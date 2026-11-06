@@ -19,6 +19,10 @@ volee-core = { path = "crates/volee-core", version = "0.1.0" }
 
 # External crates. Keep this list sorted.
 clap = { version = "4.6.7", features = ["derive", "wrap_help"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+ulid = "3.0.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
