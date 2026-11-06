@@ -18,6 +18,7 @@ categories = ["command-line-utilities", "development-tools"]
 volee-config = { path = "crates/volee-config", version = "0.1.0" }
 volee-core = { path = "crates/volee-core", version = "0.1.0" }
 volee-daemon = { path = "crates/volee-daemon", version = "0.1.0" }
+volee-harness = { path = "crates/volee-harness", version = "0.1.0" }
 volee-mcp = { path = "crates/volee-mcp", version = "0.1.0" }
 volee-proto = { path = "crates/volee-proto", version = "0.1.0" }
 volee-store = { path = "crates/volee-store", version = "0.1.0" }
@@ -25,6 +26,7 @@ volee-store = { path = "crates/volee-store", version = "0.1.0" }
 # External crates. Keep this list sorted.
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive", "wrap_help"] }
+insta = { version = "1.49.0", features = ["json"] }
 rmcp = { version = "3.9.0", default-features = false }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 schemars = "1.2.3"
