@@ -61,7 +61,9 @@ pub const MINIMUM_VERSION: Version = Version::new(2, 1, 300);
 ///
 /// volee removes them from the environment of every `claude` it runs. The
 /// user's own configuration variables, such as `CLAUDE_CODE_SUBAGENT_MODEL`,
-/// are kept.
+/// are kept, and so are the variables of the user's terminal (`TMUX` and the
+/// like), which `claude attach` needs. The list covers every Claude Code
+/// variable that the command line removes when it starts the daemon.
 pub const SESSION_VARIABLES: &[&str] = &[
     "CLAUDECODE",
     "CLAUDE_CODE_AGENT",
@@ -75,9 +77,12 @@ pub const SESSION_VARIABLES: &[&str] = &[
     "CLAUDE_CODE_REMOTE_SESSION_ID",
     "CLAUDE_CODE_SESSION_ATTENDED",
     "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SSE_PORT",
     "CLAUDE_EFFORT",
+    "CLAUDE_ENV_FILE",
     "CLAUDE_JOB_DIR",
     "CLAUDE_PID",
+    "CLAUDE_PROJECT_DIR",
 ];
 
 /// What [`MINIMUM_VERSION`] is needed for, in error messages.
