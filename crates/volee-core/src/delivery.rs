@@ -82,9 +82,16 @@ pub struct PullRequest {
 }
 
 /// What volee can prove about an agent's work.
+///
+/// The evidence is about the agent's branch, not about wherever its worktree
+/// happens to point. Proving a merge needs memory: a branch whose commits
+/// were merged has no commit left that its base branch lacks, which looks
+/// exactly like a branch that never had any. `unmerged_tip` is that memory,
+/// carried from one check to the next through
+/// [`DeliveryUpdated`](crate::event::EventKind::DeliveryUpdated) events.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Delivery {
-    /// Commits made since the agent started.
+    /// Commits on the agent's branch that its base branch does not have.
     pub commits: u32,
     /// Uncommitted changes in the worktree.
     pub dirty: bool,
@@ -92,12 +99,22 @@ pub struct Delivery {
     pub diff: DiffStat,
     /// Push state of the branch.
     pub push: PushState,
-    /// The branch is merged into its base branch.
+    /// The branch is merged into its base branch: a tip once seen with
+    /// commits of its own (`unmerged_tip`) is now part of the base branch.
     pub merged_into_base: bool,
     /// The pull request opened from the branch, if any.
     pub pull_request: Option<PullRequest>,
     /// A report message delivered for analysis work.
     pub report_delivered: bool,
+    /// The tip of the agent's branch this evidence was computed from;
+    /// `None` when the branch has no commit or no longer exists.
+    #[serde(default)]
+    pub tip: Option<String>,
+    /// The last tip of the agent's branch seen with commits its base branch
+    /// did not have. Once this commit is part of the base branch, the work is
+    /// merged, even if the branch moved or was deleted afterwards.
+    #[serde(default)]
+    pub unmerged_tip: Option<String>,
 }
 
 impl Delivery {
@@ -298,5 +315,26 @@ mod tests {
             local.summary(),
             "1 commit \u{b7} 1 to push \u{b7} uncommitted changes"
         );
+    }
+
+    #[test]
+    fn evidence_recorded_before_the_branch_tips_still_reads() {
+        // The event log keeps evidence written before `tip` and
+        // `unmerged_tip` existed.
+        let old = r#"{"commits":2,"dirty":false,"diff":{"files":1,"insertions":3,"deletions":0},
+            "push":{"push":"up-to-date"},"merged_into_base":false,"pull_request":null,
+            "report_delivered":false}"#;
+        let delivery: Delivery = serde_json::from_str(old).unwrap();
+        assert_eq!(delivery.commits, 2);
+        assert_eq!(delivery.tip, None);
+        assert_eq!(delivery.unmerged_tip, None);
+
+        let recorded = Delivery {
+            tip: Some("6adc11fa9619748617663ded520ce631e9292269".into()),
+            unmerged_tip: Some("6adc11fa9619748617663ded520ce631e9292269".into()),
+            ..delivery
+        };
+        let json = serde_json::to_string(&recorded).unwrap();
+        assert_eq!(serde_json::from_str::<Delivery>(&json).unwrap(), recorded);
     }
 }

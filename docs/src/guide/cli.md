@@ -15,6 +15,12 @@ start it when they need it, so most of the time you never think about it.
 The daemon logs to `~/.local/state/volee/logs/daemon.log`. Set `VOLEE_LOG`
 to change the level, for example `VOLEE_LOG=debug volee daemon run`.
 
+A command that starts the daemon may run inside an agent's session or a
+multiplexer pane. The daemon starts in its state directory and drops the
+variables that identify that session or pane (such as `CLAUDE_CODE_SESSION_ID`
+or `TMUX_PANE`), so the agents it launches never inherit them. Your settings,
+such as `ANTHROPIC_API_KEY` or `CLAUDE_CODE_USE_BEDROCK`, are kept.
+
 ## Agents
 
 ```sh
