@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 236.3 48" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <title>volee</title>
+    <g transform="translate(34.85 42.6) scale(.86)" stroke-width="5.2">
+        <path stroke="#b4befe" d="M-36.75-45.75l6 4.5 6-4.5M24.75-45.75l6 4.5 6-4.5M-26.5-31.25l6 4.5 6-4.5M14.5-31.25l6 4.5 6-4.5M-16.25-16.75l6 4.5 6-4.5M4.25-16.75l6 4.5 6-4.5"/>
+        <path stroke="#cba6f7" d="M-6.6-2.5l6.6 5 6.6-5"/>
+    </g>
+    <g transform="translate(84.7 47)" stroke="#cdd6f4" stroke-width="5.6">
+        <path d="M2.8-29.2 15-2.8l12.2-26.4M73.3-43.2v40.4M83.4-16h27.9a13.95 13.95 0 1 0-3.26 8.97M119.9-16h27.9a13.95 13.95 0 1 0-3.26 8.97"/>
+        <circle cx="49.25" cy="-16" r="13.95"/>
+    </g>
+</svg>
