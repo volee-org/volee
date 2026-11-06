@@ -250,10 +250,9 @@ pre-release section is folded into the stable version when it is released.
 
 ## Later: publishing to crates.io
 
-`cargo install volee-cli` needs every crate that `volee-cli` depends on to be
-on crates.io too: `volee-core`, `volee-proto`, `volee-store`, `volee-daemon`,
-then `volee-cli`. `cargo publish --workspace` publishes them in dependency
-order.
+`cargo install volee-cli` needs every workspace crate that `volee-cli` depends
+on (`volee-core`, `volee-daemon` and the others) to be on crates.io too.
+`cargo publish --workspace` publishes all of them in dependency order.
 
 1. **Publish once by hand.** Trusted Publishing is configured per crate, so
    each crate must exist first. Create a crates.io API token with the
@@ -340,7 +339,9 @@ homebrew-core does not have.
    publish-jobs = ["homebrew"]
    ```
 
-   and in `crates/volee-cli/Cargo.toml`, name the formula after the binary
+   (with crates.io publishing set up too, list both jobs:
+   `publish-jobs = ["homebrew", "./publish-crates"]`), and in
+   `crates/volee-cli/Cargo.toml`, name the formula after the binary
    rather than the package:
 
    ```toml
