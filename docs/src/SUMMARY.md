@@ -7,6 +7,7 @@
 - [Installation](guide/installation.md)
 - [Concepts](guide/concepts.md)
 - [Command line](guide/cli.md)
+- [Configuration](guide/configuration.md)
 
 # Reference
 

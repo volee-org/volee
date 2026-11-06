@@ -1,0 +1,38 @@
+# volee configuration. Every setting is optional.
+# Docs: https://volee-org.github.io/volee/guide/configuration.html
+
+[agents]
+# Model for the agents volee launches, unless a repository sets one.
+# model = "opus"
+
+# Permission mode passed to Claude Code: "acceptEdits", "auto", "manual",
+# "dontAsk" or "plan". Unset: your own Claude Code default applies.
+# permission_mode = "auto"
+
+# How long, in seconds, an idle agent stays reachable by messages before
+# volee stops waiting (Claude Code stops idle background sessions after about
+# an hour anyway; volee then resumes them when a message arrives).
+wake_timeout = 3600
+
+[worktrees]
+# Where volee creates the worktrees of the agents it launches.
+# root = "~/.local/share/volee/worktrees"
+
+# One table per repository volee may launch agents in. The key is the name you
+# use on the command line and the name agents see.
+#
+# [repos.billing]
+# path = "~/code/billing"
+# base = "develop"         # the repository's default branch when unset
+# model = "sonnet"         # overrides [agents] model for this repository
+# setup = "bun install"    # first step the agent runs in a new worktree
+
+[tui]
+# "catppuccin-mocha" (default), "catppuccin-macchiato", "catppuccin-frappe",
+# "catppuccin-latte", "terminal", or the name of a file in
+# ~/.config/volee/themes/ without its .toml extension.
+# theme = "catppuccin-mocha"
+
+# Key overrides, by action name. See the interface guide for the actions.
+# [tui.keys]
+# attach = "a"

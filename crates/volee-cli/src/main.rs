@@ -24,6 +24,9 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Show, create or check the configuration file.
+    #[command(subcommand)]
+    Config(ConfigCommand),
     /// Start, stop or inspect the background daemon.
     #[command(subcommand)]
     Daemon(DaemonCommand),
@@ -54,6 +57,16 @@ enum Command {
         #[arg(long, default_value_t = 3_600)]
         timeout: u64,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommand {
+    /// Print the path of the configuration file.
+    Path,
+    /// Write a commented example, unless the file exists.
+    Init,
+    /// Check the file and summarize what it sets.
+    Check,
 }
 
 #[derive(Debug, Subcommand)]
@@ -113,6 +126,11 @@ fn main() -> ExitCode {
             agent,
             timeout,
         }) => cmd::hook::run(&event, agent, timeout),
+        Some(Command::Config(command)) => report(match command {
+            ConfigCommand::Path => cmd::config::path(),
+            ConfigCommand::Init => cmd::config::init(),
+            ConfigCommand::Check => cmd::config::check(),
+        }),
         Some(command) => async_main(command),
         None => {
             println!(
@@ -147,9 +165,15 @@ fn async_main(command: Command) -> ExitCode {
                 cmd::msg::send(to, body, kind.into()).await
             }
             Command::Mcp { agent } => cmd::mcp::run(agent).await,
-            Command::Hook { .. } => unreachable!("hooks run without the async runtime"),
+            Command::Hook { .. } | Command::Config(_) => {
+                unreachable!("these commands run without the async runtime")
+            }
         }
     });
+    report(result)
+}
+
+fn report(result: anyhow::Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

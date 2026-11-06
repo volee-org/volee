@@ -23,6 +23,7 @@ rmcp = { workspace = true, features = ["server", "transport-io"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tracing-subscriber.workspace = true
+volee-config.workspace = true
 volee-core.workspace = true
 volee-daemon.workspace = true
 volee-mcp.workspace = true
