@@ -36,16 +36,49 @@ color:
 | `■` | stopped |
 | `∅` | lost |
 
+Each agent also has a short id such as `ag_x7k2pq`. Wherever a command asks
+for an agent, you can type its name, that short id, or its full id.
+
 ## Messages
 
 ```sh
-volee msg send ag_01jc5… "Also update the changelog."
-volee msg send ag_01jc5… "Use TTC." --kind answer
+volee msg send billing "Also update the changelog."
+volee msg send ag_x7k2pq "Use TTC." --kind answer
 ```
 
 A message reaches a working agent at the end of its turn, and wakes an idle
 agent at once. Agents you did not launch through volee cannot receive
 messages yet.
+
+## Missions
+
+A mission is one goal carried out across one or more repositories by a
+coordinator agent and its workers (see [Concepts](concepts.md)).
+
+```sh
+volee mission new "Invoicing" "Add invoices to billing and expose them in the API" \
+  --repo billing --repo api           # or --repo billing,api
+volee mission new "Slow queries" "Find the ten slowest queries" --repo . --kind analysis
+volee mission ls                      # open missions; --all adds closed ones, --json for scripts
+volee mission show invoicing          # agents, verdicts on workers, the mission's thread
+volee mission abort invoicing --reason "wrong approach"
+volee mission close invoicing         # once every worker delivered
+```
+
+A repository is a name from the [configuration](configuration.md) or a
+directory. A mission is named by its title, its short id (`ms_x7k2pq`) or its
+id.
+
+volee checks each worker when it stops. A change worker has delivered when
+its commits are pushed with an open pull request, or merged; an analysis
+worker has delivered when it sent its report. The coordinator hears about
+every verdict, and once every worker delivered it is asked for the final
+report, which it sends before calling `close_mission`.
+
+`volee mission close` refuses a mission whose workers have not all delivered
+and says which; `--force` closes it anyway. Aborting tells every agent of the
+mission to stop. Neither deletes anything: branches, worktrees and pull
+requests stay where they are.
 
 ## Isolated runs
 

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use tokio::sync::{broadcast, oneshot};
 use ulid::Ulid;
-use volee_core::ids::{MessageId, ThreadId};
+use volee_core::ids::{MessageId, MissionId, ThreadId};
 use volee_core::message::Party;
 use volee_core::time::Timestamp;
 use volee_core::{AgentId, Event, EventKind, Registry};
@@ -115,20 +115,29 @@ impl State {
         ThreadId::from_ulid(self.new_ulid())
     }
 
+    /// A new mission identifier.
+    pub(crate) fn new_mission_id(&self) -> MissionId {
+        MissionId::from_ulid(self.new_ulid())
+    }
+
     fn new_ulid(&self) -> Ulid {
         let millis = u64::try_from(self.now().as_millis()).unwrap_or(0);
         Ulid::from_parts(millis, Ulid::generate().random())
     }
 
-    /// Validates, persists, applies and publishes events, then hands new
-    /// messages to agents that wait for them.
+    /// Validates, persists, applies and publishes events, runs the mission
+    /// supervisor on what they changed, then hands new messages to agents
+    /// that wait for them.
     pub(crate) fn commit(&mut self, events: Vec<Event>) -> Result<Vec<SeqEvent>, DaemonError> {
         let mut committed = self.commit_only(events)?;
+        let follow_ups = crate::missions::follow_up(self, &committed);
+        committed.extend(follow_ups);
         committed.extend(self.wake_waiters()?);
         Ok(committed)
     }
 
-    fn commit_only(&mut self, events: Vec<Event>) -> Result<Vec<SeqEvent>, DaemonError> {
+    /// Like [`State::commit`], without follow-ups or wake-ups.
+    pub(crate) fn commit_only(&mut self, events: Vec<Event>) -> Result<Vec<SeqEvent>, DaemonError> {
         if events.is_empty() {
             return Ok(Vec::new());
         }

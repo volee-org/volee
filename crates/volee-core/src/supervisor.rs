@@ -119,7 +119,7 @@ pub fn supervise(registry: &Registry, mission: MissionId) -> Decision {
             body: format!(
                 "All {} workers of \"{}\" delivered. Coordinator: write the final report with \
                  the `report` tool (what changed, links to every pull request or report, what \
-                 the human must review), then close the mission.",
+                 the human must review), then call `close_mission`.",
                 workers.len(),
                 record.title
             ),

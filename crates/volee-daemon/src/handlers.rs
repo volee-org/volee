@@ -1,5 +1,7 @@
 //! Request handlers: one function per method.
 
+mod missions;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,9 +14,10 @@ use volee_core::time::Timestamp;
 use volee_core::{Agent, AgentId, Event, EventKind};
 use volee_proto::PROTOCOL_VERSION;
 use volee_proto::methods::{
-    AgentParams, Empty, EventBatch, EventsSince, Forget, HookIngest, HookParams, HookReply,
-    HookWait, MarkRead, MarkReadParams, Method, SendMessage, SendParams, Sent, Shutdown,
-    SinceParams, Status, StatusInfo, StatusParams, WaitParams, WaitReply,
+    AbortMission, AgentParams, CloseMission, CreateMission, Empty, EventBatch, EventsSince, Forget,
+    HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams, Method, SendMessage,
+    SendParams, Sent, Shutdown, SinceParams, Status, StatusInfo, StatusParams, WaitParams,
+    WaitReply,
 };
 use volee_proto::rpc::{self, RpcError};
 
@@ -47,6 +50,15 @@ pub(crate) async fn dispatch(
             respond(hook_ingest(shared, parse::<HookIngest>(params)?, Delivery::Live).await)
         }
         HookWait::NAME => respond(hook_wait(shared, parse::<HookWait>(params)?).await),
+        CreateMission::NAME => {
+            respond(missions::create(shared, parse::<CreateMission>(params)?).await)
+        }
+        AbortMission::NAME => {
+            respond(missions::abort(shared, parse::<AbortMission>(params)?).await)
+        }
+        CloseMission::NAME => {
+            respond(missions::close(shared, parse::<CloseMission>(params)?).await)
+        }
         other => Err(RpcError::new(
             rpc::METHOD_NOT_FOUND,
             format!("unknown method `{other}`"),
@@ -120,7 +132,7 @@ async fn forget(shared: &Arc<Shared>, params: AgentParams) -> Result<Empty, Daem
     Ok(Empty {})
 }
 
-fn require_agent(state: &State, agent: AgentId) -> Result<(), DaemonError> {
+pub(super) fn require_agent(state: &State, agent: AgentId) -> Result<(), DaemonError> {
     if state.registry().agent(agent).is_some() {
         Ok(())
     } else {

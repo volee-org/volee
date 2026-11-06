@@ -1,7 +1,9 @@
 //! Plain-text tables for the terminal.
 
+use volee_core::mission::{Mission, Verdict};
+use volee_core::role::Role;
 use volee_core::time::{Elapsed, Timestamp};
-use volee_core::{Agent, AgentState};
+use volee_core::{Agent, AgentState, Registry};
 
 /// A symbol per state, so states read without color.
 pub(crate) fn glyph(state: &AgentState) -> &'static str {
@@ -19,8 +21,17 @@ pub(crate) fn glyph(state: &AgentState) -> &'static str {
 
 /// Renders agents as an aligned table, one line per agent.
 pub(crate) fn agents(agents: &[&Agent], now: Timestamp) -> String {
-    let header = ["", "STATE", "AGENT", "ROLE", "WORKSPACE", "SINCE", "DETAIL"];
-    let mut rows: Vec<[String; 7]> = vec![header.map(str::to_owned)];
+    let header = [
+        "",
+        "STATE",
+        "AGENT",
+        "ID",
+        "ROLE",
+        "WORKSPACE",
+        "SINCE",
+        "DETAIL",
+    ];
+    let mut rows: Vec<[String; 8]> = vec![header.map(str::to_owned)];
     for agent in agents {
         let detail = agent
             .detail
@@ -31,10 +42,53 @@ pub(crate) fn agents(agents: &[&Agent], now: Timestamp) -> String {
             glyph(&agent.state).to_owned(),
             agent.state.label().to_owned(),
             agent.name.clone(),
+            agent.id.short(),
             agent.role.label().to_owned(),
             agent.workspace.label(),
             Elapsed::between(agent.state_since, now).to_string(),
             truncate(&detail, 60),
+        ]);
+    }
+    align(&rows)
+}
+
+/// Renders missions as an aligned table, one line per mission.
+pub(crate) fn missions(registry: &Registry, missions: &[&Mission], now: Timestamp) -> String {
+    let header = [
+        "STATUS", "MISSION", "ID", "KIND", "WORKERS", "SINCE", "REPOS",
+    ];
+    let mut rows: Vec<[String; 7]> = vec![header.map(str::to_owned)];
+    for mission in missions {
+        let workers: Vec<_> = registry
+            .mission_agents(mission.id)
+            .into_iter()
+            .filter(|agent| agent.role == Role::Worker)
+            .collect();
+        let delivered = workers
+            .iter()
+            .filter(|worker| {
+                mission
+                    .assessments
+                    .get(&worker.id)
+                    .is_some_and(|assessment| assessment.verdict == Verdict::Delivered)
+            })
+            .count();
+        rows.push([
+            mission.status.label().to_owned(),
+            truncate(&mission.title, 40),
+            mission.id.short(),
+            mission.kind.label().to_owned(),
+            format!("{delivered}/{} delivered", workers.len()),
+            Elapsed::between(mission.created_at, now).to_string(),
+            truncate(
+                &mission
+                    .repos
+                    .iter()
+                    .map(|repo| repo_label(repo))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                40,
+            ),
         ]);
     }
     align(&rows)
@@ -65,7 +119,15 @@ fn align<const N: usize>(rows: &[[String; N]]) -> String {
     out
 }
 
-fn truncate(text: &str, max: usize) -> String {
+/// A repository as tables show it: its name, or the last part of its path.
+pub(crate) fn repo_label(repo: &str) -> &str {
+    std::path::Path::new(repo)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(repo)
+}
+
+pub(crate) fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         text.to_owned()
     } else {
@@ -85,6 +147,12 @@ mod tests {
             ["bbbb".to_owned(), "x".to_owned()],
         ];
         assert_eq!(align(&rows), "a     long cell\nbbbb  x\n");
+    }
+
+    #[test]
+    fn repositories_given_as_paths_show_their_last_part() {
+        assert_eq!(repo_label("billing"), "billing");
+        assert_eq!(repo_label("/work/code/billing"), "billing");
     }
 
     #[test]

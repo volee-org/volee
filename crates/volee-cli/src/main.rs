@@ -6,6 +6,7 @@
 
 mod cmd;
 mod connect;
+mod resolve;
 mod table;
 
 use std::process::ExitCode;
@@ -13,6 +14,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use volee_core::AgentId;
 use volee_core::message::MessageKind;
+use volee_core::mission::MissionKind;
 
 /// See, launch and coordinate every coding agent on your machine.
 #[derive(Debug, Parser)]
@@ -39,6 +41,9 @@ enum Command {
     /// Send messages to agents.
     #[command(subcommand)]
     Msg(MsgCommand),
+    /// Start, follow, abort or close missions across repositories.
+    #[command(subcommand)]
+    Mission(MissionCommand),
     /// Serve the MCP tools of an agent over stdio. Harnesses start this.
     Mcp {
         /// The agent the server speaks for.
@@ -85,14 +90,80 @@ enum DaemonCommand {
 enum MsgCommand {
     /// Send a message from you to an agent.
     Send {
-        /// The recipient agent.
-        to: AgentId,
+        /// The recipient: an agent's name, its short id (as `volee ls` prints it) or its id.
+        to: String,
         /// The message.
         body: String,
         /// What the message is for.
         #[arg(long, value_enum, default_value_t = Kind::Note)]
         kind: Kind,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum MissionCommand {
+    /// Start a mission: one goal, carried out across one or more repositories.
+    New {
+        /// A short title.
+        title: String,
+        /// The goal, as the coordinator will read it.
+        goal: String,
+        /// A repository: a name from the configuration, or a directory.
+        /// Repeat the option or separate names with commas.
+        #[arg(long = "repo", short, required = true, value_delimiter = ',')]
+        repos: Vec<String>,
+        /// What the mission delivers.
+        #[arg(long, value_enum, default_value_t = MissionKindArg::Change)]
+        kind: MissionKindArg,
+    },
+    /// List open missions.
+    Ls {
+        /// Include closed and aborted missions.
+        #[arg(long)]
+        all: bool,
+        /// Print JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a mission: its agents, the verdicts on its workers, and its thread.
+    Show {
+        /// The mission: its title, short id or id.
+        mission: String,
+    },
+    /// Abort a mission. Its agents are told to stop; nothing is deleted.
+    Abort {
+        /// The mission: its title, short id or id.
+        mission: String,
+        /// Why, told to the agents.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Close a mission once every worker delivered.
+    Close {
+        /// The mission: its title, short id or id.
+        mission: String,
+        /// Close it even if some workers have not delivered.
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+/// What a mission delivers.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum MissionKindArg {
+    /// Branches and pull requests.
+    Change,
+    /// Reports.
+    Analysis,
+}
+
+impl From<MissionKindArg> for MissionKind {
+    fn from(kind: MissionKindArg) -> Self {
+        match kind {
+            MissionKindArg::Change => Self::Change,
+            MissionKindArg::Analysis => Self::Analysis,
+        }
+    }
 }
 
 /// Message kinds a person sends from the command line.
@@ -162,8 +233,9 @@ fn async_main(command: Command) -> ExitCode {
             Command::Daemon(DaemonCommand::Status) => cmd::daemon::status().await,
             Command::Ls { json } => cmd::ls::run(json).await,
             Command::Msg(MsgCommand::Send { to, body, kind }) => {
-                cmd::msg::send(to, body, kind.into()).await
+                cmd::msg::send(&to, body, kind.into()).await
             }
+            Command::Mission(command) => mission(command).await,
             Command::Mcp { agent } => cmd::mcp::run(agent).await,
             Command::Hook { .. } | Command::Config(_) => {
                 unreachable!("these commands run without the async runtime")
@@ -173,11 +245,40 @@ fn async_main(command: Command) -> ExitCode {
     report(result)
 }
 
+async fn mission(command: MissionCommand) -> anyhow::Result<()> {
+    match command {
+        MissionCommand::New {
+            title,
+            goal,
+            repos,
+            kind,
+        } => {
+            cmd::mission::new(cmd::mission::NewMission {
+                title,
+                goal,
+                kind: kind.into(),
+                repos,
+            })
+            .await
+        }
+        MissionCommand::Ls { all, json } => cmd::mission::list(all, json).await,
+        MissionCommand::Show { mission } => cmd::mission::show(&mission).await,
+        MissionCommand::Abort { mission, reason } => cmd::mission::abort(&mission, reason).await,
+        MissionCommand::Close { mission, force } => cmd::mission::close(&mission, force).await,
+    }
+}
+
 fn report(result: anyhow::Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("volee: {error:#}");
+            // A refusal from the daemon is meant for people: its code is not.
+            match error.downcast_ref::<volee_proto::client::ClientError>() {
+                Some(volee_proto::client::ClientError::Rpc(refusal)) => {
+                    eprintln!("volee: {}", refusal.message);
+                }
+                _ => eprintln!("volee: {error:#}"),
+            }
             ExitCode::FAILURE
         }
     }

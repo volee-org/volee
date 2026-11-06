@@ -17,6 +17,16 @@ pub enum MissionKind {
     Analysis,
 }
 
+impl MissionKind {
+    /// The label shown to people.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Change => "change",
+            Self::Analysis => "analysis",
+        }
+    }
+}
+
 /// Where a mission stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -38,6 +48,17 @@ impl MissionStatus {
     pub const fn is_over(self) -> bool {
         matches!(self, Self::Closed | Self::Aborted)
     }
+
+    /// The label shown to people.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Planning => "planning",
+            Self::Running => "running",
+            Self::Reporting => "reporting",
+            Self::Closed => "closed",
+            Self::Aborted => "aborted",
+        }
+    }
 }
 
 /// The supervisor's judgement on a worker that stopped working.
@@ -54,6 +75,19 @@ pub enum Verdict {
     Failed,
     /// The worker can no longer be found.
     Lost,
+}
+
+impl Verdict {
+    /// The label shown to people.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Delivered => "delivered",
+            Self::NotDelivered => "not delivered",
+            Self::NeedsHuman => "needs you",
+            Self::Failed => "failed",
+            Self::Lost => "lost",
+        }
+    }
 }
 
 /// The last verdict recorded for a worker, with the evidence it rests on.
