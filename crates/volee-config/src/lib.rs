@@ -309,9 +309,9 @@ mod tests {
 
     #[test]
     fn unknown_keys_are_errors_with_a_location() {
-        let error = parse("[agents]\nmodle = \"opus\"\n").unwrap_err();
+        let error = parse("[agents]\nunknown_setting = \"opus\"\n").unwrap_err();
         let message = error.to_string();
-        assert!(message.contains("modle"), "{message}");
+        assert!(message.contains("unknown_setting"), "{message}");
         assert!(message.contains("line 2"), "{message}");
     }
 
