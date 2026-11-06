@@ -1,0 +1,112 @@
+---
+source: crates/volee-harness/src/hooks/settings.rs
+expression: settings
+---
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/volee/bin/volee hook notification --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/volee/bin/volee hook post-tool-use --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/volee/bin/volee hook pre-tool-use --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/volee/bin/volee hook session-end --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/volee/bin/volee hook session-start --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/volee/bin/volee hook stop --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3",
+            "timeout": 10,
+            "type": "command"
+          },
+          {
+            "asyncRewake": true,
+            "command": "/opt/volee/bin/volee hook wait --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3 --timeout 3600",
+            "timeout": 3630,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/volee/bin/volee hook subagent-start --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/volee/bin/volee hook subagent-stop --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/volee/bin/volee hook user-prompt-submit --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}
