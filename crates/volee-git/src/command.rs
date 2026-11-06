@@ -1,5 +1,10 @@
 //! Running git: one process per command, with standard input closed, a
 //! timeout, and a limit on how many run at the same time (ADR 0010).
+//!
+//! On Unix, each git runs in a process group of its own. A command that
+//! overruns its timeout is stopped as a whole, the processes git started
+//! (ssh, filters, hooks) included: first with SIGTERM, so git can remove its
+//! lock files and half-made worktrees, then with SIGKILL.
 
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
@@ -36,18 +41,24 @@ const REPOSITORY_ENV: [&str; 11] = [
 ];
 
 /// Environment variables set for every command.
-const FIXED_ENV: [(&str, &str); 3] = [
+const FIXED_ENV: [(&str, &str); 4] = [
     // git's messages in English, so the few that are matched stay stable.
     ("LC_ALL", "C"),
     // Never ask for a user name or password on the terminal.
     ("GIT_TERMINAL_PROMPT", "0"),
     // Never let Git Credential Manager open a window or a browser.
     ("GCM_INTERACTIVE", "never"),
+    // Never let ssh open a password or passphrase dialog.
+    ("SSH_ASKPASS_REQUIRE", "never"),
 ];
 
 /// The longest pause between two checks of a running command. Short enough
 /// to add little latency to fast commands, long enough to cost nothing.
 const MAX_POLL_PAUSE: Duration = Duration::from_millis(20);
+
+/// How long a command that is being stopped gets to clean up after SIGTERM
+/// before SIGKILL.
+const TERMINATION_GRACE: Duration = Duration::from_secs(2);
 
 /// Starts git processes for [`GitCli`](crate::GitCli).
 #[derive(Debug)]
@@ -66,6 +77,7 @@ impl Runner {
         }
     }
 
+    /// Sets a variable for every command, over the ones set by default.
     pub(crate) fn set_env(&mut self, key: OsString, value: OsString) {
         self.envs.retain(|(existing, _)| *existing != key);
         self.envs.push((key, value));
@@ -75,19 +87,28 @@ impl Runner {
         self.limiter = Limiter::new(limit);
     }
 
+    /// Whether the person chose a value for `key`, in the environment of
+    /// this process or with [`Runner::set_env`].
+    pub(crate) fn person_sets(&self, key: &str) -> bool {
+        self.envs.iter().any(|(existing, _)| existing == key) || std::env::var_os(key).is_some()
+    }
+
     /// A command to run in `dir`, given `timeout` to finish.
     pub(crate) fn request<'a>(&'a self, dir: &'a Path, timeout: Duration) -> Request<'a> {
         Request {
             runner: self,
             dir,
             args: Vec::new(),
+            envs: Vec::new(),
             timeout,
+            max_stdout: None,
         }
     }
 
     /// The process for `git -C <dir> --no-optional-locks <args>`, ready to
-    /// spawn.
-    fn command(&self, dir: &Path, args: &[OsString]) -> Command {
+    /// spawn. Variables set with [`Runner::set_env`] win over `envs`, which
+    /// win over the fixed ones.
+    fn command(&self, dir: &Path, args: &[OsString], envs: &[(OsString, OsString)]) -> Command {
         let mut command = Command::new(&self.program);
         command
             .arg("-C")
@@ -101,17 +122,21 @@ impl Runner {
             command.env_remove(key);
         }
         command.envs(FIXED_ENV);
+        command.envs(envs.iter().map(|(key, value)| (key, value)));
         command.envs(self.envs.iter().map(|(key, value)| (key, value)));
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            // A group of its own: a timeout stops git and everything it
+            // started, and nothing it starts can read from the person's
+            // terminal (a background group is stopped if it tries).
+            command.process_group(0);
+        }
         command
     }
 
-    fn execute(
-        &self,
-        dir: &Path,
-        args: &[OsString],
-        timeout: Duration,
-    ) -> Result<Completed, GitError> {
-        let mut command = self.command(dir, args);
+    fn execute(&self, request: &Request<'_>) -> Result<Completed, GitError> {
+        let mut command = self.command(request.dir, &request.args, &request.envs);
         let rendered = render(&command);
         let _permit = self.limiter.acquire();
         let started = Instant::now();
@@ -119,21 +144,24 @@ impl Runner {
             program: self.program.clone(),
             source,
         })?;
-        let outcome = supervise(&mut child, Deadline::after(started, timeout));
+        let deadline = Deadline::after(started, request.timeout);
+        let outcome = supervise(&mut child, deadline, request.max_stdout);
         let elapsed = started.elapsed();
         match outcome {
-            Ok((status, stdout, stderr)) => {
+            Ok(finished) => {
                 tracing::debug!(
                     command = %rendered,
-                    code = ?status.code(),
+                    code = ?finished.status.code(),
+                    truncated = finished.truncated,
                     ?elapsed,
                     "git finished"
                 );
                 Ok(Completed {
                     command: rendered,
-                    code: status.code(),
-                    stdout,
-                    stderr,
+                    code: finished.status.code(),
+                    stdout: finished.stdout,
+                    stderr: finished.stderr,
+                    truncated: finished.truncated,
                 })
             }
             Err(failure) => {
@@ -143,7 +171,7 @@ impl Runner {
                 Err(match failure {
                     Failure::TimedOut => GitError::TimedOut {
                         command: rendered,
-                        timeout,
+                        timeout: request.timeout,
                     },
                     Failure::Io(action, source) => GitError::Io {
                         action,
@@ -162,7 +190,9 @@ pub(crate) struct Request<'a> {
     runner: &'a Runner,
     dir: &'a Path,
     args: Vec<OsString>,
+    envs: Vec<(OsString, OsString)>,
     timeout: Duration,
+    max_stdout: Option<usize>,
 }
 
 impl Request<'_> {
@@ -185,6 +215,22 @@ impl Request<'_> {
         self
     }
 
+    /// Sets environment variables for this command only. Variables the
+    /// person set with [`GitCli::env`](crate::GitCli::env) still win.
+    #[must_use]
+    pub(crate) fn envs<I, K, V>(mut self, envs: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<OsString>,
+        V: Into<OsString>,
+    {
+        self.envs.extend(
+            envs.into_iter()
+                .map(|(key, value)| (key.into(), value.into())),
+        );
+        self
+    }
+
     /// Gives the command another time limit.
     #[must_use]
     pub(crate) fn timeout(mut self, timeout: Duration) -> Self {
@@ -192,9 +238,18 @@ impl Request<'_> {
         self
     }
 
+    /// Stops reading the standard output once it holds more than `limit`
+    /// bytes. git then stops on a broken pipe, and the result is marked
+    /// [truncated](Completed::truncated) and counts as a success.
+    #[must_use]
+    pub(crate) fn max_stdout(mut self, limit: usize) -> Self {
+        self.max_stdout = Some(limit);
+        self
+    }
+
     /// Runs the command and returns how it ended, whatever its exit code.
     pub(crate) fn run(self) -> Result<Completed, GitError> {
-        self.runner.execute(self.dir, &self.args, self.timeout)
+        self.runner.execute(&self)
     }
 
     /// Runs the command and returns its standard output; any exit code other
@@ -224,12 +279,17 @@ pub(crate) struct Completed {
     pub(crate) stdout: Vec<u8>,
     /// Standard error.
     pub(crate) stderr: Vec<u8>,
+    /// The standard output went past the limit set with
+    /// [`Request::max_stdout`]: it holds one byte more than the limit, and
+    /// git was stopped before it finished.
+    pub(crate) truncated: bool,
 }
 
 impl Completed {
-    /// The command itself when it exited with 0, the failure otherwise.
+    /// The command itself when it exited with 0 or was cut short on purpose,
+    /// the failure otherwise.
     pub(crate) fn success(self) -> Result<Self, GitError> {
-        if self.code == Some(0) {
+        if self.code == Some(0) || self.truncated {
             Ok(self)
         } else {
             Err(self.failure())
@@ -298,6 +358,14 @@ enum Failure {
     Io(&'static str, io::Error),
 }
 
+/// How a supervised command ended.
+struct Finished {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    truncated: bool,
+}
+
 /// Which pipe a reader thread drained.
 #[derive(Clone, Copy)]
 enum Pipe {
@@ -307,17 +375,26 @@ enum Pipe {
 
 type PipeResult = (Pipe, io::Result<Vec<u8>>);
 
-/// Waits for `child` until `deadline` and collects its output.
+/// Waits for `child` until `deadline` and collects its output, at most one
+/// byte past `max_stdout` on the standard output.
 ///
 /// Both pipes are drained by threads while the child runs, so a command
 /// that prints more than a pipe holds (a large diff) cannot block.
 fn supervise(
     child: &mut Child,
     deadline: Deadline,
-) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), Failure> {
+    max_stdout: Option<usize>,
+) -> Result<Finished, Failure> {
     let (sender, receiver) = mpsc::channel();
-    drain(child.stdout.take(), Pipe::Stdout, sender.clone())?;
-    drain(child.stderr.take(), Pipe::Stderr, sender)?;
+    let stdout_limit =
+        max_stdout.map(|limit| u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1));
+    drain(
+        child.stdout.take(),
+        Pipe::Stdout,
+        stdout_limit,
+        sender.clone(),
+    )?;
+    drain(child.stderr.take(), Pipe::Stderr, None, sender)?;
     let status = wait_until(child, deadline)?;
     let (mut stdout, mut stderr) = (None, None);
     while stdout.is_none() || stderr.is_none() {
@@ -339,20 +416,25 @@ fn supervise(
             Pipe::Stderr => stderr = Some(bytes),
         }
     }
-    Ok((
+    let stdout = stdout.unwrap_or_default();
+    let truncated = max_stdout.is_some_and(|limit| stdout.len() > limit);
+    Ok(Finished {
         status,
-        stdout.unwrap_or_default(),
-        stderr.unwrap_or_default(),
-    ))
+        stdout,
+        stderr: stderr.unwrap_or_default(),
+        truncated,
+    })
 }
 
-/// Reads `pipe` to its end on a thread and sends the bytes.
+/// Reads `pipe` on a thread, to its end or up to `limit` bytes, and sends
+/// the bytes. Stopping early closes the pipe, which stops the writer.
 fn drain(
     pipe: Option<impl Read + Send + 'static>,
     which: Pipe,
+    limit: Option<u64>,
     sender: Sender<PipeResult>,
 ) -> Result<(), Failure> {
-    let Some(mut pipe) = pipe else {
+    let Some(pipe) = pipe else {
         // Not piped: there is nothing to read.
         let _ = sender.send((which, Ok(Vec::new())));
         return Ok(());
@@ -361,7 +443,10 @@ fn drain(
         .name("volee-git-pipe".to_owned())
         .spawn(move || {
             let mut bytes = Vec::new();
-            let result = pipe.read_to_end(&mut bytes).map(|_| bytes);
+            let result = pipe
+                .take(limit.unwrap_or(u64::MAX))
+                .read_to_end(&mut bytes)
+                .map(|_| bytes);
             // The receiver is gone only when the command was abandoned.
             let _ = sender.send((which, result));
         })
@@ -388,11 +473,49 @@ fn wait_until(child: &mut Child, deadline: Deadline) -> Result<ExitStatus, Failu
     }
 }
 
-/// Kills `child` and reaps it. Errors are ignored: the process may already
+/// Stops `child` and everything it started, then reaps it.
+///
+/// SIGTERM goes to its process group first, so git can remove its lock
+/// files and half-made worktrees. Whatever still runs after
+/// [`TERMINATION_GRACE`] gets SIGKILL. The child is reaped only after both
+/// signals: until then, its process group cannot be reused, so the signals
+/// can only reach git and the processes it started. Errors are ignored: the
+/// processes may already be gone, and there is nothing better to do.
+#[cfg(unix)]
+fn stop(child: &mut Child) {
+    use rustix::process::{Pid, Signal, kill_process_group};
+
+    let group = Pid::from_child(child);
+    let _ = kill_process_group(group, Signal::TERM);
+    let deadline = Deadline::after(Instant::now(), TERMINATION_GRACE);
+    let mut pause = Duration::from_millis(1);
+    while !has_exited(child) && !deadline.remaining().is_zero() {
+        thread::sleep(pause.min(deadline.remaining()));
+        pause = pause.saturating_mul(2).min(MAX_POLL_PAUSE);
+    }
+    let _ = kill_process_group(group, Signal::KILL);
+    let _ = child.wait();
+}
+
+/// Stops `child` and reaps it. Errors are ignored: the process may already
 /// have exited, and there is nothing better to do.
+#[cfg(not(unix))]
 fn stop(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// Whether `child` has exited, without reaping it. An error counts as
+/// exited, so the caller stops waiting.
+#[cfg(unix)]
+fn has_exited(child: &Child) -> bool {
+    use rustix::process::{Pid, WaitId, WaitIdOptions, waitid};
+
+    let options = WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT;
+    !matches!(
+        waitid(WaitId::Pid(Pid::from_child(child)), options),
+        Ok(None)
+    )
 }
 
 /// The command line of `command`, quoted so a POSIX shell would run it as
@@ -480,17 +603,21 @@ mod tests {
         runner
     }
 
+    fn envs_of(command: &Command) -> Vec<(&OsStr, Option<&OsStr>)> {
+        command.get_envs().collect()
+    }
+
     #[test]
     fn commands_target_the_directory_without_optional_locks() {
-        let command = runner().command(Path::new("/work/volee"), &["status".into()]);
+        let command = runner().command(Path::new("/work/volee"), &["status".into()], &[]);
         let args: Vec<_> = command.get_args().collect();
         assert_eq!(args, ["-C", "/work/volee", "--no-optional-locks", "status"]);
     }
 
     #[test]
     fn commands_never_prompt_and_ignore_inherited_repositories() {
-        let command = runner().command(Path::new("/work"), &[]);
-        let envs: Vec<_> = command.get_envs().collect();
+        let command = runner().command(Path::new("/work"), &[], &[]);
+        let envs = envs_of(&command);
         for key in REPOSITORY_ENV {
             assert!(
                 envs.contains(&(OsStr::new(key), None)),
@@ -504,6 +631,25 @@ mod tests {
             OsStr::new("GIT_CONFIG_GLOBAL"),
             Some(OsStr::new("/dev/null"))
         )));
+    }
+
+    #[test]
+    fn the_person_s_variables_win_over_the_command_s() {
+        let mut runner = runner();
+        runner.set_env("GIT_SSH_COMMAND".into(), "my-ssh".into());
+        let command = runner.command(
+            Path::new("/work"),
+            &[],
+            &[("GIT_SSH_COMMAND".into(), "ssh -o BatchMode=yes".into())],
+        );
+        let last = envs_of(&command)
+            .into_iter()
+            .rfind(|(key, _)| *key == "GIT_SSH_COMMAND");
+        assert_eq!(
+            last,
+            Some((OsStr::new("GIT_SSH_COMMAND"), Some(OsStr::new("my-ssh"))))
+        );
+        assert!(runner.person_sets("GIT_SSH_COMMAND"));
     }
 
     #[test]
@@ -524,9 +670,9 @@ mod tests {
     fn a_later_env_replaces_an_earlier_one() {
         let mut runner = runner();
         runner.set_env("GIT_CONFIG_GLOBAL".into(), "/etc/other".into());
-        let command = runner.command(Path::new("/work"), &[]);
-        let values: Vec<_> = command
-            .get_envs()
+        let command = runner.command(Path::new("/work"), &[], &[]);
+        let values: Vec<_> = envs_of(&command)
+            .into_iter()
             .filter(|(key, _)| *key == "GIT_CONFIG_GLOBAL")
             .collect();
         assert_eq!(
@@ -548,6 +694,7 @@ mod tests {
                 "it's".into(),
                 String::new().into(),
             ],
+            &[],
         );
         assert_eq!(
             render(&command),

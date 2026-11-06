@@ -24,13 +24,8 @@ fn a_missing_git_executable_is_a_spawn_error() {
 #[cfg(unix)]
 #[test]
 fn a_command_that_hangs_is_stopped_at_its_timeout() {
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
-
     let sandbox = Sandbox::new();
-    let program = sandbox.path("hanging-git");
-    fs::write(&program, "#!/bin/sh\nexec sleep 30\n").unwrap();
-    fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+    let program = sandbox.script("hanging-git", "#!/bin/sh\nexec sleep 30\n");
     let timeout = Duration::from_millis(300);
     let cli = sandbox.cli_with(GitCli::with_program(&program).timeout(timeout));
 
@@ -51,11 +46,76 @@ fn a_command_that_hangs_is_stopped_at_its_timeout() {
     assert_eq!(*given, timeout);
 }
 
+#[cfg(unix)]
+#[test]
+fn everything_a_timed_out_command_started_is_stopped() {
+    let sandbox = Sandbox::new();
+    let pid_file = sandbox.path("child.pid");
+    let program = sandbox.script(
+        "spawning-git",
+        &format!(
+            "#!/bin/sh\nsleep 30 &\necho $! > '{}'\nwait\n",
+            pid_file.display()
+        ),
+    );
+    let cli = sandbox.cli_with(GitCli::with_program(&program).timeout(Duration::from_millis(500)));
+
+    let error = cli.repo_info(&sandbox.dir("anywhere")).unwrap_err();
+    assert!(matches!(&error, GitError::TimedOut { .. }), "{error:?}");
+    let pid = std::fs::read_to_string(&pid_file).unwrap();
+    assert!(
+        is_gone_soon(pid.trim()),
+        "the process git started ({}) still runs",
+        pid.trim()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_command_that_ignores_sigterm_is_killed() {
+    let sandbox = Sandbox::new();
+    let pid_file = sandbox.path("child.pid");
+    let program = sandbox.script(
+        "stubborn-git",
+        &format!(
+            "#!/bin/sh\ntrap '' TERM\nsleep 30 &\necho $! > '{}'\nwait\n",
+            pid_file.display()
+        ),
+    );
+    let cli = sandbox.cli_with(GitCli::with_program(&program).timeout(Duration::from_millis(300)));
+
+    let started = Instant::now();
+    let error = cli.repo_info(&sandbox.dir("anywhere")).unwrap_err();
+    assert!(matches!(&error, GitError::TimedOut { .. }), "{error:?}");
+    // The timeout, the grace period for SIGTERM, and some slack.
+    assert!(started.elapsed() < Duration::from_secs(10));
+    let pid = std::fs::read_to_string(&pid_file).unwrap();
+    assert!(is_gone_soon(pid.trim()));
+}
+
+/// Whether the process `pid` disappears within a few seconds.
+#[cfg(unix)]
+fn is_gone_soon(pid: &str) -> bool {
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(5) {
+        let alive = std::process::Command::new("kill")
+            .args(["-0", pid])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if !alive {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    false
+}
+
 #[test]
 fn failures_keep_the_command_the_exit_code_and_stderr() {
     let sandbox = Sandbox::new();
-    let repo = sandbox.repo("volee");
-    let error = sandbox.cli().remove_worktree(&repo, &repo).unwrap_err();
+    let missing = sandbox.path("missing");
+    let error = sandbox.cli().worktrees(&missing).unwrap_err();
     let GitError::Failed {
         command,
         code,
@@ -65,9 +125,9 @@ fn failures_keep_the_command_the_exit_code_and_stderr() {
         panic!("expected a git failure, got {error:?}");
     };
     assert!(command.starts_with("git -C "), "{command}");
-    assert!(command.contains(" worktree remove -- "), "{command}");
+    assert!(command.contains(" worktree list "), "{command}");
     assert_eq!(*code, Some(128));
-    assert!(stderr.contains("is a main working tree"), "{stderr}");
+    assert!(stderr.contains("cannot change to"), "{stderr}");
     assert!(error.to_string().contains("exit code 128"), "{error}");
 }
 
@@ -80,11 +140,11 @@ fn many_threads_can_share_one_cli() {
     let threads: Vec<_> = (0..8)
         .map(|_| {
             let (cli, repo) = (Arc::clone(&cli), repo.clone());
-            thread::spawn(move || cli.delivery(&repo, "main", None))
+            thread::spawn(move || cli.worktrees(&repo))
         })
         .collect();
     for thread in threads {
-        let delivery = thread.join().unwrap().unwrap();
-        assert_eq!(delivery.commits, 0);
+        let worktrees = thread.join().unwrap().unwrap();
+        assert_eq!(worktrees.len(), 1);
     }
 }

@@ -29,9 +29,6 @@ pub(crate) struct StatusSummary {
     pub(crate) oid: Option<String>,
     /// The checked-out branch; `None` when `HEAD` is detached.
     pub(crate) branch: Option<String>,
-    /// Commits ahead of and behind the upstream. `None` when there is no
-    /// upstream, or when it was deleted on the remote.
-    pub(crate) ahead_behind: Option<(u32, u32)>,
     /// Changed tracked files, conflicts included.
     pub(crate) changed: usize,
     /// Untracked files and directories that are not ignored.
@@ -89,16 +86,17 @@ pub(crate) fn parse_worktree_porcelain(output: &[u8]) -> Result<Vec<WorktreeInfo
 
 /// Parses `git status --porcelain=v2 --branch -z`.
 ///
-/// Only the branch headers and the number of entries are kept. An entry of
-/// a kind this parser does not know counts as a change: when in doubt, the
-/// tree is dirty, which keeps the cleanup rule on the safe side.
-pub(crate) fn parse_status_porcelain_v2(output: &[u8]) -> Result<StatusSummary, ParseError> {
+/// Only the `HEAD` headers and the number of entries are kept; other headers
+/// (upstream, ahead and behind counts, stash) are skipped. An entry of a kind
+/// this parser does not know counts as a change: when in doubt, the tree is
+/// dirty, which keeps the cleanup rule on the safe side.
+pub(crate) fn parse_status_porcelain_v2(output: &[u8]) -> StatusSummary {
     let mut status = StatusSummary::default();
     let mut fields = output.split(|&byte| byte == 0);
     while let Some(field) = fields.next() {
         match field.first() {
             None | Some(b'!') => {}
-            Some(b'#') => parse_status_header(&lossy(field), &mut status)?,
+            Some(b'#') => read_status_header(&lossy(field), &mut status),
             Some(b'?') => status.untracked += 1,
             Some(b'2') => {
                 status.changed += 1;
@@ -108,32 +106,59 @@ pub(crate) fn parse_status_porcelain_v2(output: &[u8]) -> Result<StatusSummary, 
             Some(_) => status.changed += 1,
         }
     }
-    Ok(status)
+    status
 }
 
-fn parse_status_header(field: &str, status: &mut StatusSummary) -> Result<(), ParseError> {
+fn read_status_header(field: &str, status: &mut StatusSummary) {
     let Some(header) = field.strip_prefix("# ") else {
-        return Ok(());
+        return;
     };
     let (key, value) = header.split_once(' ').unwrap_or((header, ""));
     match key {
         "branch.oid" => status.oid = (value != "(initial)").then(|| value.to_owned()),
         "branch.head" => status.branch = (value != "(detached)").then(|| value.to_owned()),
-        "branch.ab" => status.ahead_behind = Some(parse_ahead_behind(value)?),
         _ => {}
     }
-    Ok(())
 }
 
-fn parse_ahead_behind(value: &str) -> Result<(u32, u32), ParseError> {
-    let invalid = || ParseError::new(format!("`{value}` is not an ahead/behind count"));
-    let (ahead, behind) = value.split_once(' ').ok_or_else(invalid)?;
-    let ahead = ahead.strip_prefix('+').ok_or_else(invalid)?;
-    let behind = behind.strip_prefix('-').ok_or_else(invalid)?;
-    Ok((
-        ahead.parse().map_err(|_| invalid())?,
-        behind.parse().map_err(|_| invalid())?,
-    ))
+/// The upstream of a branch, as `git for-each-ref --format=%(upstream)`
+/// prints it, when it is a remote-tracking branch. An upstream that is a
+/// local branch says nothing about what reached the remote.
+pub(crate) fn remote_upstream(output: &str) -> Option<String> {
+    let reference = output.trim();
+    reference
+        .starts_with("refs/remotes/")
+        .then(|| reference.to_owned())
+}
+
+/// The short name of a remote-tracking branch: `origin/feat` for
+/// `refs/remotes/origin/feat`.
+pub(crate) fn remote_branch_name(reference: &str) -> String {
+    reference
+        .strip_prefix("refs/remotes/")
+        .unwrap_or(reference)
+        .to_owned()
+}
+
+/// How many bytes of `output` to keep so it fits in `limit`: everything when
+/// it fits, otherwise up to the last line break within the limit, so no line
+/// is cut. A single line longer than the limit is cut at a character
+/// boundary.
+pub(crate) fn truncation_point(output: &[u8], limit: usize) -> usize {
+    if output.len() <= limit {
+        return output.len();
+    }
+    let window = &output[..limit];
+    if let Some(newline) = window.iter().rposition(|&byte| byte == b'\n') {
+        return newline + 1;
+    }
+    // UTF-8 continuation bytes look like 0b10xx_xxxx: step back to the
+    // start of a character.
+    let mut cut = limit;
+    while cut > 0 && output[cut] & 0b1100_0000 == 0b1000_0000 {
+        cut -= 1;
+    }
+    cut
 }
 
 /// Parses the summary line of `git diff --shortstat`, such as
@@ -459,18 +484,17 @@ mod tests {
     }
 
     #[test]
-    fn status_reads_branch_headers() {
+    fn status_reads_head_headers_and_skips_the_others() {
         let output = nul(&format!(
             "# branch.oid {SHA_A}\n# branch.head feat/x\n\
-             # branch.upstream origin/feat/x\n# branch.ab +3 -1\n"
+             # branch.upstream origin/feat/x\n# branch.ab +? -?\n# stash 2\n"
         ));
-        let status = parse_status_porcelain_v2(&output).unwrap();
+        let status = parse_status_porcelain_v2(&output);
         assert_eq!(
             status,
             StatusSummary {
                 oid: Some(SHA_A.into()),
                 branch: Some("feat/x".into()),
-                ahead_behind: Some((3, 1)),
                 changed: 0,
                 untracked: 0,
             }
@@ -481,24 +505,14 @@ mod tests {
     #[test]
     fn status_reads_detached_and_unborn_heads() {
         let detached = nul(&format!("# branch.oid {SHA_A}\n# branch.head (detached)\n"));
-        let status = parse_status_porcelain_v2(&detached).unwrap();
+        let status = parse_status_porcelain_v2(&detached);
         assert_eq!(status.oid.as_deref(), Some(SHA_A));
         assert_eq!(status.branch, None);
 
         let unborn = nul("# branch.oid (initial)\n# branch.head main\n");
-        let status = parse_status_porcelain_v2(&unborn).unwrap();
+        let status = parse_status_porcelain_v2(&unborn);
         assert_eq!(status.oid, None);
         assert_eq!(status.branch.as_deref(), Some("main"));
-    }
-
-    #[test]
-    fn status_without_ahead_behind_means_the_upstream_is_gone() {
-        let output = nul(&format!(
-            "# branch.oid {SHA_A}\n# branch.head topic\n# branch.upstream origin/topic\n"
-        ));
-        let status = parse_status_porcelain_v2(&output).unwrap();
-        assert_eq!(status.branch.as_deref(), Some("topic"));
-        assert_eq!(status.ahead_behind, None);
     }
 
     #[test]
@@ -511,7 +525,7 @@ mod tests {
              u UU N... 100644 100644 100644 100644 {SHA_A} {SHA_A} {SHA_A} conflict.rs\n\
              ? newdir/\n? u.txt\n! target/\n"
         ));
-        let status = parse_status_porcelain_v2(&output).unwrap();
+        let status = parse_status_porcelain_v2(&output);
         // `? looks like an entry.txt` is the original path of the rename, not
         // an untracked file.
         assert_eq!(status.changed, 3);
@@ -521,17 +535,36 @@ mod tests {
 
     #[test]
     fn status_counts_unknown_entry_kinds_as_changes() {
-        let status = parse_status_porcelain_v2(b"z something new\0").unwrap();
+        let status = parse_status_porcelain_v2(b"z something new\0");
         assert_eq!(status.changed, 1);
         assert!(status.is_dirty());
     }
 
     #[test]
-    fn status_rejects_a_malformed_ahead_behind_header() {
-        assert!(parse_status_porcelain_v2(b"# branch.ab 3 1\0").is_err());
-        assert!(parse_status_porcelain_v2(b"# branch.ab +x -1\0").is_err());
-        // Other headers, such as the stash count, are skipped.
-        assert!(parse_status_porcelain_v2(b"# stash 2\0").is_ok());
+    fn only_remote_tracking_branches_count_as_upstreams() {
+        assert_eq!(
+            remote_upstream("refs/remotes/origin/feat\n").as_deref(),
+            Some("refs/remotes/origin/feat")
+        );
+        assert_eq!(remote_upstream("refs/heads/main\n"), None);
+        assert_eq!(remote_upstream("\n"), None);
+        assert_eq!(
+            remote_branch_name("refs/remotes/origin/feat/x"),
+            "origin/feat/x"
+        );
+    }
+
+    #[test]
+    fn truncation_keeps_whole_lines() {
+        let output = b"one\ntwo\nthree\n";
+        assert_eq!(truncation_point(output, 100), output.len());
+        assert_eq!(truncation_point(output, output.len()), output.len());
+        assert_eq!(truncation_point(output, 10), b"one\ntwo\n".len());
+        // One long line is cut at a character boundary: `\u{e9}` takes two
+        // bytes and is not split.
+        let long = "abc\u{e9}xyz\u{e9}".as_bytes();
+        assert_eq!(truncation_point(long, 4), 3);
+        assert_eq!(truncation_point(long, 5), 5);
     }
 
     #[test]

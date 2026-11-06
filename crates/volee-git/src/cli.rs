@@ -10,26 +10,45 @@ use std::time::Duration;
 
 use volee_core::delivery::{Delivery, DiffStat, PushState};
 
-use crate::command::{Request, Runner};
+use crate::command::{Completed, Request, Runner};
 use crate::parse::{self, StatusSummary};
-use crate::{DiffFormat, Git, GitError, NewWorktree, RepoInfo, WorktreeInfo};
+use crate::{
+    DeliveryQuery, DeliveryReport, DiffFormat, DiffOutput, Git, GitError, Head, NewWorktree,
+    RemovalRefusal, RepoInfo, WorktreeInfo,
+};
 
 /// The most untracked files [`Git::diff`] lists or shows. The others are
 /// counted in a final line, so a forgotten build directory cannot flood the
 /// output or start thousands of processes.
 const MAX_UNTRACKED_FILES: usize = 100;
 
+/// Diff options that keep the output the same whatever the person's
+/// configuration says: no colors, no external diff program, paths from the
+/// top of the worktree, and the usual `a/` and `b/` prefixes.
+const STABLE_DIFF: [&str; 5] = [
+    "--no-color",
+    "--no-ext-diff",
+    "--no-relative",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+];
+
 /// Answers [`Git`] queries by running the `git` executable.
 ///
 /// Every command runs as `git -C <dir> --no-optional-locks ...`, with
 /// standard input closed, `LC_ALL=C`, prompts disabled
-/// (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`) and without the
+/// (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`,
+/// `SSH_ASKPASS_REQUIRE=never`, and ssh in batch mode for fetches and
+/// checkouts unless the person chose their own ssh command), and without the
 /// environment variables that would tie git to another repository
 /// (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`...). Only porcelain and
-/// plumbing formats are parsed. The user's git configuration applies, so the
-/// answers match what the user sees.
+/// plumbing formats are parsed. The person's git configuration applies, so
+/// the answers match what they see, except where it would change the
+/// evidence (untracked files are always looked for) or the format of a diff.
 ///
-/// A command that runs longer than its timeout is killed, and at most
+/// Queries, writes and fetches have their own timeouts. A command that
+/// overruns its timeout is stopped with everything it started: SIGTERM
+/// first, so git can clean up, then SIGKILL. At most
 /// [`max_concurrent`](GitCli::max_concurrent) commands run at the same time
 /// across all the threads that share one `GitCli`.
 ///
@@ -46,13 +65,19 @@ const MAX_UNTRACKED_FILES: usize = 100;
 pub struct GitCli {
     runner: Runner,
     timeout: Duration,
+    write_timeout: Duration,
     fetch_timeout: Duration,
 }
 
 impl GitCli {
-    /// How long a command may run before it is stopped, unless set with
+    /// How long a query may run before it is stopped, unless set with
     /// [`GitCli::timeout`].
     pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
+    /// How long creating or removing a worktree may run before it is
+    /// stopped, unless set with [`GitCli::write_timeout`]. A checkout can be
+    /// slow: large repositories, Git LFS filters, hooks.
+    pub const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(600);
 
     /// How long a fetch may run before it is stopped, unless set with
     /// [`GitCli::fetch_timeout`].
@@ -72,6 +97,7 @@ impl GitCli {
         Self {
             runner: Runner::new(program.into(), Self::DEFAULT_MAX_CONCURRENT),
             timeout: Self::DEFAULT_TIMEOUT,
+            write_timeout: Self::DEFAULT_WRITE_TIMEOUT,
             fetch_timeout: Self::DEFAULT_FETCH_TIMEOUT,
         }
     }
@@ -79,7 +105,7 @@ impl GitCli {
     /// Sets an environment variable for every git command. It wins over the
     /// variables `GitCli` sets or removes itself.
     ///
-    /// Tests use it to keep git away from the user's configuration, for
+    /// Tests use it to keep git away from the person's configuration, for
     /// example with `GIT_CONFIG_GLOBAL=/dev/null` and a temporary `HOME`.
     #[must_use]
     pub fn env(mut self, key: impl Into<OsString>, value: impl Into<OsString>) -> Self {
@@ -87,11 +113,18 @@ impl GitCli {
         self
     }
 
-    /// Sets how long a command may run before it is stopped. Fetches have
-    /// their own limit, [`GitCli::fetch_timeout`].
+    /// Sets how long a query may run before it is stopped.
     #[must_use]
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    /// Sets how long creating or removing a worktree may run before it is
+    /// stopped.
+    #[must_use]
+    pub fn write_timeout(mut self, timeout: Duration) -> Self {
+        self.write_timeout = timeout;
         self
     }
 
@@ -110,8 +143,14 @@ impl GitCli {
         self
     }
 
+    /// A query in `dir`.
     fn git<'a>(&'a self, dir: &'a Path) -> Request<'a> {
         self.runner.request(dir, self.timeout)
+    }
+
+    /// A command in `dir` that writes to the repository.
+    fn write<'a>(&'a self, dir: &'a Path) -> Request<'a> {
+        self.runner.request(dir, self.write_timeout)
     }
 
     /// The commit `revision` names, or `None` when it names none.
@@ -184,33 +223,33 @@ impl GitCli {
         request.parse(|stdout| parse::parse_count(&String::from_utf8_lossy(stdout)))
     }
 
-    /// The branch, upstream and changes of a working tree. Untracked files
-    /// are always looked for, whatever `status.showUntrackedFiles` says.
+    /// What a working tree has checked out and what it changes. Untracked
+    /// files are always looked for, whatever `status.showUntrackedFiles`
+    /// says, and changes inside submodules count, whatever
+    /// `diff.ignoreSubmodules` says.
     fn status(&self, dir: &Path) -> Result<StatusSummary, GitError> {
         self.git(dir)
             .args([
                 "status",
                 "--porcelain=v2",
                 "--branch",
-                "--ahead-behind",
+                "--no-ahead-behind",
                 "--untracked-files=normal",
+                "--ignore-submodules=none",
                 "-z",
             ])
-            .parse(parse::parse_status_porcelain_v2)
+            .parse(|stdout| Ok(parse::parse_status_porcelain_v2(stdout)))
     }
 
-    /// The size of the changes from `from` to the working tree.
-    fn shortstat(&self, dir: &Path, from: &str) -> Result<DiffStat, GitError> {
+    /// The size of the changes from `from` to `to`, or to the working tree
+    /// when `to` is `None`.
+    fn shortstat(&self, dir: &Path, from: &str, to: Option<&str>) -> Result<DiffStat, GitError> {
         self.git(dir)
-            .args([
-                "diff",
-                "--shortstat",
-                "--no-color",
-                "--no-ext-diff",
-                "--no-relative",
-                from,
-                "--",
-            ])
+            .args(["diff", "--shortstat"])
+            .args(STABLE_DIFF)
+            .arg(from)
+            .args(to)
+            .arg("--")
             .parse(|stdout| parse::parse_shortstat(&String::from_utf8_lossy(stdout)))
     }
 
@@ -225,9 +264,10 @@ impl GitCli {
             .object_id()
     }
 
-    /// Where a diff of `dir` against `base` starts: their merge base, or the
-    /// empty tree when there is none. Before the first commit, the base is
-    /// not looked up: it may not exist yet, and everything is new anyway.
+    /// Where a diff of the working tree of `dir` against `base` starts: the
+    /// merge base of `HEAD` and the base, or the empty tree when there is
+    /// none. Before the first commit, the base is not looked up: it may not
+    /// exist yet, and everything is new anyway.
     fn diff_origin(&self, dir: &Path, base: &str) -> Result<String, GitError> {
         let merge_base = match self.commit_of(dir, "HEAD")? {
             Some(head) => {
@@ -242,28 +282,57 @@ impl GitCli {
         }
     }
 
+    /// What the agent's branch changes against its merge base: the working
+    /// tree when the branch is checked out, so uncommitted changes count, and
+    /// its tip otherwise.
+    fn branch_diff(
+        &self,
+        dir: &Path,
+        tip: Option<&str>,
+        merge_base: Option<&str>,
+        on_branch: bool,
+    ) -> Result<DiffStat, GitError> {
+        if tip.is_none() && !on_branch {
+            return Ok(DiffStat::default());
+        }
+        let from = match merge_base {
+            Some(commit) => commit.to_owned(),
+            None => self.empty_tree(dir)?,
+        };
+        let to = if on_branch { None } else { tip };
+        self.shortstat(dir, &from, to)
+    }
+
+    /// The push state of `branch` at `tip`, and the remote-tracking branch
+    /// it was compared with: its upstream when that is a remote-tracking
+    /// branch, otherwise `origin/<branch>`, for a branch pushed without
+    /// `-u`.
     fn push_state(
         &self,
         dir: &Path,
-        status: &StatusSummary,
-        head: &str,
-    ) -> Result<PushState, GitError> {
-        if let Some((ahead, _behind)) = status.ahead_behind {
-            return Ok(parse::push_state(ahead));
+        branch: &str,
+        tip: &str,
+    ) -> Result<(PushState, Option<String>), GitError> {
+        let configured = self
+            .git(dir)
+            .args(["for-each-ref", "--format=%(upstream)"])
+            .arg(format!("refs/heads/{branch}"))
+            .run()?
+            .success()?
+            .text()?;
+        let candidates = parse::remote_upstream(&configured)
+            .into_iter()
+            .chain([format!("refs/remotes/origin/{branch}")]);
+        for reference in candidates {
+            if let Some(remote) = self.commit_of(dir, &reference)? {
+                let ahead = self.count_commits(dir, tip, Some(&remote))?;
+                return Ok((
+                    parse::push_state(ahead),
+                    Some(parse::remote_branch_name(&reference)),
+                ));
+            }
         }
-        // No upstream, or an upstream deleted on the remote: the branch may
-        // still have been pushed under its own name, without `-u`.
-        let Some(branch) = status.branch.as_deref() else {
-            return Ok(PushState::NoUpstream);
-        };
-        match self.commit_of(dir, &format!("refs/remotes/origin/{branch}"))? {
-            Some(remote) => Ok(parse::push_state(self.count_commits(
-                dir,
-                head,
-                Some(&remote),
-            )?)),
-            None => Ok(PushState::NoUpstream),
-        }
+        Ok((PushState::NoUpstream, None))
     }
 
     /// The checked-out branch, `None` when `HEAD` is detached.
@@ -324,6 +393,103 @@ impl GitCli {
         }
     }
 
+    /// The environment that makes ssh fail instead of asking for a password,
+    /// a passphrase or a host key confirmation. Empty when the person chose
+    /// their own ssh command (`GIT_SSH_COMMAND`, `GIT_SSH` or
+    /// `core.sshCommand`), which is then left alone.
+    fn ssh_env(&self, repo: &Path) -> Result<Vec<(&'static str, &'static str)>, GitError> {
+        if self.runner.person_sets("GIT_SSH_COMMAND") || self.runner.person_sets("GIT_SSH") {
+            return Ok(Vec::new());
+        }
+        let configured = self
+            .git(repo)
+            .args(["config", "--get", "core.sshCommand"])
+            .run()?;
+        match configured.code {
+            Some(0) => Ok(Vec::new()),
+            Some(1) => Ok(vec![("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")]),
+            _ => Err(configured.failure()),
+        }
+    }
+
+    /// Why the worktree at `path` must stay, if it must.
+    fn removal_refusal(
+        &self,
+        repo: &Path,
+        path: &Path,
+    ) -> Result<Option<RemovalRefusal>, GitError> {
+        let worktrees = self.worktrees(repo)?;
+        let Some((position, worktree)) = worktrees
+            .iter()
+            .enumerate()
+            .find(|(_, worktree)| same_path(&worktree.path, path))
+        else {
+            return Ok(Some(RemovalRefusal::NotAWorktree));
+        };
+        if position == 0 {
+            return Ok(Some(RemovalRefusal::MainCheckout));
+        }
+        if let Some(reason) = &worktree.locked {
+            return Ok(Some(RemovalRefusal::Locked {
+                reason: reason.clone(),
+            }));
+        }
+        if let Some(reason) = &worktree.prunable {
+            return Ok(Some(RemovalRefusal::Prunable {
+                reason: reason.clone(),
+            }));
+        }
+        let status = self.status(path)?;
+        if status.is_dirty() {
+            return Ok(Some(RemovalRefusal::UncommittedChanges {
+                changed: status.changed,
+                untracked: status.untracked,
+            }));
+        }
+        if let (true, Some(head)) = (worktree.detached, &worktree.head) {
+            // The worktree's own `HEAD` and reflog go with it: a detached
+            // commit is lost unless a shared reference keeps it.
+            let keeper = self
+                .git(repo)
+                .args([
+                    "for-each-ref",
+                    "--count=1",
+                    "--format=%(refname)",
+                    "--contains",
+                ])
+                .arg(head)
+                .args(["refs/heads/", "refs/tags/", "refs/remotes/"])
+                .run()?
+                .success()?
+                .text()?;
+            if keeper.is_empty() {
+                return Ok(Some(RemovalRefusal::UnreachableCommits {
+                    head: head.clone(),
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The error for a failed step of [`Git::add_worktree`]:
+    /// [`GitError::WorktreeIncomplete`] when the worktree exists anyway, so
+    /// the caller knows it is there.
+    fn creation_failure(&self, repo: &Path, path: &Path, error: GitError) -> GitError {
+        let registered = self.worktrees(repo).is_ok_and(|worktrees| {
+            worktrees
+                .iter()
+                .any(|worktree| same_path(&worktree.path, path))
+        });
+        if registered || path.exists() {
+            GitError::WorktreeIncomplete {
+                path: path.to_path_buf(),
+                source: Box::new(error),
+            }
+        } else {
+            error
+        }
+    }
+
     /// Untracked files that are not ignored, relative to `top`. With
     /// `collapse`, an untracked directory is one entry, as in `git status`.
     fn untracked_files(&self, top: &Path, collapse: bool) -> Result<Vec<PathBuf>, GitError> {
@@ -340,39 +506,38 @@ impl GitCli {
     /// list of those that are not shown: nested repositories (listed as
     /// directories, which git cannot diff against nothing), files beyond
     /// [`MAX_UNTRACKED_FILES`] and files git cannot read.
-    fn append_untracked_patches(&self, top: &Path, text: &mut String) -> Result<(), GitError> {
+    fn append_untracked_patches(&self, top: &Path, out: &mut Bounded) -> Result<(), GitError> {
         let entries = self.untracked_files(top, false)?;
         let (mut left_out, files): (Vec<&Path>, Vec<&Path>) = entries
             .iter()
             .map(PathBuf::as_path)
             .partition(|path| parse::names_directory(path));
         for (index, file) in files.into_iter().enumerate() {
+            if out.is_full() {
+                return Ok(());
+            }
             if index >= MAX_UNTRACKED_FILES {
                 left_out.push(file);
                 continue;
             }
             let completed = self
                 .git(top)
-                .args([
-                    "diff",
-                    "--no-index",
-                    "--no-color",
-                    "--no-ext-diff",
-                    "--",
-                    "/dev/null",
-                ])
+                .args(["diff", "--no-index"])
+                .args(STABLE_DIFF)
+                .args(["--", "/dev/null"])
                 .arg(file)
+                .max_stdout(out.room())
                 .run()?;
             // `--no-index` exits with 1 when the files differ, as they do.
-            if matches!(completed.code, Some(0 | 1)) {
-                text.push_str(&String::from_utf8_lossy(&completed.stdout));
+            if matches!(completed.code, Some(0 | 1)) || completed.truncated {
+                out.push(&completed.stdout);
             } else {
                 // One unreadable file must not hide the rest of the diff.
                 tracing::debug!(error = %completed.failure(), "untracked file not shown");
                 left_out.push(file);
             }
         }
-        append_path_list(text, "Untracked files not shown:", &left_out);
+        out.push_list("Untracked files not shown:", &left_out);
         Ok(())
     }
 }
@@ -495,30 +660,35 @@ impl Git for GitCli {
             }
         }
         let start = self.resolve_base(repo, base)?;
-        // git creates missing parent directories itself, but only after it
-        // has created the branch: failing there would leave a stray branch.
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|source| GitError::Io {
-                action: "create the parent directory of",
-                path: path.clone(),
-                source,
-            })?;
+        // A checkout may fetch large files over ssh (Git LFS).
+        let ssh = self.ssh_env(repo)?;
+        // Detached first: if git fails or is stopped while it checks out, no
+        // branch exists yet.
+        let added = self
+            .write(repo)
+            .args(["worktree", "add", "--quiet", "--detach", "--"])
+            .arg(&path)
+            .arg(&start.commit)
+            .envs(ssh.iter().copied())
+            .run()
+            .and_then(Completed::success);
+        if let Err(error) = added {
+            return Err(self.creation_failure(repo, &path, error));
         }
         // `--no-track`: the agent's branch must not take `origin/<base>` as
         // its upstream, or its push state would compare with the base.
-        self.git(repo)
-            .args([
-                "worktree",
-                "add",
-                "--quiet",
-                "--no-track",
-                "-b",
-                branch,
-                "--",
-            ])
-            .arg(&path)
-            .arg(&start.commit)
-            .stdout()?;
+        let switched = self
+            .write(&path)
+            .args(["switch", "--quiet", "--no-track", "--create", branch])
+            .envs(ssh.iter().copied())
+            .run()
+            .and_then(Completed::success);
+        if let Err(error) = switched {
+            return Err(GitError::WorktreeIncomplete {
+                path,
+                source: Box::new(error),
+            });
+        }
         Ok(NewWorktree {
             start_point: start.name,
             start_commit: start.commit,
@@ -527,9 +697,20 @@ impl Git for GitCli {
 
     fn remove_worktree(&self, repo: &Path, path: &Path) -> Result<(), GitError> {
         let path = absolute(repo, path)?;
-        // Never `--force` (ADR 0011): git's refusal is the answer.
-        self.git(repo)
-            .args(["worktree", "remove", "--"])
+        if let Some(reason) = self.removal_refusal(repo, &path)? {
+            return Err(GitError::RemovalRefused { path, reason });
+        }
+        // Never `--force` (ADR 0011). git checks again that the worktree is
+        // clean; make that check see untracked files whatever the
+        // configuration says.
+        self.write(repo)
+            .args([
+                "-c",
+                "status.showUntrackedFiles=normal",
+                "worktree",
+                "remove",
+                "--",
+            ])
             .arg(&path)
             .stdout()?;
         Ok(())
@@ -538,79 +719,102 @@ impl Git for GitCli {
     fn delivery(
         &self,
         worktree: &Path,
-        base: &str,
-        start_commit: Option<&str>,
-    ) -> Result<Delivery, GitError> {
+        query: &DeliveryQuery<'_>,
+    ) -> Result<DeliveryReport, GitError> {
         let status = self.status(worktree)?;
-        let dirty = status.is_dirty();
-        let Some(head) = status.oid.as_deref() else {
-            // No commit yet: nothing to count, push or merge, and the base
-            // branch may not even exist.
-            let diff = self.shortstat(worktree, &self.empty_tree(worktree)?)?;
-            return Ok(Delivery {
-                dirty,
-                diff,
-                ..Delivery::default()
-            });
-        };
-        let base = self.resolve_base(worktree, base)?;
-        let merge_base = self.merge_base(worktree, &base.commit, head)?;
-        let start = match start_commit {
-            Some(revision) => {
-                let start = self.commit_of(worktree, revision)?;
-                if start.is_none() {
-                    tracing::debug!(
-                        revision,
-                        "start commit not found, counting from the merge base"
-                    );
-                }
-                start
-            }
+        let on_branch = status.branch.as_deref() == Some(query.branch);
+        let tip = self.commit_of(worktree, &format!("refs/heads/{}", query.branch))?;
+        let previous = match query.unmerged_tip {
+            Some(revision) => self.commit_of(worktree, revision)?,
             None => None,
         };
-        let commits =
-            self.count_commits(worktree, head, start.as_deref().or(merge_base.as_deref()))?;
-        let from = match merge_base {
-            Some(commit) => commit,
-            None => self.empty_tree(worktree)?,
+        let base = if tip.is_some() || previous.is_some() {
+            Some(self.resolve_base(worktree, query.base)?)
+        } else {
+            None
         };
-        let diff = self.shortstat(worktree, &from)?;
-        let push = self.push_state(worktree, &status, head)?;
-        let merged_into_base = commits > 0 && self.is_ancestor(worktree, head, &base.commit)?;
-        Ok(Delivery {
-            commits,
-            dirty,
-            diff,
-            push,
-            merged_into_base,
-            ..Delivery::default()
+        let (commits, merge_base) = match (&tip, &base) {
+            (Some(tip), Some(base)) => (
+                self.count_commits(worktree, tip, Some(&base.commit))?,
+                self.merge_base(worktree, &base.commit, tip)?,
+            ),
+            _ => (0, None),
+        };
+        let diff = self.branch_diff(worktree, tip.as_deref(), merge_base.as_deref(), on_branch)?;
+        let (push, upstream) = match &tip {
+            Some(tip) => self.push_state(worktree, query.branch, tip)?,
+            None => (PushState::NoUpstream, None),
+        };
+        // The memory that proves a merge: the tip while it has commits of
+        // its own, the previous one otherwise.
+        let unmerged_tip = if commits > 0 {
+            tip.clone()
+        } else {
+            query.unmerged_tip.map(str::to_owned)
+        };
+        let merged_into_base = match (commits, &previous, &base) {
+            (0, Some(previous), Some(base)) => {
+                self.is_ancestor(worktree, previous, &base.commit)?
+            }
+            _ => false,
+        };
+        Ok(DeliveryReport {
+            delivery: Delivery {
+                commits,
+                dirty: status.is_dirty(),
+                diff,
+                push,
+                merged_into_base,
+                tip,
+                unmerged_tip,
+                ..Delivery::default()
+            },
+            head: Head {
+                branch: status.branch,
+                commit: status.oid,
+            },
+            on_branch,
+            base: base.map(|base| base.name),
+            upstream,
         })
     }
 
-    fn diff(&self, worktree: &Path, base: &str, format: DiffFormat) -> Result<String, GitError> {
+    fn diff(
+        &self,
+        worktree: &Path,
+        base: &str,
+        format: DiffFormat,
+        max_bytes: usize,
+    ) -> Result<DiffOutput, GitError> {
         // Run from the top level, so untracked paths are relative to it.
         let top = self
             .git(worktree)
             .args(["rev-parse", "--show-toplevel"])
             .parse(parse::parse_path_line)?;
         let from = self.diff_origin(&top, base)?;
-        let mut request =
-            self.git(&top)
-                .args(["diff", "--no-color", "--no-ext-diff", "--no-relative"]);
+        let mut request = self.git(&top).arg("diff").args(STABLE_DIFF);
         if format == DiffFormat::Stat {
             request = request.arg("--stat");
         }
-        let tracked = request.arg(&from).arg("--").stdout()?;
-        let mut text = String::from_utf8_lossy(&tracked).into_owned();
-        match format {
-            DiffFormat::Stat => {
-                let untracked = self.untracked_files(&top, true)?;
-                let untracked: Vec<&Path> = untracked.iter().map(PathBuf::as_path).collect();
-                append_path_list(&mut text, "Untracked files:", &untracked);
+        let tracked = request
+            .arg(&from)
+            .arg("--")
+            .max_stdout(max_bytes)
+            .run()?
+            .success()?;
+        let mut out = Bounded::new(max_bytes);
+        out.push(&tracked.stdout);
+        if !out.is_full() {
+            match format {
+                DiffFormat::Stat => {
+                    let untracked = self.untracked_files(&top, true)?;
+                    let untracked: Vec<&Path> = untracked.iter().map(PathBuf::as_path).collect();
+                    out.push_list("Untracked files:", &untracked);
+                }
+                DiffFormat::Patch => self.append_untracked_patches(&top, &mut out)?,
             }
-            DiffFormat::Patch => self.append_untracked_patches(&top, &mut text)?,
         }
-        Ok(text)
+        Ok(out.finish())
     }
 
     fn fetch(&self, repo: &Path) -> Result<(), GitError> {
@@ -626,10 +830,19 @@ impl Git for GitCli {
             }
             _ => return Err(remote.failure()),
         }
-        // `FETCH_HEAD` belongs to the person: a background fetch must not
-        // replace it.
+        let ssh = self.ssh_env(repo)?;
+        // `--prune`: a remote branch deleted on the remote must not keep
+        // counting as pushed. `FETCH_HEAD` belongs to the person: a
+        // background fetch must not replace it.
         self.git(repo)
-            .args(["fetch", "--quiet", "--no-write-fetch-head", "origin"])
+            .args([
+                "fetch",
+                "--quiet",
+                "--prune",
+                "--no-write-fetch-head",
+                "origin",
+            ])
+            .envs(ssh)
             .timeout(self.fetch_timeout)
             .stdout()?;
         Ok(())
@@ -645,6 +858,70 @@ struct Base {
     commit: String,
 }
 
+/// The text of [`Git::diff`], gathered within a byte limit.
+#[derive(Debug)]
+struct Bounded {
+    bytes: Vec<u8>,
+    limit: usize,
+}
+
+impl Bounded {
+    fn new(limit: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            limit,
+        }
+    }
+
+    /// How many more bytes fit.
+    fn room(&self) -> usize {
+        self.limit.saturating_sub(self.bytes.len())
+    }
+
+    /// Whether the text went past the limit: it will be cut, so nothing more
+    /// is worth gathering.
+    fn is_full(&self) -> bool {
+        self.bytes.len() > self.limit
+    }
+
+    fn push(&mut self, bytes: &[u8]) {
+        self.bytes.extend_from_slice(bytes);
+    }
+
+    /// Appends `paths` under `title`, at most [`MAX_UNTRACKED_FILES`] of
+    /// them, after a blank line when text came before. Appends nothing when
+    /// there are no paths.
+    fn push_list(&mut self, title: &str, paths: &[&Path]) {
+        if paths.is_empty() {
+            return;
+        }
+        let mut list = String::new();
+        if !self.bytes.is_empty() {
+            list.push('\n');
+        }
+        list.push_str(title);
+        list.push('\n');
+        // Writing to a `String` never fails, so the results are ignored.
+        for path in paths.iter().take(MAX_UNTRACKED_FILES) {
+            let _ = writeln!(list, "  {}", path.display());
+        }
+        let omitted = paths.len().saturating_sub(MAX_UNTRACKED_FILES);
+        if omitted > 0 {
+            let _ = writeln!(list, "  ... and {omitted} more");
+        }
+        self.push(list.as_bytes());
+    }
+
+    /// The text, cut at a line break when it went past the limit.
+    fn finish(self) -> DiffOutput {
+        let keep = parse::truncation_point(&self.bytes, self.limit);
+        DiffOutput {
+            text: String::from_utf8_lossy(&self.bytes[..keep]).into_owned(),
+            truncated: keep < self.bytes.len(),
+        }
+    }
+}
+
 /// `path` relative to `repo`, made absolute without touching the file
 /// system, so git and this process agree on what it names.
 fn absolute(repo: &Path, path: &Path) -> Result<PathBuf, GitError> {
@@ -656,53 +933,39 @@ fn absolute(repo: &Path, path: &Path) -> Result<PathBuf, GitError> {
     })
 }
 
-/// Appends `paths` under `title`, at most [`MAX_UNTRACKED_FILES`] of them,
-/// after a blank line when `text` is not empty. Appends nothing when there
-/// are no paths.
-fn append_path_list(text: &mut String, title: &str, paths: &[&Path]) {
-    if paths.is_empty() {
-        return;
-    }
-    if !text.is_empty() {
-        text.push('\n');
-    }
-    text.push_str(title);
-    text.push('\n');
-    // Writing to a `String` never fails, so the results are ignored.
-    for path in paths.iter().take(MAX_UNTRACKED_FILES) {
-        let _ = writeln!(text, "  {}", path.display());
-    }
-    let omitted = paths.len().saturating_sub(MAX_UNTRACKED_FILES);
-    if omitted > 0 {
-        let _ = writeln!(text, "  ... and {omitted} more");
-    }
+/// Whether `listed`, a worktree path as git prints it (with symbolic links
+/// resolved), is `path`.
+fn same_path(listed: &Path, path: &Path) -> bool {
+    listed == path || fs::canonicalize(path).is_ok_and(|resolved| resolved == listed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn text(out: Bounded) -> String {
+        out.finish().text
+    }
+
     #[test]
     fn path_lists_follow_the_text_after_a_blank_line() {
-        let mut text = " a.txt | 1 +\n 1 file changed, 1 insertion(+)\n".to_owned();
-        append_path_list(
-            &mut text,
-            "Untracked files:",
-            &[Path::new("new/"), Path::new("u.txt")],
-        );
+        let mut out = Bounded::new(usize::MAX);
+        out.push(b" a.txt | 1 +\n 1 file changed, 1 insertion(+)\n");
+        out.push_list("Untracked files:", &[Path::new("new/"), Path::new("u.txt")]);
         assert_eq!(
-            text,
+            text(out),
             " a.txt | 1 +\n 1 file changed, 1 insertion(+)\n\nUntracked files:\n  new/\n  u.txt\n"
         );
     }
 
     #[test]
     fn an_empty_path_list_adds_nothing() {
-        let mut text = String::new();
-        append_path_list(&mut text, "Untracked files:", &[]);
-        assert_eq!(text, "");
-        append_path_list(&mut text, "Untracked files:", &[Path::new("u.txt")]);
-        assert_eq!(text, "Untracked files:\n  u.txt\n");
+        let mut out = Bounded::new(usize::MAX);
+        out.push_list("Untracked files:", &[]);
+        assert_eq!(text(out), "");
+        let mut out = Bounded::new(usize::MAX);
+        out.push_list("Untracked files:", &[Path::new("u.txt")]);
+        assert_eq!(text(out), "Untracked files:\n  u.txt\n");
     }
 
     #[test]
@@ -711,10 +974,30 @@ mod tests {
             .map(|i| format!("f{i}"))
             .collect();
         let paths: Vec<&Path> = names.iter().map(Path::new).collect();
-        let mut text = String::new();
-        append_path_list(&mut text, "Untracked files:", &paths);
+        let mut out = Bounded::new(usize::MAX);
+        out.push_list("Untracked files:", &paths);
+        let text = text(out);
         assert_eq!(text.lines().count(), 1 + MAX_UNTRACKED_FILES + 1);
         assert!(text.ends_with("  ... and 3 more\n"));
+    }
+
+    #[test]
+    fn bounded_text_is_cut_at_a_line_break() {
+        let mut out = Bounded::new(10);
+        assert_eq!(out.room(), 10);
+        out.push(b"one\ntwo\nthree\n");
+        assert!(out.is_full());
+        assert_eq!(
+            out.finish(),
+            DiffOutput {
+                text: "one\ntwo\n".into(),
+                truncated: true,
+            }
+        );
+        let mut out = Bounded::new(10);
+        out.push(b"one\n");
+        assert!(!out.is_full());
+        assert!(!out.finish().truncated);
     }
 
     #[test]

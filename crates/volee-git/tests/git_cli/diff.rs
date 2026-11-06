@@ -2,15 +2,18 @@
 
 use std::path::{Path, PathBuf};
 
-use volee_git::{DiffFormat, Git, GitCli};
+use volee_git::{DiffFormat, DiffOutput, Git, GitCli};
 
 use crate::fixture::Sandbox;
 
+/// A limit no test reaches.
+const UNLIMITED: usize = 1 << 20;
+
 /// A worktree with a committed change, an uncommitted change and untracked
 /// files, one of them in a new directory.
-fn busy_worktree(sandbox: &Sandbox) -> PathBuf {
-    let repo = sandbox.repo("volee");
-    let worktree = sandbox.worktree(&repo, "wt/feat", "feat", "main");
+pub(crate) fn busy_worktree(sandbox: &Sandbox, root: &str) -> PathBuf {
+    let repo = sandbox.repo(root);
+    let worktree = sandbox.worktree(&repo, &format!("{root}-worktrees/feat"), "feat", "main");
     sandbox.commit(&worktree, "src/lib.rs", "committed line\n", "Add lib");
     sandbox.write(&worktree.join("README.md"), "# Sample\nuncommitted line\n");
     sandbox.write(&worktree.join("todo.txt"), "untracked line\n");
@@ -18,16 +21,19 @@ fn busy_worktree(sandbox: &Sandbox) -> PathBuf {
     worktree
 }
 
-/// The diff of `worktree` against `main`.
-fn diff(cli: &GitCli, worktree: &Path, format: DiffFormat) -> String {
-    cli.diff(worktree, "main", format)
-        .expect("diff the worktree")
+/// The whole diff of `worktree` against `main`.
+pub(crate) fn diff(cli: &GitCli, worktree: &Path, format: DiffFormat) -> String {
+    let output = cli
+        .diff(worktree, "main", format, UNLIMITED)
+        .expect("diff the worktree");
+    assert!(!output.truncated);
+    output.text
 }
 
 #[test]
 fn the_stat_lists_tracked_changes_then_untracked_files() {
     let sandbox = Sandbox::new();
-    let worktree = busy_worktree(&sandbox);
+    let worktree = busy_worktree(&sandbox, "volee");
     let stat = diff(&sandbox.cli(), &worktree, DiffFormat::Stat);
     assert!(stat.contains(" README.md  | 1 +\n"), "{stat}");
     assert!(stat.contains(" src/lib.rs | 1 +\n"), "{stat}");
@@ -44,7 +50,7 @@ fn the_stat_lists_tracked_changes_then_untracked_files() {
 #[test]
 fn the_patch_shows_committed_uncommitted_and_new_files() {
     let sandbox = Sandbox::new();
-    let worktree = busy_worktree(&sandbox);
+    let worktree = busy_worktree(&sandbox, "volee");
     let patch = diff(&sandbox.cli(), &worktree, DiffFormat::Patch);
     for expected in [
         "diff --git a/README.md b/README.md\n",
@@ -77,10 +83,52 @@ fn a_worktree_without_changes_has_an_empty_diff() {
 #[test]
 fn the_diff_of_a_subdirectory_covers_the_whole_worktree() {
     let sandbox = Sandbox::new();
-    let worktree = busy_worktree(&sandbox);
+    let worktree = busy_worktree(&sandbox, "volee");
     let patch = diff(&sandbox.cli(), &worktree.join("src"), DiffFormat::Patch);
     assert!(patch.contains("+uncommitted line\n"), "{patch}");
     assert!(patch.contains("b/todo.txt\n"), "{patch}");
+}
+
+#[test]
+fn a_long_diff_is_cut_at_a_line_break_and_flagged() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let lines = "a line of the big file\n".repeat(2_000);
+    sandbox.commit(&repo, "big.txt", &lines, "Add a big file");
+    sandbox.write(&repo.join("big.txt"), "");
+    let limit = 1_000;
+    let output = sandbox
+        .cli()
+        .diff(&repo, "main", DiffFormat::Patch, limit)
+        .unwrap();
+    assert!(output.truncated);
+    assert!(output.text.len() <= limit, "{} bytes", output.text.len());
+    assert!(output.text.ends_with('\n'));
+    assert!(output.text.starts_with("diff --git a/big.txt b/big.txt\n"));
+}
+
+#[test]
+fn untracked_files_count_toward_the_limit() {
+    let sandbox = Sandbox::new();
+    let worktree = busy_worktree(&sandbox, "volee");
+    let cli = sandbox.cli();
+    let whole = diff(&cli, &worktree, DiffFormat::Patch);
+    let limit = whole.len() - 1;
+    let cut = cli
+        .diff(&worktree, "main", DiffFormat::Patch, limit)
+        .unwrap();
+    assert!(cut.truncated);
+    assert!(whole.starts_with(&cut.text));
+    let exact = cli
+        .diff(&worktree, "main", DiffFormat::Patch, whole.len())
+        .unwrap();
+    assert_eq!(
+        exact,
+        DiffOutput {
+            text: whole,
+            truncated: false,
+        }
+    );
 }
 
 #[test]

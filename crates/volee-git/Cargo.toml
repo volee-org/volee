@@ -17,6 +17,10 @@ thiserror.workspace = true
 tracing.workspace = true
 volee-core.workspace = true
 
+# Signals to the process group of a git command that overran its timeout.
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
 [dev-dependencies]
 serde_json.workspace = true
 tempfile.workspace = true

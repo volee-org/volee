@@ -10,5 +10,6 @@ mod delivery;
 mod diff;
 mod errors;
 mod fetch;
+mod hostile;
 mod repo_info;
 mod worktrees;

@@ -1,10 +1,11 @@
 //! Temporary repositories for the integration tests.
 //!
 //! Every git command of the tests, the fixture's own and the ones `GitCli`
-//! runs, gets the same environment: a temporary `HOME`, no global or system
-//! configuration, and a ceiling at the sandbox so git never discovers a
-//! repository above it. The tests therefore never read the developer's
-//! settings and never touch their home directory.
+//! runs, gets the same environment: a temporary `HOME`, no system
+//! configuration, a global configuration that is empty (or deliberately
+//! hostile, see [`Sandbox::hostile`]), and a ceiling at the sandbox so git
+//! never discovers a repository above it. The tests therefore never read the
+//! developer's settings and never touch their home directory.
 
 use std::ffi::OsString;
 use std::fs;
@@ -24,10 +25,29 @@ const REPOSITORY_ENV: [&str; 5] = [
     "GIT_OBJECT_DIRECTORY",
 ];
 
+/// A global configuration that changes every output volee reads, if volee
+/// let it: colors, an external diff program, paths relative to the current
+/// directory, no `a/` and `b/` prefixes, untracked files hidden from
+/// `git status`, submodule changes ignored.
+const HOSTILE_CONFIG: &str = "\
+[color]
+\tui = always
+[diff]
+\texternal = echo EXTERNAL-DIFF
+\trelative = true
+\tnoprefix = true
+\tmnemonicPrefix = true
+\tignoreSubmodules = all
+[status]
+\tshowUntrackedFiles = no
+\trelativePaths = true
+";
+
 /// A temporary directory that holds repositories, removed on drop.
 pub(crate) struct Sandbox {
     _dir: TempDir,
     root: PathBuf,
+    global_config: Option<PathBuf>,
 }
 
 impl Sandbox {
@@ -40,7 +60,31 @@ impl Sandbox {
             .canonicalize()
             .expect("resolve the temporary directory");
         fs::create_dir_all(root.join("home/.config")).expect("create the temporary home");
-        Self { _dir: dir, root }
+        Self {
+            _dir: dir,
+            root,
+            global_config: None,
+        }
+    }
+
+    /// A sandbox whose global git configuration is [`HOSTILE_CONFIG`].
+    pub(crate) fn hostile() -> Self {
+        let mut sandbox = Self::new();
+        let config = sandbox.path("home/hostile.gitconfig");
+        fs::write(&config, HOSTILE_CONFIG).expect("write the hostile configuration");
+        sandbox.global_config = Some(config);
+        sandbox
+    }
+
+    /// Writes an executable script at `relative` and returns its path.
+    #[cfg(unix)]
+    pub(crate) fn script(&self, relative: &str, contents: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = self.path(relative);
+        self.write(&path, contents);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("make executable");
+        path
     }
 
     /// A path inside the sandbox.
@@ -58,8 +102,12 @@ impl Sandbox {
     /// The environment of every git command in the tests.
     fn env(&self) -> Vec<(&'static str, OsString)> {
         let home = self.root.join("home");
+        let global = self
+            .global_config
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("/dev/null"));
         vec![
-            ("GIT_CONFIG_GLOBAL", "/dev/null".into()),
+            ("GIT_CONFIG_GLOBAL", global.into()),
             ("GIT_CONFIG_NOSYSTEM", "1".into()),
             ("HOME", home.clone().into()),
             ("XDG_CONFIG_HOME", home.join(".config").into()),

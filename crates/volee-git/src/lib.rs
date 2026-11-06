@@ -16,17 +16,20 @@
 //!
 //! - Queries never change a repository: they take no optional lock, so they
 //!   never refresh the index of a worktree an agent is working in.
-//! - [`Git::remove_worktree`] never forces, and nothing in this crate ever
-//!   deletes a branch.
-//! - git never waits for a person: standard input is closed, credential
-//!   prompts are disabled and every command has a timeout.
+//! - [`Git::remove_worktree`] never forces and refuses to remove anything
+//!   that would lose work; nothing in this crate ever deletes a branch.
+//! - [`Git::add_worktree`] creates the branch only once its worktree exists,
+//!   so a failure never leaves a stray branch.
+//! - git never waits for a person: standard input is closed, credential and
+//!   ssh prompts are disabled, and every command has a timeout after which
+//!   git and everything it started are stopped.
 //!
 //! # The base branch
 //!
-//! The methods that compare a worktree with its base branch (`main`,
-//! `develop`...) compare with `origin/<base>` when that remote-tracking branch
-//! exists, because agents branch from it and pull requests merge into it; the
-//! local branch is used otherwise. Fetch first (see [`Git::fetch`]) for fresh
+//! The methods that compare with a base branch (`main`, `develop`...)
+//! compare with `origin/<base>` when that remote-tracking branch exists,
+//! because agents branch from it and pull requests merge into it; the local
+//! branch is used otherwise. Fetch first (see [`Git::fetch`]) for fresh
 //! answers.
 //!
 //! # Requirements
@@ -39,16 +42,21 @@
 //! ```no_run
 //! use std::path::Path;
 //!
-//! use volee_git::{DiffFormat, Git, GitCli};
+//! use volee_git::{DeliveryQuery, DiffFormat, Git, GitCli};
 //!
 //! # fn main() -> Result<(), volee_git::GitError> {
 //! let git = GitCli::new();
-//! if let Some(repo) = git.repo_info(Path::new("."))? {
-//!     let delivery = git.delivery(&repo.top_level, "main", None)?;
-//!     let summary = delivery.summary(); // "2 commits · not pushed · uncommitted changes"
-//!     let stat = git.diff(&repo.top_level, "main", DiffFormat::Stat)?;
-//! #   let _ = (summary, stat);
-//! }
+//! let worktree = Path::new("/work/volee/.worktrees/feat-x");
+//! let query = DeliveryQuery {
+//!     branch: "feat/x",
+//!     base: "main",
+//!     // The `unmerged_tip` of the agent's previous evidence.
+//!     unmerged_tip: None,
+//! };
+//! let report = git.delivery(worktree, &query)?;
+//! let summary = report.delivery.summary(); // "2 commits · not pushed"
+//! let stat = git.diff(worktree, "main", DiffFormat::Stat, 64 * 1024)?;
+//! # let _ = (summary, stat);
 //! # Ok(())
 //! # }
 //! ```
@@ -67,7 +75,7 @@ mod error;
 mod parse;
 
 pub use cli::GitCli;
-pub use error::GitError;
+pub use error::{GitError, RemovalRefusal};
 
 /// Everything volee asks of git.
 ///
@@ -112,6 +120,12 @@ pub trait Git: Send + Sync {
     /// ([`GitError::BranchExists`]), when `path` already exists
     /// ([`GitError::PathExists`]) or when `base` names no commit
     /// ([`GitError::UnknownRevision`]).
+    ///
+    /// The worktree is created first, detached, and the branch only once the
+    /// worktree exists, so a failure never leaves a stray branch. When the
+    /// worktree exists but a later step failed (a failing hook, or a
+    /// checkout stopped at its timeout), the error is
+    /// [`GitError::WorktreeIncomplete`].
     fn add_worktree(
         &self,
         repo: &Path,
@@ -121,57 +135,73 @@ pub trait Git: Send + Sync {
     ) -> Result<NewWorktree, GitError>;
 
     /// Removes the worktree at `path` from the repository that contains
-    /// `repo`.
+    /// `repo`. A relative `path` is resolved against `repo`.
     ///
-    /// Never forces (ADR 0011): git refuses to remove a worktree with
-    /// uncommitted or untracked files, a locked worktree or the main
-    /// checkout, and that refusal is returned as an error. The worktree's
-    /// branch is always kept. A relative `path` is resolved against `repo`.
+    /// Never forces (ADR 0011). Refuses, with [`GitError::RemovalRefused`],
+    /// a path that is not a worktree of the repository, the main checkout, a
+    /// locked or prunable worktree, a worktree with changes to tracked files
+    /// or untracked files (whatever `status.showUntrackedFiles` says), and a
+    /// detached `HEAD` that no branch, tag or remote-tracking branch
+    /// contains. The worktree's branch is always kept.
+    ///
+    /// Ignored files (build outputs, `.env` files...) are deleted with the
+    /// worktree. git may still refuse in rarer cases, such as a worktree that
+    /// contains submodules, reported as [`GitError::Failed`].
     ///
     /// Call this only once the cleanup rule
     /// ([`tidy_verdict`](volee_core::delivery::tidy_verdict)) allows it.
     fn remove_worktree(&self, repo: &Path, path: &Path) -> Result<(), GitError>;
 
-    /// The delivery evidence of the work in `worktree`, compared with the
-    /// base branch `base` (see [the base branch](crate#the-base-branch)).
+    /// The delivery evidence of an agent's branch, checked out in
+    /// `worktree`, compared with its base branch (see
+    /// [the base branch](crate#the-base-branch)).
     ///
-    /// - `commits`: commits since `start_commit`, or since the merge base
-    ///   with the base branch when the start commit is unknown or no longer
+    /// The evidence describes `query.branch`, wherever the worktree's `HEAD`
+    /// is: [`DeliveryReport::on_branch`] says when `HEAD` moved off it.
+    ///
+    /// - `tip`: the commit at the tip of the branch; `None` when the branch
+    ///   has no commit or no longer exists.
+    /// - `commits`: commits on the branch that the base branch does not have.
+    ///   Commits the agent pulled from the base branch do not count.
+    /// - `dirty`: a change to a tracked file, or an untracked file that is
+    ///   not ignored, in the worktree.
+    /// - `diff`: what the branch changes against its merge base with the base
+    ///   branch. When the branch is checked out, the working tree is
+    ///   compared, so uncommitted changes to tracked files count too.
+    ///   Untracked files make the tree dirty and are shown by [`Git::diff`],
+    ///   but are not counted here.
+    /// - `push`: commits of the branch missing from its upstream, or from
+    ///   `origin/<branch>` when it was pushed without setting an upstream.
+    ///   An upstream that is a local branch does not count.
+    ///   [`PushState::NoUpstream`] when no such remote-tracking branch
     ///   exists.
-    /// - `dirty`: any change to a tracked file, or any untracked file that
-    ///   is not ignored.
-    /// - `diff`: the working tree against the merge base, so committed and
-    ///   uncommitted changes to tracked files both count. Untracked files
-    ///   make the tree dirty and are shown by [`Git::diff`], but are not
-    ///   counted here.
-    /// - `push`: compared with the branch's upstream, or with
-    ///   `origin/<branch>` when the branch was pushed without setting an
-    ///   upstream. [`PushState::NoUpstream`] when neither exists, including
-    ///   for a detached `HEAD`.
-    /// - `merged_into_base`: the branch has at least one commit (as counted
-    ///   above) and its tip is an ancestor of the base branch. A branch with
-    ///   no commit is never merged. Without a start commit, a merged branch
-    ///   cannot be told apart from an empty one, so it is reported as not
-    ///   merged: absence of evidence keeps the worktree (ADR 0011).
+    /// - `unmerged_tip` and `merged_into_base`: proving a merge needs memory
+    ///   (see [`Delivery`]). Pass the `unmerged_tip` of the agent's previous
+    ///   evidence in `query`. When the branch has commits of its own, the
+    ///   returned `unmerged_tip` is its tip and the work is not merged.
+    ///   Otherwise the previous one is carried forward, and the work is
+    ///   merged when that commit is now part of the base branch. A branch
+    ///   never seen with commits of its own is never merged. A squash merge
+    ///   is not visible in the history: its evidence is the merged pull
+    ///   request, from the forge.
     ///
     /// `pull_request` and `report_delivered` are left at their defaults:
     /// they come from the forge and from messages, not from git.
     ///
-    /// Before the first commit, only `dirty` and `diff` (against the empty
-    /// tree) are filled, and the base branch is not looked up, since it may
-    /// not exist yet. Otherwise a base that names no commit is a
-    /// [`GitError::UnknownRevision`].
+    /// The base branch is looked up only when there is something to compare:
+    /// a branch without commits and without memory needs none, which suits a
+    /// repository before its first commit. Otherwise a base that names no
+    /// commit is a [`GitError::UnknownRevision`].
     ///
     /// [`PushState::NoUpstream`]: volee_core::delivery::PushState::NoUpstream
     fn delivery(
         &self,
         worktree: &Path,
-        base: &str,
-        start_commit: Option<&str>,
-    ) -> Result<Delivery, GitError>;
+        query: &DeliveryQuery<'_>,
+    ) -> Result<DeliveryReport, GitError>;
 
     /// The changes in `worktree` against the merge base with `base`, as text
-    /// for a person to read.
+    /// for a person to read, in at most `max_bytes` bytes.
     ///
     /// This is `git diff <merge-base>`: committed and uncommitted changes to
     /// tracked files. Untracked files that are not ignored come after it, so
@@ -182,10 +212,20 @@ pub trait Git: Send + Sync {
     ///
     /// Without a merge base (before the first commit, or for unrelated
     /// histories), everything is compared with the empty tree. The output is
-    /// meant for display: bytes that are not UTF-8 are replaced.
-    fn diff(&self, worktree: &Path, base: &str, format: DiffFormat) -> Result<String, GitError>;
+    /// meant for display: bytes that are not UTF-8 are replaced, and text
+    /// past `max_bytes` is cut at a line break and flagged as
+    /// [truncated](DiffOutput::truncated).
+    fn diff(
+        &self,
+        worktree: &Path,
+        base: &str,
+        format: DiffFormat,
+        max_bytes: usize,
+    ) -> Result<DiffOutput, GitError>;
 
-    /// Fetches `origin` quietly, without prompting for credentials.
+    /// Fetches `origin` quietly and without prompting, and forgets the
+    /// remote-tracking branches deleted on the remote, so a push state never
+    /// relies on a branch that is gone.
     ///
     /// Does nothing when the repository has no `origin` remote, so callers
     /// can fetch before [`Git::add_worktree`] or [`Git::delivery`] without
@@ -246,9 +286,51 @@ pub struct WorktreeInfo {
 pub struct NewWorktree {
     /// What the branch was created from: `origin/<base>` or `<base>`.
     pub start_point: String,
-    /// The commit the branch starts at. Record it as the workspace's start
-    /// commit, so [`Git::delivery`] counts the agent's commits only.
+    /// The commit the branch starts at.
     pub start_commit: String,
+}
+
+/// What [`Git::delivery`] is asked about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeliveryQuery<'a> {
+    /// The agent's branch, without `refs/heads/`.
+    pub branch: &'a str,
+    /// The branch the work goes into, such as `main`.
+    pub base: &'a str,
+    /// The [`unmerged_tip`](Delivery::unmerged_tip) of the agent's previous
+    /// evidence, if any: the memory that proves a merge.
+    pub unmerged_tip: Option<&'a str>,
+}
+
+/// The answer of [`Git::delivery`]: the evidence, and what it was computed
+/// from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliveryReport {
+    /// The evidence, ready for a
+    /// [`DeliveryUpdated`](volee_core::event::EventKind::DeliveryUpdated)
+    /// event.
+    pub delivery: Delivery,
+    /// What the worktree has checked out.
+    pub head: Head,
+    /// Whether the worktree has the agent's branch checked out. When it does
+    /// not (`HEAD` detached, or another branch checked out), the evidence
+    /// still describes the branch, and `dirty` describes the worktree.
+    pub on_branch: bool,
+    /// The base branch the commits were counted against, such as
+    /// `origin/main`; `None` when no comparison was needed.
+    pub base: Option<String>,
+    /// The remote-tracking branch the push state compares with, such as
+    /// `origin/feat`; `None` when there is none.
+    pub upstream: Option<String>,
+}
+
+/// What a worktree has checked out.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Head {
+    /// The checked-out branch, without `refs/heads/`; `None` when detached.
+    pub branch: Option<String>,
+    /// The checked-out commit; `None` before the first commit.
+    pub commit: Option<String>,
 }
 
 /// How much of a diff [`Git::diff`] returns.
@@ -262,6 +344,16 @@ pub enum DiffFormat {
     /// The full unified diff, then the content of the untracked files as
     /// new-file diffs.
     Patch,
+}
+
+/// The text returned by [`Git::diff`].
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiffOutput {
+    /// The diff, for display.
+    pub text: String,
+    /// Whether the diff was longer than the limit asked for and `text` holds
+    /// only its beginning, cut at a line break.
+    pub truncated: bool,
 }
 
 #[cfg(test)]
@@ -292,6 +384,21 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<WorktreeInfo>(&json).unwrap(),
             worktree
+        );
+        let report = DeliveryReport {
+            delivery: Delivery::default(),
+            head: Head {
+                branch: None,
+                commit: Some("6adc11fa9619748617663ded520ce631e9292269".into()),
+            },
+            on_branch: false,
+            base: Some("origin/main".into()),
+            upstream: None,
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DeliveryReport>(&json).unwrap(),
+            report
         );
     }
 }

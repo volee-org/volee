@@ -3,8 +3,9 @@
 
 use std::fs;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
-use volee_git::{Git, GitError, NewWorktree, WorktreeInfo};
+use volee_git::{Git, GitError, NewWorktree, RemovalRefusal, WorktreeInfo};
 
 use crate::fixture::{Sandbox, path_str};
 
@@ -294,23 +295,221 @@ fn remove_worktree_never_forces() {
     cli.add_worktree(&repo, &path, "feat", "main").unwrap();
 
     sandbox.write(&path.join("README.md"), "changed\n");
-    assert_refused(cli.remove_worktree(&repo, &path), "modified or untracked");
+    assert_refused(
+        cli.remove_worktree(&repo, &path),
+        &RemovalRefusal::UncommittedChanges {
+            changed: 1,
+            untracked: 0,
+        },
+    );
     sandbox.git(&path, &["checkout", "--quiet", "--", "README.md"]);
 
     sandbox.write(&path.join("new.txt"), "new\n");
-    assert_refused(cli.remove_worktree(&repo, &path), "modified or untracked");
+    assert_refused(
+        cli.remove_worktree(&repo, &path),
+        &RemovalRefusal::UncommittedChanges {
+            changed: 0,
+            untracked: 1,
+        },
+    );
     fs::remove_file(path.join("new.txt")).unwrap();
 
-    sandbox.git(&repo, &["worktree", "lock", path_str(&path)]);
-    assert_refused(cli.remove_worktree(&repo, &path), "locked");
+    sandbox.git(
+        &repo,
+        &["worktree", "lock", "--reason", "in use", path_str(&path)],
+    );
+    assert_refused(
+        cli.remove_worktree(&repo, &path),
+        &RemovalRefusal::Locked {
+            reason: "in use".into(),
+        },
+    );
     assert!(path.join("README.md").is_file());
 
-    assert_refused(cli.remove_worktree(&repo, &repo), "main working tree");
+    assert_refused(
+        cli.remove_worktree(&repo, &repo),
+        &RemovalRefusal::MainCheckout,
+    );
+    assert_refused(
+        cli.remove_worktree(&repo, &sandbox.dir("elsewhere")),
+        &RemovalRefusal::NotAWorktree,
+    );
 }
 
-fn assert_refused(result: Result<(), GitError>, reason: &str) {
+#[test]
+fn remove_worktree_sees_untracked_files_that_status_would_hide() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let cli = sandbox.cli();
+    let path = sandbox.path("wt/feat");
+    cli.add_worktree(&repo, &path, "feat", "main").unwrap();
+    sandbox.git(&repo, &["config", "status.showUntrackedFiles", "no"]);
+    sandbox.write(&path.join("notes/draft.md"), "unsaved work\n");
+    assert_refused(
+        cli.remove_worktree(&repo, &path),
+        &RemovalRefusal::UncommittedChanges {
+            changed: 0,
+            untracked: 1,
+        },
+    );
+    assert!(path.join("notes/draft.md").is_file());
+}
+
+#[test]
+fn remove_worktree_keeps_a_detached_head_that_nothing_else_contains() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let cli = sandbox.cli();
+    let path = sandbox.path("wt/feat");
+    cli.add_worktree(&repo, &path, "feat", "main").unwrap();
+    sandbox.git(&path, &["checkout", "--quiet", "--detach"]);
+    let lonely = sandbox.commit(&path, "lonely.rs", "lonely\n", "Commit on no branch");
+
+    assert_refused(
+        cli.remove_worktree(&repo, &path),
+        &RemovalRefusal::UnreachableCommits {
+            head: lonely.clone(),
+        },
+    );
+    assert!(path.exists());
+
+    // Once a tag keeps the commit, removing loses nothing.
+    sandbox.git(&repo, &["tag", "kept", &lonely]);
+    cli.remove_worktree(&repo, &path).unwrap();
+    assert!(!path.exists());
+}
+
+#[test]
+fn remove_worktree_allows_a_detached_head_that_a_branch_contains() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let cli = sandbox.cli();
+    let path = sandbox.path("wt/detached");
+    sandbox.git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            path_str(&path),
+            "main",
+        ],
+    );
+    cli.remove_worktree(&repo, &path).unwrap();
+    assert!(!path.exists());
+}
+
+#[test]
+fn remove_worktree_deletes_ignored_files_with_the_worktree() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let cli = sandbox.cli();
+    let path = sandbox.path("wt/feat");
+    cli.add_worktree(&repo, &path, "feat", "main").unwrap();
+    sandbox.commit(&path, ".gitignore", "target/\n", "Ignore build output");
+    sandbox.write(&path.join("target/debug/app"), "binary\n");
+    cli.remove_worktree(&repo, &path).unwrap();
+    assert!(!path.exists());
+}
+
+#[test]
+fn remove_worktree_refuses_a_worktree_whose_directory_is_gone() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let cli = sandbox.cli();
+    let path = sandbox.path("wt/feat");
+    cli.add_worktree(&repo, &path, "feat", "main").unwrap();
+    fs::remove_dir_all(&path).unwrap();
+    let error = cli.remove_worktree(&repo, &path).unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            GitError::RemovalRefused {
+                reason: RemovalRefusal::Prunable { .. },
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn add_worktree_leaves_no_branch_when_the_directory_cannot_be_created() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let parent = sandbox.dir("read-only");
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o555)).unwrap();
+    // Permissions do not apply to root, so this cannot fail there. CI runs
+    // as an ordinary user.
+    let writable_anyway = fs::create_dir(parent.join("probe")).is_ok();
+
+    let result = sandbox
+        .cli()
+        .add_worktree(&repo, &parent.join("feat"), "feat", "main");
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o755)).unwrap();
+    if !writable_anyway {
+        assert!(result.is_err(), "{result:?}");
+        assert!(!sandbox.has_rev(&repo, "refs/heads/feat"));
+        assert_eq!(sandbox.cli().worktrees(&repo).unwrap().len(), 1);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failing_hook_reports_the_worktree_it_left() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    sandbox.script("volee/.git/hooks/post-checkout", "#!/bin/sh\nexit 1\n");
+    let path = sandbox.path("wt/feat");
+    let error = sandbox
+        .cli()
+        .add_worktree(&repo, &path, "feat", "main")
+        .unwrap_err();
+    assert!(
+        matches!(&error, GitError::WorktreeIncomplete { path: left, .. } if *left == path),
+        "{error:?}"
+    );
+    assert!(path.exists());
+    assert!(!sandbox.has_rev(&repo, "refs/heads/feat"));
+}
+
+#[test]
+fn a_checkout_stopped_at_its_timeout_leaves_nothing_behind() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    // A clean and smudge filter that hangs, like a stuck Git LFS download.
+    sandbox.git(&repo, &["config", "filter.slow.smudge", "sleep 30"]);
+    sandbox.git(&repo, &["config", "filter.slow.clean", "cat"]);
+    sandbox.commit(
+        &repo,
+        ".gitattributes",
+        "*.bin filter=slow\n",
+        "Use the filter",
+    );
+    sandbox.commit(&repo, "data.bin", "data\n", "Add data");
+
+    let cli = sandbox.cli().write_timeout(Duration::from_secs(1));
+    let path = sandbox.path("wt/feat");
+    let started = Instant::now();
+    let error = cli.add_worktree(&repo, &path, "feat", "main").unwrap_err();
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "git was not stopped"
+    );
+    assert!(matches!(&error, GitError::TimedOut { .. }), "{error:?}");
+    // SIGTERM let git remove the half-made worktree, and no branch was made.
+    assert!(!path.exists());
+    assert!(!sandbox.has_rev(&repo, "refs/heads/feat"));
+    assert_eq!(cli.worktrees(&repo).unwrap().len(), 1);
+}
+
+fn assert_refused(result: Result<(), GitError>, expected: &RemovalRefusal) {
     match result {
-        Err(GitError::Failed { stderr, .. }) => assert!(stderr.contains(reason), "{stderr}"),
-        other => panic!("expected git to refuse ({reason}), got {other:?}"),
+        Err(GitError::RemovalRefused { reason, .. }) => assert_eq!(&reason, expected),
+        other => panic!("expected a refusal ({expected}), got {other:?}"),
     }
 }

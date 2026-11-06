@@ -125,3 +125,12 @@ triggered it are already committed.
   the agent is not busy, the tree is clean, and the work is delivered (merged,
   merged through a pull request, or reported). Every missing condition is
   reported at once.
+- **Delivery evidence** (`delivery::Delivery`) describes the agent's branch:
+  `commits` counts its commits that the base branch does not have, and `tip`
+  is the commit it was computed from. A merge leaves no commit of the branch
+  outside the base branch, which looks exactly like a branch that never had
+  any, so the evidence carries a memory: `unmerged_tip`, the last tip seen
+  with commits of its own. `merged_into_base` is true only once that commit
+  is part of the base branch. The daemon passes the previous `unmerged_tip`
+  back to git on each check; `delivery-updated` events keep it across
+  restarts. How git computes each fact is described in [Git](git.md).
