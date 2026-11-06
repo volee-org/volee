@@ -64,6 +64,53 @@ pub enum HarnessError {
         /// The id.
         id: String,
     },
+    /// The session has no handle the harness accepts in commands: for Claude
+    /// Code, an interactive session, which lives in its own terminal and
+    /// cannot be stopped, removed, previewed or attached from elsewhere.
+    #[error("{session} cannot be controlled from volee: it runs in its own terminal")]
+    NotControllable {
+        /// The session.
+        session: SessionKey,
+    },
+    /// The harness does not know the session any more.
+    #[error("the harness has no session `{handle}`")]
+    UnknownSession {
+        /// The handle volee asked about.
+        handle: String,
+    },
+    /// The harness refuses to start a session in a directory the user has not
+    /// trusted, and cannot ask without a terminal.
+    #[error(
+        "Claude Code does not trust {}: run `claude` there once and accept the trust prompt",
+        path.display()
+    )]
+    UntrustedDirectory {
+        /// The directory.
+        path: PathBuf,
+    },
+    /// The session works in a git worktree that removing it may delete, and
+    /// the caller has no delivery evidence for that work (ADR 0011).
+    #[error(
+        "{session} works in the git worktree {}, which removing the session may delete; \
+         remove it only once its work is delivered",
+        worktree.display()
+    )]
+    WorktreeAtRisk {
+        /// The session.
+        session: SessionKey,
+        /// The root of the worktree.
+        worktree: PathBuf,
+    },
+    /// The harness kept the session instead of removing it, and said why (for
+    /// Claude Code: its worktree has uncommitted changes or unpushed
+    /// commits).
+    #[error("the harness kept session `{handle}`: {reason}")]
+    SessionKept {
+        /// The session's handle.
+        handle: String,
+        /// The harness's explanation.
+        reason: String,
+    },
     /// The request cannot become a valid command line or configuration.
     #[error("invalid request")]
     InvalidRequest(#[from] RequestError),
@@ -132,16 +179,16 @@ mod tests {
     #[test]
     fn command_failures_name_the_command_and_the_status() {
         let error = HarnessError::CommandFailed {
-            command: "claude stop 4402670e".into(),
+            command: "claude stop 7d3c1f0a".into(),
             code: Some(1),
             message: "no such session".into(),
         };
         assert_eq!(
             error.to_string(),
-            "`claude stop 4402670e` failed (exit status 1): no such session"
+            "`claude stop 7d3c1f0a` failed (exit status 1): no such session"
         );
         let killed = HarnessError::CommandFailed {
-            command: "claude logs 4402670e".into(),
+            command: "claude logs 7d3c1f0a".into(),
             code: None,
             message: String::new(),
         };

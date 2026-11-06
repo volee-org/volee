@@ -3,8 +3,9 @@
 The `volee-harness` crate is how volee talks to Claude Code. It relies only
 on documented commands and hooks, never on Claude Code's internal files
 ([ADR 0004](../adr/0004-sources-and-reconciliation.md)). Everything on this
-page was measured on Claude Code 2.1.319; volee needs 2.1.300 or newer and
-says so at startup when the installed version is older.
+page was measured on Claude Code 2.1.319 or taken from its documentation, as
+marked; volee needs 2.1.300 or newer and says so at startup when the
+installed version is older.
 
 The daemon uses the adapter through the `Harness` trait, so other harnesses
 can join later. Every command runs through a `CommandRunner` with a timeout,
@@ -16,23 +17,46 @@ which lets the tests replay recorded output instead of running `claude`.
 | --- | --- | --- |
 | Version | `claude --version` | Checked when the daemon starts. |
 | Every session | `claude agents --json --all` | Polled and reconciled by session id. |
-| Launch | `claude --bg [flags] -- <prompt>` | Runs in the agent's worktree; prints `backgrounded · <id> · <name>`. |
-| Resume | `claude --bg --resume <session-uuid> [flags] -- <prompt>` | Continues a stopped session; 2.1.319 creates a fork, linked to the same agent. |
+| Launch | `claude --bg --opt=value... -- <prompt>` | Runs in the agent's worktree; prints `backgrounded · <id> · <name>`. |
+| Resume | `claude --bg --resume=<session-uuid> --opt=value... -- <prompt>` | Continues a stopped session; 2.1.319 creates a fork, linked to the same agent. |
 | Stop | `claude stop <id>` | The conversation is kept. |
 | Delete | `claude rm <id>` | Never with `--discard-unpushed` or `--force-remove-worktree`. |
 | Preview | `claude logs <id>` | A raw replay of the session's terminal. |
 | Take over | `claude attach <id>` | Runs in the TUI's terminal; `Ctrl+Z` returns to volee. |
 
-`<id>` is the short id of a background session: the first eight characters of
-its session UUID.
+`<id>` is the id of a background session, kept exactly as `claude agents`
+lists it (the session's *handle*). Interactive sessions have no id: volee
+shows them but cannot stop, delete, preview or attach them.
 
-Every launch passes the agent's settings file (`--settings`, volee's hooks)
-and its MCP configuration (`--mcp-config` with `--strict-mcp-config`, so the
-agent loads volee's tools and nothing else). A permission mode is passed only
-when the launch asks for one: volee never uses `bypassPermissions` on its own.
-The prompt always comes after `--`, so no prompt can be read as an option, and
-a one-word prompt gets a trailing newline so that it can never run a Claude
-Code subcommand such as `claude update`.
+Every launch passes the agent's settings file (`--settings`: volee's hooks,
+and a rule that allows volee's own MCP tools) and its MCP configuration
+(`--mcp-config` with `--strict-mcp-config`, so the agent loads volee's tools
+and nothing else). The permission mode and tool rules come from volee's
+configuration only, never from an agent's request, and there is no way to
+ask for `bypassPermissions`.
+
+Every value travels inside its option (`--name=alpha`, not `--name alpha`),
+so no value can be read as an option and no list option can swallow the next
+argument; Claude Code 2.1.319 accepts this form and rejects unknown options
+(measured on `claude agents`, read-only). The prompt comes last, after `--`.
+A one-word prompt gets a trailing newline and a prompt starting with `-` a
+leading one, so that no prompt can run a Claude Code subcommand such as
+`claude update` or be read as an option.
+
+## Environment and directories
+
+Claude Code sets variables in the environment of the processes it starts
+(shell commands, hooks, MCP servers, background sessions) that tie them to
+one session: `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_ENTRYPOINT`,
+`CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
+`CLAUDE_JOB_DIR`, `CLAUDE_PID`, `CLAUDE_EFFORT` and a few more. volee removes
+all of them from every `claude` it runs, so a daemon started from inside an
+agent never launches or controls sessions as that agent. The user's own
+configuration variables, such as `CLAUDE_CODE_SUBAGENT_MODEL`, are kept.
+
+Queries and controls (`--version`, `agents`, `stop`, `rm`, `logs`) run from
+`/`, a directory that always exists and holds no project settings; launches
+run in the agent's worktree.
 
 ## Session states
 
@@ -55,8 +79,9 @@ or unknown.
 | status `waiting` | needs input |
 | status `idle` | idle |
 
-Hooks refine these states for the agents volee launched, for example with the
-tool that waits for permission.
+Each listed session also carries its id, its process id while it runs, and
+when it started. Hooks refine these states for the agents volee launched, for
+example with the tool that waits for permission.
 
 ## Hooks
 
@@ -64,15 +89,16 @@ The settings file of an agent adds one hook per event to the user's own
 hooks; the user's settings file is never edited. Each hook runs
 `volee hook <event> --agent <id>` with a ten-second timeout, and the `Stop`
 event has a second handler that waits for messages while the agent is idle.
-Claude Code gives that waiter 30 seconds more than its own wait, so it always
-ends on its own:
+Claude Code gives that waiter 30 seconds more than its own wait, which is at
+most a day, so it always ends on its own:
 
 ```json
 "Stop": [{ "hooks": [
   { "type": "command", "command": "/usr/local/bin/volee hook stop --agent ag_01jc...", "timeout": 10 },
   { "type": "command", "command": "/usr/local/bin/volee hook wait --agent ag_01jc... --timeout 3600",
     "asyncRewake": true, "timeout": 3630 }
-]}]
+]}],
+"permissions": { "allow": ["mcp__volee"] }
 ```
 
 | Event | What volee takes from it |
@@ -86,10 +112,53 @@ ends on its own:
 | `SessionEnd` | The session ended, and why. |
 | `SubagentStart`, `SubagentStop` | Subagents running inside the session. |
 
+## Messages
+
 Messages reach a working agent through the `Stop` hook, which prints
 `{"decision":"block","reason":"<messages>"}`, and an idle agent through the
 waiter, which exits with status 2 and the messages on standard error
 ([ADR 0006](../adr/0006-messaging.md)).
+
+The text cannot impersonate anyone: only volee writes the `[n] question from
+...` lines, every line of a message body is quoted with `> `, and sender
+names and references are cut to one line without control characters. A
+delivery holds at most 8,000 characters (Claude Code drops hook output
+beyond 10,000); messages that do not fit are counted, and the agent is told
+to read them with the MCP tool `read_messages`.
+
+## Trust, deletion and session ids
+
+What the adapter knows, and how it knows it:
+
+- **Untrusted directories** (documented). `claude --bg` checks workspace
+  trust before it starts. Without a terminal to ask in, it refuses with
+  ``Workspace not trusted. Run `claude` in <dir> once and accept the trust
+  prompt, then retry.`` (two variants name the home directory and a directory
+  that cannot be found). volee reports it as `UntrustedDirectory` with the
+  directory. Whether a worktree created with `git worktree add` inherits its
+  repository's trust, inside or outside the repository, is not measured yet:
+  the probe needs to launch real background sessions, which the agent that
+  wrote this adapter was not allowed to do. Until it is, the daemon must
+  expect this error on the first launch in a new worktree location.
+- **Unknown sessions** (measured). `claude stop` and `claude logs` answer
+  `No job matching '<id>'. Run 'claude agents' to list running sessions.`,
+  `claude rm` answers `No job matching '<id>'`, all with exit status 1.
+  volee reports `UnknownSession`.
+- **Deleting a session** (documented, not measured). `claude rm` deletes a
+  worktree Claude Code created for the session (it does so under
+  `.claude/worktrees/` when a session starts outside a linked worktree),
+  unless the worktree has uncommitted changes or unpushed commits: it then
+  keeps the session and says `kept <id>`, which volee reports as
+  `SessionKept`. A worktree someone else created and started the session
+  inside is left in place, which is the case of every agent volee launches.
+  volee still refuses to delete a session whose directory is in a linked git
+  worktree unless the daemon passes `WorktreeRemoval::Delivered`, which it
+  does only after `tidy_verdict` found delivery evidence
+  ([ADR 0011](../adr/0011-safety-and-delivery-evidence.md)).
+- **Choosing the session id** (not measured). `--session-id <uuid>` is
+  documented as a general option, but its effect with `--bg` is neither
+  documented nor measured, so the adapter does not use it: the daemon learns
+  a new session's full id from its first hook or the next listing.
 
 ## Tolerance
 

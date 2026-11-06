@@ -22,8 +22,18 @@ pub const HOOK_TIMEOUT_SECS: u64 = 10;
 /// wait` gives the daemon five extra seconds to answer).
 pub const REWAKE_GRACE_SECS: u64 = 30;
 
+/// The longest the message waiter may wait, in seconds: one day, like the
+/// daemon's own limit. Claude Code's timers overflow past 2^31 milliseconds
+/// (about 24.8 days).
+pub const MAX_REWAKE_SECS: u64 = 24 * 60 * 60;
+
+/// The permission rule that lets an agent call every tool of volee's MCP
+/// server without a prompt: a background agent stalled on a prompt for
+/// `send_message` could never report that it is stalled.
+pub const VOLEE_TOOLS_RULE: &str = "mcp__volee";
+
 /// The settings that connect an agent's hooks to volee, for `claude
-/// --settings`. Claude Code adds them to the user's own hooks; the user's
+/// --settings`. Claude Code adds them to the user's own settings; the user's
 /// settings file is never edited.
 ///
 /// Every event in [`HookEventName::OBSERVED`] runs `<volee_bin> hook
@@ -31,9 +41,11 @@ pub const REWAKE_GRACE_SECS: u64 = 30;
 /// (except `SessionEnd`, which keeps Claude Code's short exit budget). `Stop`
 /// has a second handler, `<volee_bin> hook wait --agent <agent> --timeout
 /// <seconds>`, declared with `asyncRewake`: it waits up to `rewake_timeout`
-/// (rounded up to whole seconds) for messages while the agent is idle, and
-/// wakes it by exiting with [`REWAKE_EXIT_CODE`](super::REWAKE_EXIT_CODE).
-/// Claude Code's timeout for it is [`REWAKE_GRACE_SECS`] longer.
+/// (rounded up to whole seconds, at most [`MAX_REWAKE_SECS`]) for messages
+/// while the agent is idle, and wakes it by exiting with
+/// [`REWAKE_EXIT_CODE`](super::REWAKE_EXIT_CODE). Claude Code's timeout for
+/// it is [`REWAKE_GRACE_SECS`] longer. The settings also allow volee's own
+/// MCP tools ([`VOLEE_TOOLS_RULE`]), and nothing else.
 ///
 /// `volee_bin` must be absolute (hooks run in the agent's directory) and
 /// valid UTF-8; it is quoted for the shell that runs the hook.
@@ -71,7 +83,10 @@ pub fn agent_settings(
         }
         hooks.insert(event.as_str().to_owned(), json!([{ "hooks": handlers }]));
     }
-    Ok(json!({ "hooks": hooks }))
+    Ok(json!({
+        "hooks": hooks,
+        "permissions": { "allow": [VOLEE_TOOLS_RULE] },
+    }))
 }
 
 /// The MCP configuration that gives an agent volee's tools, for `claude
@@ -106,12 +121,13 @@ fn absolute_utf8(path: &Path) -> Result<&str, RequestError> {
     })
 }
 
-/// A duration in whole seconds, rounded up, at least one.
+/// A waiting time in whole seconds: rounded up, at least one, at most
+/// [`MAX_REWAKE_SECS`].
 fn whole_seconds(duration: Duration) -> u64 {
     duration
         .as_secs()
         .saturating_add(u64::from(duration.subsec_nanos() > 0))
-        .max(1)
+        .clamp(1, MAX_REWAKE_SECS)
 }
 
 /// `word` as one word for a POSIX shell: unchanged when it only has
@@ -154,6 +170,7 @@ mod tests {
         let settings =
             super::agent_settings(Path::new("/bin/volee"), agent(), Duration::from_secs(60))
                 .unwrap();
+        assert_eq!(settings["permissions"], json!({ "allow": ["mcp__volee"] }));
         let hooks = settings["hooks"].as_object().unwrap();
         assert_eq!(hooks.len(), HookEventName::OBSERVED.len());
         for event in HookEventName::OBSERVED {
@@ -202,7 +219,8 @@ mod tests {
         assert_eq!(whole_seconds(Duration::from_secs(3_600)), 3_600);
         assert_eq!(whole_seconds(Duration::from_millis(1_500)), 2);
         assert_eq!(whole_seconds(Duration::ZERO), 1);
-        assert_eq!(whole_seconds(Duration::MAX), u64::MAX);
+        assert_eq!(whole_seconds(Duration::MAX), MAX_REWAKE_SECS);
+        assert_eq!(whole_seconds(Duration::from_secs(30 * 24 * 3_600)), 86_400);
     }
 
     #[test]

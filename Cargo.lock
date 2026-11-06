@@ -1326,6 +1326,7 @@ dependencies = [
  "insta",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tracing",
  "volee-core",
