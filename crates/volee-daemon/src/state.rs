@@ -6,12 +6,13 @@
 //! notified. Callers hold the state lock for the whole commit, so
 //! subscribers see events in log order without gaps.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::{broadcast, oneshot};
 use ulid::Ulid;
-use volee_core::ids::{MessageId, ThreadId};
+use volee_core::ids::{MessageId, MissionId, ThreadId};
 use volee_core::message::Party;
 use volee_core::time::Timestamp;
 use volee_core::{AgentId, Event, EventKind, Registry};
@@ -39,6 +40,8 @@ pub(crate) struct State {
     next_token: u64,
     clock: Arc<dyn Clock>,
     started_at: Timestamp,
+    /// The last identifier handed out, so that the next one sorts after it.
+    last_id: Cell<Ulid>,
 }
 
 impl std::fmt::Debug for State {
@@ -67,6 +70,7 @@ impl State {
             bus,
             waiters: HashMap::new(),
             next_token: 0,
+            last_id: Cell::new(Ulid::nil()),
             clock,
             started_at,
         })
@@ -115,20 +119,42 @@ impl State {
         ThreadId::from_ulid(self.new_ulid())
     }
 
-    fn new_ulid(&self) -> Ulid {
-        let millis = u64::try_from(self.now().as_millis()).unwrap_or(0);
-        Ulid::from_parts(millis, Ulid::generate().random())
+    /// A new mission identifier.
+    pub(crate) fn new_mission_id(&self) -> MissionId {
+        MissionId::from_ulid(self.new_ulid())
     }
 
-    /// Validates, persists, applies and publishes events, then hands new
-    /// messages to agents that wait for them.
+    /// A new identifier, timestamped by the daemon's clock and strictly
+    /// greater than every identifier handed out before, even within one
+    /// millisecond: identifiers sort in the order the daemon created them.
+    fn new_ulid(&self) -> Ulid {
+        let millis = u64::try_from(self.now().as_millis()).unwrap_or(0);
+        let candidate = Ulid::from_parts(millis, Ulid::generate().random());
+        let last = self.last_id.get();
+        let next = if candidate > last {
+            candidate
+        } else {
+            // The clock did not move (or went back): count up from the last
+            // one. An overflow carries into the next millisecond, still up.
+            last.increment().unwrap_or_else(|carried| carried)
+        };
+        self.last_id.set(next);
+        next
+    }
+
+    /// Validates, persists, applies and publishes events, runs the mission
+    /// supervisor on what they changed, then hands new messages to agents
+    /// that wait for them.
     pub(crate) fn commit(&mut self, events: Vec<Event>) -> Result<Vec<SeqEvent>, DaemonError> {
         let mut committed = self.commit_only(events)?;
+        let follow_ups = crate::missions::follow_up(self, &committed);
+        committed.extend(follow_ups);
         committed.extend(self.wake_waiters()?);
         Ok(committed)
     }
 
-    fn commit_only(&mut self, events: Vec<Event>) -> Result<Vec<SeqEvent>, DaemonError> {
+    /// Like [`State::commit`], without follow-ups or wake-ups.
+    pub(crate) fn commit_only(&mut self, events: Vec<Event>) -> Result<Vec<SeqEvent>, DaemonError> {
         if events.is_empty() {
             return Ok(Vec::new());
         }
@@ -232,5 +258,27 @@ impl State {
             }
         }
         Ok(committed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clock::ManualClock;
+    use crate::log::MemoryLog;
+
+    #[test]
+    fn identifiers_sort_in_creation_order_within_a_millisecond() {
+        let state = State::load(
+            Box::new(MemoryLog::with(vec![])),
+            Arc::new(ManualClock::at(1_000)),
+        )
+        .unwrap();
+        let ids: Vec<MessageId> = (0..1_000).map(|_| state.new_message_id()).collect();
+        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
+        let thread = state.new_thread_id().to_string();
+        let last = ids.last().unwrap().to_string();
+        // Different kinds share one sequence, after their prefix.
+        assert!(thread["th_".len()..] > last["msg_".len()..]);
     }
 }

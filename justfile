@@ -48,3 +48,11 @@ docs-serve:
 # Check the minimum supported Rust version
 msrv:
     cargo +1.89 check --workspace --all-features --locked
+
+# Regenerate CHANGELOG.md from the commit history (see RELEASING.md)
+changelog:
+    git cliff -o CHANGELOG.md
+
+# Show what the release workflow would build for the current version
+release-plan:
+    dist plan

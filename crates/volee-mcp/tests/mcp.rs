@@ -4,6 +4,7 @@
 // In tests, a failed unwrap is a failed test with a clear location.
 #![allow(clippy::unwrap_used)]
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,17 +14,21 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use tokio::net::UnixListener;
 use ulid::Ulid;
+use volee_core::delivery::{ChecksState, Delivery, PrState, PullRequest, PushState};
 use volee_core::harness::HarnessKind;
-use volee_core::message::{Message, MessageKind, Party};
+use volee_core::message::{Message, MessageKind, Party, Thread};
+use volee_core::mission::{Mission, MissionKind, MissionStatus};
 use volee_core::role::{LaunchedBy, Role};
 use volee_core::time::Timestamp;
 use volee_core::workspace::{Location, Workspace};
-use volee_core::{AgentId, Event, EventKind, Registry};
+use volee_core::{AgentId, Event, EventKind, MissionId, Registry, ThreadId};
 use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
 use volee_mcp::VoleeMcp;
-use volee_mcp::tools::ListArgs;
+use volee_mcp::tools::{ListArgs, OutcomeArg, ReportArgs};
 use volee_proto::client::Client;
-use volee_proto::methods::{EventsSince, SendMessage, SendParams, SinceParams};
+use volee_proto::methods::{
+    EventsSince, HookIngest, HookParams, SendMessage, SendParams, SinceParams,
+};
 use volee_proto::paths::Paths;
 
 fn agent(n: u128) -> AgentId {
@@ -58,15 +63,19 @@ struct Fixture {
 
 /// A daemon with a lead (1), its worker "api" (2) and a stranger "docs" (3).
 fn start() -> Fixture {
+    start_with(vec![
+        registered(agent(1), "lead", Role::Lead, None),
+        registered(agent(2), "api", Role::Worker, Some(agent(1))),
+        registered(agent(3), "docs", Role::Worker, None),
+    ])
+}
+
+fn start_with(events: Vec<Event>) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::rooted(dir.path());
     let socket = paths.socket.clone();
     let listener = UnixListener::bind(&socket).unwrap();
-    let log = MemoryLog::with(vec![
-        registered(agent(1), "lead", Role::Lead, None),
-        registered(agent(2), "api", Role::Worker, Some(agent(1))),
-        registered(agent(3), "docs", Role::Worker, None),
-    ]);
+    let log = MemoryLog::with(events);
     tokio::spawn(Daemon::serve(
         listener,
         Config {
@@ -263,7 +272,7 @@ async fn report_reaches_the_parent_and_the_human() {
 }
 
 #[tokio::test]
-async fn a_real_mcp_client_sees_the_five_tools() {
+async fn a_real_mcp_client_sees_every_tool() {
     let fixture = start();
     let server = server_for(&fixture, agent(2)).await;
     let (server_io, client_io) = tokio::io::duplex(64 * 1024);
@@ -283,6 +292,7 @@ async fn a_real_mcp_client_sees_the_five_tools() {
     assert_eq!(
         names,
         [
+            "close_mission",
             "list_agents",
             "read_messages",
             "report",
@@ -295,4 +305,119 @@ async fn a_real_mcp_client_sees_the_five_tools() {
         .await
         .unwrap();
     assert!(body(&result).contains("\"api\""));
+}
+
+/// A change mission coordinated by agent 10, whose only worker (11) shipped.
+fn mission_fixture() -> Fixture {
+    let mission = MissionId::from_ulid(Ulid::from_parts(4_000, 1));
+    let thread = ThreadId::from_ulid(Ulid::from_parts(2_000, 1));
+    let at = |kind| Event::new(Timestamp::from_millis(1), kind);
+    let member = |n: u128, name: &str, role: Role| {
+        let mut event = registered(agent(n), name, role, None);
+        if let EventKind::AgentRegistered {
+            mission: of,
+            parent,
+            ..
+        } = &mut event.kind
+        {
+            *of = Some(mission);
+            *parent = (role == Role::Worker).then(|| agent(10));
+        }
+        event
+    };
+    start_with(vec![
+        at(EventKind::ThreadOpened {
+            thread: Thread {
+                id: thread,
+                title: "Mission: Invoicing".into(),
+                mission: Some(mission),
+                participants: vec![Party::Human],
+                opened_at: Timestamp::from_millis(1),
+            },
+        }),
+        at(EventKind::MissionCreated {
+            mission: Mission {
+                id: mission,
+                title: "Invoicing".into(),
+                kind: MissionKind::Change,
+                goal: "Add invoices".into(),
+                repos: vec!["billing".into()],
+                requested_by: None,
+                coordinator: None,
+                thread,
+                status: MissionStatus::Planning,
+                report: None,
+                created_at: Timestamp::from_millis(1),
+                ended_at: None,
+                assessments: BTreeMap::new(),
+            },
+        }),
+        member(10, "coordinator", Role::Coordinator),
+        member(11, "billing", Role::Worker),
+        at(EventKind::DeliveryUpdated {
+            agent: agent(11),
+            delivery: Delivery {
+                commits: 1,
+                push: PushState::UpToDate,
+                pull_request: Some(PullRequest {
+                    number: 7,
+                    url: "https://example.com/pull/7".into(),
+                    state: PrState::Open,
+                    checks: ChecksState::Passing,
+                }),
+                ..Delivery::default()
+            },
+        }),
+    ])
+}
+
+#[tokio::test]
+async fn the_coordinator_closes_its_mission_after_reporting() {
+    let fixture = mission_fixture();
+    let worker = server_for(&fixture, agent(11)).await;
+    let coordinator = server_for(&fixture, agent(10)).await;
+
+    let not_mine = worker.close_mission().await.unwrap();
+    assert!(failed(&not_mine));
+    assert!(
+        body(&not_mine).contains("coordinator"),
+        "{}",
+        body(&not_mine)
+    );
+
+    // The worker's turn ends: volee checks its delivery and asks for the report.
+    let client = Client::connect(&fixture.socket).await.unwrap();
+    client
+        .call::<HookIngest>(HookParams {
+            agent: agent(11),
+            event: "stop".into(),
+            payload: serde_json::json!({}),
+        })
+        .await
+        .unwrap();
+    let no_report = coordinator.close_mission().await.unwrap();
+    assert!(failed(&no_report));
+    assert!(
+        body(&no_report).contains("`report` tool"),
+        "{}",
+        body(&no_report)
+    );
+
+    let sent = coordinator
+        .report(Parameters(ReportArgs {
+            outcome: OutcomeArg::Done,
+            summary: "Invoices are in billing#7.".into(),
+            refs: vec![],
+        }))
+        .await
+        .unwrap();
+    assert!(!failed(&sent), "{}", body(&sent));
+    let closed = coordinator.close_mission().await.unwrap();
+    assert!(!failed(&closed), "{}", body(&closed));
+
+    let registry = registry(&fixture).await;
+    let mission = registry.missions().next().unwrap();
+    assert_eq!(mission.status, MissionStatus::Closed);
+    let report = registry.message(mission.report.unwrap()).unwrap();
+    assert!(report.body.contains("billing#7"));
 }

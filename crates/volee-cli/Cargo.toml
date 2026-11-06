@@ -23,11 +23,20 @@ rmcp = { workspace = true, features = ["server", "transport-io"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tracing-subscriber.workspace = true
+volee-config.workspace = true
 volee-core.workspace = true
 volee-daemon.workspace = true
 volee-mcp.workspace = true
 volee-proto.workspace = true
 volee-store.workspace = true
 
+[dev-dependencies]
+ulid.workspace = true
+
 [lints]
 workspace = true
+
+# The only package with release artifacts: `dist-workspace.toml` sets
+# `dist = false` for every other one. See RELEASING.md.
+[package.metadata.dist]
+dist = true

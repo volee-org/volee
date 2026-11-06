@@ -25,9 +25,26 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `messages.read` | `message`, `by` | none |
 | `hooks.ingest` | `agent`, `event`, `payload` | `stdout`: what the hook prints, if anything |
 | `hooks.wait` | `agent`, `timeout_ms` | `text`: messages that wake the agent, or `null` |
+| `missions.create` | `title`, `kind` (`change` or `analysis`), `goal`, `repos`, optional `requested_by` | `mission`, `thread` |
+| `missions.abort` | `mission`, optional `reason` | none |
+| `missions.close` | `mission`, optional `report`, `force`, `by` | none |
 
 More methods (`agents.spawn`, `agents.preview`, `agents.diff`,
 `agents.attach`, `agents.tidy`) arrive with the harness and git integration.
+
+### Missions
+
+`missions.create` opens the mission's thread and records the mission in the
+`planning` status. From then on the daemon runs the
+[supervisor](../architecture/domain.md#the-mission-supervisor) after every
+batch of events that concerns the mission, and once when it starts. Its
+decisions are ordinary events (`worker-assessed`, `mission-updated`) and
+messages from volee in the mission's thread, so every client sees them.
+
+`missions.close` refuses (`-32002`) while a worker has not delivered, unless
+`force` is set. Without `report`, the coordinator's latest report in the
+mission's thread is recorded. When `by` names an agent, it must be the
+mission's coordinator, it must have sent a report, and it cannot force.
 
 ## Events and replicas
 
@@ -56,7 +73,7 @@ Standard JSON-RPC codes, plus volee's own:
 | `-32602` | invalid parameters |
 | `-32603` | internal error |
 | `-32001` | not found: agent, message, thread or mission |
-| `-32002` | refused by a rule (routing, cleanup) |
+| `-32002` | refused by a rule (routing, cleanup, a mission that cannot close) |
 | `-32003` | a required program (harness, git) is unavailable |
 | `-32004` | protocol versions differ |
 

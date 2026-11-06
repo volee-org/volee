@@ -71,3 +71,12 @@ task is done, blocked or failed. A `done` report is a `report` message;
 | `outcome` | `done`, `blocked`, `failed` | How the task ended. |
 | `summary` | string | What was done, what is left, what to check. |
 | `refs` | list | Commits, pull requests or files that prove the work. |
+
+### `close_mission`
+
+For a mission's coordinator: closes the mission once every worker delivered
+and the final report went to the human with `report`. It takes no argument;
+the coordinator's latest report becomes the mission's report. volee refuses,
+with the reason, when the caller is not the coordinator, when no report was
+sent, or while a worker has not delivered. An agent can never force a
+mission closed: only the human can.
