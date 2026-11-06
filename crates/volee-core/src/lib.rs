@@ -24,6 +24,7 @@ pub mod reconcile;
 pub mod registry;
 pub mod role;
 pub mod state;
+pub mod supervisor;
 pub mod time;
 pub mod workspace;
 

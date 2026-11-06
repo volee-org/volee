@@ -6,7 +6,7 @@ use crate::delivery::Delivery;
 use crate::harness::{HarnessKind, SessionKey, SessionOrigin};
 use crate::ids::{AgentId, MessageId, MissionId};
 use crate::message::{Message, Party, Thread};
-use crate::mission::{Mission, MissionStatus};
+use crate::mission::{Mission, MissionStatus, Verdict};
 use crate::role::{LaunchedBy, Role};
 use crate::state::AgentState;
 use crate::time::Timestamp;
@@ -142,6 +142,17 @@ pub enum EventKind {
     MissionCreated {
         /// The mission.
         mission: Mission,
+    },
+    /// The supervisor judged a worker of a mission.
+    WorkerAssessed {
+        /// The mission.
+        mission: MissionId,
+        /// The worker.
+        worker: AgentId,
+        /// The verdict.
+        verdict: Verdict,
+        /// The evidence, in one line.
+        evidence: String,
     },
     /// A mission moved forward.
     MissionUpdated {

@@ -1,5 +1,7 @@
 //! Missions: goals across repositories (ADR 0007).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{AgentId, MessageId, MissionId, ThreadId};
@@ -38,6 +40,33 @@ impl MissionStatus {
     }
 }
 
+/// The supervisor's judgement on a worker that stopped working.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Verdict {
+    /// The work landed: pushed with an open pull request, merged, or reported.
+    Delivered,
+    /// The worker stopped, but the evidence is missing.
+    NotDelivered,
+    /// The worker waits for a human.
+    NeedsHuman,
+    /// The worker failed.
+    Failed,
+    /// The worker can no longer be found.
+    Lost,
+}
+
+/// The last verdict recorded for a worker, with the evidence it rests on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Assessment {
+    /// The verdict.
+    pub verdict: Verdict,
+    /// What was observed, in one line, such as `3 commits · pushed · PR #42 open`.
+    pub evidence: String,
+    /// When it was recorded.
+    pub at: Timestamp,
+}
+
 /// A goal that spans one or more repositories.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Mission {
@@ -65,6 +94,9 @@ pub struct Mission {
     pub created_at: Timestamp,
     /// When it closed or was aborted.
     pub ended_at: Option<Timestamp>,
+    /// The supervisor's last verdict on each worker.
+    #[serde(default)]
+    pub assessments: BTreeMap<AgentId, Assessment>,
 }
 
 #[cfg(test)]

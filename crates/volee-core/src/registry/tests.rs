@@ -369,6 +369,7 @@ fn create_mission(registry: &mut Registry, coordinator: Option<AgentId>) -> Miss
                     report: None,
                     created_at: at(1),
                     ended_at: None,
+                    assessments: BTreeMap::new(),
                 },
             },
         ))
