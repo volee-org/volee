@@ -30,6 +30,9 @@ volee-mcp.workspace = true
 volee-proto.workspace = true
 volee-store.workspace = true
 
+[dev-dependencies]
+ulid.workspace = true
+
 [lints]
 workspace = true
 

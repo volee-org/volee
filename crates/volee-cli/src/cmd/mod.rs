@@ -5,4 +5,5 @@ pub(crate) mod daemon;
 pub(crate) mod hook;
 pub(crate) mod ls;
 pub(crate) mod mcp;
+pub(crate) mod mission;
 pub(crate) mod msg;

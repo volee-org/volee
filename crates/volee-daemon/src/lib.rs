@@ -13,6 +13,7 @@ mod delivery;
 mod error;
 mod handlers;
 mod log;
+mod missions;
 mod server;
 mod sqlite;
 mod state;

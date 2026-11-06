@@ -79,7 +79,11 @@ impl Daemon {
 
     /// Serves an already bound listener. Used by [`Daemon::run`] and by tests.
     pub async fn serve(listener: UnixListener, config: Config) -> Result<(), DaemonError> {
-        let state = State::load(config.log, config.clock)?;
+        let mut state = State::load(config.log, config.clock)?;
+        let caught_up = crate::missions::catch_up(&mut state).len();
+        if caught_up > 0 {
+            tracing::info!(events = caught_up, "missions caught up");
+        }
         let (shutdown, mut stop) = watch::channel(false);
         let shared = Arc::new(Shared {
             state: Mutex::new(state),

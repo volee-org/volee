@@ -10,6 +10,7 @@ use volee_core::delivery::TidyRefusal;
 use volee_core::harness::HarnessKind;
 use volee_core::ids::{AgentId, MessageId, MissionId, ThreadId};
 use volee_core::message::{MessageKind, Party, Reference};
+use volee_core::mission::MissionKind;
 use volee_core::role::Role;
 use volee_core::time::Timestamp;
 
@@ -363,6 +364,85 @@ method!(
     Empty
 );
 
+// ---- missions -------------------------------------------------------------
+
+/// Parameters of [`CreateMission`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateMissionParams {
+    /// A short title.
+    pub title: String,
+    /// What the mission delivers.
+    pub kind: MissionKind,
+    /// The goal, as the coordinator will read it.
+    pub goal: String,
+    /// The repositories involved, by configuration name.
+    pub repos: Vec<String>,
+    /// The agent asking for the mission, if an agent does.
+    #[serde(default)]
+    pub requested_by: Option<AgentId>,
+}
+
+/// The result of [`CreateMission`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatedMission {
+    /// The new mission.
+    pub mission: MissionId,
+    /// Its conversation thread.
+    pub thread: ThreadId,
+}
+
+method!(
+    /// Creates a mission and its thread, in the planning status.
+    CreateMission,
+    "missions.create",
+    CreateMissionParams,
+    CreatedMission
+);
+
+/// Parameters of [`AbortMission`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AbortParams {
+    /// The mission.
+    pub mission: MissionId,
+    /// Why, told to its agents.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+method!(
+    /// Aborts a mission and tells its agents to stop. Nothing is deleted.
+    AbortMission,
+    "missions.abort",
+    AbortParams,
+    Empty
+);
+
+/// Parameters of [`CloseMission`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloseParams {
+    /// The mission.
+    pub mission: MissionId,
+    /// The final report, a message in the mission's thread. Without it, the
+    /// coordinator's latest report in that thread is used.
+    #[serde(default)]
+    pub report: Option<MessageId>,
+    /// Close even if some workers have not delivered. Only the human can.
+    #[serde(default)]
+    pub force: bool,
+    /// The agent closing the mission, when an agent does. It must be the
+    /// mission's coordinator and must have sent its report.
+    #[serde(default)]
+    pub by: Option<AgentId>,
+}
+
+method!(
+    /// Closes a mission whose workers all delivered (ADR 0007).
+    CloseMission,
+    "missions.close",
+    CloseParams,
+    Empty
+);
+
 // ---- hooks ----------------------------------------------------------------
 
 /// Parameters of [`HookIngest`].
@@ -440,6 +520,9 @@ mod tests {
             MarkRead::NAME,
             HookIngest::NAME,
             HookWait::NAME,
+            CreateMission::NAME,
+            AbortMission::NAME,
+            CloseMission::NAME,
         ];
         let mut sorted = names.to_vec();
         sorted.sort_unstable();
