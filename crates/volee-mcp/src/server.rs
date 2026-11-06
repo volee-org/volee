@@ -12,7 +12,9 @@ use volee_core::message::{MessageKind, Party, Reference};
 use volee_core::registry::ApplyError;
 use volee_core::{AgentId, AgentState, Registry};
 use volee_proto::client::{Client, ClientError};
-use volee_proto::methods::{MarkRead, MarkReadParams, SendMessage, SendParams};
+use volee_proto::methods::{
+    CloseMission, CloseParams, MarkRead, MarkReadParams, SendMessage, SendParams,
+};
 
 use crate::replica::Replica;
 use crate::view::{AgentView, MessageView, WhoAmI, party_name};
@@ -21,8 +23,9 @@ use crate::view::{AgentView, MessageView, WhoAmI, party_name};
 const INSTRUCTIONS: &str = "volee connects you with the other coding agents on this machine and \
 with the human who supervises them. Use list_agents to see who works on what, send_message to \
 write to an agent or to the human (by id, by name, or \"human\"), read_messages to read what was \
-sent to you, and report when your task is done, blocked or failed. Messages sent to you also \
-arrive on their own at the end of your turn.";
+sent to you, and report when your task is done, blocked or failed. A mission's coordinator calls \
+close_mission once every worker delivered and its final report is sent. Messages sent to you \
+also arrive on their own at the end of your turn.";
 
 /// Starting the server failed.
 #[derive(Debug, thiserror::Error)]
@@ -445,6 +448,51 @@ impl VoleeMcp {
             thread: None,
         })
         .await
+    }
+
+    /// Closes the mission this agent coordinates.
+    #[tool(
+        description = "Close the mission you coordinate. Call it once volee told you every worker \
+                       delivered and after you sent the final report to the human with the report \
+                       tool. volee refuses while a worker has not delivered, and says which."
+    )]
+    pub async fn close_mission(&self) -> Result<CallToolResult, ErrorData> {
+        let mission = {
+            let registry = self.inner.replica.read().await;
+            let Some(me) = registry.agent(self.inner.me) else {
+                return Err(ErrorData::internal_error(
+                    "this agent was forgotten by volee",
+                    None,
+                ));
+            };
+            let Some(mission) = me.mission.and_then(|id| registry.mission(id)) else {
+                return Ok(refuse("you are not part of a mission"));
+            };
+            if mission.coordinator != Some(me.id) {
+                return Ok(refuse(
+                    "only the mission's coordinator closes it; if your task is over, use the \
+                     report tool",
+                ));
+            }
+            mission.id
+        };
+        let closed = self
+            .inner
+            .client
+            .call::<CloseMission>(CloseParams {
+                mission,
+                report: None,
+                force: false,
+                by: Some(self.inner.me),
+            })
+            .await;
+        match closed {
+            Ok(_) => Ok(text(
+                "The mission is closed and the human has your report. You can stop now.",
+            )),
+            Err(ClientError::Rpc(error)) => Ok(refuse(&error.message)),
+            Err(error) => Err(ErrorData::internal_error(error.to_string(), None)),
+        }
     }
 }
 

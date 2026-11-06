@@ -15,6 +15,10 @@ updates:
           - "patch"
   - package-ecosystem: "github-actions"
     directory: "/"
+    # dist generates release.yml and fails a release when the file differs
+    # from its output, so its actions are updated with dist (RELEASING.md).
+    exclude-paths:
+      - ".github/workflows/release.yml"
     schedule:
       interval: "weekly"
       day: "monday"

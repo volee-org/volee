@@ -55,15 +55,25 @@ and the [design decisions](https://volee-org.github.io/volee/adr/README.html).
 
 ## Install
 
-Prebuilt binaries and a Homebrew formula come with the first release. Until
-then, build from source with a recent stable Rust toolchain:
+The first release is v0.1.0. Each [release](https://github.com/volee-org/volee/releases)
+has prebuilt binaries for macOS (Apple Silicon and Intel) and Linux (x86_64
+and ARM64), and an installer that checks the download and puts `volee` in
+`~/.local/bin`:
 
 ```sh
-cargo install --git https://github.com/volee-org/volee volee-cli
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/volee-org/volee/releases/latest/download/volee-cli-installer.sh | sh
+```
+
+Or build it from source with Cargo (Rust 1.89 or later):
+
+```sh
+cargo install --locked --git https://github.com/volee-org/volee --tag v0.1.0 volee-cli
 ```
 
 volee supports macOS and Linux and needs [Claude Code](https://code.claude.com)
-2.1.300 or later for its agent features.
+2.1.300 or later for its agent features. The
+[installation guide](https://volee-org.github.io/volee/guide/installation.html)
+covers specific versions, manual downloads and uninstalling.
 
 ## Contributing
 

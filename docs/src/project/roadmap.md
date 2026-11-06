@@ -7,12 +7,12 @@ deliberately out of scope. Dates are targets, not promises.
 
 | Milestone | Content | Status |
 | --- | --- | --- |
-| Bootstrap | Workspace, CI, documentation site, contributor guides, agent rules | In progress |
-| Foundation | Domain model, SQLite event store, daemon with JSON-RPC over a Unix socket, `volee ls`, discovery of every Claude Code session | Planned |
-| Launch and observe | `volee spawn` (worktree + `claude --bg` + per-agent hooks), hook ingestion, git delivery state, `volee diff` | Planned |
-| Interface | Hierarchy view, preview, take over with `claude attach`, keymap and help, themes, semantic zoom | Planned |
-| Messaging | MCP server for agents, typed threads, delivery to working, idle and stopped agents, inbox, message pulses on the graph | Planned |
-| Missions | Supervisor plus coordinator agent, change and analysis missions, delivery evidence, `volee tidy` | Planned |
+| Bootstrap | Workspace, CI, documentation site, contributor guides, agent rules | Done |
+| Foundation | Domain model, SQLite event store, daemon with JSON-RPC over a Unix socket, `volee ls`, discovery of every Claude Code session | In progress: discovery comes with the Claude Code adapter |
+| Launch and observe | `volee spawn` (worktree + `claude --bg` + per-agent hooks), hook ingestion, git delivery state, `volee diff` | In progress |
+| Interface | Hierarchy view, preview, take over with `claude attach`, keymap and help, themes, semantic zoom | In progress |
+| Messaging | MCP server for agents, typed threads, delivery to working, idle and stopped agents, inbox, message pulses on the graph | In progress: MCP server, threads and delivery are done |
+| Missions | Supervisor plus coordinator agent, change and analysis missions, delivery evidence, `volee tidy` | In progress: lifecycle, supervisor and `volee mission` are done |
 | More views | Network, repositories and worktrees, timeline | Planned |
 | Release | Prebuilt binaries for macOS and Linux, shell installer, demo recordings | Planned |
 

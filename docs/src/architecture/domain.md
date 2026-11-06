@@ -104,6 +104,17 @@ coordinator. When every worker delivered, the mission moves to `reporting`
 and the coordinator and the human are asked for the final report. A worker
 that regresses moves the mission back to `running`.
 
+In the daemon (`volee-daemon`, module `missions`), supervision follows every
+commit: the daemon finds the missions the new events concern (an agent of
+the mission changed state or delivery, posted a message, or registered),
+first records a newly registered coordinator on its mission, then runs
+`supervise` and commits the decision in one batch. The supervisor's own
+events never trigger another round. It also runs over every open mission
+when the daemon starts, which catches up after a crash between a commit and
+its follow-ups, or after an upgrade that changed the rules. A failure there
+is logged and never fails the request that caused it: the events that
+triggered it are already committed.
+
 ## Rules
 
 - **Routing** (`Registry::check_route`): people and volee write to anyone;
