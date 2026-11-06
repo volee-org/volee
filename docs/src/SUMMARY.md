@@ -6,6 +6,11 @@
 
 - [Installation](guide/installation.md)
 - [Concepts](guide/concepts.md)
+- [Command line](guide/cli.md)
+
+# Reference
+
+- [Daemon protocol](reference/protocol.md)
 
 # Architecture
 

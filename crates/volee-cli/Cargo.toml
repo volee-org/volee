@@ -17,8 +17,15 @@ name = "volee"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
 clap.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+tracing-subscriber.workspace = true
 volee-core.workspace = true
+volee-daemon.workspace = true
+volee-proto.workspace = true
+volee-store.workspace = true
 
 [lints]
 workspace = true
