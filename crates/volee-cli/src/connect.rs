@@ -40,6 +40,12 @@ pub(crate) async fn connect_or_start() -> Result<Client> {
 
 /// Starts `volee daemon run` detached from this terminal, logging to the state
 /// directory.
+///
+/// Commands often run inside an agent's session or a multiplexer pane (hooks
+/// and `volee mcp` do, by design). The daemon outlives them and launches
+/// agents of its own, so it must not keep their identity: it starts in the
+/// state directory, without the variables that name the session or pane it
+/// came from.
 pub(crate) fn spawn_daemon(paths: &Paths) -> Result<()> {
     std::fs::create_dir_all(paths.log_dir())
         .with_context(|| format!("cannot create {}", paths.log_dir().display()))?;
@@ -51,15 +57,61 @@ pub(crate) fn spawn_daemon(paths: &Paths) -> Result<()> {
         .with_context(|| format!("cannot open {}", log_path.display()))?;
     let error_log = log.try_clone().context("cannot duplicate the log handle")?;
     let program = std::env::current_exe().context("cannot find the volee executable")?;
-    Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(["daemon", "run"])
+        .current_dir(&paths.state_dir)
         .stdin(Stdio::null())
         .stdout(log)
         .stderr(error_log)
-        .process_group(0)
-        .spawn()
-        .context("cannot start the volee daemon")?;
+        .process_group(0);
+    for (name, _) in std::env::vars_os() {
+        if name.to_str().is_some_and(names_a_session) {
+            command.env_remove(&name);
+        }
+    }
+    command.spawn().context("cannot start the volee daemon")?;
     Ok(())
+}
+
+/// Variables that identify the agent session or terminal pane a process runs
+/// in, rather than configure it. User settings (for example
+/// `CLAUDE_CODE_USE_BEDROCK` or `ANTHROPIC_API_KEY`) are not among them.
+const SESSION_VARIABLES: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_AGENT",
+    "CLAUDE_CODE_BRIDGE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_HOST_SHORT_TEMP_DIRS",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SSE_PORT",
+    "CLAUDE_EFFORT",
+    "CLAUDE_ENV_FILE",
+    "CLAUDE_JOB_DIR",
+    "CLAUDE_PID",
+    "CLAUDE_PROJECT_DIR",
+    "GHOSTTY_SURFACE_ID",
+    "ITERM_SESSION_ID",
+    "KITTY_WINDOW_ID",
+    "TERM_SESSION_ID",
+    "TMUX",
+    "TMUX_PANE",
+    "WEZTERM_PANE",
+];
+
+/// Prefixes of variables that multiplexers set in their panes.
+const SESSION_PREFIXES: &[&str] = &["HERDR_", "TUIOS_", "ZELLIJ"];
+
+fn names_a_session(name: &str) -> bool {
+    SESSION_VARIABLES.contains(&name)
+        || SESSION_PREFIXES
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
 }
 
 /// Waits until the daemon accepts connections.
@@ -77,6 +129,36 @@ pub(crate) async fn wait_for_daemon(paths: &Paths) -> Result<Client> {
                 });
             }
             Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::names_a_session;
+
+    #[test]
+    fn session_identity_is_dropped_and_settings_are_kept() {
+        for name in [
+            "CLAUDECODE",
+            "CLAUDE_CODE_SESSION_ID",
+            "CLAUDE_CODE_MESSAGING_TOKEN",
+            "TUIOS_PANE_ID",
+            "HERDR_ENV",
+            "ZELLIJ_SESSION_NAME",
+            "TMUX",
+        ] {
+            assert!(names_a_session(name), "{name}");
+        }
+        for name in [
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+            "ANTHROPIC_API_KEY",
+            "PATH",
+            "HOME",
+            "VOLEE_LOG",
+        ] {
+            assert!(!names_a_session(name), "{name}");
         }
     }
 }
