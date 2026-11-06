@@ -12,6 +12,12 @@ keywords.workspace = true
 categories = ["development-tools"]
 
 [dependencies]
+serde.workspace = true
+thiserror.workspace = true
+ulid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true
