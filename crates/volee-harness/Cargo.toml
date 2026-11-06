@@ -1,0 +1,31 @@
+[package]
+name = "volee-harness"
+description = "Coding harness adapters for volee: launch, observe, preview, take over and message Claude Code agents."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["development-tools"]
+
+[features]
+# Exposes `testing::FakeRunner`, a scripted command runner, to the tests of
+# crates that drive a harness (the daemon).
+testing = []
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+volee-core.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

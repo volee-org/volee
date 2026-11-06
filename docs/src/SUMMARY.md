@@ -18,6 +18,7 @@
 
 - [Overview](architecture/overview.md)
 - [Domain model](architecture/domain.md)
+- [Claude Code adapter](architecture/claude-code.md)
 - [Git](architecture/git.md)
 - [Decisions](adr/README.md)
   - [0000. Record architecture decisions](adr/0000-record-architecture-decisions.md)
