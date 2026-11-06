@@ -84,6 +84,8 @@ fn start_with(events: Vec<Event>) -> Fixture {
             clock: Arc::new(ManualClock::at(5_000)),
             harnesses: vec![],
             spool: None,
+            harness: None,
+            discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         },
     ));
     Fixture { socket, _dir: dir }

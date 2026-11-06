@@ -19,6 +19,7 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "signa
 tracing.workspace = true
 ulid.workspace = true
 volee-core.workspace = true
+volee-harness.workspace = true
 volee-proto.workspace = true
 volee-store.workspace = true
 

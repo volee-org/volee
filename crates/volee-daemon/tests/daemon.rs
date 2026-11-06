@@ -77,6 +77,8 @@ fn start() -> Running {
         clock: Arc::new(ManualClock::at(10_000)),
         harnesses: vec![],
         spool: None,
+        harness: None,
+        discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
     };
     let task = tokio::spawn(Daemon::serve(listener, config));
     Running {

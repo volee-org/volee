@@ -119,6 +119,11 @@ impl State {
         ThreadId::from_ulid(self.new_ulid())
     }
 
+    /// A new agent identifier.
+    pub(crate) fn new_agent_id(&self) -> AgentId {
+        AgentId::from_ulid(self.new_ulid())
+    }
+
     /// A new mission identifier.
     pub(crate) fn new_mission_id(&self) -> MissionId {
         MissionId::from_ulid(self.new_ulid())
