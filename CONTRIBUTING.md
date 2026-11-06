@@ -54,6 +54,7 @@ volee supports macOS and Linux.
 | `docs/` | The mdBook documentation site |
 | `docs/src/adr/` | Architecture decision records |
 | `AGENTS.md`, `CLAUDE.md` | Instructions for coding agents |
+| `RELEASING.md` | How maintainers cut a release |
 
 ## Checks
 
@@ -102,13 +103,17 @@ We use [Conventional Commits](https://www.conventionalcommits.org):
 
 Pull requests are squash-merged and the PR title becomes the commit message, so
 the PR title must follow Conventional Commits. The commits inside your branch
-can be as messy as you like.
+can be as messy as you like. The title is also the entry of your change in the
+changelog, so describe the change for users: `fix(daemon): keep messages to a
+stopped agent`, not `fix: address review`.
 
 Keep pull requests focused: one change per PR is easier to review. Fill in the
 PR template, and attach a screenshot or a vhs recording for UI changes.
 
-Releases are automated with release-plz and cargo-dist. Do not edit
-`CHANGELOG.md` or version numbers by hand.
+Maintainers cut releases with a release pull request and a tag, as described
+in [RELEASING.md](RELEASING.md): git-cliff writes `CHANGELOG.md` from the PR
+titles, and dist builds the binaries. Do not edit `CHANGELOG.md` or version
+numbers in your pull request.
 
 ## Proposing a design change
 

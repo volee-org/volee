@@ -32,3 +32,8 @@ volee-store.workspace = true
 
 [lints]
 workspace = true
+
+# The only package with release artifacts: `dist-workspace.toml` sets
+# `dist = false` for every other one. See RELEASING.md.
+[package.metadata.dist]
+dist = true
