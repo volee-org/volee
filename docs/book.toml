@@ -1,0 +1,26 @@
+[book]
+title = "volee"
+description = "See, launch and coordinate every coding agent on your machine, from your terminal."
+authors = ["The volee contributors"]
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "latte"
+preferred-dark-theme = "mocha"
+additional-css = ["theme/catppuccin.css"]
+git-repository-url = "https://github.com/volee-org/volee"
+edit-url-template = "https://github.com/volee-org/volee/edit/main/docs/{path}"
+site-url = "/volee/"
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+limit-results = 20
+
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"

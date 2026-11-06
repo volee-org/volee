@@ -1,0 +1,20 @@
+# Build output
+/target/
+/docs/book/
+
+# Local state and editor files
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Claude Code: personal settings and worktrees stay local
+.claude/settings.local.json
+.claude/worktrees/
+
+# insta: pending snapshots must be reviewed, never committed
+*.snap.new
+*.pending-snap

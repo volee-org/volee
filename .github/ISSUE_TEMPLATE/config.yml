@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/volee-org/volee/discussions
+    about: Ask a question or talk about an idea in Discussions.
+  - name: Security vulnerability
+    url: https://github.com/volee-org/volee/security/policy
+    about: Do not open a public issue. Read the security policy and report privately.
