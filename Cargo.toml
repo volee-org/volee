@@ -23,11 +23,17 @@ volee-harness = { path = "crates/volee-harness", version = "0.1.0" }
 volee-mcp = { path = "crates/volee-mcp", version = "0.1.0" }
 volee-proto = { path = "crates/volee-proto", version = "0.1.0" }
 volee-store = { path = "crates/volee-store", version = "0.1.0" }
+volee-tui = { path = "crates/volee-tui", version = "0.1.0" }
 
 # External crates. Keep this list sorted.
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive", "wrap_help"] }
+# Only to enable `event-stream`: code uses the `ratatui::crossterm` re-export,
+# so there is exactly one crossterm in the build.
+crossterm = { version = "0.29.0", features = ["event-stream"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 insta = { version = "1.49.0", features = ["json"] }
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache"] }
 rmcp = { version = "3.9.0", default-features = false }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 rustix = { version = "1.1.6", features = ["process"] }
@@ -41,6 +47,8 @@ toml = "1.2.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 ulid = "3.0.0"
+unicode-width = "0.2.3"
+vt100 = "0.18.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
