@@ -1,0 +1,32 @@
+[package]
+name = "volee-mcp"
+description = "The MCP server through which coding agents talk to volee and to each other."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["development-tools"]
+
+[dependencies]
+rmcp = { workspace = true, features = ["macros", "server", "transport-io"] }
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+volee-core.workspace = true
+volee-proto.workspace = true
+
+[dev-dependencies]
+rmcp = { workspace = true, features = ["client", "macros", "server", "transport-io"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+ulid.workspace = true
+volee-daemon.workspace = true
+
+[lints]
+workspace = true

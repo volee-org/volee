@@ -36,6 +36,12 @@ enum Command {
     /// Send messages to agents.
     #[command(subcommand)]
     Msg(MsgCommand),
+    /// Serve the MCP tools of an agent over stdio. Harnesses start this.
+    Mcp {
+        /// The agent the server speaks for.
+        #[arg(long)]
+        agent: AgentId,
+    },
     /// Called by the hooks of agents volee launched. Not for people.
     #[command(hide = true)]
     Hook {
@@ -140,6 +146,7 @@ fn async_main(command: Command) -> ExitCode {
             Command::Msg(MsgCommand::Send { to, body, kind }) => {
                 cmd::msg::send(to, body, kind.into()).await
             }
+            Command::Mcp { agent } => cmd::mcp::run(agent).await,
             Command::Hook { .. } => unreachable!("hooks run without the async runtime"),
         }
     });

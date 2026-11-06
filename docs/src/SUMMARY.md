@@ -11,6 +11,7 @@
 # Reference
 
 - [Daemon protocol](reference/protocol.md)
+- [MCP tools for agents](reference/mcp.md)
 
 # Architecture
 
