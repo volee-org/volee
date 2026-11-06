@@ -11,7 +11,7 @@ use crate::event::{Event, EventKind};
 use crate::harness::SessionKey;
 use crate::ids::{AgentId, MessageId, MissionId, ThreadId};
 use crate::message::{Message, MessageKind, Party, Thread};
-use crate::mission::Mission;
+use crate::mission::{Assessment, Mission};
 use crate::state::AgentState;
 
 /// An event that does not fit the current state. The daemon validates events
@@ -260,6 +260,25 @@ impl Registry {
                 }
                 self.missions.insert(mission.id, mission.clone());
             }
+            EventKind::WorkerAssessed {
+                mission,
+                worker,
+                verdict,
+                evidence,
+            } => {
+                let record = self
+                    .missions
+                    .get_mut(mission)
+                    .ok_or(ApplyError::UnknownMission(*mission))?;
+                record.assessments.insert(
+                    *worker,
+                    Assessment {
+                        verdict: *verdict,
+                        evidence: evidence.clone(),
+                        at,
+                    },
+                );
+            }
             EventKind::MissionUpdated {
                 mission,
                 status,
@@ -393,6 +412,14 @@ impl Registry {
         self.messages
             .values()
             .filter(|message| message.thread == thread)
+            .collect()
+    }
+
+    /// Messages sent by `party`, oldest first.
+    pub fn messages_from(&self, party: Party) -> Vec<&Message> {
+        self.messages
+            .values()
+            .filter(|message| message.from == party)
             .collect()
     }
 

@@ -62,6 +62,7 @@ group.
 | `agent-forgotten` | The agent is removed; its sessions are ignored from then on. |
 | `thread-opened`, `message-posted`, `message-delivered`, `message-read` | Conversations and receipts. |
 | `mission-created`, `mission-updated` | Missions and their progress. |
+| `worker-assessed` | The supervisor's verdict on a worker of a mission, with its evidence. |
 
 ## Reconciliation
 
@@ -75,6 +76,33 @@ group.
 - when a complete listing no longer contains an agent's current session, the
   agent becomes `stopped` (it ran in a terminal) or `lost` (it ran in the
   background). It never becomes `done` because it disappeared.
+
+## The mission supervisor
+
+`supervisor::supervise` is the program half of a mission (ADR 0007). The
+daemon calls it after events that concern a mission and applies its
+decision: events to commit and notices to send from volee in the mission
+thread. It is idempotent: once its own events are applied, calling it again
+returns nothing.
+
+| Worker state | Verdict |
+| --- | --- |
+| launching, working | none yet |
+| needs input | `needs-human` |
+| failed | `failed` (the human is told too) |
+| lost | `lost` (the human is told too) |
+| idle, done, stopped | `delivered` or `not-delivered`, from the evidence below |
+
+Delivery evidence depends on the mission kind:
+
+- **change**: commits, all pushed, an open or merged pull request, and a clean
+  tree; a merged branch or pull request always counts;
+- **analysis**: a `report` message from the worker.
+
+Every new or changed verdict is recorded as `worker-assessed` and told to the
+coordinator. When every worker delivered, the mission moves to `reporting`
+and the coordinator and the human are asked for the final report. A worker
+that regresses moves the mission back to `running`.
 
 ## Rules
 

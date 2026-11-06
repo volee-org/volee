@@ -55,6 +55,7 @@ pub(crate) fn one_of_each_kind() -> Vec<Event> {
                 report: None,
                 created_at: at(1),
                 ended_at: None,
+                assessments: std::collections::BTreeMap::new(),
             },
         },
         EventKind::AgentRegistered {
@@ -148,6 +149,12 @@ pub(crate) fn one_of_each_kind() -> Vec<Event> {
             status: MissionStatus::Running,
             coordinator: Some(agent),
             report: None,
+        },
+        EventKind::WorkerAssessed {
+            mission: mission_id,
+            worker: agent,
+            verdict: volee_core::mission::Verdict::Delivered,
+            evidence: "3 commits, pushed, PR #42 open".to_owned(),
         },
         EventKind::AgentForgotten { agent },
     ];

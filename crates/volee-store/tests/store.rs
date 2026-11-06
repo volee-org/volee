@@ -23,7 +23,7 @@ fn the_fixture_covers_every_event_kind() {
     kinds.sort();
     kinds.dedup();
     // Update this number together with `EventKind`.
-    assert_eq!(kinds.len(), 15);
+    assert_eq!(kinds.len(), 16);
 }
 
 #[test]
@@ -172,8 +172,8 @@ fn columns_index_kind_agent_and_time() {
             |row| row.get(0),
         )
         .unwrap();
-    // Every kind that names an agent: nine of the fifteen.
-    assert_eq!(by_agent, 9);
+    // Every kind that names an agent: ten of the sixteen.
+    assert_eq!(by_agent, 10);
     let (kind, at): (String, i64) = connection
         .query_row("SELECT kind, at FROM events WHERE seq = 1", [], |row| {
             Ok((row.get(0)?, row.get(1)?))
@@ -203,7 +203,7 @@ fn reopening_keeps_data_and_does_not_remigrate() {
         store.set_meta("k", "v").unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.count().unwrap(), 15);
+    assert_eq!(store.count().unwrap(), 16);
     assert_eq!(store.get_meta("k").unwrap().as_deref(), Some("v"));
     let version: u32 = Connection::open(&path)
         .unwrap()
