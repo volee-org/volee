@@ -1,0 +1,87 @@
+# AGENTS.md
+
+Instructions for coding agents (Claude Code, Codex, Cursor and others)
+working on this repository. Humans: [CONTRIBUTING.md](CONTRIBUTING.md) says
+the same things at a gentler pace.
+
+## What volee is
+
+A terminal tool, written in Rust, that shows every coding agent on a machine
+(state, repo, branch, worktree, diffs, messages) and runs multi-repo missions.
+Read [docs/src/architecture/overview.md](docs/src/architecture/overview.md)
+before changing anything structural, and the decisions in
+[docs/src/adr/](docs/src/adr/README.md) before contradicting one.
+
+## Repository map
+
+| Path | What lives there |
+| --- | --- |
+| `crates/volee-core` | Domain model and pure rules. No IO, no async, no terminal. |
+| `crates/volee-cli` | The `volee` binary: argument parsing and wiring only. |
+| `crates/volee-*` | One crate per concern (store, git, harness, daemon, mcp, tui) as they land. |
+| `docs/` | The mdBook site (`docs/src`), ADRs (`docs/src/adr`), theme (`docs/theme`, vendored). |
+| `.github/` | CI, issue forms, Dependabot. |
+
+Dependencies point inward: `volee-core` depends on no other volee crate.
+
+## Commands
+
+Run these before you say a change is done. They are exactly what CI runs.
+
+```sh
+cargo fmt --all
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo nextest run --workspace --all-features --locked   # or: cargo test --workspace
+cargo test --doc --workspace --locked
+typos
+mdbook build docs                                        # when docs/ changed
+```
+
+`just check` runs the first four. The toolchain is pinned by
+`rust-toolchain.toml`; the MSRV (`rust-version` in `Cargo.toml`) is checked in
+CI, so do not use language or library features newer than it.
+
+## Code rules
+
+- English everywhere: code, comments, docs, interface text, commit messages.
+- Errors: `thiserror` in library crates, `anyhow` only in `volee-cli`. No
+  `unwrap()` or `expect()` outside tests unless the invariant is written next
+  to it.
+- No `println!`/`eprintln!` outside `volee-cli` (the TUI owns the terminal).
+  Use `tracing` for diagnostics.
+- No `unsafe` (the workspace forbids it).
+- Keep functions pure where you can and push IO to the edges; the domain is
+  tested without IO.
+- Never parse Claude Code internal files (`~/.claude/jobs`, `~/.claude/sessions`,
+  transcripts). Use hooks, `claude agents --json` and documented commands
+  (ADR 0004).
+- Never edit the user's own configuration files (for example
+  `~/.claude/settings.json`). volee passes per-agent settings on the command
+  line.
+- Destructive operations need delivery evidence and never delete branches
+  (ADR 0011).
+
+## Tests
+
+- Unit tests sit next to the code (`#[cfg(test)] mod tests`).
+- TUI rendering uses `insta` snapshots with ratatui's `TestBackend`. Review new
+  snapshots with `cargo insta review`; never commit `.snap.new` files.
+- Git code is tested against real temporary repositories (`tempfile`).
+- Tests never touch the network, the user's home directory or a real Claude
+  Code installation. Use fakes behind the crate's traits.
+
+## Commits and pull requests
+
+- Conventional Commits, English, imperative: `feat(tui): add semantic zoom`.
+  Scopes are crate names without the `volee-` prefix, or `docs`, `ci`, `deps`.
+- Pull requests are squash-merged; the PR title becomes the commit message, so
+  it must follow the same format.
+- One topic per pull request. Update docs and ADRs in the same pull request as
+  the code they describe.
+- Do not edit `CHANGELOG.md` or version numbers: releases are automated.
+
+## When you are unsure
+
+Prefer the smallest change that keeps the design coherent, explain the
+trade-off in the pull request, and propose an ADR for anything that changes a
+recorded decision.

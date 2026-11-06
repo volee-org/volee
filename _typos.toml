@@ -1,0 +1,17 @@
+# typos configuration: https://github.com/crate-ci/typos
+[files]
+extend-exclude = [
+    "target/",
+    "docs/book/",
+    "docs/theme/",
+    "docs/mermaid.min.js",
+    "docs/mermaid-init.js",
+    "*.gif",
+    "*.svg",
+    "**/snapshots/*.snap",
+]
+
+[default.extend-words]
+# Project and ecosystem names that look like typos.
+ratatui = "ratatui"
+volee = "volee"

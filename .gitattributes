@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.gif binary
+*.png binary
+*.snap linguist-generated=true
+docs/theme/catppuccin.css linguist-vendored=true
+docs/theme/index.hbs linguist-vendored=true
