@@ -1,0 +1,6 @@
+//! One module per subcommand.
+
+pub(crate) mod daemon;
+pub(crate) mod hook;
+pub(crate) mod ls;
+pub(crate) mod msg;

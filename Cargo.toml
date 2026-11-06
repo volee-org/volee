@@ -16,16 +16,21 @@ categories = ["command-line-utilities", "development-tools"]
 [workspace.dependencies]
 # Internal crates.
 volee-core = { path = "crates/volee-core", version = "0.1.0" }
+volee-daemon = { path = "crates/volee-daemon", version = "0.1.0" }
+volee-proto = { path = "crates/volee-proto", version = "0.1.0" }
 volee-store = { path = "crates/volee-store", version = "0.1.0" }
 
 # External crates. Keep this list sorted.
+anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive", "wrap_help"] }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
+tokio = "1.54.1"
 tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 ulid = "3.0.0"
 
 [workspace.lints.rust]
