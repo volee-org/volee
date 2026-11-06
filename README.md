@@ -1,6 +1,11 @@
 <div align="center">
 
-# volee
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/wordmark-dark.svg">
+    <img alt="volee" src="assets/brand/wordmark-light.svg" width="360">
+  </picture>
+</h1>
 
 **See, launch and coordinate every coding agent on your machine, from your terminal.**
 
