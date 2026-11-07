@@ -92,7 +92,9 @@ repository's name), `VOLEE_REPO_ROOT` (its main checkout), `VOLEE_WORKTREE`,
 is killed with everything it started. Meanwhile the agent is listed as
 launching, with the command that runs; what the commands print goes to
 `setup.log` in the agent's folder of volee's state directory as they print
-it, so `tail -f` follows it, and `volee spawn` says where it is.
+it, so `tail -f` follows it, and `volee spawn` says where it is. Until the
+agent's session starts, its preview in the interface and `volee logs` show
+the end of that log.
 
 If a command fails, the launch fails: no session starts, the worktree and
 branch stay, and the agent is listed as failed with the command and the last
