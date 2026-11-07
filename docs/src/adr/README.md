@@ -21,5 +21,26 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0012](0012-language-license-and-scope.md) | Rust, dual MIT/Apache-2.0, Unix first | Accepted |
 | [0013](0013-worktrees-live-in-their-repository.md) | Agent worktrees live in their repository | Accepted |
 
+## Not built yet
+
+Some decisions describe more than volee 0.1.0 does. These parts are still to
+come:
+
+- [0004](0004-sources-and-reconciliation.md): listing Claude Code sessions
+  faster while a client is connected, and a setting for it. 0.1.0 lists them
+  every two seconds.
+- [0005](0005-harness-neutral-agent-protocol.md): CLI commands that give
+  harnesses without MCP the operations of the MCP tools.
+- [0006](0006-messaging.md): configurable routing policies, and a wake
+  action for sessions volee did not launch, which cannot receive messages
+  yet.
+- [0008](0008-multiplexers-are-optional.md): location adapters. 0.1.0 has
+  none: a session running in a pane is listed, and you switch to its pane
+  yourself.
+- [0011](0011-safety-and-delivery-evidence.md): `volee tidy --force`. 0.1.0
+  cannot remove a worktree without delivery evidence.
+- [0012](0012-language-license-and-scope.md): the Homebrew formula and the
+  crates.io release.
+
 To propose a new decision, copy [the template](template.md), number it, and
 open a pull request.

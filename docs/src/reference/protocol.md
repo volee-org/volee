@@ -16,7 +16,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 
 | Method | Parameters | Result |
 | --- | --- | --- |
-| `daemon.status` | `protocol` (the client's protocol version, or 0) | version, protocol, pid, start time, last event, agent count, harnesses |
+| `daemon.status` | `protocol` (the client's protocol version, or 0) | version, protocol, pid, start time, last event, agent count, harnesses, forge |
 | `daemon.shutdown` | none | none; the daemon stops after answering |
 | `events.since` | `after` (sequence number, optional) | `events` (sequence number and event), `last_seq` |
 | `events.subscribe` | `after` (optional) | the same batch, then `events.appended` notifications |

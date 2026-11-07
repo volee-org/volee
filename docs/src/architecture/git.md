@@ -73,8 +73,9 @@ memory in its `delivery-updated` events. Some consequences are worth knowing:
 
 ## When the daemon checks
 
-The daemon keeps every agent's workspace and evidence up to date by itself,
-so the interface and the mission supervisor never wait for git:
+The daemon keeps the workspace and evidence of every agent up to date by
+itself, sessions volee did not launch included, so the interface and the
+mission supervisor never wait for git:
 
 - **Workspaces.** When an agent registers, or its working directory changes,
   the daemon reads where the directory sits: the repository (named after its
