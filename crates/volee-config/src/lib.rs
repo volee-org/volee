@@ -211,6 +211,10 @@ pub struct Repo {
     /// The model for this repository's agents.
     #[serde(default)]
     pub model: Option<String>,
+    /// Commands that prepare a new worktree before its agent starts, run in
+    /// order with `sh -c` in the worktree (ADR 0017), such as `bun install`.
+    #[serde(default)]
+    pub setup: Vec<String>,
 }
 
 /// Interface settings.
@@ -373,6 +377,11 @@ impl Config {
                     repo.path.display()
                 )));
             }
+            if repo.setup.iter().any(|command| command.trim().is_empty()) {
+                return Err(invalid(format!(
+                    "repos.{name}.setup holds an empty command"
+                )));
+            }
         }
         if self.agents.wake_timeout == 0 {
             return Err(invalid(
@@ -527,6 +536,32 @@ mod tests {
         assert!(!Config::default().tui.reduced_motion);
         let config = parse("[tui]\nreduced_motion = true\n").unwrap();
         assert!(config.tui.reduced_motion);
+    }
+
+    #[test]
+    fn setup_commands_keep_their_order_and_none_may_be_empty() {
+        let config = parse(
+            r#"
+            [repos.shop]
+            path = "/srv/shop"
+            setup = ["cp \"$VOLEE_REPO_ROOT/.env.local\" .", "bun install"]
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.repos["shop"].setup,
+            ["cp \"$VOLEE_REPO_ROOT/.env.local\" .", "bun install"]
+        );
+        let docs = parse("[repos.docs]\npath = \"/srv/docs\"\n").unwrap();
+        assert_eq!(docs.repos["docs"].setup, Vec::<String>::new());
+        let error = parse("[repos.shop]\npath = \"/srv/shop\"\nsetup = [\"bun install\", \" \"]\n")
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("repos.shop.setup holds an empty command"),
+            "{error}"
+        );
     }
 
     #[test]

@@ -42,6 +42,7 @@
   - [0014. Agents of other harnesses join through MCP](adr/0014-agents-of-other-harnesses-join-through-mcp.md)
   - [0015. tuios is the first location adapter](adr/0015-tuios-location-adapter.md)
   - [0016. Reuse or tidy what a failed launch left untouched](adr/0016-what-a-failed-launch-left-untouched.md)
+  - [0017. Setup commands prepare a new worktree before its agent starts](adr/0017-setup-commands-for-new-worktrees.md)
   - [Template](adr/template.md)
 
 # Project

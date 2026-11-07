@@ -8,9 +8,10 @@
 //! and reuses the worktree volee created. Started directly in a fresh
 //! worktree, a background session would be refused as untrusted.
 //!
-//! Every slow step (git, the harness) runs off the state lock. The agent is
-//! registered before its session starts, so that the session's first hooks
-//! find it; a launch that fails marks it failed and deletes nothing.
+//! Every slow step (git, the setup commands, the harness) runs off the state
+//! lock. The agent is registered before its worktree is set up and its
+//! session starts, so that people see it launching and the session's first
+//! hooks find it; a launch that fails marks it failed and deletes nothing.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -24,7 +25,9 @@ use volee_core::state::AgentState;
 use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, MissionId};
 use volee_git::Git;
-use volee_harness::{Harness, PermissionMode, SpawnSpec};
+use volee_harness::{
+    CommandRunner, Harness, Invocation, Output, PermissionMode, RunError, SpawnSpec, SystemRunner,
+};
 use volee_proto::methods::{SpawnParams, Spawned};
 
 use crate::error::DaemonError;
@@ -33,6 +36,12 @@ use crate::server::Shared;
 /// The directory, inside a repository, where volee puts its worktrees: the
 /// one Claude Code looks into for `--worktree`.
 pub(crate) const IN_REPO_WORKTREES: &str = ".claude/worktrees";
+
+/// How long one setup command may run (ADR 0017).
+const SETUP_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// The shell that runs setup commands.
+const SETUP_SHELL: &str = "/bin/sh";
 
 /// A repository resolved for a launch.
 #[derive(Clone, Debug)]
@@ -116,6 +125,15 @@ pub(crate) async fn spawn(
         slot,
     )
     .await?;
+    let setup = setup_commands(shared, &target.root);
+    let setup_log = if setup.is_empty() {
+        None
+    } else {
+        let log = set_up(shared, agent, &target, &worktree, &params.branch, &setup)
+            .await
+            .map_err(|error| kept(error, &target.root, &worktree, &params.branch))?;
+        Some(log.display().to_string())
+    };
 
     let model = params.model.clone().or_else(|| {
         shared
@@ -147,7 +165,159 @@ pub(crate) async fn spawn(
     Ok(Spawned {
         agent,
         worktree: worktree.display().to_string(),
+        setup_log,
     })
+}
+
+/// The setup commands of the repository whose main checkout is `root`.
+fn setup_commands(shared: &Shared, root: &Path) -> Vec<String> {
+    shared
+        .settings
+        .repo_at(root)
+        .map(|(_, repo)| repo.setup.clone())
+        .unwrap_or_default()
+}
+
+/// Runs the repository's setup commands in the agent's new worktree
+/// (ADR 0017), in order, and returns the log they wrote. Meanwhile the agent
+/// is shown launching, with the command that runs. The first command that
+/// fails or runs out of time marks the agent failed and fails the launch.
+async fn set_up(
+    shared: &Arc<Shared>,
+    agent: AgentId,
+    target: &Target,
+    worktree: &Path,
+    branch: &str,
+    commands: &[String],
+) -> Result<PathBuf, DaemonError> {
+    let log_path = shared.paths.agent_dir(agent).join("setup.log");
+    let mut log = String::new();
+    for command in commands {
+        let shown = command.lines().next().unwrap_or_default().trim();
+        launching(shared, agent, Some(format!("setting up: {shown}"))).await?;
+        let invocation = Invocation::new(SETUP_SHELL, SETUP_TIMEOUT)
+            .arg("-c")
+            .arg(command.as_str())
+            .cwd(worktree)
+            .env("VOLEE_REPO", &target.name)
+            .env("VOLEE_REPO_ROOT", &target.root)
+            .env("VOLEE_WORKTREE", worktree)
+            .env("VOLEE_BRANCH", branch)
+            .env("VOLEE_BASE", &target.base);
+        let ran = blocking(move || SystemRunner.run(&invocation)).await?;
+        let failure = record_setup_step(&mut log, command, ran);
+        write_setup_log(&log_path, &log)?;
+        if let Some(reason) = failure {
+            let mut state = shared.state.lock().await;
+            let now = state.now();
+            state.commit(vec![Event::new(
+                now,
+                EventKind::StateChanged {
+                    agent,
+                    state: AgentState::Failed,
+                    detail: Some(format!("setup failed: `{shown}` {reason}")),
+                },
+            )])?;
+            return Err(DaemonError::SetupFailed {
+                command: command.clone(),
+                reason,
+                log: log_path,
+            });
+        }
+    }
+    launching(shared, agent, None).await?;
+    Ok(log_path)
+}
+
+/// Appends what one setup command printed, and how it ended, to `log`;
+/// returns why it failed, if it did: `exited with status 1: <its last line>`.
+fn record_setup_step(
+    log: &mut String,
+    command: &str,
+    ran: Result<Output, RunError>,
+) -> Option<String> {
+    log.push_str("$ ");
+    log.push_str(command);
+    log.push('\n');
+    match ran {
+        Ok(output) => {
+            for stream in [&output.stdout, &output.stderr] {
+                let text = String::from_utf8_lossy(stream);
+                log.push_str(&text);
+                if !text.is_empty() && !text.ends_with('\n') {
+                    log.push('\n');
+                }
+            }
+            if output.is_success() {
+                return None;
+            }
+            let status = output.code.map_or_else(
+                || "was stopped by a signal".to_owned(),
+                |code| format!("exited with status {code}"),
+            );
+            note(log, &status);
+            let last = [&output.stderr, &output.stdout]
+                .into_iter()
+                .find_map(|stream| {
+                    String::from_utf8_lossy(stream)
+                        .lines()
+                        .map(str::trim)
+                        .rfind(|line| !line.is_empty())
+                        .map(str::to_owned)
+                });
+            Some(match last {
+                Some(line) => format!("{status}: {line}"),
+                None => status,
+            })
+        }
+        Err(RunError::TimedOut { .. }) => {
+            let reason = format!(
+                "did not finish within {} minutes and was killed",
+                SETUP_TIMEOUT.as_secs() / 60
+            );
+            note(log, &reason);
+            Some(reason)
+        }
+        Err(error) => {
+            let reason = format!("could not run: {error}");
+            note(log, &reason);
+            Some(reason)
+        }
+    }
+}
+
+/// Appends how a setup command ended to `log`, on a line of its own.
+fn note(log: &mut String, ending: &str) {
+    log.push('[');
+    log.push_str(ending);
+    log.push_str("]\n");
+}
+
+/// Writes the setup log in the agent's private directory.
+fn write_setup_log(path: &Path, log: &str) -> Result<(), DaemonError> {
+    std::fs::write(path, log).map_err(|source| DaemonError::Write {
+        path: path.to_owned(),
+        source,
+    })
+}
+
+/// Marks a registered agent as launching, with `detail` (`None` clears it).
+async fn launching(
+    shared: &Arc<Shared>,
+    agent: AgentId,
+    detail: Option<String>,
+) -> Result<(), DaemonError> {
+    let mut state = shared.state.lock().await;
+    let now = state.now();
+    state.commit(vec![Event::new(
+        now,
+        EventKind::StateChanged {
+            agent,
+            state: AgentState::Launching,
+            detail,
+        },
+    )])?;
+    Ok(())
 }
 
 /// Launches the coordinator of a new mission, in the main checkout of its

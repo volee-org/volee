@@ -768,3 +768,101 @@ async fn a_mission_launches_at_most_its_limit_even_all_at_once() {
         "two and the coordinator"
     );
 }
+
+#[tokio::test]
+async fn setup_commands_prepare_the_worktree_before_the_session_starts() {
+    let daemon = start_with(concat!(
+        "setup = [\n",
+        "  'printf \"%s|%s|%s\" \"$VOLEE_REPO\" \"$VOLEE_BRANCH\" \"$VOLEE_BASE\" > env.txt',\n",
+        "  'echo one >> order.txt',\n",
+        "  'echo two >> order.txt; echo installed',\n",
+        "  'printf \"%s\\n%s\" \"$VOLEE_WORKTREE\" \"$VOLEE_REPO_ROOT\" > paths.txt',\n",
+        "]\n",
+    ));
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let spawned = client.call::<Spawn>(worker("feat/setup")).await.unwrap();
+    let worktree = daemon.repo.join(".claude/worktrees/feat-setup");
+    // In the new worktree, in order, with what they need to know.
+    let read = |name: &str| std::fs::read_to_string(worktree.join(name)).unwrap();
+    assert_eq!(read("env.txt"), "alpha|feat/setup|main");
+    assert_eq!(read("order.txt"), "one\ntwo\n");
+    assert_eq!(
+        read("paths.txt"),
+        format!("{}\n{}", worktree.display(), daemon.repo.display())
+    );
+    // Then the session starts.
+    assert_eq!(daemon.harness.launches().len(), 1);
+    // What they printed is in the log, which the answer names.
+    let log = spawned.setup_log.expect("a setup log");
+    assert!(log.ends_with("setup.log"), "{log}");
+    let text = std::fs::read_to_string(&log).unwrap();
+    assert!(text.contains("$ echo one >> order.txt\n"), "{text}");
+    assert!(text.contains("installed\n"), "{text}");
+    // The agent no longer says it is setting up.
+    let registry = registry(&daemon.socket).await;
+    let agent = registry.agent(spawned.agent).unwrap();
+    assert_eq!(agent.state, AgentState::Launching);
+    assert_eq!(agent.detail, None);
+}
+
+#[tokio::test]
+async fn a_failing_setup_keeps_the_worktree_and_runs_again_with_the_launch() {
+    // The second command fails until a file appears next to the repository.
+    let daemon = start_with(concat!(
+        "setup = [\n",
+        "  'echo preparing',\n",
+        "  'test -f \"$VOLEE_REPO_ROOT/../go\" || { echo \"the lockfile is stale\" >&2; exit 3; }',\n",
+        "  'echo done > ../setup-ran-to-the-end',\n",
+        "]\n",
+    ));
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let error = rpc_error(
+        client
+            .call::<Spawn>(worker("feat/setup"))
+            .await
+            .unwrap_err(),
+    );
+    assert_eq!(error.code, rpc::REFUSED);
+    assert!(
+        error
+            .message
+            .contains("exited with status 3: the lockfile is stale")
+            && error.message.contains("setup.log")
+            && error.message.contains("kept the worktree")
+            && error.message.contains("run the same command again"),
+        "{}",
+        error.message
+    );
+    // No session, the rest of the setup skipped, the worktree kept.
+    assert_eq!(daemon.harness.launches().len(), 0);
+    let worktree = daemon.repo.join(".claude/worktrees/feat-setup");
+    assert!(worktree.is_dir());
+    assert!(!worktree.join("../setup-ran-to-the-end").exists());
+    let registry = registry(&daemon.socket).await;
+    let agent = registry.agents().next().unwrap();
+    assert_eq!(agent.state, AgentState::Failed);
+    assert_eq!(
+        agent.detail.as_deref(),
+        Some(
+            "setup failed: `test -f \"$VOLEE_REPO_ROOT/../go\" || { echo \"the lockfile is \
+             stale\" >&2; exit 3; }` exited with status 3: the lockfile is stale"
+        )
+    );
+
+    // Once fixed, the same command reuses the untouched worktree and sets
+    // it up again.
+    std::fs::write(daemon.repo.join("../go"), "").unwrap();
+    let spawned = client.call::<Spawn>(worker("feat/setup")).await.unwrap();
+    assert_eq!(PathBuf::from(&spawned.worktree), worktree);
+    assert!(worktree.join("../setup-ran-to-the-end").exists());
+    assert_eq!(daemon.harness.launches().len(), 1);
+}
+
+#[tokio::test]
+async fn a_repository_without_setup_starts_at_once() {
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let spawned = client.call::<Spawn>(worker("feat/plain")).await.unwrap();
+    assert_eq!(spawned.setup_log, None);
+    assert_eq!(daemon.harness.launches().len(), 1);
+}

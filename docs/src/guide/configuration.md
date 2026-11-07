@@ -25,6 +25,7 @@ wake_timeout = 3600
 path = "~/code/billing"
 base = "develop"
 model = "sonnet"
+setup = ["bun install"]
 
 [tui]
 theme = "catppuccin-mocha"
@@ -67,6 +68,36 @@ and `.`.
 | `path` | yes | The main checkout. `~` is expanded. A folder inside another repository is refused, so that agents never land in the repository around it. |
 | `base` | no | The branch work starts from. The repository's default branch when unset. |
 | `model` | no | Model for this repository's agents. |
+| `setup` | no | Commands that prepare each new worktree before its agent starts, such as `["bun install"]`. See below. |
+
+### Setup commands
+
+A new worktree holds the tracked files only: no dependencies, and none of
+the files git ignores. `setup` prepares it before the agent starts
+([ADR 0017](../adr/0017-setup-commands-for-new-worktrees.md)):
+
+```toml
+[repos.shop]
+path = "~/code/shop"
+setup = [
+  "cp \"$VOLEE_REPO_ROOT/.env.local\" .",
+  "bun install",
+]
+```
+
+The daemon runs the commands in order, each with `sh -c`, in the new
+worktree. Besides the daemon's environment, they get `VOLEE_REPO` (the
+repository's name), `VOLEE_REPO_ROOT` (its main checkout), `VOLEE_WORKTREE`,
+`VOLEE_BRANCH` and `VOLEE_BASE`. Each may run for 15 minutes. Meanwhile the
+agent is listed as launching, with the command that runs; what the commands
+print goes to `setup.log` in the agent's folder of volee's state directory.
+
+If a command fails, the launch fails: no session starts, the worktree and
+branch stay, and the agent is listed as failed with the command and the last
+line it printed. Fix the cause and run the same `volee spawn` again: volee
+reuses the worktree when nothing changed in it, and runs the setup again, so
+keep the commands safe to run twice. A mission's coordinator works in the
+main checkout and runs no setup.
 
 ## `[messages]`
 

@@ -23,6 +23,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0014](0014-agents-of-other-harnesses-join-through-mcp.md) | Agents of other harnesses join through MCP | Accepted |
 | [0015](0015-tuios-location-adapter.md) | tuios is the first location adapter | Accepted |
 | [0016](0016-what-a-failed-launch-left-untouched.md) | Reuse or tidy what a failed launch left untouched (refines 0011) | Accepted |
+| [0017](0017-setup-commands-for-new-worktrees.md) | Setup commands prepare a new worktree before its agent starts | Accepted |
 
 ## Not built yet
 
