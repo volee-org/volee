@@ -34,10 +34,16 @@ deliberately out of scope. Dates are targets, not promises.
 | Forget from the interface | The interface forgets an agent that no longer runs, like `volee forget` | Done |
 | Fixes from the 0.2 review | The forge line of `volee daemon status`, focus steps for tuios panes on the daemon's server | Done |
 
+## 0.4: more places agents run
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| tmux panes | Claude Code sessions in tmux panes are shown, previewed and reached from the interface, like tuios panes | Done |
+
 ## Later
 
-- Location adapters for tmux and Zellij (jump to a pane-hosted agent); tuios
-  has one ([ADR 0015](../adr/0015-tuios-location-adapter.md)).
+- A location adapter for Zellij (jump to a pane-hosted agent); tuios and tmux
+  have one ([ADR 0015](../adr/0015-tuios-location-adapter.md)).
 - Other harnesses: Codex CLI, Gemini CLI (discovery and messaging first).
   Agents of any MCP-capable harness can already
   [join](../guide/other-harnesses.md) through `volee mcp --join`; discovering

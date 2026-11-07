@@ -33,9 +33,9 @@ Everything on the screen comes from the daemon, and so do the actions:
 | What | What the daemon uses |
 | --- | --- |
 | The agents, their states and messages | Its own records, kept up to date as sessions come and go. |
-| The preview of an agent's screen | Claude Code, which replays the session's output (`claude logs`); tuios, for a session in one of its panes (`capture-pane`). |
+| The preview of an agent's screen | Claude Code, which replays the session's output (`claude logs`); tuios or tmux, for a session in one of their panes (`capture-pane`). |
 | An agent's changes (`d`) | git, in the agent's worktree or folder. |
-| Taking over an agent (`a`) | Claude Code, which attaches the session (`claude attach`); tuios, which brings forward the pane of a session in one of its panes. |
+| Taking over an agent (`a`) | Claude Code, which attaches the session (`claude attach`); tuios or tmux, which bring forward the pane of a session in one of their panes. |
 | Writing to an agent (`m`) | Its own records and the agent's hooks. |
 
 When the daemon cannot do something, because Claude Code or git is
@@ -399,8 +399,21 @@ tell volee which session runs in which pane; without them, volee follows
 the session's process to its pane. Nothing is required: without tuios,
 these sessions are listed as before, and `volee daemon status` says
 whether volee found tuios
-([ADR 0015](../adr/0015-tuios-location-adapter.md)). tmux and Zellij are
-not supported yet.
+([ADR 0015](../adr/0015-tuios-location-adapter.md)).
+
+### Agents in tmux panes
+
+A Claude Code session you started by hand in a [tmux](https://github.com/tmux/tmux)
+pane is found the same way, when tmux is installed and its server runs: volee
+follows the session's process to the pane that runs it. The Detail panel
+says `tmux · work`, the preview is the pane's screen, and `a` makes the pane
+current in its window and session, then switches your tmux client to it when
+volee runs inside tmux. With no client attached, volee says how to see it:
+`tmux attach -t <session>`.
+
+The daemon uses the default tmux server, or the one `TMUX` names when you
+run `volee daemon run` yourself inside tmux, and every command it runs or
+shows names that server. Zellij is not supported yet.
 
 ## Forgetting an agent
 
