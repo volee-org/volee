@@ -53,6 +53,18 @@ pub(crate) fn key(model: &mut Model, code: KeyCode) -> Vec<Effect> {
     )
 }
 
+/// A letter with Ctrl held, such as `ctrl-s`.
+pub(crate) fn ctrl(model: &mut Model, letter: char) -> Vec<Effect> {
+    update(
+        model,
+        Msg::Key(KeyEvent::new_with_kind(
+            KeyCode::Char(letter),
+            KeyModifiers::CONTROL,
+            KeyEventKind::Press,
+        )),
+    )
+}
+
 /// Characters typed one after the other.
 pub(crate) fn press(model: &mut Model, keys: &str) -> Vec<Effect> {
     keys.chars()

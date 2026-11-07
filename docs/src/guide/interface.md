@@ -42,9 +42,12 @@ When the daemon cannot do something, because Claude Code or git is
 missing, because the agent runs in a terminal of its own, or because the
 daemon is older than the interface, volee says so in a sentence where the
 result would be, such as "No preview: dashboard runs in a terminal of its
-own: switch to that terminal to see or control it", and goes on working. If
-the daemon stops while volee runs, the top bar shows `offline` and the
-screen stops changing; start `volee` again to reconnect.
+own: switch to that terminal to see or control it", and goes on working.
+With no agent yet, the views say how agents get there; when the daemon
+cannot use Claude Code at all (missing, or too old), they say so instead,
+and `volee daemon status` says why. If the daemon stops while volee runs,
+the top bar shows `offline` and the screen stops changing; start `volee`
+again to reconnect.
 
 The theme, the keys and reduced motion come from the `[tui]` table of the
 [configuration](configuration.md), as for the demo.
@@ -352,11 +355,14 @@ delivers branches and pull requests, `analysis` reports), its repositories
 and its goal; volee launches its coordinator.
 
 `Tab` moves between fields, `←` and `→` choose, `space` picks a
-repository, `Alt+Enter` or `Ctrl+J` starts a new line in the task or the
-goal, and `Enter` launches. When volee refuses (a repository Claude Code
-does not trust yet, a branch that already exists...), the dialog stays
-open and says why, so you can fix it and launch again. The new agent is
-selected as soon as it appears.
+repository, and `Enter` starts a new line in the task or the goal (it moves
+to the next field from the others). `Ctrl+S` launches, from any field:
+`Enter` never does, so a task you are still writing cannot start an agent.
+If your terminal or multiplexer keeps `Ctrl+S` for itself (Zellij's scroll
+mode does), move `launch` to another key under `[tui.keys]`. When volee
+refuses (a repository Claude Code does not trust yet, a branch that
+already exists...), the dialog stays open and says why, so you can fix it
+and launch again. The new agent is selected as soon as it appears.
 
 ## Taking over an agent
 
@@ -557,10 +563,10 @@ take-over = "ctrl-a"
 
 | Keys | What it does | Action |
 | --- | --- | --- |
+| `ctrl-s` | launch the agent, or create the mission | `launch` |
 | `tab` | next field | `next-field` |
 | `shift-tab` | previous field | `previous-field` |
-| `enter` | launch | `apply` |
-| `alt-enter`, `ctrl-j` | start a new line in the task or the goal | `new-line` |
+| `enter`, `alt-enter`, `ctrl-j` | a new line in the task or the goal, the next field elsewhere | `new-line` |
 | `esc` | cancel | `back` |
 | `ctrl-c` | quit volee | `quit` |
 

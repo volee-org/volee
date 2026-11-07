@@ -9,14 +9,15 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::mpsc;
+use volee_core::harness::HarnessKind;
 use volee_core::message::Party;
 use volee_core::role::Role;
 use volee_core::{AgentId, Event, MessageId, ThreadId};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     AgentParams, Attach, CreateMission, CreateMissionParams, Diff, DiffParams, MarkRead,
-    MarkReadParams, Preview, SendMessage, SendParams, Spawn, SpawnParams, Summarize,
-    SummarizeParams,
+    MarkReadParams, Preview, SendMessage, SendParams, Spawn, SpawnParams, Status, StatusParams,
+    Summarize, SummarizeParams,
 };
 use volee_proto::replica::{self, Feed, FeedEnd, ReplicaError, Updates};
 use volee_proto::rpc;
@@ -50,6 +51,8 @@ const BACKLOG: usize = 1_024;
 pub struct DaemonSource {
     client: Arc<Client>,
     feed: Mutex<Option<Feed>>,
+    /// Whether the daemon found a Claude Code it can use.
+    claude_code_available: bool,
 }
 
 impl DaemonSource {
@@ -60,14 +63,26 @@ impl DaemonSource {
     ///
     /// The subscription is interactive: while the interface is open, the
     /// daemon looks for new sessions every few seconds, and it looks once
-    /// right away so the interface opens on fresh data.
+    /// right away so the interface opens on fresh data. The daemon's status
+    /// says first whether it found a Claude Code it can use.
     pub async fn connect(mut client: Client) -> Result<Self, SourceError> {
+        let status = client
+            .call::<Status>(StatusParams {
+                protocol: volee_proto::PROTOCOL_VERSION,
+            })
+            .await
+            .map_err(|error| failure(error, "cannot ask the volee daemon for its status"))?;
+        let claude_code_available = status
+            .harnesses
+            .iter()
+            .any(|harness| harness.kind == HarnessKind::ClaudeCode && harness.available);
         let feed = replica::subscribe_interactive(&mut client)
             .await
             .map_err(cannot_follow)?;
         Ok(Self {
             client: Arc::new(client),
             feed: Mutex::new(Some(feed)),
+            claude_code_available,
         })
     }
 }
@@ -95,6 +110,7 @@ impl DaemonSource {
         Ok(Subscription {
             snapshot: feed.backlog,
             updates,
+            claude_code_available: self.claude_code_available,
         })
     }
 }

@@ -27,7 +27,7 @@ use crate::app::Model;
 use crate::history::{Mark, MarkKind};
 use crate::text;
 use crate::theme::StyleRole;
-use crate::widgets::{put_spans, state_glyph, truncated};
+use crate::widgets::{placeholder, put_spans, state_glyph, truncated};
 
 /// The steps of the time scale, in milliseconds per column.
 pub(crate) const STEPS: [i64; 13] = [
@@ -466,17 +466,14 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
     let geometry = state.geometry;
     if state.lanes.is_empty() {
         let message = if model.registry.agents().next().is_none() {
-            "No agents yet: their states and messages will show here as they come."
+            model
+                .settings
+                .without_claude_code()
+                .unwrap_or("No agents yet: their states and messages will show here as they come.")
         } else {
             "No agent matches the filter."
         };
-        put_spans(
-            buf,
-            area.x + 1,
-            area.y,
-            &[Span::styled(message, theme.style(StyleRole::Placeholder))],
-            area.width.saturating_sub(1),
-        );
+        placeholder(model, message, area, buf);
         return;
     }
     let window = state.window(model.now);

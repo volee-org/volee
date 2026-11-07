@@ -585,7 +585,9 @@ mod tests {
         let start = Timestamp::from_millis(1_793_986_617_000);
         let clock = ManualClock::new(start);
         let source = DemoSource::new(Arc::new(clock.clone()));
-        let Subscription { snapshot, updates } = source.subscribe().await.unwrap();
+        let Subscription {
+            snapshot, updates, ..
+        } = source.subscribe().await.unwrap();
         let (mut screen, send) = screen(120, 40);
         let mut model = Model::new(Theme::default(), Keymap::default(), None, (120, 40), start);
         type_later(
@@ -618,7 +620,9 @@ mod tests {
         let start = Timestamp::from_millis(1_793_986_617_000);
         let clock = ManualClock::new(start);
         let source = DemoSource::new(Arc::new(clock.clone()));
-        let Subscription { snapshot, updates } = source.subscribe().await.unwrap();
+        let Subscription {
+            snapshot, updates, ..
+        } = source.subscribe().await.unwrap();
         let (mut screen, send) = screen(120, 40);
         let mut model = Model::new(Theme::default(), Keymap::default(), None, (120, 40), start);
         let tools = crate::demo::agent_id(start, crate::demo::INVOICE_TOOLS);
@@ -671,7 +675,9 @@ mod tests {
         let start = Timestamp::from_millis(1_793_986_617_000);
         let clock = ManualClock::new(start);
         let source = DemoSource::new(Arc::new(clock.clone()));
-        let Subscription { snapshot, updates } = source.subscribe().await.unwrap();
+        let Subscription {
+            snapshot, updates, ..
+        } = source.subscribe().await.unwrap();
         let (mut screen, send) = screen(80, 24);
         let mut model = Model::new(Theme::default(), Keymap::default(), None, (80, 24), start);
         let tower = crate::demo::agent_id(start, crate::demo::TOWER);

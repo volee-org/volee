@@ -35,18 +35,18 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
         return;
     }
     if model.rail.is_empty() {
-        let message = if model.registry.agents().next().is_none() {
+        let message = if model.registry.agents().next().is_some() {
+            "No agent matches the filter"
+        } else if model.layout.view.is_some() {
+            // The view next to the list says more, with more room.
             "No agents yet"
         } else {
-            "No agent matches the filter"
+            model
+                .settings
+                .without_claude_code()
+                .unwrap_or("No agents yet")
         };
-        put_spans(
-            buf,
-            inner.x + 1,
-            inner.y,
-            &[Span::styled(message, theme.style(StyleRole::Placeholder))],
-            inner.width.saturating_sub(1),
-        );
+        super::placeholder(model, message, inner, buf);
         return;
     }
     let height = model.rail_row_height();

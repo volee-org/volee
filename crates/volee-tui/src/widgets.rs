@@ -104,6 +104,42 @@ pub(crate) fn truncated<'a>(spans: &[Span<'a>], max: u16) -> Vec<Span<'a>> {
     out
 }
 
+/// Writes a message that stands in for missing content, wrapped to the
+/// width of `area`, from its first row, one cell in.
+pub(crate) fn placeholder(model: &Model, message: &str, area: Rect, buf: &mut Buffer) {
+    put_placeholder(model, message, area, false, buf);
+}
+
+/// The same, in the middle of `area`: for a view with nothing else to show.
+pub(crate) fn centered_placeholder(model: &Model, message: &str, area: Rect, buf: &mut Buffer) {
+    put_placeholder(model, message, area, true, buf);
+}
+
+fn put_placeholder(model: &Model, message: &str, area: Rect, centered: bool, buf: &mut Buffer) {
+    let area = area.intersection(buf.area);
+    if area.width < 3 || area.height == 0 {
+        return;
+    }
+    let rows = text::wrap(message, usize::from(area.width - 2));
+    let height = u16::try_from(rows.len()).unwrap_or(u16::MAX);
+    let top = if centered {
+        area.y + area.height.saturating_sub(height) / 2
+    } else {
+        area.y
+    };
+    let style = model.theme.style(StyleRole::Placeholder);
+    for ((start, end), y) in rows.into_iter().zip(top..area.bottom()) {
+        let row = &message[start..end];
+        let x = if centered {
+            let used = u16::try_from(text::width(row)).unwrap_or(area.width);
+            area.x + area.width.saturating_sub(used) / 2
+        } else {
+            area.x + 1
+        };
+        buf.set_stringn(x, y, row, usize::from(area.right() - x), style);
+    }
+}
+
 /// Writes spans from (`x`, `y`) without going past `max` cells.
 pub(crate) fn put_spans(buf: &mut Buffer, x: u16, y: u16, spans: &[Span<'_>], max: u16) -> u16 {
     let mut used = 0;

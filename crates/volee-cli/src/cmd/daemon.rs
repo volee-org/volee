@@ -142,13 +142,15 @@ pub(crate) async fn status() -> Result<()> {
     println!("  socket   {}", paths.socket.display());
     println!("  database {}", paths.database().display());
     for harness in &status.harnesses {
-        let version = harness.version.as_deref().unwrap_or("unknown version");
-        let state = if harness.available {
-            "available"
+        if harness.available {
+            let version = harness.version.as_deref().unwrap_or("unknown version");
+            println!("  harness  {} {version}, available", harness.kind);
         } else {
-            "unavailable"
-        };
-        println!("  harness  {} {version}, {state}", harness.kind);
+            // The interface sends people here when it cannot use Claude
+            // Code: say why, such as not found or too old.
+            let reason = harness.detail.as_deref().unwrap_or("unknown reason");
+            println!("  harness  {} unavailable: {reason}", harness.kind);
+        }
     }
     if let Some(forge) = &status.forge {
         let version = forge.version.as_deref().unwrap_or("unknown version");

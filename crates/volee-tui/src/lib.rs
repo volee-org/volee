@@ -122,7 +122,11 @@ pub enum TuiError {
 /// agent suspends the interface, runs the command of [`Source::attach`] in
 /// this terminal, and comes back to the same agent.
 pub async fn run(source: impl Source, options: Options) -> Result<(), TuiError> {
-    let Subscription { snapshot, updates } = source.subscribe().await?;
+    let Subscription {
+        snapshot,
+        updates,
+        claude_code_available,
+    } = source.subscribe().await?;
     let mut screen = TerminalScreen::enter()?;
     let size = run::Screen::size(&screen)?;
     let mut model = Model::new(
@@ -134,6 +138,7 @@ pub async fn run(source: impl Source, options: Options) -> Result<(), TuiError> 
     );
     model.settings.tools = options.tools;
     model.settings.repos = options.repos;
+    model.settings.claude_code_available = claude_code_available;
     if options.reduced_motion {
         model.motion = Motion::Reduced;
     }

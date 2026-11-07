@@ -174,31 +174,40 @@ pub(crate) fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>
     match action {
         Some(Action::Back) => model.overlay = None,
         Some(Action::Quit) => crate::app::request_quit(model, effects),
-        Some(Action::NextField | Action::PreviousField) => {
-            let count = dialog.fields.len();
-            dialog.focus = if action == Some(Action::NextField) {
-                (dialog.focus + 1) % count
-            } else {
-                (dialog.focus + count - 1) % count
-            };
-        }
-        Some(Action::Apply) => submit(dialog, effects),
-        _ if dialog.sending => {}
-        Some(Action::NewLine) => {
-            if let Some(Field {
+        Some(Action::NextField) => move_focus(dialog, true),
+        Some(Action::PreviousField) => move_focus(dialog, false),
+        Some(Action::Launch) => submit(dialog, effects),
+        // Enter: the task and the goal take several lines, and a launch
+        // needs its own key, so Enter only moves on from the other fields.
+        Some(Action::NewLine) => match dialog.fields.get_mut(dialog.focus) {
+            Some(Field {
                 value: Value::Lines(field),
                 ..
-            }) = dialog.fields.get_mut(dialog.focus)
-            {
-                field.insert("\n");
+            }) => {
+                if !dialog.sending {
+                    field.insert("\n");
+                }
             }
-        }
+            _ => move_focus(dialog, true),
+        },
+        _ if dialog.sending => {}
         _ => {
             if let Some(field) = dialog.fields.get_mut(dialog.focus) {
                 edit(&mut field.value, key);
             }
         }
     }
+}
+
+/// Gives the keyboard to the next field, or the previous one, round the
+/// dialog.
+fn move_focus(dialog: &mut LaunchDialog, forward: bool) {
+    let count = dialog.fields.len().max(1);
+    dialog.focus = if forward {
+        (dialog.focus + 1) % count
+    } else {
+        (dialog.focus + count - 1) % count
+    };
 }
 
 /// Pasted text goes to the focused text field.
@@ -501,10 +510,23 @@ mod tests {
 
         use super::*;
         use crate::app::{Msg, update};
-        use crate::test_support::{key, model, press, start};
+        use crate::test_support::{ctrl, key, model, press, start};
 
         fn new_agent() -> AgentId {
             AgentId::from_ulid(ulid::Ulid::from_parts(9, 9))
+        }
+
+        fn launches(effects: &[Effect]) -> bool {
+            effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::Spawn(_) | Effect::CreateMission(_)))
+        }
+
+        fn focused(model: &Model) -> (usize, String) {
+            let Some(Overlay::Launch(dialog)) = &model.overlay else {
+                panic!("the dialog closed");
+            };
+            (dialog.focus, dialog.fields[dialog.focus].value.text())
         }
 
         #[test]
@@ -518,7 +540,7 @@ mod tests {
             key(&mut model, KeyCode::Tab);
             // `q` and `n` type: the dialog owns the keys.
             press(&mut model, "quick note");
-            let effects = key(&mut model, KeyCode::Enter);
+            let effects = ctrl(&mut model, 's');
             assert!(
                 matches!(effects.as_slice(), [Effect::Spawn(_)]),
                 "{effects:?}"
@@ -563,7 +585,7 @@ mod tests {
             key(&mut model, KeyCode::Tab);
             press(&mut model, "Export invoices.");
             assert!(matches!(
-                key(&mut model, KeyCode::Enter).as_slice(),
+                ctrl(&mut model, 's').as_slice(),
                 [Effect::CreateMission(_)]
             ));
             update(
@@ -591,6 +613,69 @@ mod tests {
             let notice = model.notice.as_ref().unwrap();
             assert!(notice.error);
             assert!(notice.text.starts_with("Mission created, but"));
+        }
+
+        #[test]
+        fn enter_moves_on_or_starts_a_line_and_never_launches() {
+            let mut model = model(120, 40);
+            model.settings.repos = vec!["billing".into()];
+            press(&mut model, "n");
+            // From the repository and the branch, Enter moves on.
+            assert!(!launches(&key(&mut model, KeyCode::Enter)));
+            press(&mut model, "feat/export");
+            assert!(!launches(&key(&mut model, KeyCode::Enter)));
+            // In the task, with everything a launch needs filled in, it
+            // starts a new line.
+            press(&mut model, "Export invoices.");
+            assert!(!launches(&key(&mut model, KeyCode::Enter)));
+            press(&mut model, "One file per month.");
+            assert_eq!(
+                focused(&model),
+                (2, "Export invoices.\nOne file per month.".to_owned())
+            );
+            // From the last field, Enter goes round to the first.
+            key(&mut model, KeyCode::Tab);
+            assert!(!launches(&key(&mut model, KeyCode::Enter)));
+            assert_eq!(focused(&model).0, 0);
+            // Only ctrl-s launches, with the whole task.
+            assert_eq!(
+                ctrl(&mut model, 's'),
+                [Effect::Spawn(SpawnRequest {
+                    repo: "billing".into(),
+                    branch: "feat/export".into(),
+                    task: "Export invoices.\nOne file per month.".into(),
+                    model: None,
+                })]
+            );
+        }
+
+        #[test]
+        fn a_mission_s_goal_takes_several_lines() {
+            let mut model = model(120, 40);
+            model.settings.repos = vec!["billing".into()];
+            press(&mut model, "N");
+            press(&mut model, "Export");
+            // Title, kind, then repositories: Enter moves on.
+            key(&mut model, KeyCode::Enter);
+            key(&mut model, KeyCode::Enter);
+            key(&mut model, KeyCode::Char(' '));
+            key(&mut model, KeyCode::Enter);
+            press(&mut model, "Export invoices.");
+            assert!(!launches(&key(&mut model, KeyCode::Enter)));
+            press(&mut model, "Then report.");
+            assert_eq!(
+                focused(&model),
+                (3, "Export invoices.\nThen report.".to_owned())
+            );
+            assert_eq!(
+                ctrl(&mut model, 's'),
+                [Effect::CreateMission(MissionRequest {
+                    title: "Export".into(),
+                    kind: MissionKind::Change,
+                    repos: vec!["billing".into()],
+                    goal: "Export invoices.\nThen report.".into(),
+                })]
+            );
         }
 
         #[test]

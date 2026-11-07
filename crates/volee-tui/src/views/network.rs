@@ -35,7 +35,7 @@ use crate::theme::StyleRole;
 use crate::widgets::braille::{Dot, Pen, Raster};
 use crate::widgets::canvas::Canvas;
 use crate::widgets::card::{self, CardContext, NAME_MAX};
-use crate::widgets::{put_spans, state_glyph, truncated};
+use crate::widgets::{centered_placeholder, put_spans, state_glyph, truncated};
 
 /// A node of the network.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -638,21 +638,13 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
     if area.intersection(buf.area) != area || area.is_empty() {
         return;
     }
-    let theme = &model.theme;
     let state = &model.network;
     let graph = &state.graph;
     if graph.nodes.is_empty() || state.scene.spots.len() != graph.nodes.len() {
-        let line = text::truncate(
+        let message = model.settings.without_claude_code().unwrap_or(
             "No agents yet. Start Claude Code anywhere, or launch one with volee spawn.",
-            usize::from(area.width),
         );
-        let width = u16::try_from(text::width(&line)).unwrap_or(0);
-        buf.set_string(
-            area.x + area.width.saturating_sub(width) / 2,
-            area.y + area.height / 2,
-            line,
-            theme.style(StyleRole::Placeholder),
-        );
+        centered_placeholder(model, message, area, buf);
         return;
     }
     let (graph_area, footer) = split(area);
