@@ -10,15 +10,17 @@ use volee_proto::client::Client;
 use volee_proto::methods::{AgentParams, Attach, Diff, DiffParams, Preview, Stop};
 
 use crate::connect::connect_or_start;
-use crate::resolve;
+use crate::{resolve, text};
 
-/// The agent `input` names, with its display name.
+/// The agent `input` names, with its display name, safe to print: an agent
+/// that a coordinator launched got its name from a model.
 async fn agent(client: &Client, input: &str) -> Result<(AgentId, String)> {
     let registry = resolve::registry(client).await?;
     let id = resolve::agent(&registry, input)?;
-    let name = registry
-        .agent(id)
-        .map_or_else(|| id.short(), |agent| agent.name.clone());
+    let name = registry.agent(id).map_or_else(
+        || id.short(),
+        |agent| text::one_line(&agent.name).into_owned(),
+    );
     Ok((id, name))
 }
 
