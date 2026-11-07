@@ -343,6 +343,7 @@ mod tests {
             url: String::new(),
             state,
             checks,
+            head: None,
         };
         let before = Delivery {
             commits: 2,
