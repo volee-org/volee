@@ -503,45 +503,7 @@ impl Scene {
         direction: Direction,
         allowed: impl Fn(AgentId) -> bool,
     ) -> Option<AgentId> {
-        let targets = self.targets();
-        let origin = targets.iter().find(|(id, _)| *id == from)?.1;
-        // Distance between two intervals, zero when they overlap.
-        let gap = |a0: u16, a1: u16, b0: u16, b1: u16| -> u32 {
-            u32::from(b0.saturating_sub(a1).max(a0.saturating_sub(b1)))
-        };
-        // Twice the center, to stay in integers.
-        let center = |start: u16, length: u16| i32::from(start) * 2 + i32::from(length);
-        targets
-            .iter()
-            .filter(|(id, _)| *id != from && allowed(*id))
-            .filter_map(|(id, rect)| {
-                let (distance, misalignment, offset) = match direction {
-                    Direction::Down if rect.y >= origin.bottom() => (
-                        u32::from(rect.y - origin.bottom()),
-                        gap(origin.x, origin.right(), rect.x, rect.right()),
-                        center(rect.x, rect.width) - center(origin.x, origin.width),
-                    ),
-                    Direction::Up if rect.bottom() <= origin.y => (
-                        u32::from(origin.y - rect.bottom()),
-                        gap(origin.x, origin.right(), rect.x, rect.right()),
-                        center(rect.x, rect.width) - center(origin.x, origin.width),
-                    ),
-                    Direction::Right if rect.x >= origin.right() => (
-                        u32::from(rect.x - origin.right()),
-                        gap(origin.y, origin.bottom(), rect.y, rect.bottom()),
-                        center(rect.y, rect.height) - center(origin.y, origin.height),
-                    ),
-                    Direction::Left if rect.right() <= origin.x => (
-                        u32::from(origin.x - rect.right()),
-                        gap(origin.y, origin.bottom(), rect.y, rect.bottom()),
-                        center(rect.y, rect.height) - center(origin.y, origin.height),
-                    ),
-                    _ => return None,
-                };
-                Some(((distance + 2 * misalignment, offset.unsigned_abs()), *id))
-            })
-            .min_by_key(|(score, _)| *score)
-            .map(|(_, id)| id)
+        super::spatial::nearest(&self.targets(), from, direction, allowed)
     }
 }
 

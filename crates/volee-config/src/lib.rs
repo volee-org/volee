@@ -155,6 +155,9 @@ pub struct Tui {
     pub theme: Option<String>,
     /// Key overrides, by action name. Interpreted by the interface.
     pub keys: BTreeMap<String, String>,
+    /// No travelling animations: message pulses become short highlights
+    /// and spinners stop.
+    pub reduced_motion: bool,
 }
 
 impl Config {
@@ -318,6 +321,13 @@ mod tests {
         );
         assert_eq!(PermissionMode::DontAsk.as_flag(), "dontAsk");
         assert!(parse("[agents]\npermission_mode = \"bypassPermissions\"\n").is_err());
+    }
+
+    #[test]
+    fn the_interface_can_stop_its_animations() {
+        assert!(!Config::default().tui.reduced_motion);
+        let config = parse("[tui]\nreduced_motion = true\n").unwrap();
+        assert!(config.tui.reduced_motion);
     }
 
     #[test]

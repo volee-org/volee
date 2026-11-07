@@ -35,6 +35,10 @@ wake_timeout = 3600
 # ~/.config/volee/themes/ without its .toml extension.
 # theme = "catppuccin-mocha"
 
+# Stop animations: messages light up their line on the network instead of
+# travelling along it, and spinners stop.
+# reduced_motion = true
+
 # Key overrides, by action name. See the interface guide for the actions.
 # [tui.keys]
 # take-over = "ctrl-a"

@@ -104,7 +104,7 @@ Claude Code 2.1.319 (see [ADR 0006](../adr/0006-messaging.md)):
 | --- | --- | --- |
 | Working | A `Stop` hook that returns `decision: "block"` with the pending messages | The agent reads them at the end of its turn and continues. |
 | Idle, process alive | An `asyncRewake` `Stop` hook that waits for a message, then exits with status 2 | The idle agent wakes up with the message, same session. |
-| Stopped (idle sessions are reaped after about an hour) | `claude --bg --resume <session>` with the message | The conversation continues in a new session that volee links to the same agent. |
+| Stopped (idle sessions are reaped after about an hour) | `claude --bg --resume <session>` with the message | The conversation continues in a new session that volee links to the same agent. Never for an agent you stopped (until you write to it) or whose mission is over. |
 
 Agents send messages through the `volee` MCP server (`send_message`,
 `read_messages`, `list_agents`...), which works for any harness that speaks

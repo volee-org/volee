@@ -30,9 +30,15 @@ pub(crate) struct FakeHarness {
     actions: Mutex<Vec<(String, String)>>,
     sessions_gone: Mutex<bool>,
     keep_on_remove: Mutex<bool>,
+    listings: Mutex<usize>,
 }
 
 impl FakeHarness {
+    /// How many times the daemon listed sessions so far.
+    pub(crate) fn listings(&self) -> usize {
+        *self.listings.lock().unwrap()
+    }
+
     /// Makes `remove` answer as Claude Code does for a worktree it did not
     /// create: it keeps the session (and leaves the worktree locked).
     pub(crate) fn keep_on_remove(&self, keep: bool) {
@@ -120,6 +126,7 @@ impl Harness for FakeHarness {
     }
 
     fn list(&self) -> Result<Listing, HarnessError> {
+        *self.listings.lock().unwrap() += 1;
         if *self.failing.lock().unwrap() {
             return Err(unsupported("agents"));
         }

@@ -513,6 +513,7 @@ mod tests {
                 checked_at: Some(Timestamp::from_millis(2_000)),
                 ..Delivery::default()
             },
+            hold: None,
             created_at: Timestamp::from_millis(0),
             updated_at: Timestamp::from_millis(2_000),
         }

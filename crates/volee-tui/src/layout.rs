@@ -1,28 +1,31 @@
 //! Where each panel goes.
 //!
-//! Panel sizes depend only on the terminal size, never on the content or on
-//! the selection, so nothing jumps while you move around.
+//! Panel sizes depend only on the terminal size and on the view, never on
+//! the content or on the selection, so nothing jumps while you move around.
 //!
 //! ```text
-//!  wide (100 columns and 28 rows or more)      narrow (below)
-//! ┌──────────── top bar ────────────────┐     ┌──────── top bar ────────┐
-//! │ agents   │ view (hierarchy...)      │     │ agents   │ detail       │
-//! │          │                          │     │ (as a    ├──────────────┤
-//! ├──────────┼──────────────────────────┤     │  tree)   │ preview      │
-//! │ detail   │ preview                  │     │          │              │
-//! └──────────── key hints ──────────────┘     └──────── key hints ──────┘
+//!  wide (100 columns and 28 rows or more)      narrow, hierarchy           narrow, other views
+//! ┌──────────── top bar ────────────────┐     ┌────── top bar ──────┐     ┌────── top bar ──────┐
+//! │ agents   │ view (hierarchy...)      │     │ agents  │ detail    │     │ agents  │ view      │
+//! │          │                          │     │ (as a   ├───────────┤     │         │ (network, │
+//! ├──────────┼──────────────────────────┤     │  tree)  │ preview   │     ├─────────┤  repos,   │
+//! │ detail   │ preview                  │     │         │           │     │ detail  │  timeline)│
+//! └──────────── key hints ──────────────┘     └────── key hints ────┘     └────── key hints ────┘
 //! ```
 
 use ratatui::layout::Rect;
 
-/// The two arrangements of the screen.
+/// The arrangements of the screen.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Mode {
     /// Agents, view, detail and preview.
     #[default]
     Wide,
-    /// Agents (as a tree on the hierarchy tab), detail and preview.
+    /// Agents as a tree (the hierarchy), detail and preview.
     Narrow,
+    /// Agents and detail on the left, the view on the right: the network,
+    /// repositories and timeline views on small screens.
+    Split,
 }
 
 /// The rectangles of every panel.
@@ -48,8 +51,10 @@ pub(crate) struct ScreenLayout {
 const WIDE_MIN: (u16, u16) = (100, 28);
 
 impl ScreenLayout {
-    /// The layout of a terminal of the given size.
-    pub(crate) fn compute(area: Rect) -> Self {
+    /// The layout of a terminal of the given size. On small screens, the
+    /// hierarchy fits in the agents list as a tree (`tree_view`); the other
+    /// views take the place of the preview.
+    pub(crate) fn compute(area: Rect, tree_view: bool) -> Self {
         let top = Rect::new(area.x, area.y, area.width, 1.min(area.height));
         let hints = Rect::new(
             area.x,
@@ -75,6 +80,20 @@ impl ScreenLayout {
                 view: Some(Rect::new(main.x + left, main.y, right, upper)),
                 detail: Rect::new(main.x, main.y + upper, left, bottom),
                 preview: Some(Rect::new(main.x + left, main.y + upper, right, bottom)),
+                hints,
+            }
+        } else if !tree_view {
+            let left = (area.width * 3 / 8).clamp(24.min(area.width), 34);
+            let right = area.width.saturating_sub(left);
+            let detail_height = (main.height * 2 / 5).clamp(6, 10).min(main.height / 2);
+            let rail_height = main.height - detail_height;
+            Self {
+                mode: Mode::Split,
+                top,
+                rail: Rect::new(main.x, main.y, left, rail_height),
+                view: Some(Rect::new(main.x + left, main.y, right, main.height)),
+                detail: Rect::new(main.x, main.y + rail_height, left, detail_height),
+                preview: None,
                 hints,
             }
         } else {
@@ -118,13 +137,15 @@ mod tests {
     fn common_sizes_tile_the_screen() {
         for (width, height) in [(80, 24), (100, 28), (120, 40), (200, 50), (99, 60)] {
             let area = Rect::new(0, 0, width, height);
-            covers_without_overlap(&ScreenLayout::compute(area), area);
+            for tree_view in [true, false] {
+                covers_without_overlap(&ScreenLayout::compute(area, tree_view), area);
+            }
         }
     }
 
     #[test]
-    fn small_terminals_drop_the_view() {
-        let layout = ScreenLayout::compute(Rect::new(0, 0, 80, 24));
+    fn small_terminals_show_the_hierarchy_in_the_list() {
+        let layout = ScreenLayout::compute(Rect::new(0, 0, 80, 24), true);
         assert_eq!(layout.mode, Mode::Narrow);
         assert_eq!(layout.view, None);
         assert_eq!(layout.rail.width, 36);
@@ -132,20 +153,36 @@ mod tests {
     }
 
     #[test]
+    fn small_terminals_give_other_views_the_right_side() {
+        let layout = ScreenLayout::compute(Rect::new(0, 0, 80, 24), false);
+        assert_eq!(layout.mode, Mode::Split);
+        assert_eq!(layout.view, Some(Rect::new(30, 1, 50, 22)));
+        assert_eq!(layout.rail, Rect::new(0, 1, 30, 14));
+        assert_eq!(layout.detail, Rect::new(0, 15, 30, 8));
+        assert_eq!(layout.preview, None);
+    }
+
+    #[test]
     fn wide_terminals_give_the_view_most_of_the_room() {
-        let layout = ScreenLayout::compute(Rect::new(0, 0, 120, 40));
+        let layout = ScreenLayout::compute(Rect::new(0, 0, 120, 40), true);
+        assert_eq!(
+            layout,
+            ScreenLayout::compute(Rect::new(0, 0, 120, 40), false)
+        );
         assert_eq!(layout.mode, Mode::Wide);
         assert_eq!(layout.rail, Rect::new(0, 1, 34, 26));
         assert_eq!(layout.view, Some(Rect::new(34, 1, 86, 26)));
         assert_eq!(layout.detail, Rect::new(0, 27, 34, 12));
-        let layout = ScreenLayout::compute(Rect::new(0, 0, 200, 50));
+        let layout = ScreenLayout::compute(Rect::new(0, 0, 200, 50), false);
         assert_eq!(layout.view, Some(Rect::new(40, 1, 160, 34)));
     }
 
     #[test]
     fn tiny_terminals_do_not_panic() {
-        for (width, height) in [(0, 0), (1, 1), (10, 3), (30, 8)] {
-            let _ = ScreenLayout::compute(Rect::new(0, 0, width, height));
+        for (width, height) in [(0, 0), (1, 1), (10, 3), (30, 8), (60, 12)] {
+            for tree_view in [true, false] {
+                let _ = ScreenLayout::compute(Rect::new(0, 0, width, height), tree_view);
+            }
         }
     }
 }

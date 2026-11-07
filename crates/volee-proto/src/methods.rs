@@ -145,11 +145,24 @@ method!(
 
 // ---- events ---------------------------------------------------------------
 
-/// Parameters of [`EventsSince`] and [`Subscribe`].
+/// Parameters of [`EventsSince`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SinceParams {
     /// Return events after this sequence number; from the start when absent.
     pub after: Option<u64>,
+}
+
+/// Parameters of [`Subscribe`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubscribeParams {
+    /// Return events after this sequence number; from the start when absent.
+    pub after: Option<u64>,
+    /// Whether a person watches through this subscription (the interface),
+    /// rather than a program (an agent's MCP server). While at least one
+    /// interactive subscription is open, the daemon looks for new sessions
+    /// every few seconds; otherwise it looks rarely.
+    #[serde(default)]
+    pub interactive: bool,
 }
 
 /// The result of [`EventsSince`].
@@ -173,10 +186,11 @@ method!(
 method!(
     /// Like [`EventsSince`], then keeps the connection subscribed: every new
     /// event arrives as an [`EVENTS_APPENDED`] notification, in order and
-    /// without gaps.
+    /// without gaps. An interactive subscription also makes the daemon look
+    /// for new sessions at once, then every few seconds while it lasts.
     Subscribe,
     "events.subscribe",
-    SinceParams,
+    SubscribeParams,
     EventBatch
 );
 
@@ -645,5 +659,22 @@ mod tests {
             serde_json::from_value(serde_json::json!({ "agent": "ag_01jc5x8m3kq7v2c4b9e0f1g2h3" }))
                 .unwrap();
         assert!(!params.dry_run, "a request without dry_run removes");
+    }
+
+    #[test]
+    fn subscriptions_are_not_interactive_unless_they_say_so() {
+        let params: SubscribeParams =
+            serde_json::from_value(serde_json::json!({ "after": 7 })).unwrap();
+        assert_eq!(
+            params,
+            SubscribeParams {
+                after: Some(7),
+                interactive: false
+            }
+        );
+        let params: SubscribeParams =
+            serde_json::from_value(serde_json::json!({ "interactive": true })).unwrap();
+        assert!(params.interactive);
+        assert_eq!(params.after, None);
     }
 }
