@@ -75,6 +75,14 @@ volee supports macOS and Linux and needs [Claude Code](https://code.claude.com)
 [installation guide](https://volee-org.github.io/volee/guide/installation.html)
 covers specific versions, manual downloads and uninstalling.
 
+Try the interface on a simulated team of agents, no setup needed:
+
+```sh
+volee demo
+```
+
+![volee demo](docs/src/images/demo.gif)
+
 ## Contributing
 
 Contributions are welcome, including ones written with coding agents. Start

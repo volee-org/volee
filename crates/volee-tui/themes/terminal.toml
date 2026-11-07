@@ -1,0 +1,48 @@
+# terminal: only the 16 ANSI colors and the terminal's own background, so
+# volee follows whatever palette your terminal uses.
+
+[roles]
+background = { fg = "reset", bg = "reset" }
+text = "reset"
+"text.dim" = "dark-gray"
+title = { modifiers = ["bold"] }
+border = "dark-gray"
+"border.focused" = "blue"
+selection = { modifiers = ["reversed"] }
+"card.selected" = { fg = "blue", modifiers = ["bold"] }
+topbar = "reset"
+"topbar.brand" = { fg = "black", bg = "magenta", modifiers = ["bold"] }
+tab = "dark-gray"
+"tab.active" = { modifiers = ["bold", "underlined"] }
+"tab.number" = "yellow"
+counter = "reset"
+"counter.urgent" = { fg = "yellow", modifiers = ["bold"] }
+letter = "yellow"
+"state.launching" = "blue"
+"state.working" = "cyan"
+"state.needs_input" = { fg = "yellow", modifiers = ["bold"] }
+"state.idle" = "dark-gray"
+"state.done" = "green"
+"state.failed" = { fg = "red", modifiers = ["bold"] }
+"state.stopped" = "dark-gray"
+"state.lost" = "magenta"
+"role.lead" = "magenta"
+"role.coordinator" = "yellow"
+"role.worker" = "blue"
+"role.subagent" = "light-magenta"
+"role.independent" = "cyan"
+edge = "dark-gray"
+"edge.pulse" = "yellow"
+"diff.added" = "green"
+"diff.removed" = "red"
+"badge.pr" = "magenta"
+"checks.passing" = "green"
+"checks.failing" = "red"
+"checks.pending" = "yellow"
+sparkline = "cyan"
+"hint.key" = { fg = "blue", modifiers = ["bold"] }
+"hint.text" = "dark-gray"
+notice = { modifiers = ["reversed"] }
+"notice.error" = { fg = "black", bg = "red", modifiers = ["bold"] }
+input = { modifiers = ["bold"] }
+placeholder = { fg = "dark-gray", modifiers = ["italic"] }

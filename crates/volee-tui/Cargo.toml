@@ -1,0 +1,33 @@
+[package]
+name = "volee-tui"
+description = "The terminal interface of volee: every coding agent on your machine, at a glance."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["command-line-interface", "development-tools"]
+
+[dependencies]
+crossterm.workspace = true
+futures-util.workspace = true
+ratatui.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "signal", "sync", "time"] }
+toml.workspace = true
+tracing.workspace = true
+ulid.workspace = true
+unicode-width.workspace = true
+volee-core.workspace = true
+vt100.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+
+[lints]
+workspace = true

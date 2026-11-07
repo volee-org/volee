@@ -1,0 +1,78 @@
+# Catppuccin Mocha: the default theme of volee.
+#
+# Palette: https://catppuccin.com/palette (MIT). The other Catppuccin flavors
+# inherit the roles below and only swap the palette.
+
+[palette]
+rosewater = "#f5e0dc"
+flamingo = "#f2cdcd"
+pink = "#f5c2e7"
+mauve = "#cba6f7"
+red = "#f38ba8"
+maroon = "#eba0ac"
+peach = "#fab387"
+yellow = "#f9e2af"
+green = "#a6e3a1"
+teal = "#94e2d5"
+sky = "#89dceb"
+sapphire = "#74c7ec"
+blue = "#89b4fa"
+lavender = "#b4befe"
+text = "#cdd6f4"
+subtext1 = "#bac2de"
+subtext0 = "#a6adc8"
+overlay2 = "#9399b2"
+overlay1 = "#7f849c"
+overlay0 = "#6c7086"
+surface2 = "#585b70"
+surface1 = "#45475a"
+surface0 = "#313244"
+base = "#1e1e2e"
+mantle = "#181825"
+crust = "#11111b"
+
+[roles]
+background = { fg = "text", bg = "base" }
+text = "text"
+"text.dim" = "overlay1"
+title = { fg = "subtext1", modifiers = ["bold"] }
+border = "surface1"
+"border.focused" = "lavender"
+selection = { fg = "text", bg = "surface0", modifiers = ["bold"] }
+"card.selected" = { fg = "lavender", bg = "surface0", modifiers = ["bold"] }
+topbar = { fg = "subtext0", bg = "mantle" }
+"topbar.brand" = { fg = "crust", bg = "mauve", modifiers = ["bold"] }
+tab = "overlay1"
+"tab.active" = { fg = "text", bg = "surface0", modifiers = ["bold"] }
+"tab.number" = "peach"
+counter = "subtext0"
+"counter.urgent" = { fg = "yellow", modifiers = ["bold"] }
+letter = "peach"
+"state.launching" = "lavender"
+"state.working" = "sky"
+"state.needs_input" = { fg = "yellow", modifiers = ["bold"] }
+"state.idle" = "overlay2"
+"state.done" = "green"
+"state.failed" = { fg = "red", modifiers = ["bold"] }
+"state.stopped" = "overlay1"
+"state.lost" = "maroon"
+"role.lead" = "mauve"
+"role.coordinator" = "peach"
+"role.worker" = "blue"
+"role.subagent" = "flamingo"
+"role.independent" = "teal"
+edge = "surface2"
+"edge.pulse" = "yellow"
+"diff.added" = "green"
+"diff.removed" = "red"
+"badge.pr" = "mauve"
+"checks.passing" = "green"
+"checks.failing" = "red"
+"checks.pending" = "yellow"
+sparkline = "sapphire"
+"hint.key" = { fg = "lavender", modifiers = ["bold"] }
+"hint.text" = "overlay1"
+notice = { fg = "text", bg = "surface0" }
+"notice.error" = { fg = "crust", bg = "red", modifiers = ["bold"] }
+input = { fg = "text", modifiers = ["bold"] }
+placeholder = { fg = "overlay1", modifiers = ["italic"] }
