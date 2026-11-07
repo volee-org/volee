@@ -14,7 +14,7 @@ use volee_git::{GhCli, GitCli};
 use volee_harness::{ClaudeCode, Harness};
 use volee_mux::{Multiplexer, Tuios};
 use volee_proto::client::Client;
-use volee_proto::methods::{Empty, HarnessStatus, Shutdown, Status, StatusParams};
+use volee_proto::methods::{Empty, ForgeStatus, HarnessStatus, Shutdown, Status, StatusParams};
 use volee_proto::paths::Paths;
 
 use crate::connect::{paths, spawn_daemon, wait_for_daemon};
@@ -166,15 +166,7 @@ pub(crate) async fn status() -> Result<()> {
             println!("  harness  {} unavailable: {reason}", harness.kind);
         }
     }
-    if let Some(forge) = &status.forge {
-        let version = forge.version.as_deref().unwrap_or("unknown version");
-        if forge.available {
-            println!("  forge    {} {version}, available", forge.program);
-        } else {
-            let reason = forge.detail.as_deref().unwrap_or("unknown reason");
-            println!("  forge    {} unavailable: {reason}", forge.program);
-        }
-    }
+    println!("  forge    {}", forge_line(status.forge.as_ref()));
     for multiplexer in &status.multiplexers {
         let version = multiplexer.version.as_deref().unwrap_or("unknown version");
         if multiplexer.available {
@@ -185,6 +177,25 @@ pub(crate) async fn status() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// What the `forge` line of `volee daemon status` says.
+///
+/// The daemon checks `gh` in the background once it starts, and reports
+/// nothing until then: say so, so that a status asked right after
+/// `volee daemon start` does not read as "no forge". The daemon that
+/// `volee daemon start` runs always has `gh` as its forge.
+fn forge_line(forge: Option<&ForgeStatus>) -> String {
+    let Some(forge) = forge else {
+        return "gh not checked yet, ask again in a few seconds".to_owned();
+    };
+    if forge.available {
+        let version = forge.version.as_deref().unwrap_or("unknown version");
+        format!("{} {version}, available", forge.program)
+    } else {
+        let reason = forge.detail.as_deref().unwrap_or("unknown reason");
+        format!("{} unavailable: {reason}", forge.program)
+    }
 }
 
 /// The person's configuration (repository names and base branches), or the
@@ -208,4 +219,41 @@ fn init_logging() {
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .try_init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gh(available: bool, version: Option<&str>, detail: Option<&str>) -> ForgeStatus {
+        ForgeStatus {
+            program: "gh".to_owned(),
+            available,
+            version: version.map(str::to_owned),
+            detail: detail.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn a_forge_not_checked_yet_says_so() {
+        assert_eq!(
+            forge_line(None),
+            "gh not checked yet, ask again in a few seconds"
+        );
+    }
+
+    #[test]
+    fn an_available_forge_shows_its_version() {
+        let forge = gh(true, Some("2.103.3"), None);
+        assert_eq!(forge_line(Some(&forge)), "gh 2.103.3, available");
+    }
+
+    #[test]
+    fn an_unavailable_forge_says_why() {
+        let forge = gh(false, None, Some("gh is not installed"));
+        assert_eq!(
+            forge_line(Some(&forge)),
+            "gh unavailable: gh is not installed"
+        );
+    }
 }
