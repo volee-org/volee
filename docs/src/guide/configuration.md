@@ -65,6 +65,17 @@ and `.`.
 | `model` | no | Model for this repository's agents. |
 | `setup` | no | A first step agents run in a new worktree, such as `bun install`. |
 
+## `[messages]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `summaries` | `false` | Lets volee summarize a thread with a model when you ask (`volee summary`). Each summary runs Claude Code with your account, usually for a few cents. |
+| `summary_model` | `haiku` | The model summaries use. |
+
+A summary runs `claude -p` with no tools, no MCP server, none of your hooks
+and no saved session, in a directory of volee's own: the model reads the
+thread and nothing else.
+
 ## `[tui]`
 
 | Key | Default | Meaning |

@@ -127,6 +127,20 @@ Code stops idle background sessions after about an hour), volee resumes it in
 its worktree with the message as its prompt; if that fails, it tells you once. Agents you did not launch through volee cannot receive
 messages yet.
 
+## Summaries
+
+```sh
+volee summary invoicing      # a mission's thread
+volee summary billing        # your thread with an agent
+```
+
+A model reads the thread and answers in a few bullet points: what was
+decided, what was delivered (with its links), the questions still waiting and
+who must answer them, what is blocked. Summaries are off until you set
+`summaries = true` under `[messages]` in the
+[configuration](configuration.md#messages), because each one runs Claude Code
+with your account.
+
 ## Missions
 
 A mission is one goal carried out across one or more repositories by a

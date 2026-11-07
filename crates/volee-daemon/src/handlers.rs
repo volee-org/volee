@@ -1,6 +1,7 @@
 //! Request handlers: one function per method.
 
 mod missions;
+mod threads;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,7 +19,7 @@ use volee_proto::methods::{
     AbortMission, AgentParams, Attach, CloseMission, CreateMission, Diff, Empty, EventBatch,
     EventsSince, Forget, HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams,
     Method, Preview, SendMessage, SendParams, Sent, Shutdown, SinceParams, Spawn, Status,
-    StatusInfo, StatusParams, Stop, Tidy, WaitParams, WaitReply,
+    StatusInfo, StatusParams, Stop, Summarize, Tidy, WaitParams, WaitReply,
 };
 use volee_proto::rpc::{self, RpcError};
 
@@ -57,6 +58,7 @@ pub(crate) async fn dispatch(
         Attach::NAME => respond(control::attach(shared, parse::<Attach>(params)?).await),
         Stop::NAME => respond(control::stop(shared, parse::<Stop>(params)?).await),
         Tidy::NAME => respond(crate::tidy::tidy(shared, parse::<Tidy>(params)?).await),
+        Summarize::NAME => respond(threads::summarize(shared, parse::<Summarize>(params)?).await),
         CreateMission::NAME => {
             respond(missions::create(shared, parse::<CreateMission>(params)?).await)
         }

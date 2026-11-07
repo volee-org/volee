@@ -16,6 +16,14 @@ pub enum HarnessError {
         /// The program volee tried to run.
         program: PathBuf,
     },
+    /// The harness cannot do what was asked.
+    #[error("{harness:?} cannot {what}")]
+    Unsupported {
+        /// The harness.
+        harness: HarnessKind,
+        /// What it cannot do, as a verb phrase.
+        what: &'static str,
+    },
     /// The program could not run to completion.
     #[error(transparent)]
     Run(#[from] RunError),
