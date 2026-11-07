@@ -10,6 +10,7 @@ use serde_json::Value;
 use volee_core::harness::{SessionKey, SessionOrigin};
 use volee_core::ids::ThreadId;
 use volee_core::message::{Message, Party, Receipt, Thread};
+use volee_core::role::LaunchedBy;
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
 use volee_core::{Agent, AgentId, Event, EventKind, Registry};
@@ -132,9 +133,30 @@ async fn events_since(
     })
 }
 
+/// `agents.forget`: volee stops listing the agent and ignores its sessions
+/// from then on; nothing else changes. Refused for an agent volee launched
+/// that still runs, and for an agent of an open mission: forgetting them
+/// would leave a session or a mission that nobody sees.
 async fn forget(shared: &Arc<Shared>, params: AgentParams) -> Result<Empty, DaemonError> {
     let mut state = shared.state.lock().await;
-    require_agent(&state, params.agent)?;
+    let registry = state.registry();
+    let record = registry
+        .agent(params.agent)
+        .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {}", params.agent)))?;
+    let name = &record.name;
+    if record.launched_by != LaunchedBy::Outside && record.state.is_live() {
+        return Err(DaemonError::Refused(format!(
+            "{name} is still running: stop it first (`volee stop {name}`), then forget it"
+        )));
+    }
+    if let Some(mission) = record.mission.and_then(|id| registry.mission(id))
+        && !mission.status.is_over()
+    {
+        return Err(DaemonError::Refused(format!(
+            "{name} belongs to the open mission \"{}\": close or abort the mission first",
+            mission.title
+        )));
+    }
     let now = state.now();
     state.commit(vec![Event::new(
         now,

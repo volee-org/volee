@@ -82,6 +82,7 @@ volee diff <agent>          # its changes against the branch it started from, by
 volee diff <agent> --full   # the same changes, as a full patch
 volee attach <agent>        # take it over in this terminal; Ctrl+Z comes back
 volee stop <agent>          # stop it; volee does not resume it until you message it
+volee forget <agent>        # stop listing an agent that no longer runs
 ```
 
 `volee logs` prints the agent's screen as it looks now, as plain text: the
@@ -100,6 +101,12 @@ they were started. A stopped agent keeps its conversation, and volee does not
 resume it on its own, even when other agents write to it, until you send it a
 message yourself. `volee stop` on an agent that is not running only records
 that.
+
+`volee forget` removes an agent from volee's lists, for example one whose
+launch failed or a session you no longer care about; volee then ignores its
+sessions. Nothing else changes: its worktree and branch stay, so remove them
+with git when you no longer need them. volee refuses to forget an agent it
+launched that still runs (stop it first) and an agent of an open mission.
 
 ## Launching agents
 
