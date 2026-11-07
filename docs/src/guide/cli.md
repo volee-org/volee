@@ -98,7 +98,9 @@ volee msg send ag_x7k2pq "Use TTC." --kind answer
 ```
 
 A message reaches a working agent at the end of its turn, and wakes an idle
-agent at once. Agents you did not launch through volee cannot receive
+agent at once. When the session of an agent volee launched has ended (Claude
+Code stops idle background sessions after about an hour), volee resumes it in
+its worktree with the message as its prompt; if that fails, it tells you once. Agents you did not launch through volee cannot receive
 messages yet.
 
 ## Missions

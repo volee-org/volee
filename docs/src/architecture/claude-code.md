@@ -145,6 +145,11 @@ What the adapter knows, and how it knows it:
   already exists Claude Code reuses it on its current branch and locks it.
   That is how volee launches every agent (`SpawnSpec::worktree`, [ADR
   0013](../adr/0013-worktrees-live-in-their-repository.md)).
+- **Resuming** (measured). From the trusted main checkout, `claude --bg
+  --worktree=<name> --resume=<session id>` continues a stopped session's
+  conversation in its worktree, as a fork with a new id. volee resumes agents
+  this way to deliver messages (ADR 0006). Once two sessions record the same
+  worktree, `claude rm` refuses to delete it and offers no way to force it.
 - **Unknown sessions** (measured). `claude stop` and `claude logs` answer
   `No job matching '<id>'. Run 'claude agents' to list running sessions.`,
   `claude rm` answers `No job matching '<id>'`, all with exit status 1.

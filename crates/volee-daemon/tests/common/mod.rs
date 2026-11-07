@@ -24,6 +24,7 @@ pub(crate) struct FakeHarness {
     sessions: Mutex<Vec<ListedSession>>,
     failing: Mutex<bool>,
     launches: Mutex<Vec<SpawnSpec>>,
+    resumes: Mutex<Vec<(SessionKey, SpawnSpec)>>,
     refuse_launches: Mutex<bool>,
     actions: Mutex<Vec<(String, String)>>,
     sessions_gone: Mutex<bool>,
@@ -71,6 +72,11 @@ impl FakeHarness {
     /// Makes launches fail, or work again.
     pub(crate) fn refuse_launches(&self, refuse: bool) {
         *self.refuse_launches.lock().unwrap() = refuse;
+    }
+
+    /// Every resume so far, with the session it resumed.
+    pub(crate) fn resumes(&self) -> Vec<(SessionKey, SpawnSpec)> {
+        self.resumes.lock().unwrap().clone()
     }
 
     /// Every launch so far.
@@ -123,8 +129,17 @@ impl Harness for FakeHarness {
         })
     }
 
-    fn resume(&self, _: &SessionKey, _: &SpawnSpec) -> Result<Spawned, HarnessError> {
-        Err(unsupported("resume"))
+    fn resume(&self, session: &SessionKey, spec: &SpawnSpec) -> Result<Spawned, HarnessError> {
+        if *self.refuse_launches.lock().unwrap() {
+            return Err(unsupported("--resume"));
+        }
+        let mut resumes = self.resumes.lock().unwrap();
+        resumes.push((session.clone(), spec.clone()));
+        Ok(Spawned {
+            handle: format!("resumed{}", resumes.len()),
+            name: Some(spec.name.clone()),
+            origin: SessionOrigin::Forked,
+        })
     }
 
     fn stop(&self, session: &ListedSession) -> Result<(), HarnessError> {

@@ -34,7 +34,11 @@ background session. Probes on 2026-11-06 established what works:
   1. working: queued, delivered by the `Stop` block at the end of the turn;
   2. idle: delivered by the `asyncRewake` waiter armed at every `Stop`;
   3. stopped or reaped: delivered by `--bg --resume`, and the new session is
-     linked to the same agent (ADR 0001).
+     linked to the same agent (ADR 0001). The resume starts from the
+     repository's main checkout with `--worktree` (ADR 0013), carries the
+     pending messages as its prompt and the agent's instructions again, and
+     the daemon links the new session by the handle the harness printed,
+     before any listing could take it for a stranger.
 - Agents that volee did not launch can be messaged only through an explicit
   "wake" action by the human, because it forks their session.
 - Thread summaries by an LLM are opt-in and show their cost.

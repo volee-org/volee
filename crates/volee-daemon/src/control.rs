@@ -2,20 +2,21 @@
 //! stopping them.
 //!
 //! The harness acts on a session as it last listed it: the listing gives the
-//! handle its commands take. The daemon keeps the last listing, and the
-//! handle of every session it launched until a listing shows it, so that an
-//! agent can be previewed, taken over or stopped right after its launch.
-//! Every slow step (the harness, git) runs off the state lock.
+//! handle its commands take. The daemon keeps the last listing; a session it
+//! started or resumed and no listing shows yet is reached through the handle
+//! the launch printed (the state's expected sessions), so that an agent can
+//! be previewed, taken over or stopped right after its launch. Every slow
+//! step (the harness, git) runs off the state lock.
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::sync::Arc;
 
-use volee_core::harness::{SessionKey, SessionOrigin};
+use volee_core::harness::SessionKey;
 use volee_core::reconcile::{ListedSession, Listing};
 use volee_core::role::LaunchedBy;
 use volee_core::workspace::Location;
-use volee_core::{Agent, AgentId, Event, EventKind, Registry};
+use volee_core::{Agent, AgentId};
 use volee_git::DiffFormat;
 use volee_harness::{Harness, HarnessError};
 use volee_proto::methods::{AgentParams, AttachCommand, DiffParams, DiffText, Empty, PreviewText};
@@ -23,7 +24,6 @@ use volee_proto::methods::{AgentParams, AttachCommand, DiffParams, DiffText, Emp
 use crate::error::DaemonError;
 use crate::launch::{blocking, git, harness};
 use crate::server::Shared;
-use crate::state::State;
 
 /// The most diff text one request returns, in bytes. Past it, the text is
 /// cut at a line break and flagged as truncated.
@@ -32,14 +32,10 @@ pub(crate) const MAX_DIFF_BYTES: usize = 512 * 1024;
 /// What a person reads before taking an agent over.
 pub(crate) const ATTACH_HINT: &str = "Press Ctrl+Z to come back; the agent keeps running.";
 
-/// The harness sessions the daemon can act on.
+/// The sessions of the last harness listing, which the daemon acts on.
 #[derive(Debug, Default)]
 pub(crate) struct Sessions {
-    /// The sessions of the last listing.
     listed: HashMap<SessionKey, ListedSession>,
-    /// The handle of every session volee launched, by agent, until a listing
-    /// shows the session.
-    launched: HashMap<AgentId, String>,
 }
 
 /// Why the daemon cannot act on an agent's session.
@@ -55,15 +51,8 @@ pub(crate) enum NoSession {
 }
 
 impl Sessions {
-    /// Records a listing. A launched session that appears in it is known by
-    /// its listing from now on.
+    /// Records a listing, which replaces the previous one.
     pub(crate) fn record(&mut self, listing: &Listing) {
-        self.launched.retain(|_, handle| {
-            !listing
-                .sessions
-                .iter()
-                .any(|session| started_by(session, handle))
-        });
         self.listed = listing
             .sessions
             .iter()
@@ -71,43 +60,14 @@ impl Sessions {
             .collect();
     }
 
-    /// Remembers the handle of the session the daemon just launched for
-    /// `agent`.
-    pub(crate) fn launched(&mut self, agent: AgentId, handle: String) {
-        self.launched.insert(agent, handle);
-    }
-
-    /// The sessions of `listing` that volee launched and that the registry
-    /// does not link to their agent yet, with that agent. A session's first
-    /// hook, which links it, may come after the listing that shows it.
-    pub(crate) fn unlinked_launches(
-        &self,
-        registry: &Registry,
-        listing: &Listing,
-    ) -> Vec<(AgentId, SessionKey)> {
-        let mut links: Vec<(AgentId, SessionKey)> = self
-            .launched
-            .iter()
-            .filter(|(agent, _)| registry.agent(**agent).is_some())
-            .filter_map(|(agent, handle)| {
-                listing
-                    .sessions
-                    .iter()
-                    .find(|session| started_by(session, handle))
-                    .filter(|session| {
-                        registry.agent_for_session(&session.key).is_none()
-                            && !registry.is_ignored(&session.key)
-                    })
-                    .map(|session| (*agent, session.key.clone()))
-            })
-            .collect();
-        links.sort();
-        links
-    }
-
     /// The session to act on for `agent`: its current session as the last
-    /// listing showed it, else the session volee launched for it.
-    pub(crate) fn session_for(&self, agent: &Agent) -> Result<ListedSession, NoSession> {
+    /// listing showed it, else the session the daemon started or resumed for
+    /// it, known by the handle the launch printed (`expected`).
+    pub(crate) fn session_for(
+        &self,
+        agent: &Agent,
+        expected: Option<&str>,
+    ) -> Result<ListedSession, NoSession> {
         let current = agent.current_session().map(|link| &link.key);
         if let Some(listed) = current.and_then(|key| self.listed.get(key)) {
             return if listed.handle.is_some() {
@@ -116,15 +76,15 @@ impl Sessions {
                 Err(NoSession::OwnTerminal)
             };
         }
-        if let Some(handle) = self.launched.get(&agent.id) {
+        if let Some(handle) = expected {
             let key = current.cloned().unwrap_or_else(|| SessionKey {
                 harness: agent.harness.clone(),
-                id: handle.clone(),
+                id: handle.to_owned(),
             });
             return Ok(ListedSession {
                 alive: true,
                 background: true,
-                handle: Some(handle.clone()),
+                handle: Some(handle.to_owned()),
                 ..ListedSession::new(key, agent.workspace.cwd.clone(), agent.state.clone())
             });
         }
@@ -134,40 +94,6 @@ impl Sessions {
             (Some(_), _) => Err(NoSession::NotListedYet),
         }
     }
-}
-
-/// Brings the daemon's view of the harness sessions in line with a new
-/// listing. A session volee launched may be listed before its first hook
-/// links it: it is linked to its agent now, by its handle, rather than left
-/// to become an independent agent. Then the listing is recorded.
-pub(crate) fn apply_listing(state: &mut State, listing: &Listing) {
-    let now = state.now();
-    let links: Vec<Event> = state
-        .sessions()
-        .unlinked_launches(state.registry(), listing)
-        .into_iter()
-        .map(|(agent, session)| {
-            Event::new(
-                now,
-                EventKind::SessionLinked {
-                    agent,
-                    session,
-                    origin: SessionOrigin::Started,
-                },
-            )
-        })
-        .collect();
-    if !links.is_empty()
-        && let Err(error) = state.commit(links)
-    {
-        tracing::error!(%error, "cannot link launched sessions");
-    }
-    state.sessions_mut().record(listing);
-}
-
-/// Whether `session` is the one the launch that printed `handle` started.
-fn started_by(session: &ListedSession, handle: &str) -> bool {
-    session.handle.as_deref() == Some(handle) || session.key.id.starts_with(handle)
 }
 
 /// What an action on an agent's session needs.
@@ -195,7 +121,7 @@ async fn target(shared: &Arc<Shared>, agent: AgentId) -> Result<Target, DaemonEr
     }
     let session = state
         .sessions()
-        .session_for(record)
+        .session_for(record, state.expected_handle(agent))
         .map_err(|reason| refusal(&record.name, reason))?;
     Ok(Target {
         harness,
@@ -373,11 +299,12 @@ mod tests {
     use std::path::Path;
 
     use ulid::Ulid;
-    use volee_core::harness::HarnessKind;
+    use volee_core::harness::{HarnessKind, SessionOrigin};
     use volee_core::role::Role;
     use volee_core::state::AgentState;
     use volee_core::time::Timestamp;
     use volee_core::workspace::Workspace;
+    use volee_core::{Event, EventKind, Registry};
 
     use super::*;
 
@@ -438,18 +365,33 @@ mod tests {
         let registry = registry(LaunchedBy::Human, Location::Background, Some(KEY));
         let mut sessions = Sessions::default();
         sessions.record(&listing(vec![listed(KEY, Some("7d3c1f0a"))]));
-        let session = sessions.session_for(agent(&registry)).unwrap();
+        let session = sessions.session_for(agent(&registry), None).unwrap();
         assert_eq!(session.handle.as_deref(), Some("7d3c1f0a"));
         assert_eq!(session.key, SessionKey::claude(KEY));
     }
 
     #[test]
+    fn the_listing_wins_over_the_launch_handle() {
+        let registry = registry(LaunchedBy::Human, Location::Background, Some(KEY));
+        let mut sessions = Sessions::default();
+        sessions.record(&listing(vec![listed(KEY, Some("7d3c1f0a"))]));
+        let session = sessions
+            .session_for(agent(&registry), Some("feed5678"))
+            .unwrap();
+        assert_eq!(session.handle.as_deref(), Some("7d3c1f0a"));
+    }
+
+    #[test]
     fn a_launched_session_is_acted_on_before_any_listing() {
         let registry = registry(LaunchedBy::Human, Location::Background, None);
-        let mut sessions = Sessions::default();
-        assert_eq!(sessions.session_for(agent(&registry)), Err(NoSession::None));
-        sessions.launched(agent_id(), "7d3c1f0a".into());
-        let session = sessions.session_for(agent(&registry)).unwrap();
+        let sessions = Sessions::default();
+        assert_eq!(
+            sessions.session_for(agent(&registry), None),
+            Err(NoSession::None)
+        );
+        let session = sessions
+            .session_for(agent(&registry), Some("7d3c1f0a"))
+            .unwrap();
         assert_eq!(session.handle.as_deref(), Some("7d3c1f0a"));
         assert!(session.alive && session.background);
         assert_eq!(session.cwd, Path::new("/work/alpha"));
@@ -458,24 +400,21 @@ mod tests {
     #[test]
     fn a_launched_session_with_a_known_key_keeps_it() {
         let registry = registry(LaunchedBy::Human, Location::Background, Some(KEY));
-        let mut sessions = Sessions::default();
-        sessions.launched(agent_id(), "7d3c1f0a".into());
-        let session = sessions.session_for(agent(&registry)).unwrap();
+        let session = Sessions::default()
+            .session_for(agent(&registry), Some("7d3c1f0a"))
+            .unwrap();
         assert_eq!(session.key, SessionKey::claude(KEY));
     }
 
     #[test]
-    fn a_listing_replaces_the_launch_handle() {
+    fn a_session_gone_from_the_listing_is_not_acted_on_from_memory() {
         let registry = registry(LaunchedBy::Human, Location::Background, Some(KEY));
         let mut sessions = Sessions::default();
-        sessions.launched(agent_id(), "7d3c1f0a".into());
         sessions.record(&listing(vec![listed(KEY, Some("7d3c1f0a"))]));
-        assert!(sessions.launched.is_empty());
         sessions.record(&listing(vec![]));
         assert_eq!(
-            sessions.session_for(agent(&registry)),
-            Err(NoSession::NotListedYet),
-            "a session gone from the listing is not acted on from memory"
+            sessions.session_for(agent(&registry), None),
+            Err(NoSession::NotListedYet)
         );
     }
 
@@ -485,12 +424,12 @@ mod tests {
         let mut sessions = Sessions::default();
         sessions.record(&listing(vec![listed(KEY, None)]));
         assert_eq!(
-            sessions.session_for(agent(&registry)),
+            sessions.session_for(agent(&registry), None),
             Err(NoSession::OwnTerminal)
         );
         sessions.record(&listing(vec![]));
         assert_eq!(
-            sessions.session_for(agent(&registry)),
+            sessions.session_for(agent(&registry), None),
             Err(NoSession::OwnTerminal)
         );
     }
@@ -511,38 +450,8 @@ mod tests {
         let mut sessions = Sessions::default();
         sessions.record(&listing(vec![listed(KEY, Some("7d3c1f0a"))]));
         assert_eq!(
-            sessions.session_for(agent(&registry)),
+            sessions.session_for(agent(&registry), None),
             Err(NoSession::NotListedYet)
         );
-    }
-
-    #[test]
-    fn launched_sessions_are_linked_by_their_handle() {
-        let registry = registry(LaunchedBy::Human, Location::Background, None);
-        let mut sessions = Sessions::default();
-        sessions.launched(agent_id(), "7d3c1f0a".into());
-        let shown = listing(vec![
-            listed(KEY, Some("7d3c1f0a")),
-            listed("c4e5a6b7-8901-4cde-8f01-23456789abcd", Some("c4e5a6b7")),
-        ]);
-        assert_eq!(
-            sessions.unlinked_launches(&registry, &shown),
-            [(agent_id(), SessionKey::claude(KEY))]
-        );
-        let linked = self::registry(LaunchedBy::Human, Location::Background, Some(KEY));
-        assert_eq!(sessions.unlinked_launches(&linked, &shown), []);
-        let mut forgotten = Sessions::default();
-        forgotten.launched(
-            AgentId::from_ulid(Ulid::from_parts(9_999, 9)),
-            "7d3c1f0a".into(),
-        );
-        assert_eq!(forgotten.unlinked_launches(&registry, &shown), []);
-    }
-
-    #[test]
-    fn a_session_is_recognized_by_handle_or_id_prefix() {
-        assert!(started_by(&listed(KEY, Some("7d3c1f0a")), "7d3c1f0a"));
-        assert!(started_by(&listed(KEY, None), "7d3c1f0a"));
-        assert!(!started_by(&listed(KEY, Some("7d3c1f0a")), "c4e5a6b7"));
     }
 }
