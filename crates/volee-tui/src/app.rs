@@ -18,14 +18,19 @@ use volee_core::{Agent, AgentId, MessageId, Registry};
 
 use crate::activity::ActivityLog;
 use crate::editor::TextField;
+use crate::history::History;
 use crate::keymap::{Action, Context, KeyCombo, Keymap};
 use crate::layout::{Mode, ScreenLayout};
 use crate::letters::Letters;
 use crate::preview::PreviewScreen;
+use crate::pulses::Pulses;
 use crate::source::{Changes, Outgoing, SourceError, TakeOver};
 use crate::text;
 use crate::theme::Theme;
 use crate::views::hierarchy::{self, Direction, Scene, SceneKey, ZoomChoice};
+use crate::views::network::{self, NetworkState};
+use crate::views::repos::ReposState;
+use crate::views::timeline::TimelineState;
 
 /// The views, in tab order.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -214,6 +219,9 @@ pub(crate) enum Hit {
     Tab(Tab),
     /// A panel.
     Pane(Pane),
+    /// The cells of an agent's lane in the timeline: a click also moves the
+    /// cursor to the column.
+    Lane(AgentId),
 }
 
 /// What changes the model.
@@ -304,6 +312,17 @@ pub(crate) enum Effect {
     Send(Outgoing),
 }
 
+/// How much the interface moves.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Motion {
+    /// Spinners turn and messages travel along the network's lines.
+    #[default]
+    Full,
+    /// Nothing travels: message pulses become short highlights and
+    /// spinners stop.
+    Reduced,
+}
+
 /// The spinner of working agents.
 const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -326,6 +345,12 @@ pub(crate) struct Model {
     pub(crate) letters: Letters,
     /// Activity counts for sparklines.
     pub(crate) activity: ActivityLog,
+    /// What happened when, for the timeline.
+    pub(crate) history: History,
+    /// Messages travelling along the network's lines.
+    pub(crate) pulses: Pulses,
+    /// How much the interface moves.
+    pub(crate) motion: Motion,
     /// The current time.
     pub(crate) now: Timestamp,
 
@@ -376,6 +401,12 @@ pub(crate) struct Model {
     pub(crate) scene_offset: (i32, i32),
     /// Bring the selection into view at the next layout pass.
     reveal_selection: bool,
+    /// The network view.
+    pub(crate) network: NetworkState,
+    /// The repositories view.
+    pub(crate) repos: ReposState,
+    /// The timeline view.
+    pub(crate) timeline: TimelineState,
     /// Everything the mouse can hit, topmost last.
     pub(crate) hits: Vec<(Rect, Hit)>,
 
@@ -399,6 +430,9 @@ impl Model {
             registry: Registry::new(),
             letters: Letters::default(),
             activity: ActivityLog::default(),
+            history: History::default(),
+            pulses: Pulses::default(),
+            motion: Motion::Full,
             now,
             tab: Tab::default(),
             focus: Pane::default(),
@@ -423,6 +457,9 @@ impl Model {
             scene_key: None,
             scene_offset: (0, 0),
             reveal_selection: true,
+            network: NetworkState::default(),
+            repos: ReposState::default(),
+            timeline: TimelineState::default(),
             hits: Vec::new(),
             dirty: true,
         };
@@ -443,6 +480,13 @@ impl Model {
 
     /// Whether something on screen moves, so the run loop ticks fast.
     pub(crate) fn is_animating(&self) -> bool {
+        if self.motion == Motion::Reduced {
+            return false;
+        }
+        if self.tab == Tab::Network && self.layout.view.is_some() && self.pulses.is_moving(self.now)
+        {
+            return true;
+        }
         self.rail.iter().any(|entry| {
             self.registry.agent(entry.agent).is_some_and(|agent| {
                 matches!(
@@ -455,22 +499,7 @@ impl Model {
 
     /// Whether an agent passes the filter.
     pub(crate) fn matches(&self, agent: &Agent) -> bool {
-        let Some(needle) = self.filter.needle() else {
-            return true;
-        };
-        let mission = agent
-            .mission
-            .and_then(|mission| self.registry.mission(mission))
-            .map(|mission| mission.title.as_str());
-        [
-            Some(agent.name.as_str()),
-            agent.workspace.repo.as_deref(),
-            agent.workspace.branch.as_deref(),
-            mission,
-        ]
-        .into_iter()
-        .flatten()
-        .any(|field| field.to_lowercase().contains(&needle))
+        passes(self.filter.needle().as_deref(), &self.registry, agent)
     }
 
     /// The key contexts that apply now, the most specific first.
@@ -488,12 +517,21 @@ impl Model {
             return vec![Context::Filter];
         }
         let pane = match self.focus {
-            Pane::Rail => Some(Context::Agents),
-            Pane::View if self.tab == Tab::Hierarchy => Some(Context::Hierarchy),
-            Pane::View => None,
-            Pane::Detail => Some(Context::Detail),
+            Pane::Rail => Context::Agents,
+            Pane::View => match self.tab {
+                Tab::Hierarchy => Context::Hierarchy,
+                Tab::Network => Context::Network,
+                Tab::Repos => Context::Repos,
+                Tab::Timeline => Context::Timeline,
+            },
+            Pane::Detail => Context::Detail,
         };
-        pane.into_iter().chain([Context::Global]).collect()
+        vec![pane, Context::Global]
+    }
+
+    /// Whether the timeline's cursor left the present.
+    fn scrubbing(&self) -> bool {
+        self.tab == Tab::Timeline && self.timeline.cursor.is_some()
     }
 
     /// Whether Escape has something to close or leave.
@@ -501,6 +539,7 @@ impl Model {
         self.prompt.is_some()
             || self.overlay.is_some()
             || self.filter.editing
+            || self.scrubbing()
             || !self.subtree.is_empty()
             || self.filter.needle().is_some()
             || self.focus != Pane::Rail
@@ -583,6 +622,10 @@ impl Model {
                 tracing::warn!(%error, "event ignored");
                 continue;
             }
+            self.history.record(&event);
+            if let EventKind::MessagePosted { message } = &event.kind {
+                self.pulses.record(message, self.now);
+            }
             match &event.kind {
                 EventKind::AgentRegistered { agent, name, .. } => {
                     self.letters.assign(*agent, name);
@@ -607,7 +650,7 @@ impl Model {
     /// It runs at the end of every update; drawing reads its results.
     fn relayout(&mut self) {
         let area = Rect::new(0, 0, self.size.0, self.size.1);
-        self.layout = ScreenLayout::compute(area);
+        self.layout = ScreenLayout::compute(area, self.tab == Tab::Hierarchy);
         self.rail_order = if self.layout.mode == Mode::Narrow && self.tab == Tab::Hierarchy {
             RailOrder::Tree
         } else {
@@ -653,9 +696,36 @@ impl Model {
             }
             self.scene_offset = self.fit_offset(inner);
         }
+        if let Some(view) = self.layout.view {
+            self.relayout_view(inner(view));
+        }
         self.reveal_selection = false;
         self.rail_offset = self.fit_rail_offset();
         self.hits = self.hit_areas();
+    }
+
+    /// The layout pass of the network, repositories and timeline views.
+    fn relayout_view(&mut self, area: Rect) {
+        let needle = self.filter.needle();
+        let registry = &self.registry;
+        let matches = |agent: &Agent| passes(needle.as_deref(), registry, agent);
+        match self.tab {
+            Tab::Hierarchy => {}
+            Tab::Network => {
+                let (graph, _) = network::split(area);
+                self.network.relayout(
+                    registry,
+                    self.history.messages(),
+                    (graph.width, graph.height),
+                );
+            }
+            Tab::Repos => self
+                .repos
+                .relayout(registry, &matches, area.height, self.selected),
+            Tab::Timeline => self
+                .timeline
+                .relayout(registry, &matches, area, self.selected),
+        }
     }
 
     /// Rows of the agents list, filtered.
@@ -779,15 +849,46 @@ impl Model {
                 Hit::Agent(entry.agent, Pane::Rail),
             ));
         }
-        if let Some(view) = layout.view
-            && self.tab == Tab::Hierarchy
-        {
+        if let Some(view) = layout.view {
             let area = inner(view);
-            for (agent, rect) in self.scene.targets() {
-                let x = i32::from(area.x) + i32::from(rect.x) - self.scene_offset.0;
-                let y = i32::from(area.y) + i32::from(rect.y) - self.scene_offset.1;
-                if let Some(visible) = clip(x, y, rect.width, rect.height, area) {
-                    hits.push((visible, Hit::Agent(agent, Pane::View)));
+            match self.tab {
+                Tab::Hierarchy => {
+                    for (agent, rect) in self.scene.targets() {
+                        let x = i32::from(area.x) + i32::from(rect.x) - self.scene_offset.0;
+                        let y = i32::from(area.y) + i32::from(rect.y) - self.scene_offset.1;
+                        if let Some(visible) = clip(x, y, rect.width, rect.height, area) {
+                            hits.push((visible, Hit::Agent(agent, Pane::View)));
+                        }
+                    }
+                }
+                Tab::Network => {
+                    let (graph, _) = network::split(area);
+                    for (agent, rect) in self.network.targets() {
+                        let (x, y) = (i32::from(graph.x + rect.x), i32::from(graph.y + rect.y));
+                        if let Some(visible) = clip(x, y, rect.width, rect.height, graph) {
+                            hits.push((visible, Hit::Agent(agent, Pane::View)));
+                        }
+                    }
+                }
+                Tab::Repos => {
+                    let lines = self.repos.lines.iter().skip(self.repos.offset);
+                    for (row, line) in (0..area.height).zip(lines) {
+                        if let crate::views::repos::Line::Agent { agent, .. } = line {
+                            let rect = Rect::new(area.x, area.y + row, area.width, 1);
+                            hits.push((rect, Hit::Agent(*agent, Pane::View)));
+                        }
+                    }
+                }
+                Tab::Timeline => {
+                    let geometry = self.timeline.geometry;
+                    let lanes = self.timeline.lanes.iter().skip(self.timeline.offset);
+                    for (row, agent) in (0..geometry.lanes.height).zip(lanes) {
+                        let y = geometry.lanes.y + row;
+                        let label = Rect::new(geometry.lanes.x, y, geometry.label, 1);
+                        hits.push((label, Hit::Agent(*agent, Pane::View)));
+                        let cells = Rect::new(geometry.cells_x(), y, geometry.columns(), 1);
+                        hits.push((cells, Hit::Lane(*agent)));
+                    }
                 }
             }
         }
@@ -812,6 +913,27 @@ impl Model {
             _ => None,
         })
     }
+}
+
+/// Whether an agent's name, repository, branch or mission contains
+/// `needle`, written in lower case; everything passes without a needle.
+fn passes(needle: Option<&str>, registry: &Registry, agent: &Agent) -> bool {
+    let Some(needle) = needle else {
+        return true;
+    };
+    let mission = agent
+        .mission
+        .and_then(|mission| registry.mission(mission))
+        .map(|mission| mission.title.as_str());
+    [
+        Some(agent.name.as_str()),
+        agent.workspace.repo.as_deref(),
+        agent.workspace.branch.as_deref(),
+        mission,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|field| field.to_lowercase().contains(needle))
 }
 
 /// A panel's area inside its border.
@@ -997,9 +1119,12 @@ fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool 
 fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool {
     let frame_before = model.spinner();
     let second_before = model.now.as_millis().div_euclid(1_000);
+    let pulses_before = model.tab == Tab::Network && model.pulses.is_moving(model.now);
     model.now = now;
-    let mut changed =
-        model.spinner() != frame_before || now.as_millis().div_euclid(1_000) != second_before;
+    model.pulses.prune(now);
+    let mut changed = model.spinner() != frame_before
+        || now.as_millis().div_euclid(1_000) != second_before
+        || pulses_before;
     if model
         .notice
         .as_ref()
@@ -1157,13 +1282,19 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
                 }
             }
         }
-        Action::ZoomIn => {
-            model.zoom = ZoomChoice::Fixed(model.scene.zoom.more_detail());
+        Action::ZoomIn | Action::ZoomOut | Action::ZoomAuto => zoom(model, context, action),
+        Action::PreviousEvent | Action::NextEvent => {
+            let forward = action == Action::NextEvent;
+            let found = model
+                .selected
+                .and_then(|agent| model.history.lane(agent))
+                .and_then(|lane| model.timeline.event_from(&lane.marks, model.now, forward));
+            match found {
+                Some(at) => model.timeline.jump_to(at, model.now),
+                None if forward => model.timeline.cursor = None,
+                None => model.notify("No earlier event on this lane.", false),
+            }
         }
-        Action::ZoomOut => {
-            model.zoom = ZoomChoice::Fixed(model.scene.zoom.less_detail());
-        }
-        Action::ZoomAuto => model.zoom = ZoomChoice::Auto,
         Action::Refresh => {
             if let Some(Overlay::Diff(diff)) = &model.overlay {
                 let (agent, full) = (diff.agent, diff.full);
@@ -1175,6 +1306,28 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
         // The other actions belong to prompts and the composer, handled
         // before the keymap's contexts.
         _ => {}
+    }
+}
+
+/// The zoom keys of a view: more or less detail, or the level the size
+/// allows; on the timeline, a finer or coarser time scale, or back to now.
+fn zoom(model: &mut Model, context: Context, action: Action) {
+    let step = |choice: &mut ZoomChoice, current: hierarchy::Zoom| {
+        *choice = match action {
+            Action::ZoomIn => ZoomChoice::Fixed(current.more_detail()),
+            Action::ZoomOut => ZoomChoice::Fixed(current.less_detail()),
+            _ => ZoomChoice::Auto,
+        };
+    };
+    match context {
+        Context::Network => step(&mut model.network.zoom, model.network.scene.zoom),
+        Context::Repos => step(&mut model.repos.zoom, model.repos.density),
+        Context::Timeline => match action {
+            Action::ZoomIn => model.timeline.zoom(true),
+            Action::ZoomOut => model.timeline.zoom(false),
+            _ => model.timeline.reset(),
+        },
+        _ => step(&mut model.zoom, model.scene.zoom),
     }
 }
 
@@ -1356,6 +1509,10 @@ fn back(model: &mut Model) {
     if model.overlay.take().is_some() {
         return;
     }
+    if model.scrubbing() {
+        model.timeline.cursor = None;
+        return;
+    }
     if !model.subtree.is_empty() {
         model.subtree.pop();
         model.reveal_selection = true;
@@ -1395,20 +1552,19 @@ fn navigate(model: &mut Model, context: Context, action: Action, effects: &mut V
                 Action::First => model.scene.first(),
                 Action::Last => model.scene.last(),
                 _ => model.selected.and_then(|from| {
-                    let direction = match action {
-                        Action::Down => Direction::Down,
-                        Action::Up => Direction::Up,
-                        Action::Left => Direction::Left,
-                        _ => Direction::Right,
-                    };
                     let selectable: Vec<AgentId> =
                         model.rail.iter().map(|entry| entry.agent).collect();
                     model
                         .scene
-                        .neighbour(from, direction, |id| selectable.contains(&id))
+                        .neighbour(from, direction(action), |id| selectable.contains(&id))
                 }),
             };
             if let Some(agent) = target {
+                model.select(agent, effects);
+            }
+        }
+        Context::Network | Context::Repos | Context::Timeline => {
+            if let Some(agent) = view_target(model, context, action) {
                 model.select(agent, effects);
             }
         }
@@ -1444,6 +1600,52 @@ fn navigate(model: &mut Model, context: Context, action: Action, effects: &mut V
     }
 }
 
+/// Where a move key goes in the network, repositories or timeline view; on
+/// the timeline, left and right move the cursor instead of the selection.
+fn view_target(model: &mut Model, context: Context, action: Action) -> Option<AgentId> {
+    let selected = model.selected;
+    match context {
+        Context::Network => {
+            let selectable: Vec<AgentId> = model.rail.iter().map(|entry| entry.agent).collect();
+            let allowed = |id| selectable.contains(&id);
+            match action {
+                Action::First => model.network.corner(false, allowed),
+                Action::Last => model.network.corner(true, allowed),
+                _ => selected
+                    .and_then(|from| model.network.neighbour(from, direction(action), allowed)),
+            }
+        }
+        Context::Repos => match action {
+            Action::Down => model.repos.step(selected, true),
+            Action::Up => model.repos.step(selected, false),
+            Action::Left => model.repos.jump_repo(selected, false),
+            Action::Right => model.repos.jump_repo(selected, true),
+            Action::First => model.repos.order.first().copied(),
+            _ => model.repos.order.last().copied(),
+        },
+        _ => match action {
+            Action::Left | Action::Right => {
+                model.timeline.scrub(model.now, action == Action::Right);
+                None
+            }
+            Action::Down => model.timeline.step_lane(selected, true),
+            Action::Up => model.timeline.step_lane(selected, false),
+            Action::First => model.timeline.lanes.first().copied(),
+            _ => model.timeline.lanes.last().copied(),
+        },
+    }
+}
+
+/// The direction of a move action.
+fn direction(action: Action) -> Direction {
+    match action {
+        Action::Down => Direction::Down,
+        Action::Up => Direction::Up,
+        Action::Left => Direction::Left,
+        _ => Direction::Right,
+    }
+}
+
 /// A window's scroll after a key, between 0 and `most` lines.
 fn scrolled(scroll: u16, action: Action, most: u16) -> u16 {
     let scroll = match action {
@@ -1454,6 +1656,34 @@ fn scrolled(scroll: u16, action: Action, most: u16) -> u16 {
         _ => scroll,
     };
     scroll.min(most)
+}
+
+/// The wheel over the view: the hierarchy scrolls (`sideways` with Shift),
+/// the repositories and the timeline move the selection, and Shift moves
+/// the timeline's cursor. Returns whether anything changed.
+fn scroll_view(model: &mut Model, down: bool, sideways: bool, effects: &mut Vec<Effect>) -> bool {
+    match model.tab {
+        Tab::Hierarchy => {
+            let step = if down { 2 } else { -2 };
+            if sideways {
+                model.scene_offset.0 += step * 2;
+            } else {
+                model.scene_offset.1 += step;
+            }
+        }
+        Tab::Timeline if sideways => model.timeline.scrub(model.now, down),
+        Tab::Repos | Tab::Timeline => {
+            let context = if model.tab == Tab::Repos {
+                Context::Repos
+            } else {
+                Context::Timeline
+            };
+            let action = if down { Action::Down } else { Action::Up };
+            navigate(model, context, action, effects);
+        }
+        Tab::Network => return false,
+    }
+    true
 }
 
 /// Handles the mouse; returns whether anything changed.
@@ -1499,6 +1729,15 @@ fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> 
                 model.focus = pane;
                 true
             }
+            Some(Hit::Lane(agent)) => {
+                model.focus = Pane::View;
+                model.select(agent, effects);
+                let geometry = model.timeline.geometry;
+                let window = model.timeline.window(model.now);
+                let offset = column.saturating_sub(geometry.cells_x());
+                model.timeline.jump_to(window.start_of(offset), model.now);
+                true
+            }
             None => false,
         },
         MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
@@ -1509,12 +1748,8 @@ fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> 
                     navigate(model, Context::Agents, action, effects);
                 }
                 Some(Pane::View) => {
-                    let step = if down { 2 } else { -2 };
-                    if mouse.modifiers.contains(KeyModifiers::SHIFT) {
-                        model.scene_offset.0 += step * 2;
-                    } else {
-                        model.scene_offset.1 += step;
-                    }
+                    let sideways = mouse.modifiers.contains(KeyModifiers::SHIFT);
+                    return scroll_view(model, down, sideways, effects);
                 }
                 Some(Pane::Detail) => {
                     let action = if down { Action::Down } else { Action::Up };
@@ -1527,12 +1762,12 @@ fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> 
         MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight
             if model.pane_at(column, row) == Some(Pane::View) =>
         {
-            let step = if mouse.kind == MouseEventKind::ScrollRight {
-                4
-            } else {
-                -4
-            };
-            model.scene_offset.0 += step;
+            let right = mouse.kind == MouseEventKind::ScrollRight;
+            match model.tab {
+                Tab::Hierarchy => model.scene_offset.0 += if right { 4 } else { -4 },
+                Tab::Timeline => model.timeline.scrub(model.now, right),
+                Tab::Network | Tab::Repos => return false,
+            }
             true
         }
         _ => false,

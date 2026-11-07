@@ -32,7 +32,9 @@ letter = "yellow"
 "role.subagent" = "light-magenta"
 "role.independent" = "cyan"
 edge = "dark-gray"
-"edge.pulse" = "yellow"
+"edge.pulse" = { fg = "light-cyan", modifiers = ["bold"] }
+"edge.message" = "gray"
+"edge.question" = { fg = "yellow", modifiers = ["bold"] }
 "diff.added" = "green"
 "diff.removed" = "red"
 "badge.pr" = "magenta"

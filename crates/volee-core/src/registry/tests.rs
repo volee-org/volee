@@ -311,6 +311,8 @@ fn a_question_is_answered_by_a_reply_from_the_human() {
         Some(question),
     );
     assert_eq!(registry.unanswered_questions(), Vec::<&Message>::new());
+    let kinds: Vec<MessageKind> = registry.messages().map(|message| message.kind).collect();
+    assert_eq!(kinds, [MessageKind::Question, MessageKind::Answer]);
 }
 
 #[test]
