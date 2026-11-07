@@ -72,9 +72,11 @@ request sent again reuses that worktree while nothing was done in it, and
 forgets the failed agent
 ([ADR 0016](../adr/0016-what-a-failed-launch-left-untouched.md)). It refuses
 coordinators (missions launch them) and, for a mission, repositories the
-mission does not list. `missions.create` launches the coordinator when Claude
-Code is available; when it cannot, it tells the human in the mission's thread
-and `coordinator` is null.
+mission does not list. `missions.create` refuses (`-32003`) when the daemon
+has no usable Claude Code (missing or too old, as `daemon.status` reports),
+before it records anything. Otherwise it records the mission and launches the
+coordinator; when that launch fails, it tells the human in the mission's
+thread and `coordinator` is null.
 
 ### Joining
 

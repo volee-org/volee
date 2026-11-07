@@ -223,7 +223,10 @@ fn texts(registry: &Registry, party: Party) -> Vec<String> {
 
 #[tokio::test]
 async fn a_mission_starts_in_planning_with_its_own_thread() {
-    let daemon = start(vec![]);
+    // A mission needs a harness for its coordinator. This daemon has a fake
+    // one but no git, so the coordinator does not start (the launch tests
+    // cover that); the mission itself is what is under test here.
+    let daemon = start_with(vec![], Some(Arc::new(common::FakeHarness::default())));
     let client = connect(&daemon).await;
     let created = client
         .call::<CreateMission>(CreateMissionParams {
@@ -243,6 +246,34 @@ async fn a_mission_starts_in_planning_with_its_own_thread() {
     let thread = registry.thread(created.thread).unwrap();
     assert_eq!(thread.mission, Some(created.mission));
     assert_eq!(thread.participants, [Party::Human]);
+}
+
+#[tokio::test]
+async fn without_claude_code_a_mission_is_refused_and_nothing_is_recorded() {
+    let daemon = start(vec![]);
+    let client = connect(&daemon).await;
+    let error = rpc_error(
+        client
+            .call::<CreateMission>(CreateMissionParams {
+                title: "Invoicing".into(),
+                kind: MissionKind::Change,
+                goal: "Add invoices to billing.".into(),
+                repos: vec!["billing".into()],
+                requested_by: None,
+            })
+            .await
+            .unwrap_err(),
+    );
+    assert_eq!(error.code, rpc::UNAVAILABLE, "{}", error.message);
+    assert!(
+        error.message.contains("needs Claude Code")
+            && error.message.contains("volee daemon status"),
+        "{}",
+        error.message
+    );
+    let registry = registry(&client).await;
+    assert_eq!(registry.missions().count(), 0);
+    assert_eq!(registry.threads().count(), 0, "no thread either");
 }
 
 #[tokio::test]

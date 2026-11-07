@@ -32,33 +32,52 @@ pub(super) async fn create(
             "a mission needs at least one repository".into(),
         ));
     }
+    if let Some(agent) = params.requested_by {
+        require_agent(&*shared.state.lock().await, agent)?;
+    }
+    // The coordinator is a Claude Code session: without Claude Code, refuse
+    // before anything is recorded, rather than leave a mission to abort.
+    if shared.harness.is_none() {
+        return Err(no_harness(shared));
+    }
     let (mission, thread) = open(shared, &params, title).await?;
-    let coordinator = if shared.harness.is_some() {
-        match crate::launch::coordinator(shared, mission).await {
-            Ok(agent) => Some(agent),
-            Err(error) => {
-                tracing::warn!(%error, %mission, "cannot launch the coordinator");
-                alert_human(
-                    shared,
-                    thread,
-                    format!(
-                        "volee could not launch the coordinator of this mission: {error}. The \
-                         mission stays in planning: abort it, or fix the problem and create it \
-                         again."
-                    ),
-                )
-                .await?;
-                None
-            }
+    let coordinator = match crate::launch::coordinator(shared, mission).await {
+        Ok(agent) => Some(agent),
+        Err(error) => {
+            tracing::warn!(%error, %mission, "cannot launch the coordinator");
+            alert_human(
+                shared,
+                thread,
+                format!(
+                    "volee could not launch the coordinator of this mission: {error}. The \
+                     mission stays in planning: abort it, or fix the problem and create it \
+                     again."
+                ),
+            )
+            .await?;
+            None
         }
-    } else {
-        None
     };
     Ok(CreatedMission {
         mission,
         thread,
         coordinator,
     })
+}
+
+/// Why a mission cannot start on this daemon: it found no Claude Code it
+/// can use, missing or too old, and says why in `volee daemon status`.
+fn no_harness(shared: &Shared) -> DaemonError {
+    let why = shared
+        .harnesses
+        .iter()
+        .find_map(|status| status.detail.clone())
+        .map_or_else(String::new, |detail| format!(" ({detail})"));
+    DaemonError::Unavailable(format!(
+        "a mission needs Claude Code to run its coordinator, and this daemon found none it can \
+         use{why}; `volee daemon status` says why. Once Claude Code is installed or updated, \
+         restart the daemon with `volee daemon stop`: the next command starts it again"
+    ))
 }
 
 /// Records the mission and its thread.
