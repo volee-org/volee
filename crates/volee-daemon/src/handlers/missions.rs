@@ -141,12 +141,15 @@ async fn alert_human(
 pub(super) async fn abort(shared: &Arc<Shared>, params: AbortParams) -> Result<Empty, DaemonError> {
     let mut state = shared.state.lock().await;
     let record = open_mission(&state, params.mission)?;
+    // Only live agents hear it: a stopped agent has nothing to stop, and a
+    // message waiting for it must not look like a reason to resume it.
     let mut to = vec![Party::Human];
     to.extend(
         state
             .registry()
             .mission_agents(params.mission)
             .into_iter()
+            .filter(|agent| agent.state.is_live())
             .map(|agent| Party::Agent(agent.id)),
     );
     let reason = params
