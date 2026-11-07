@@ -11,7 +11,9 @@
 //! seconds while an interactive client (the interface) is subscribed, rarely
 //! otherwise, and at once when a new interactive client subscribes, so that
 //! it opens on fresh data. Each wait starts when the previous listing ends,
-//! so a slow listing on a loaded machine never runs back to back.
+//! so a slow listing on a loaded machine never runs back to back. A one-off
+//! command (`volee ls`) asks for a listing now with `discovery.refresh`, and
+//! waits for it.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,10 +24,74 @@ use volee_core::reconcile::{Listing, reconcile};
 use volee_core::time::Timestamp;
 use volee_core::{Event, EventKind};
 use volee_harness::Harness;
+use volee_proto::methods::{RefreshParams, Refreshed};
 
+use crate::error::DaemonError;
 use crate::server::Shared;
 use crate::state::State;
 use crate::watchers::Watching;
+
+/// How long a refresh waits for its listing when the request says nothing.
+const REFRESH_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// The longest a refresh may wait for its listing.
+const MAX_REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Where discovery stands, for requests that wait for a listing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Progress {
+    /// Listings started since the daemon started.
+    started: u64,
+    /// The number of the last listing that finished.
+    finished: u64,
+    /// Whether that listing worked.
+    succeeded: bool,
+}
+
+/// Requests for a listing now, and how listings progress.
+#[derive(Debug)]
+pub(crate) struct Refreshes {
+    /// Requests so far; discovery lists when it changes.
+    requests: watch::Sender<u64>,
+    progress: watch::Sender<Progress>,
+}
+
+impl Refreshes {
+    pub(crate) fn new() -> Self {
+        Self {
+            requests: watch::Sender::new(0),
+            progress: watch::Sender::new(Progress::default()),
+        }
+    }
+}
+
+/// `discovery.refresh`: has discovery list now, and waits, at most the
+/// timeout, for a listing that started after the request. Concurrent
+/// requests share one listing.
+pub(crate) async fn refresh(
+    shared: &Arc<Shared>,
+    params: RefreshParams,
+) -> Result<Refreshed, DaemonError> {
+    if shared.harness.is_none() {
+        // No harness, no discovery: nothing to wait for.
+        return Ok(Refreshed { listed: false });
+    }
+    let timeout = params
+        .timeout_ms
+        .map_or(REFRESH_TIMEOUT, Duration::from_millis)
+        .min(MAX_REFRESH_TIMEOUT);
+    let mut progress = shared.refreshes.progress.subscribe();
+    // A listing that starts from now on.
+    let wanted = progress.borrow_and_update().started + 1;
+    shared.refreshes.requests.send_modify(|count| *count += 1);
+    let done = tokio::time::timeout(
+        timeout,
+        progress.wait_for(|progress| progress.finished >= wanted),
+    )
+    .await;
+    let listed = matches!(done, Ok(Ok(progress)) if progress.succeeded);
+    Ok(Refreshed { listed })
+}
 
 /// How often the harness is listed while an interactive client watches,
 /// when the configuration says nothing.
@@ -55,7 +121,8 @@ impl Cadence {
 }
 
 /// Lists `harness` at once, then again after each wait the cadence gives,
-/// until `stop` changes; a new interactive subscription cuts the wait short.
+/// until `stop` changes; a new interactive subscription, or a refresh
+/// request, cuts the wait short.
 pub(crate) async fn run(
     shared: Arc<Shared>,
     harness: Arc<dyn Harness>,
@@ -63,6 +130,8 @@ pub(crate) async fn run(
     mut stop: watch::Receiver<bool>,
 ) {
     let mut watching = shared.watchers.subscribe();
+    let mut requests = shared.refreshes.requests.subscribe();
+    requests.borrow_and_update();
     // The interactive subscriptions opened before the last listing began:
     // that listing gave them fresh data.
     let mut served = watching.borrow_and_update().opened;
@@ -84,17 +153,33 @@ pub(crate) async fn run(
                     continue;
                 }
             }
+            changed = requests.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+            }
             _ = stop.changed() => return,
         }
         served = watching.borrow_and_update().opened;
-        list(&shared, &harness, &mut failing).await;
+        // This listing answers every request made until now.
+        requests.borrow_and_update();
+        shared
+            .refreshes
+            .progress
+            .send_modify(|progress| progress.started += 1);
+        let succeeded = list(&shared, &harness, &mut failing).await;
+        shared.refreshes.progress.send_modify(|progress| {
+            progress.finished = progress.started;
+            progress.succeeded = succeeded;
+        });
         last = Some(Instant::now());
     }
 }
 
-/// Lists the harness once and applies what changed. `failing` remembers
-/// whether the previous listing failed, so that a failure is logged once.
-async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bool) {
+/// Lists the harness once and applies what changed; `false` when the
+/// listing failed. `failing` remembers whether the previous listing failed,
+/// so that a failure is logged once.
+async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bool) -> bool {
     let lister = Arc::clone(harness);
     let mut listing = match tokio::task::spawn_blocking(move || lister.list()).await {
         Ok(Ok(listing)) => {
@@ -110,11 +195,11 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
                 tracing::warn!(harness = ?harness.kind(), %error, "cannot list sessions");
                 *failing = true;
             }
-            return;
+            return false;
         }
         Err(error) => {
             tracing::error!(%error, "the listing task panicked");
-            return;
+            return false;
         }
     };
     // volee's own one-off runs (thread summaries) are never agents.
@@ -132,12 +217,18 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
     state.sessions_mut().record(&listing);
     let events = reconcile(state.registry(), &listing, now, || state.new_agent_id());
     if events.is_empty() {
-        return;
+        return true;
     }
     let count = events.len();
     match state.commit(events) {
-        Ok(_) => tracing::debug!(events = count, "discovery applied"),
-        Err(error) => tracing::error!(%error, "cannot apply discovered sessions"),
+        Ok(_) => {
+            tracing::debug!(events = count, "discovery applied");
+            true
+        }
+        Err(error) => {
+            tracing::error!(%error, "cannot apply discovered sessions");
+            false
+        }
     }
 }
 

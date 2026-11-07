@@ -28,7 +28,7 @@ it waits for you, and none of it changes your work:
 
 | What | How often | What it runs |
 | --- | --- | --- |
-| Find sessions | Every two seconds while the [interface](interface.md) is open, every thirty seconds otherwise | `claude agents --json --all` |
+| Find sessions | Every two seconds while the [interface](interface.md) is open, every thirty seconds otherwise, and at once when the interface opens or `volee ls` asks | `claude agents --json --all` |
 | Read each agent's work | When it finishes a turn or stops, and every minute while it runs | git queries in its directory, which never change the repository |
 | Fetch | At most every five minutes per repository, for the repositories of agents volee launched | `git fetch --prune origin`; the [`[git] fetch`](configuration.md#git) setting chooses which repositories, or none |
 | Look up pull requests | At most once a minute per branch, and right after its agent stops | `gh pr list`, with your own `gh` sign-in, when the GitHub CLI is installed and signed in |
@@ -49,9 +49,10 @@ terminal or in the background, whoever started it. Agents volee launched
 report through their hooks the moment something happens. The daemon finds
 the other sessions by listing them: every two seconds while the
 [interface](interface.md) is open, and every thirty seconds otherwise, so an
-idle daemon costs next to nothing. Opening the interface lists them at once.
-Finished sessions you never saw through volee are left out; `volee daemon
-status` tells you whether Claude Code was found.
+idle daemon costs next to nothing. Opening the interface lists them at once,
+and so does `volee ls`, which waits for that listing (three seconds at most)
+before it prints. Finished sessions you never saw through volee are left
+out; `volee daemon status` tells you whether Claude Code was found.
 
 Each line shows a symbol and a word for the state, so the list reads without
 color:
