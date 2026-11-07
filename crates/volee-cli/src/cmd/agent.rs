@@ -1,7 +1,6 @@
 //! `volee attach`, `volee logs`, `volee diff` and `volee stop`: acting on one
 //! agent, named as a person types it (its name, short id or id).
 
-use std::io::Write as _;
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
@@ -56,13 +55,15 @@ pub(crate) async fn attach(input: &str) -> Result<()> {
 /// moves, as the harness recorded it.
 pub(crate) async fn logs(input: &str) -> Result<()> {
     let client = connect_or_start().await?;
-    let (agent, _) = agent(&client, input).await?;
+    let (agent, name) = agent(&client, input).await?;
     let preview = client.call::<Preview>(AgentParams { agent }).await?;
-    let mut out = std::io::stdout().lock();
-    out.write_all(preview.screen.as_bytes())?;
-    // Leave the terminal's colors as they were.
-    out.write_all(b"\x1b[0m\n")?;
-    out.flush()?;
+    // The screen as it looks now, not the raw output that drew it.
+    let screen = volee_tui::screen_text(&preview.screen);
+    if screen.is_empty() {
+        println!("{name} has shown nothing yet.");
+    } else {
+        println!("{screen}");
+    }
     Ok(())
 }
 
