@@ -370,7 +370,9 @@ fn mission_fixture() -> Fixture {
                     url: "https://example.com/pull/7".into(),
                     state: PrState::Open,
                     checks: ChecksState::Passing,
+                    head: Some("c0ffee".into()),
                 }),
+                tip: Some("c0ffee".into()),
                 ..Delivery::default()
             },
         }),

@@ -74,10 +74,12 @@ mod command;
 mod error;
 mod forge;
 mod parse;
+mod remote;
 
 pub use cli::GitCli;
 pub use error::{GitError, RemovalRefusal};
-pub use forge::{Forge, ForgeStatus, GhCli};
+pub use forge::{BranchHead, Forge, ForgeStatus, GhCli};
+pub use remote::RepoSlug;
 
 /// Everything volee asks of git.
 ///
@@ -248,6 +250,12 @@ pub trait Git: Send + Sync {
     /// can fetch before [`Git::add_worktree`] or [`Git::delivery`] without
     /// special-casing local-only repositories.
     fn fetch(&self, repo: &Path) -> Result<(), GitError>;
+
+    /// The repository `origin` points to on its forge, as `owner/name` (from
+    /// `git remote get-url origin`, which applies `url.*.insteadOf`); `None`
+    /// when there is no `origin` remote or its URL names no `owner/name`,
+    /// such as a path on this machine.
+    fn origin(&self, repo: &Path) -> Result<Option<RepoSlug>, GitError>;
 }
 
 /// Where a directory sits in a git repository: see [`Git::repo_info`].

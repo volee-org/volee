@@ -132,6 +132,9 @@ impl World {
     }
 }
 
+/// The tip of a shipped branch, and the head of its pull request.
+const TIP: &str = "c0ffee";
+
 fn shipped() -> Delivery {
     Delivery {
         commits: 3,
@@ -141,7 +144,9 @@ fn shipped() -> Delivery {
             url: "https://example.com/pull/42".into(),
             state: PrState::Open,
             checks: ChecksState::Passing,
+            head: Some(TIP.into()),
         }),
+        tip: Some(TIP.into()),
         ..Delivery::default()
     }
 }
@@ -298,6 +303,29 @@ fn a_merged_pull_request_is_delivery_even_without_new_commits() {
     world.step();
     let assessment = &world.registry.mission(mission_id()).unwrap().assessments[&agent(1)];
     assert_eq!(assessment.verdict, Verdict::Delivered);
+}
+
+#[test]
+fn a_pull_request_at_another_commit_proves_nothing() {
+    let mut world = World::new(MissionKind::Change);
+    world.register(1, Role::Worker, "billing");
+    // A merged pull request whose head is not the branch's tip: an old one
+    // of a reused branch name, or commits made after it.
+    let mut delivery = shipped();
+    delivery.commits = 0;
+    let pr = delivery.pull_request.as_mut().unwrap();
+    pr.state = PrState::Merged;
+    pr.head = Some("0dd5ed".into());
+    world.set_delivery(1, delivery);
+    world.set_state(1, AgentState::Stopped);
+    world.step();
+    let assessment = &world.registry.mission(mission_id()).unwrap().assessments[&agent(1)];
+    assert_eq!(assessment.verdict, Verdict::NotDelivered);
+    assert!(
+        assessment.evidence.contains("no open pull request"),
+        "{}",
+        assessment.evidence
+    );
 }
 
 #[test]

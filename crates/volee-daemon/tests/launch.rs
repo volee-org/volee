@@ -22,7 +22,7 @@ use volee_core::time::Timestamp;
 use volee_core::{Event, EventKind, MissionId, Registry, ThreadId};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_git::GitCli;
-use volee_harness::Harness;
+use volee_harness::{Harness, PermissionMode};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     CreateMission, CreateMissionParams, EventsSince, SinceParams, Spawn, SpawnParams,
@@ -223,6 +223,26 @@ async fn a_worker_gets_its_own_worktree_and_session() {
     assert_eq!(
         mcp["mcpServers"]["volee"]["env"]["VOLEE_SOCKET"],
         socket.as_str()
+    );
+}
+
+#[tokio::test]
+async fn agents_launch_in_manual_mode_unless_another_is_configured() {
+    // Never the person's own Claude Code default, which may skip every check.
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    client.call::<Spawn>(worker("feat/invoices")).await.unwrap();
+    assert_eq!(
+        daemon.harness.launches()[0].permission_mode,
+        PermissionMode::Manual
+    );
+
+    let daemon = start_with("[agents]\npermission_mode = \"acceptEdits\"\n");
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    client.call::<Spawn>(worker("feat/invoices")).await.unwrap();
+    assert_eq!(
+        daemon.harness.launches()[0].permission_mode,
+        PermissionMode::AcceptEdits
     );
 }
 

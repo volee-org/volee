@@ -715,19 +715,19 @@ fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), DaemonError>
         })
 }
 
-pub(crate) fn permission_mode(shared: &Shared) -> Option<PermissionMode> {
+/// The permission mode of the agents volee launches and resumes: the
+/// configured one, else `manual`, which asks before every tool that needs
+/// permission. It is never left to the person's own Claude Code default,
+/// which may skip every check.
+pub(crate) fn permission_mode(shared: &Shared) -> PermissionMode {
     use volee_config::PermissionMode as Configured;
-    shared
-        .settings
-        .agents
-        .permission_mode
-        .map(|mode| match mode {
-            Configured::AcceptEdits => PermissionMode::AcceptEdits,
-            Configured::Auto => PermissionMode::Auto,
-            Configured::Manual => PermissionMode::Manual,
-            Configured::DontAsk => PermissionMode::DontAsk,
-            Configured::Plan => PermissionMode::Plan,
-        })
+    match shared.settings.agents.permission_mode {
+        None | Some(Configured::Manual) => PermissionMode::Manual,
+        Some(Configured::AcceptEdits) => PermissionMode::AcceptEdits,
+        Some(Configured::Auto) => PermissionMode::Auto,
+        Some(Configured::DontAsk) => PermissionMode::DontAsk,
+        Some(Configured::Plan) => PermissionMode::Plan,
+    }
 }
 
 /// What volee tells an agent it launched, appended to its system prompt so

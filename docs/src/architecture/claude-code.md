@@ -33,7 +33,9 @@ and a rule that allows volee's own MCP tools) and its MCP configuration
 (`--mcp-config` with `--strict-mcp-config`, so the agent loads volee's tools
 and nothing else). The permission mode and tool rules come from volee's
 configuration only, never from an agent's request, and there is no way to
-ask for `bypassPermissions`.
+ask for `bypassPermissions`. Every launch and resume passes
+`--permission-mode`: the configured mode, else `manual`, never the person's
+own default, which may skip every check.
 
 Every value travels inside its option (`--name=alpha`, not `--name alpha`),
 so no value can be read as an option and no list option can swallow the next
@@ -151,6 +153,11 @@ What the adapter knows, and how it knows it:
   conversation in its worktree, as a fork with a new id. volee resumes agents
   this way to deliver messages (ADR 0006). Once two sessions record the same
   worktree, `claude rm` refuses to delete it and offers no way to force it.
+  The resumed session starts its MCP servers again, but the conversation it
+  continues may say that the volee server disconnected (it stopped with the
+  old session). A resumed model took that for the current state and wrote
+  that it could not answer, with its tools connected, so volee's resume
+  prompt starts by saying that the tools work in the new session.
 - **Unknown sessions** (measured). `claude stop` and `claude logs` answer
   `No job matching '<id>'. Run 'claude agents' to list running sessions.`,
   `claude rm` answers `No job matching '<id>'`, all with exit status 1.

@@ -84,9 +84,7 @@ pub(crate) fn args(resume: Option<&str>, spec: &SpawnSpec) -> Vec<OsString> {
     args.push(option("--settings", &spec.settings_file));
     args.push(option("--mcp-config", &spec.mcp_config_file));
     args.push("--strict-mcp-config".into());
-    if let Some(mode) = spec.permission_mode {
-        args.push(option("--permission-mode", mode.as_str()));
-    }
+    args.push(option("--permission-mode", spec.permission_mode.as_str()));
     for (flag, rules) in [
         ("--allowedTools", &spec.allowed_tools),
         ("--disallowedTools", &spec.disallowed_tools),
@@ -211,7 +209,7 @@ mod tests {
             prompt: "Fix the flaky test".into(),
             settings_file: "/state/agents/ag_1/settings.json".into(),
             mcp_config_file: "/state/agents/ag_1/mcp.json".into(),
-            permission_mode: None,
+            permission_mode: PermissionMode::Manual,
             allowed_tools: vec![],
             disallowed_tools: vec![],
             append_system_prompt: None,
@@ -315,6 +313,7 @@ mod tests {
                 "--settings=/state/agents/ag_1/settings.json",
                 "--mcp-config=/state/agents/ag_1/mcp.json",
                 "--strict-mcp-config",
+                "--permission-mode=manual",
                 "--",
                 "Fix the flaky test",
             ]
@@ -325,7 +324,7 @@ mod tests {
     fn every_value_travels_inside_its_option() {
         let full = SpawnSpec {
             model: Some("opus".into()),
-            permission_mode: Some(PermissionMode::AcceptEdits),
+            permission_mode: PermissionMode::AcceptEdits,
             allowed_tools: vec!["Bash(cargo test *)".into(), "Edit".into()],
             disallowed_tools: vec!["WebFetch".into()],
             append_system_prompt: Some("-You are a volee worker.".into()),
@@ -352,12 +351,18 @@ mod tests {
     }
 
     #[test]
-    fn a_permission_mode_is_passed_only_when_configured() {
+    fn the_permission_mode_is_always_passed_and_never_skips_checks() {
         let defaults = args(None, &spec());
+        let defaults = strings(&defaults);
         assert!(
-            !strings(&defaults)
+            defaults.contains(&"--permission-mode=manual"),
+            "{defaults:?}"
+        );
+        assert!(
+            !defaults
                 .iter()
-                .any(|arg| arg.contains("ermission") || arg.contains("dangerously"))
+                .any(|arg| arg.contains("bypass") || arg.contains("dangerously")),
+            "{defaults:?}"
         );
     }
 

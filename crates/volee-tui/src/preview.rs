@@ -154,8 +154,7 @@ impl PreviewScreen {
         }
     }
 
-    /// The text of the screen, for tests.
-    #[cfg(test)]
+    /// The text of the screen, one string per row.
     pub(crate) fn text(&self) -> Vec<String> {
         self.rows
             .iter()
@@ -167,6 +166,25 @@ impl PreviewScreen {
             })
             .collect()
     }
+}
+
+/// The screen that raw terminal output leaves, as plain text: what was
+/// visible last, one line per row, without colors, escape sequences or
+/// trailing blanks. `volee logs` prints it: the raw output replays every
+/// frame of the agent's interface, and carries sequences that should not
+/// reach a terminal unread.
+pub fn screen_text(output: &str) -> String {
+    let screen = PreviewScreen::parse(output, ColorDepth::TrueColor);
+    let mut lines: Vec<String> = screen
+        .text()
+        .into_iter()
+        .take(usize::from(screen.anchor) + 1)
+        .map(|line| line.trim_end().to_owned())
+        .collect();
+    while lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
+    lines.join("\n")
 }
 
 fn color(color: vt100::Color, depth: ColorDepth) -> Option<Color> {
@@ -200,6 +218,15 @@ fn style_of(cell: &vt100::Cell, depth: ColorDepth) -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_screen_text_is_the_last_frame_without_escapes() {
+        // A spinner redrawn in place, a window title, then the prompt.
+        let output = "\x1b[2J\x1b[H\x1b[38;5;208m\u{273b} Ideating\x1b[0m\x1b[H\x1b[38;5;208m\
+                      \u{2736} Ideating\x1b[0m\x1b[H\x1b[K\u{273b} Done for 3s\r\n\x1b]0;title\x07> ";
+        assert_eq!(screen_text(output), "\u{273b} Done for 3s\n>");
+        assert_eq!(screen_text(""), "");
+    }
 
     #[test]
     fn escape_sequences_become_styled_cells() {

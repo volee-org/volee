@@ -25,7 +25,7 @@ use volee_core::time::Timestamp;
 use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, MissionId, Registry, ThreadId};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
-use volee_git::{Forge, ForgeStatus, GitCli, GitError};
+use volee_git::{BranchHead, Forge, ForgeStatus, GitCli, GitError};
 use volee_proto::client::Client;
 use volee_proto::methods::{
     EventsSince, HookIngest, HookParams, SinceParams, Status, StatusParams,
@@ -170,20 +170,29 @@ impl Sandbox {
     }
 }
 
-/// A forge that answers what the test says, and counts lookups.
+/// A forge that answers what the test says, and records what it was asked.
 #[derive(Default)]
 struct FakeForge {
     pull_request: Mutex<Option<PullRequest>>,
+    /// The tips the daemon asked about, with the origin it named.
+    asked: Mutex<Vec<(String, Option<String>)>>,
 }
 
 impl FakeForge {
+    /// From now on, the branch has an open pull request at whatever tip the
+    /// daemon asks about, as a forge answers once the branch is pushed.
     fn open(&self, number: u64) {
         *self.pull_request.lock().unwrap() = Some(PullRequest {
             number,
             url: format!("https://example.com/pull/{number}"),
             state: PrState::Open,
             checks: ChecksState::Passing,
+            head: None,
         });
+    }
+
+    fn asked(&self) -> Vec<(String, Option<String>)> {
+        self.asked.lock().unwrap().clone()
     }
 }
 
@@ -197,8 +206,20 @@ impl Forge for FakeForge {
         }
     }
 
-    fn pull_request(&self, _repo: &Path, _branch: &str) -> Result<Option<PullRequest>, GitError> {
-        Ok(self.pull_request.lock().unwrap().clone())
+    fn pull_request(
+        &self,
+        _repo: &Path,
+        head: &BranchHead<'_>,
+    ) -> Result<Option<PullRequest>, GitError> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push((head.tip.to_owned(), head.origin.map(ToString::to_string)));
+        let found = self.pull_request.lock().unwrap().clone();
+        Ok(found.map(|pr| PullRequest {
+            head: Some(head.tip.to_owned()),
+            ..pr
+        }))
     }
 }
 
@@ -439,6 +460,14 @@ async fn a_change_worker_is_judged_only_on_evidence_checked_after_it_stopped() {
     assert_eq!(delivery.commits, 1);
     assert_eq!(delivery.push, PushState::UpToDate);
     assert_eq!(delivery.pull_request.as_ref().map(|pr| pr.number), Some(7));
+    // The forge was asked about the branch's tip; the sandbox's `origin` is
+    // a directory, not a repository on a forge, so no origin was named.
+    let tip = delivery.tip.clone().unwrap();
+    assert_eq!(
+        delivery.pull_request.as_ref().unwrap().head,
+        Some(tip.clone())
+    );
+    assert!(forge.asked().contains(&(tip, None)), "{:?}", forge.asked());
     assert!(delivery.checked_at >= Some(Timestamp::from_millis(11_000)));
     assert_eq!(
         registry.mission(mission_id()).unwrap().status,

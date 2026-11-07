@@ -192,11 +192,11 @@ pub fn verdict_for(
 
 fn delivery_verdict(registry: &Registry, kind: MissionKind, worker: &Agent) -> (Verdict, String) {
     let delivery = &worker.delivery;
-    let merged = delivery.merged_into_base
-        || delivery
-            .pull_request
-            .as_ref()
-            .is_some_and(|pr| pr.state == PrState::Merged);
+    // Only a pull request whose head is the branch's tip counts: an old pull
+    // request of a reused branch name says nothing about this work.
+    let pull_request = delivery.pull_request_at_tip();
+    let merged =
+        delivery.merged_into_base || pull_request.is_some_and(|pr| pr.state == PrState::Merged);
     if merged {
         return (Verdict::Delivered, delivery.summary());
     }
@@ -219,10 +219,8 @@ fn delivery_verdict(registry: &Registry, kind: MissionKind, worker: &Agent) -> (
             } else if delivery.push != PushState::UpToDate {
                 missing.push("commits not pushed");
             }
-            let open_pr = delivery
-                .pull_request
-                .as_ref()
-                .is_some_and(|pr| matches!(pr.state, PrState::Open | PrState::Draft));
+            let open_pr =
+                pull_request.is_some_and(|pr| matches!(pr.state, PrState::Open | PrState::Draft));
             if !open_pr {
                 missing.push("no open pull request");
             }
