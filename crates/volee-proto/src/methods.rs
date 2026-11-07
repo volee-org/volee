@@ -190,30 +190,42 @@ method!(
 pub struct TidyParams {
     /// The agent whose worktree to remove.
     pub agent: AgentId,
-    /// Remove even without delivery evidence. Never deletes the branch.
+    /// Only say what tidying would do; touch nothing.
     #[serde(default)]
-    pub force: bool,
+    pub dry_run: bool,
 }
 
 /// The result of [`Tidy`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "outcome")]
 pub enum TidyOutcome {
-    /// The worktree was removed; the branch was kept.
+    /// The worktree was removed and the agent forgotten; the branch was
+    /// kept.
     Removed {
         /// The removed worktree.
         worktree: String,
+        /// The agent's branch, which is kept.
+        branch: Option<String>,
+    },
+    /// A dry run: the evidence allows removing the worktree. Nothing was
+    /// touched.
+    WouldRemove {
+        /// The worktree tidying would remove.
+        worktree: String,
+        /// The agent's branch, which tidying keeps.
+        branch: Option<String>,
     },
     /// Nothing was removed, for these reasons.
     Kept {
-        /// Why.
+        /// Why, every reason at once.
         reasons: Vec<TidyRefusal>,
     },
 }
 
 method!(
-    /// Removes an agent's worktree when delivery evidence allows it
-    /// (ADR 0011).
+    /// Removes an agent's worktree when its delivery evidence allows it
+    /// (ADR 0011), then forgets the agent. Never deletes a branch, never
+    /// forces.
     Tidy,
     "agents.tidy",
     TidyParams,
@@ -580,5 +592,15 @@ mod tests {
         let json = serde_json::to_value(&kept).unwrap();
         assert_eq!(json["outcome"], "kept");
         assert_eq!(json["reasons"][0]["reason"], "not-delivered");
+        let would = TidyOutcome::WouldRemove {
+            worktree: "/work/alpha/.claude/worktrees/feat-x".into(),
+            branch: Some("feat/x".into()),
+        };
+        let json = serde_json::to_value(&would).unwrap();
+        assert_eq!(json["outcome"], "would-remove");
+        let params: TidyParams =
+            serde_json::from_value(serde_json::json!({ "agent": "ag_01jc5x8m3kq7v2c4b9e0f1g2h3" }))
+                .unwrap();
+        assert!(!params.dry_run, "a request without dry_run removes");
     }
 }

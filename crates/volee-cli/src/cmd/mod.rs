@@ -10,3 +10,4 @@ pub(crate) mod mcp;
 pub(crate) mod mission;
 pub(crate) mod msg;
 pub(crate) mod spawn;
+pub(crate) mod tidy;

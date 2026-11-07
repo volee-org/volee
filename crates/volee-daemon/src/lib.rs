@@ -21,6 +21,7 @@ mod resume;
 mod server;
 mod sqlite;
 mod state;
+mod tidy;
 
 pub use clock::{Clock, ManualClock, SystemClock};
 pub use discovery::DEFAULT_INTERVAL as DEFAULT_DISCOVERY_INTERVAL;

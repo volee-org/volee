@@ -90,6 +90,30 @@ Claude Code only starts background sessions in repositories you trust: run
 `claude` once in each repository and accept its trust prompt. volee says so
 when it is missing, and starts nothing.
 
+## Tidying worktrees
+
+```sh
+volee tidy <agent>             # remove its worktree if its work landed
+volee tidy --all               # the same for every agent volee launched
+volee tidy --all --dry-run     # say what would be removed, touch nothing
+```
+
+`volee tidy` removes the worktree of an agent only when the evidence says
+its work landed: its branch is merged into its base branch, its pull request
+is merged, or, for analysis work, its report was delivered. The worktree
+must also be clean, the agent must not be running, and volee must have
+checked the agent's work since its last change. It only touches agents volee
+launched, in the worktrees it created under `.claude/worktrees/`. It never
+deletes a branch and has no way to force a removal: when something is
+missing, it says what, for example:
+
+```text
+Kept billing-feat-invoices: its work has not landed: not merged into its base branch, no merged pull request, no report.
+```
+
+Once the worktree is gone, the agent leaves `volee ls`; its history stays in
+volee's event log, and its branch stays in the repository.
+
 ## Messages
 
 ```sh
