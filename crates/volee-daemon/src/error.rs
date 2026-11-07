@@ -86,8 +86,18 @@ impl From<RouteError> for DaemonError {
 impl From<DaemonError> for RpcError {
     fn from(error: DaemonError) -> Self {
         let code = match &error {
-            DaemonError::NotFound(_) => rpc::NOT_FOUND,
+            DaemonError::NotFound(_)
+            | DaemonError::Harness(volee_harness::HarnessError::UnknownSession { .. }) => {
+                rpc::NOT_FOUND
+            }
             DaemonError::Refused(_)
+            | DaemonError::Harness(
+                volee_harness::HarnessError::NotControllable { .. }
+                | volee_harness::HarnessError::ForeignSession { .. }
+                | volee_harness::HarnessError::UntrustedDirectory { .. }
+                | volee_harness::HarnessError::WorktreeAtRisk { .. }
+                | volee_harness::HarnessError::SessionKept { .. },
+            )
             | DaemonError::Git(
                 volee_git::GitError::BranchExists { .. }
                 | volee_git::GitError::PathExists { .. }

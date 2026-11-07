@@ -16,16 +16,48 @@ use volee_harness::{
     Capabilities, Harness, HarnessError, SpawnSpec, Spawned, Version, WorktreeRemoval,
 };
 
-/// A harness whose listing the test sets, and which records launches.
+/// A harness whose listing the test sets, and which records launches and
+/// the actions on sessions (`logs`, `stop`, `attach`) with the handle each
+/// one received.
 #[derive(Debug, Default)]
 pub(crate) struct FakeHarness {
     sessions: Mutex<Vec<ListedSession>>,
     failing: Mutex<bool>,
     launches: Mutex<Vec<SpawnSpec>>,
     refuse_launches: Mutex<bool>,
+    actions: Mutex<Vec<(String, String)>>,
+    sessions_gone: Mutex<bool>,
 }
 
 impl FakeHarness {
+    /// Every action on a session so far, as `(action, handle)`.
+    pub(crate) fn actions(&self) -> Vec<(String, String)> {
+        self.actions.lock().unwrap().clone()
+    }
+
+    /// Makes the harness forget every session, as `claude rm` would.
+    pub(crate) fn forget_sessions(&self) {
+        *self.sessions_gone.lock().unwrap() = true;
+    }
+
+    /// Records an action on `session` and returns its handle, or the error
+    /// Claude Code gives for a session it does not know.
+    fn act(&self, action: &str, session: &ListedSession) -> Result<String, HarnessError> {
+        let handle = session
+            .handle
+            .clone()
+            .ok_or_else(|| HarnessError::NotControllable {
+                session: session.key.clone(),
+            })?;
+        if *self.sessions_gone.lock().unwrap() {
+            return Err(HarnessError::UnknownSession { handle });
+        }
+        self.actions
+            .lock()
+            .unwrap()
+            .push((action.to_owned(), handle.clone()));
+        Ok(handle)
+    }
     /// Sets what the next listings return.
     pub(crate) fn set(&self, sessions: Vec<ListedSession>) {
         *self.sessions.lock().unwrap() = sessions;
@@ -95,20 +127,25 @@ impl Harness for FakeHarness {
         Err(unsupported("resume"))
     }
 
-    fn stop(&self, _: &ListedSession) -> Result<(), HarnessError> {
-        Err(unsupported("stop"))
+    fn stop(&self, session: &ListedSession) -> Result<(), HarnessError> {
+        self.act("stop", session).map(drop)
     }
 
     fn remove(&self, _: &ListedSession, _: WorktreeRemoval) -> Result<(), HarnessError> {
         Err(unsupported("remove"))
     }
 
-    fn logs(&self, _: &ListedSession) -> Result<Vec<u8>, HarnessError> {
-        Err(unsupported("logs"))
+    /// A screen with a color escape, like `claude logs` prints.
+    fn logs(&self, session: &ListedSession) -> Result<Vec<u8>, HarnessError> {
+        let handle = self.act("logs", session)?;
+        Ok(format!("\u{1b}[2J\u{1b}[1;1H\u{1b}[32mscreen of {handle}\u{1b}[0m").into_bytes())
     }
 
-    fn attach_command(&self, _: &ListedSession) -> Result<Command, HarnessError> {
-        Err(unsupported("attach"))
+    fn attach_command(&self, session: &ListedSession) -> Result<Command, HarnessError> {
+        let handle = self.act("attach", session)?;
+        let mut command = Command::new("claude");
+        command.arg("attach").arg(handle).env_remove("CLAUDECODE");
+        Ok(command)
     }
 
     fn agent_settings(

@@ -347,6 +347,14 @@ async fn start_session(
     match started {
         Ok(spawned) => {
             tracing::info!(%agent, handle = %spawned.handle, "agent launched");
+            // Until a listing shows the session, its handle is all the daemon
+            // knows to preview, take over or stop it.
+            shared
+                .state
+                .lock()
+                .await
+                .sessions_mut()
+                .launched(agent, spawned.handle);
             Ok(())
         }
         Err(error) => {
@@ -583,7 +591,8 @@ fn worker_instructions(
     )
 }
 
-fn harness(shared: &Shared) -> Result<Arc<dyn Harness>, DaemonError> {
+/// The harness, or why the daemon has none.
+pub(crate) fn harness(shared: &Shared) -> Result<Arc<dyn Harness>, DaemonError> {
     shared.harness.clone().ok_or_else(|| {
         DaemonError::Unavailable(
             "Claude Code is not available to this daemon; see `volee daemon status`".into(),
@@ -591,7 +600,8 @@ fn harness(shared: &Shared) -> Result<Arc<dyn Harness>, DaemonError> {
     })
 }
 
-fn git(shared: &Shared) -> Result<Arc<dyn Git>, DaemonError> {
+/// git, or why the daemon has none.
+pub(crate) fn git(shared: &Shared) -> Result<Arc<dyn Git>, DaemonError> {
     shared
         .git
         .clone()
@@ -599,7 +609,7 @@ fn git(shared: &Shared) -> Result<Arc<dyn Git>, DaemonError> {
 }
 
 /// Runs blocking work (git, the harness) on the blocking thread pool.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, DaemonError> {
     tokio::task::spawn_blocking(work)

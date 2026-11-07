@@ -3,16 +3,15 @@
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result, bail};
+use volee_core::Registry;
 use volee_core::message::Party;
 use volee_core::mission::{Mission, MissionKind, MissionStatus};
 use volee_core::role::Role;
 use volee_core::time::{Elapsed, Timestamp};
-use volee_core::{Event, Registry};
 use volee_daemon::{Clock, SystemClock};
-use volee_proto::client::{Client, ClientError};
+use volee_proto::client::ClientError;
 use volee_proto::methods::{
     AbortMission, AbortParams, CloseMission, CloseParams, CreateMission, CreateMissionParams,
-    EventsSince, SinceParams,
 };
 use volee_proto::rpc;
 
@@ -58,7 +57,7 @@ pub(crate) async fn new(request: NewMission) -> Result<()> {
 
 /// Lists missions, open ones only unless `all`.
 pub(crate) async fn list(all: bool, json: bool) -> Result<()> {
-    let registry = registry(&connect_or_start().await?).await?;
+    let registry = resolve::registry(&connect_or_start().await?).await?;
     let mut missions: Vec<&Mission> = registry
         .missions()
         .filter(|mission| all || !mission.status.is_over())
@@ -82,7 +81,7 @@ pub(crate) async fn list(all: bool, json: bool) -> Result<()> {
 
 /// Shows one mission: its agents, the supervisor's verdicts and its thread.
 pub(crate) async fn show(input: &str) -> Result<()> {
-    let registry = registry(&connect_or_start().await?).await?;
+    let registry = resolve::registry(&connect_or_start().await?).await?;
     let id = resolve::mission(&registry, input)?;
     let mission = registry
         .mission(id)
@@ -94,7 +93,7 @@ pub(crate) async fn show(input: &str) -> Result<()> {
 /// Aborts a mission. Its agents are told to stop; nothing is deleted.
 pub(crate) async fn abort(input: &str, reason: Option<String>) -> Result<()> {
     let client = connect_or_start().await?;
-    let id = resolve::mission(&registry(&client).await?, input)?;
+    let id = resolve::mission(&resolve::registry(&client).await?, input)?;
     client
         .call::<AbortMission>(AbortParams {
             mission: id,
@@ -112,7 +111,7 @@ pub(crate) async fn abort(input: &str, reason: Option<String>) -> Result<()> {
 /// Closes a mission, with its coordinator's latest report.
 pub(crate) async fn close(input: &str, force: bool) -> Result<()> {
     let client = connect_or_start().await?;
-    let registry = registry(&client).await?;
+    let registry = resolve::registry(&client).await?;
     let id = resolve::mission(&registry, input)?;
     let closed = client
         .call::<CloseMission>(CloseParams {
@@ -142,12 +141,6 @@ pub(crate) async fn close(input: &str, force: bool) -> Result<()> {
         }
         Err(error) => Err(error.into()),
     }
-}
-
-async fn registry(client: &Client) -> Result<Registry> {
-    let batch = client.call::<EventsSince>(SinceParams::default()).await?;
-    let events: Vec<Event> = batch.events.into_iter().map(|e| e.event).collect();
-    Registry::from_events(&events).context("the daemon sent events that do not fit together")
 }
 
 /// The text of `volee mission show`.
