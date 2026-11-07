@@ -72,7 +72,7 @@ cargo install --locked --git https://github.com/volee-org/volee --tag v0.1.0 vol
 ```
 
 volee supports macOS and Linux and needs [Claude Code](https://code.claude.com)
-2.1.300 or later for its agent features. The
+2.1.319 or later for its agent features. The
 [installation guide](https://volee-org.github.io/volee/guide/installation.html)
 covers specific versions, manual downloads and uninstalling.
 
