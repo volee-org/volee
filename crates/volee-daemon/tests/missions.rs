@@ -151,6 +151,7 @@ fn start(events: Vec<Event>) -> Running {
         spool: None,
         harness: None,
         discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
+        idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
         volee_bin: None,
     };

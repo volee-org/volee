@@ -19,7 +19,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `daemon.status` | `protocol` (the client's protocol version, or 0) | version, protocol, pid, start time, last event, agent count, harnesses |
 | `daemon.shutdown` | none | none; the daemon stops after answering |
 | `events.since` | `after` (sequence number, optional) | `events` (sequence number and event), `last_seq` |
-| `events.subscribe` | `after` (optional) | the same batch, then `events.appended` notifications |
+| `events.subscribe` | `after` (optional), `interactive` (optional, `false` by default) | the same batch, then `events.appended` notifications |
 | `agents.forget` | `agent` | none |
 | `agents.preview` | `agent` | `screen`: the agent's recent terminal output, with its escape sequences |
 | `agents.diff` | `agent`, optional `full` | `text`: a summary by file, or the full patch; `truncated` |
@@ -119,11 +119,21 @@ than 4,096 events behind receives `events.lagged` (with the number of events
 it `skipped`) and is dropped; it can resubscribe with `after` set to the last
 sequence number it applied.
 
+A client a person watches, such as the interface, subscribes with
+`interactive` set to `true`. While at least one interactive subscription is
+open, the daemon lists the harness's sessions every two seconds instead of
+every thirty, and a new one triggers a listing at once, so the client opens
+on fresh data ([discovery](../architecture/domain.md#reconciliation)). The
+subscription stops counting when it ends or its connection closes. Programs,
+such as an agent's MCP server, leave it `false`: agents volee launched
+report through their hooks in real time anyway.
+
 Rust clients get all of this from `volee_proto::replica`: `subscribe` returns
 the backlog and a feed of the events that follow, which drops repeats and
-picks up again after a lag on request, and `Replica` keeps a `Registry` up
-to date from a feed. The MCP server reads a `Replica`; the interface follows
-a feed, because it also needs the events themselves.
+picks up again after a lag on request (`subscribe_interactive` does the
+same for a client a person watches), and `Replica` keeps a `Registry` up to
+date from a feed. The MCP server reads a `Replica`; the interface follows an
+interactive feed, because it also needs the events themselves.
 
 ## Errors
 
