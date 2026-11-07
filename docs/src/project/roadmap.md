@@ -21,6 +21,9 @@ deliberately out of scope. Dates are targets, not promises.
 - Location adapters for tmux and Zellij (jump to a pane-hosted agent); tuios
   has one ([ADR 0015](../adr/0015-tuios-location-adapter.md)).
 - Other harnesses: Codex CLI, Gemini CLI (discovery and messaging first).
+  Agents of any MCP-capable harness can already
+  [join](../guide/other-harnesses.md) through `volee mcp --join`; discovering
+  their sessions and handing them messages would come with adapters.
 - Setup commands for new worktrees: a first step, such as `bun install`,
   that each new worktree runs.
 - Leads that start missions and workers themselves.

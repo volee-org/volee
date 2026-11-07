@@ -134,7 +134,7 @@ fn link_coordinator(registry: &Registry, mission: MissionId) -> Option<EventKind
 }
 
 /// A supervisor notice as a message from volee in the mission's thread.
-fn notice_message(state: &State, mission: MissionId, notice: Notice) -> Option<Message> {
+pub(crate) fn notice_message(state: &State, mission: MissionId, notice: Notice) -> Option<Message> {
     let thread = state.registry().mission(mission)?.thread;
     if notice.to.is_empty() {
         return None;

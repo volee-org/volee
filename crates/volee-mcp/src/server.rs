@@ -13,8 +13,8 @@ use volee_core::role::Role;
 use volee_core::{AgentId, AgentState, Registry};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    CloseMission, CloseParams, MarkRead, MarkReadParams, SendMessage, SendParams, Spawn,
-    SpawnParams,
+    ActivityParams, CloseMission, CloseParams, Join, JoinParams, MarkRead, MarkReadParams,
+    RecordActivity, SendMessage, SendParams, Spawn, SpawnParams,
 };
 use volee_proto::replica::{Replica, ReplicaError};
 
@@ -27,6 +27,15 @@ write to an agent or to the human (by id, by name, or \"human\"), read_messages 
 sent to you, and report when your task is done, blocked or failed. A mission's coordinator calls \
 close_mission once every worker delivered and its final report is sent. Messages sent to you \
 also arrive on their own at the end of your turn.";
+
+/// The same for an agent of another harness that joined (ADR 0014): no
+/// hooks hand it messages, so it must read them.
+const JOINED_INSTRUCTIONS: &str = "volee connects you with the other coding agents on this machine, \
+whatever AI runs them, and with the human who supervises them. You joined volee through this \
+server, so messages sent to you wait until you call read_messages: call it when you start a \
+task, after you send a question, and before you finish. Use list_agents to see who works on \
+what and whom you may write to (can_message), send_message to write to an agent or to the human \
+(by id, by name, or \"human\"), and report when your task is done, blocked or failed.";
 
 /// Starting the server failed.
 #[derive(Debug, thiserror::Error)]
@@ -54,6 +63,9 @@ struct Inner {
     me: AgentId,
     client: Client,
     replica: Replica,
+    /// Whether `me` joined through this server: then no hooks report on it,
+    /// and the server records its tool calls as its activity.
+    joined: bool,
 }
 
 /// Parameters of `list_agents`.
@@ -221,19 +233,49 @@ impl VoleeMcp {
         if replica.read().await.agent(me).is_none() {
             return Err(McpError::UnknownAgent(me));
         }
-        Ok(Self {
+        Ok(Self::new(me, client, replica, false))
+    }
+
+    /// Joins volee as an agent of another harness (ADR 0014), then builds
+    /// its server. The agent stays alive while `client`'s connection is
+    /// open, so keep this server for as long as the harness runs.
+    pub async fn join(params: JoinParams, mut client: Client) -> Result<Self, McpError> {
+        let joined = client.call::<Join>(params).await?;
+        let replica = Replica::subscribe(&mut client).await?;
+        Ok(Self::new(joined.agent, client, replica, true))
+    }
+
+    fn new(me: AgentId, client: Client, replica: Replica, joined: bool) -> Self {
+        Self {
             inner: Arc::new(Inner {
                 me,
                 client,
                 replica,
+                joined,
             }),
             tool_router: Self::tool_router(),
-        })
+        }
     }
 
     /// The agent this server speaks for.
     pub fn agent(&self) -> AgentId {
         self.inner.me
+    }
+
+    /// Records a tool call as the activity of a joined agent; agents volee
+    /// launched report through their hooks instead. A failure only loses
+    /// the line.
+    async fn note(&self, activity: impl Into<String>) {
+        if !self.inner.joined {
+            return;
+        }
+        let params = ActivityParams {
+            agent: self.inner.me,
+            activity: activity.into(),
+        };
+        // The tool's answer matters more than the activity line: a daemon
+        // that cannot record it fails the next call on its own.
+        let _ = self.inner.client.call::<RecordActivity>(params).await;
     }
 
     async fn send(&self, params: SendParams) -> Result<CallToolResult, ErrorData> {
@@ -259,6 +301,7 @@ impl VoleeMcp {
                        workspace (repository, branch, worktree)."
     )]
     pub async fn whoami(&self) -> Result<CallToolResult, ErrorData> {
+        self.note("called whoami").await;
         let registry = self.inner.replica.read().await;
         let Some(me) = registry.agent(self.inner.me) else {
             return Err(ErrorData::internal_error(
@@ -289,6 +332,7 @@ impl VoleeMcp {
         &self,
         Parameters(args): Parameters<ListArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        self.note("listed the agents").await;
         let registry = self.inner.replica.read().await;
         let agents: Vec<AgentView> = registry
             .agents_by_urgency()
@@ -317,6 +361,7 @@ impl VoleeMcp {
         &self,
         Parameters(args): Parameters<SendArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        self.note(format!("wrote to {}", args.to.join(", "))).await;
         let (to, in_reply_to, repo) = {
             let registry = self.inner.replica.read().await;
             let mut to = Vec::new();
@@ -369,6 +414,7 @@ impl VoleeMcp {
         &self,
         Parameters(args): Parameters<ReadArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        self.note("read its messages").await;
         let me = Party::Agent(self.inner.me);
         let (views, unread) = {
             let registry = self.inner.replica.read().await;
@@ -419,6 +465,7 @@ impl VoleeMcp {
         &self,
         Parameters(args): Parameters<ReportArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        self.note("sent a report").await;
         let (to, repo) = {
             let registry = self.inner.replica.read().await;
             let Some(me) = registry.agent(self.inner.me) else {
@@ -477,6 +524,7 @@ impl VoleeMcp {
         &self,
         Parameters(args): Parameters<SpawnArgs>,
     ) -> Result<CallToolResult, ErrorData> {
+        self.note("asked to launch a worker").await;
         let mission = {
             let registry = self.inner.replica.read().await;
             let Some(me) = registry.agent(self.inner.me) else {
@@ -529,6 +577,7 @@ impl VoleeMcp {
                        tool. volee refuses while a worker has not delivered, and says which."
     )]
     pub async fn close_mission(&self) -> Result<CallToolResult, ErrorData> {
+        self.note("asked to close its mission").await;
         let mission = {
             let registry = self.inner.replica.read().await;
             let Some(me) = registry.agent(self.inner.me) else {
@@ -575,7 +624,11 @@ impl ServerHandler for VoleeMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("volee", volee_core::VERSION))
-            .with_instructions(INSTRUCTIONS)
+            .with_instructions(if self.inner.joined {
+                JOINED_INSTRUCTIONS
+            } else {
+                INSTRUCTIONS
+            })
     }
 }
 

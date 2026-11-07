@@ -85,11 +85,20 @@ fn counter_spans(model: &Model) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         }
     }
     full.extend([
-        Span::styled(format!("! {needs} need you"), needs_style),
+        Span::styled(
+            format!(
+                "! {needs} {}",
+                if needs == 1 { "needs you" } else { "need you" }
+            ),
+            needs_style,
+        ),
         Span::styled(" · ", dim),
         Span::styled(format!("▸ {working} working"), counter),
         Span::styled(" · ", dim),
-        Span::styled(format!("{all} agents"), counter),
+        Span::styled(
+            format!("{all} {}", if all == 1 { "agent" } else { "agents" }),
+            counter,
+        ),
     ]);
     short.extend([
         Span::styled(format!("!{needs}"), needs_style),

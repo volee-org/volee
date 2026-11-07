@@ -16,6 +16,26 @@ harness can use it too:
 The server speaks for one agent, given by `--agent`. It starts the volee
 daemon if needed.
 
+An agent of another harness, which volee did not launch, joins instead
+([ADR 0014](../adr/0014-agents-of-other-harnesses-join-through-mcp.md)):
+
+```sh
+volee mcp --join <name> [--harness <kind>] [--mission <title, short id or id>]
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--join` | required | The agent's name. The same name, harness and directory find the same agent again on the next start. |
+| `--harness` | `other` | The harness it runs in, such as `codex` or `gemini-cli`: lowercase letters, digits, `.`, `_` and `-`. `claude-code` is refused: volee finds those sessions itself. |
+| `--mission` | none | An open mission to take part in, so that its members and this agent can write to each other. Without it, the agent writes to the person, and the person to it. |
+
+The directory the server runs in is the agent's workspace. The agent is
+idle while the server runs and stopped once it exits; each tool call shows
+as its activity. No hooks hand it messages, so the server's instructions ask
+the model to call `read_messages` at the start of a task, after a question,
+and before it finishes. The [guide](../guide/other-harnesses.md) has
+configurations for Codex CLI and Gemini CLI.
+
 Agents volee launches may call every tool below without a permission
 prompt: their settings allow `mcp__volee`, so that a background agent never
 stalls on asking to send a message. Only a mission's coordinator may call
@@ -68,8 +88,10 @@ references. Returned messages are marked as read.
 | --- | --- | --- | --- |
 | `unread_only` | boolean | `true` | Only messages not read yet. |
 
-Messages also reach agents without this tool: at the end of a turn through
-the `Stop` hook, or by waking an idle agent.
+Messages also reach the agents volee launched without this tool: at the end
+of a turn through the `Stop` hook, or by waking an idle agent. An agent that
+joined with `--join` has no hooks: this tool is the only way its messages
+reach it.
 
 ### `report`
 

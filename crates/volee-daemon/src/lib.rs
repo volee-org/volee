@@ -14,6 +14,7 @@ mod discovery;
 mod error;
 mod evidence;
 mod handlers;
+mod join;
 mod launch;
 mod log;
 mod missions;

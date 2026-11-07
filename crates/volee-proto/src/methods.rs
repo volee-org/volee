@@ -260,6 +260,58 @@ method!(
     Empty
 );
 
+/// Parameters of [`Join`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JoinParams {
+    /// The agent's name, as people and other agents call it.
+    pub name: String,
+    /// The harness it runs in, such as `codex` or `gemini-cli`.
+    pub harness: String,
+    /// The directory its MCP server runs in: its workspace, and part of how
+    /// volee finds it again.
+    pub cwd: std::path::PathBuf,
+    /// The open mission it takes part in, if any.
+    #[serde(default)]
+    pub mission: Option<MissionId>,
+}
+
+/// The result of [`Join`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Joined {
+    /// The agent the connection speaks for from now on.
+    pub agent: AgentId,
+    /// Whether volee knew it already: same name, harness and directory.
+    pub rejoined: bool,
+}
+
+method!(
+    /// Joins volee as an agent of another harness (ADR 0014): finds the
+    /// agent with this name, harness and directory again, or registers it.
+    /// It is alive while the connection that joined stays open.
+    Join,
+    "agents.join",
+    JoinParams,
+    Joined
+);
+
+/// Parameters of [`RecordActivity`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivityParams {
+    /// A joined agent.
+    pub agent: AgentId,
+    /// What it just did, in one line.
+    pub activity: String,
+}
+
+method!(
+    /// Records what a joined agent just did: its MCP server reports each
+    /// tool call, since no hooks report on it.
+    RecordActivity,
+    "agents.activity",
+    ActivityParams,
+    Empty
+);
+
 /// Parameters of [`Tidy`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TidyParams {
@@ -687,6 +739,8 @@ mod tests {
             Subscribe::NAME,
             RefreshDiscovery::NAME,
             Forget::NAME,
+            Join::NAME,
+            RecordActivity::NAME,
             Tidy::NAME,
             Spawn::NAME,
             Preview::NAME,

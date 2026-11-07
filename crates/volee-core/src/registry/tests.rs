@@ -415,6 +415,87 @@ fn members_of_a_mission_write_to_each_other() {
     assert_eq!(registry.mission_agents(mission).len(), 3);
 }
 
+/// An agent of another harness that joined through volee's MCP server.
+fn join_through_mcp(registry: &mut Registry, agent: AgentId) {
+    registry
+        .apply(&Event::new(
+            at(1),
+            EventKind::AgentRegistered {
+                agent,
+                name: "infra".into(),
+                role: Role::Independent,
+                harness: HarnessKind::Other("codex".into()),
+                launched_by: LaunchedBy::Outside,
+                parent: None,
+                mission: None,
+                workspace: Workspace::default(),
+                location: Location::Unknown,
+            },
+        ))
+        .unwrap();
+}
+
+#[test]
+fn a_joined_agent_takes_part_in_a_mission_and_leaves_it() {
+    let mut registry = Registry::new();
+    let mission = create_mission(&mut registry, None);
+    join_mission(&mut registry, agent_id(11), mission, Role::Worker);
+    join_through_mcp(&mut registry, agent_id(20));
+    let joined = Party::Agent(agent_id(20));
+    let worker = Party::Agent(agent_id(11));
+    assert!(registry.agent(agent_id(20)).unwrap().joined());
+    assert!(!registry.agent(agent_id(11)).unwrap().joined());
+    assert!(registry.check_route(joined, worker).is_err(), "strangers");
+
+    let member = |mission| {
+        Event::new(
+            at(2),
+            EventKind::MembershipChanged {
+                agent: agent_id(20),
+                mission,
+            },
+        )
+    };
+    registry.apply(&member(Some(mission))).unwrap();
+    assert_eq!(registry.check_route(joined, worker), Ok(()));
+    assert_eq!(registry.check_route(worker, joined), Ok(()));
+
+    registry.apply(&member(None)).unwrap();
+    assert_eq!(registry.agent(agent_id(20)).unwrap().mission, None);
+    assert!(registry.check_route(joined, worker).is_err());
+}
+
+#[test]
+fn only_joined_agents_change_missions() {
+    let mut registry = Registry::new();
+    let mission = create_mission(&mut registry, None);
+    join_mission(&mut registry, agent_id(11), mission, Role::Worker);
+    join_through_mcp(&mut registry, agent_id(20));
+    let change = |agent, mission| {
+        Event::new(
+            at(2),
+            EventKind::MembershipChanged {
+                agent: agent_id(agent),
+                mission,
+            },
+        )
+    };
+    assert_eq!(
+        registry.apply(&change(11, None)),
+        Err(ApplyError::NotJoined(agent_id(11)))
+    );
+    let unknown = MissionId::from_ulid(Ulid::from_parts(4_000, 9));
+    assert_eq!(
+        registry.apply(&change(20, Some(unknown))),
+        Err(ApplyError::UnknownMission(unknown))
+    );
+    assert_eq!(
+        registry.agent(agent_id(11)).unwrap().mission,
+        Some(mission),
+        "unchanged"
+    );
+}
+
 #[test]
 fn strangers_may_not_write_to_each_other() {
     let mut registry = Registry::new();

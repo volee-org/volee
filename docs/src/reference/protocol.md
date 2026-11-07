@@ -22,6 +22,8 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `events.subscribe` | `after` (optional), `interactive` (optional, `false` by default) | the same batch, then `events.appended` notifications |
 | `discovery.refresh` | `timeout_ms` (optional: 3,000 by default, 10,000 at most) | `listed`: whether a listing that started after the request was applied in time |
 | `agents.forget` | `agent` | none |
+| `agents.join` | `name`, `harness`, `cwd`, optional `mission` | `agent`, `rejoined` |
+| `agents.activity` | `agent`, `activity` | none |
 | `agents.preview` | `agent` | `screen`: the agent's recent terminal output, with its escape sequences |
 | `agents.diff` | `agent`, optional `full` | `text`: a summary by file, or the full patch; `truncated` |
 | `agents.attach` | `agent` | `program`, `args`, `cwd`, `env_remove`, `hint`: the command that takes the agent over |
@@ -70,6 +72,25 @@ coordinators (missions launch them) and, for a mission, repositories the
 mission does not list. `missions.create` launches the coordinator when Claude
 Code is available; when it cannot, it tells the human in the mission's thread
 and `coordinator` is null.
+
+### Joining
+
+`agents.join` brings an agent of another harness into volee
+([ADR 0014](../adr/0014-agents-of-other-harnesses-join-through-mcp.md)); `volee
+mcp --join` sends it. The daemon finds the agent that joined with the same
+`name`, `harness` and `cwd` (an absolute path) and was not forgotten, or
+registers one (`launched_by: outside`, harness `other` with that name, role
+`independent`), records it idle, and answers whether it knew it
+(`rejoined`). With `mission`, which must be open, the agent is a member of
+that mission, and its coordinator is told; joining again with another
+mission, or without one, records a `membership-changed` event. The agent
+stays alive while the connection that joined stays open: when the last such
+connection closes, or when the daemon starts, it is stopped. Invalid names or
+harnesses answer `-32602`, a mission that is over `-32002`, and `claude-code`
+is refused (`-32002`): those sessions are found without joining.
+
+`agents.activity` records a joined agent's last action in one line (its MCP
+server sends one per tool call). It refuses agents that did not join.
 
 ### Acting on agents
 
