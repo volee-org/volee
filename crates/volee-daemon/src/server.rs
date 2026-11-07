@@ -1,7 +1,8 @@
 //! The socket server: one task per connection, one task per request.
 
 use std::fs::{self, File, TryLockError};
-use std::os::unix::fs::PermissionsExt;
+use std::io;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -263,16 +264,48 @@ fn acquire_lock(path: &Path) -> Result<File, DaemonError> {
 
 /// Binds the socket, replacing a stale socket file left by a crash, and
 /// restricts it to the current user.
+///
+/// Only a socket is ever replaced: a `VOLEE_SOCKET` that names another kind
+/// of file by mistake stops the daemon instead of deleting the file.
+///
+/// The socket is created with the process's umask, then restricted to
+/// 0600. The umask is not narrowed around `bind`: it is process-wide, so
+/// changing it would race with every other thread that creates files, and
+/// setting it needs `unsafe`, which the workspace forbids. The directory
+/// closes that gap instead: the default places are private (the state
+/// directory, made 0700 before `bind`, or `$XDG_RUNTIME_DIR`, 0700 by
+/// specification), so no other user can reach the socket before its mode
+/// is restricted. A directory that lets others in gets a warning.
 async fn bind(path: &Path) -> Result<UnixListener, DaemonError> {
-    if path.exists() {
-        if UnixStream::connect(path).await.is_ok() {
-            return Err(DaemonError::AlreadyRunning(path.to_owned()));
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_socket() => {
+            if UnixStream::connect(path).await.is_ok() {
+                return Err(DaemonError::AlreadyRunning(path.to_owned()));
+            }
+            fs::remove_file(path).map_err(|source| DaemonError::Setup {
+                action: "cannot remove the stale socket",
+                path: path.to_owned(),
+                source,
+            })?;
         }
-        fs::remove_file(path).map_err(|source| DaemonError::Setup {
-            action: "cannot remove the stale socket",
-            path: path.to_owned(),
-            source,
-        })?;
+        Ok(_) => {
+            return Err(DaemonError::Setup {
+                action: "will not replace",
+                path: path.to_owned(),
+                source: io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "it is not a socket; remove it, or set VOLEE_SOCKET to another path",
+                ),
+            });
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(DaemonError::Setup {
+                action: "cannot inspect",
+                path: path.to_owned(),
+                source,
+            });
+        }
     }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| DaemonError::Setup {
@@ -280,6 +313,7 @@ async fn bind(path: &Path) -> Result<UnixListener, DaemonError> {
             path: parent.to_owned(),
             source,
         })?;
+        warn_if_others_can_enter(parent);
     }
     let listener = UnixListener::bind(path).map_err(|source| DaemonError::Setup {
         action: "cannot listen on",
@@ -294,6 +328,21 @@ async fn bind(path: &Path) -> Result<UnixListener, DaemonError> {
         }
     })?;
     Ok(listener)
+}
+
+/// Warns when users other than this one can enter `dir`, the socket's
+/// directory: between `bind` and the chmod that follows, they could
+/// connect.
+fn warn_if_others_can_enter(dir: &Path) {
+    if let Ok(metadata) = fs::metadata(dir)
+        && metadata.permissions().mode() & 0o011 != 0
+    {
+        tracing::warn!(
+            directory = %dir.display(),
+            "other users can enter the directory of the socket: set VOLEE_SOCKET to a path \
+             in a directory only you can enter"
+        );
+    }
 }
 
 async fn serve_connection(stream: UnixStream, shared: Arc<Shared>) {

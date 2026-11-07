@@ -96,6 +96,22 @@ async fn connect(socket: &Path) -> Client {
     Client::connect(socket).await.unwrap()
 }
 
+/// A daemon configuration on `paths`, with nothing to replay.
+fn empty(paths: Paths) -> Config {
+    Config {
+        paths,
+        log: Box::new(MemoryLog::with(vec![])),
+        clock: Arc::new(ManualClock::at(10_000)),
+        harnesses: vec![],
+        spool: None,
+        harness: None,
+        discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
+        idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
+        evidence: EvidenceSources::default(),
+        volee_bin: None,
+    }
+}
+
 fn human_note(to: AgentId, body: &str) -> SendParams {
     SendParams {
         from: Party::Human,
@@ -360,6 +376,43 @@ async fn the_blocking_client_reports_an_unreachable_daemon() {
     )
     .unwrap_err();
     assert!(matches!(error, blocking::BlockingError::Unreachable(_)));
+}
+
+#[tokio::test]
+async fn a_file_that_is_not_a_socket_is_never_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::rooted(dir.path());
+    std::fs::write(&paths.socket, "keep me").unwrap();
+    let error = Daemon::run(empty(paths.clone())).await.unwrap_err();
+    assert!(error.to_string().contains("not a socket"), "{error}");
+    assert_eq!(std::fs::read_to_string(&paths.socket).unwrap(), "keep me");
+}
+
+#[tokio::test]
+async fn a_stale_socket_is_replaced_by_a_private_one() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::rooted(dir.path());
+    // A socket that nobody listens on, as a crash leaves it.
+    drop(std::os::unix::net::UnixListener::bind(&paths.socket).unwrap());
+    let daemon = tokio::spawn(Daemon::run(empty(paths.clone())));
+    let client = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(client) = Client::connect(&paths.socket).await {
+                break client;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let mode = std::fs::metadata(&paths.socket)
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+    client.call::<Shutdown>(Empty {}).await.unwrap();
+    daemon.await.unwrap().unwrap();
 }
 
 #[tokio::test]
