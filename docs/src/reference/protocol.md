@@ -25,6 +25,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `agents.diff` | `agent`, optional `full` | `text`: a summary by file, or the full patch; `truncated` |
 | `agents.attach` | `agent` | `program`, `args`, `cwd`, `env_remove`, `hint`: the command that takes the agent over |
 | `agents.stop` | `agent` | none |
+| `agents.tidy` | `agent`, optional `dry_run` | `outcome`: `removed` or `would-remove` (`worktree`, `branch`), or `kept` (`reasons`) |
 | `messages.send` | `from`, `to`, `kind`, `body`, optional `refs`, `in_reply_to`, `thread` | `message`, `thread` |
 | `messages.read` | `message`, `by` | none |
 | `hooks.ingest` | `agent`, `event`, `payload` | `stdout`: what the hook prints, if anything |
@@ -35,7 +36,27 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `missions.abort` | `mission`, optional `reason` | none |
 | `missions.close` | `mission`, optional `report`, `force`, `by` | none |
 
-One more method, `agents.tidy`, arrives with cleanup.
+### Tidying
+
+`agents.tidy` follows [ADR 0011](../adr/0011-safety-and-delivery-evidence.md):
+it removes nothing without delivery evidence and never deletes a branch.
+`delivery::tidy_check` decides from the registry: the agent was launched by
+volee, works in a worktree under `<repository>/.claude/worktrees/`, is not
+running, and its delivery evidence, checked since its last change, shows a
+clean tree and landed work (merged, merged pull request, or report).
+Otherwise the result is `kept` with every reason, each with a `reason` tag
+(`busy`, `uncommitted-changes`, `not-delivered`, `not-launched-by-volee`,
+`not-a-volee-worktree`, `evidence-not-checked`, `evidence-stale`,
+`kept-by-harness`, `refused-by-git`) and a sentence for people when
+displayed.
+
+When the evidence allows it, the daemon asks the harness to delete the
+session (with the evidence), checks the verdict again, unlocks the worktree
+if the harness left it locked, and lets git remove it; git still refuses
+changes and commits that no branch keeps, and never forces. It then records
+the workspace without its worktree and forgets the agent; its events stay in
+the log. With `dry_run`, the answer is `would-remove` or `kept`, and nothing
+is touched.
 
 ### Launching
 

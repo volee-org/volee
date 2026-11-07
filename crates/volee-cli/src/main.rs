@@ -82,6 +82,18 @@ enum Command {
         /// The agent: its name, short id or id.
         agent: String,
     },
+    /// Remove the worktree of an agent whose work landed; its branch is kept.
+    Tidy {
+        /// The agent: its name, short id or id.
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        agent: Option<String>,
+        /// Every agent volee launched whose evidence allows it.
+        #[arg(long)]
+        all: bool,
+        /// Only say what would be removed and what kept.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Send messages to agents.
     #[command(subcommand)]
     Msg(MsgCommand),
@@ -292,6 +304,11 @@ fn async_main(command: Command) -> ExitCode {
             Command::Logs { agent } => cmd::agent::logs(&agent).await,
             Command::Diff { agent, full } => cmd::agent::diff(&agent, full).await,
             Command::Stop { agent } => cmd::agent::stop(&agent).await,
+            Command::Tidy {
+                agent,
+                all,
+                dry_run,
+            } => cmd::tidy::run(agent.as_deref(), all, dry_run).await,
             Command::Msg(MsgCommand::Send { to, body, kind }) => {
                 cmd::msg::send(&to, body, kind.into()).await
             }
@@ -416,5 +433,27 @@ mod tests {
             Command::Stop { agent } if agent == "alpha"
         ));
         assert!(Cli::try_parse_from(["volee", "attach"]).is_err());
+    }
+
+    #[test]
+    fn tidy_takes_one_agent_or_all_of_them() {
+        assert!(matches!(
+            parse(&["volee", "tidy", "alpha"]),
+            Command::Tidy { agent: Some(agent), all: false, dry_run: false } if agent == "alpha"
+        ));
+        assert!(matches!(
+            parse(&["volee", "tidy", "--all", "--dry-run"]),
+            Command::Tidy {
+                agent: None,
+                all: true,
+                dry_run: true
+            }
+        ));
+        assert!(Cli::try_parse_from(["volee", "tidy"]).is_err());
+        assert!(Cli::try_parse_from(["volee", "tidy", "alpha", "--all"]).is_err());
+        assert!(
+            Cli::try_parse_from(["volee", "tidy", "alpha", "--force"]).is_err(),
+            "there is no way to force a removal"
+        );
     }
 }

@@ -139,7 +139,11 @@ triggered it are already committed.
 - **Cleanup** (`delivery::tidy_verdict`): a worktree may be removed only when
   the agent is not busy, the tree is clean, and the work is delivered (merged,
   merged through a pull request, or reported). Every missing condition is
-  reported at once.
+  reported at once. `delivery::tidy_check` adds what makes a worktree volee's
+  to remove: the agent was launched by volee, the worktree lies under
+  `<repository>/.claude/worktrees/`, and the delivery evidence was checked
+  since the agent's last change (stale or missing evidence proves nothing).
+  The branch is never part of the decision: it is always kept.
 - **Delivery evidence** (`delivery::Delivery`) describes the agent's branch:
   `commits` counts its commits that the base branch does not have, and `tip`
   is the commit it was computed from. A merge leaves no commit of the branch
