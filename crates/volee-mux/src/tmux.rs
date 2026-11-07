@@ -136,8 +136,15 @@ impl<R: CommandRunner> Tmux<R> {
             return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
         }
         let said = first_line(&output);
-        if said.starts_with("no server running") || said.starts_with("error connecting to") {
-            // No server answered on this socket.
+        if no_server(&said) {
+            // What `volee daemon status` shows: tmux's own words name a
+            // socket and an errno.
+            Err(MuxError::Unavailable(match &self.socket {
+                Some(socket) => format!("no tmux server runs on {}", socket.display()),
+                None => "no tmux server is running".to_owned(),
+            }))
+        } else if said.starts_with("error connecting to") {
+            // Another reason to fail to connect, such as a permission.
             Err(MuxError::Unavailable(said))
         } else if said.starts_with("can't find") {
             Err(MuxError::Refused {
@@ -306,6 +313,17 @@ impl<R: CommandRunner> Multiplexer for Tmux<R> {
     }
 }
 
+/// Whether tmux said that no server listens on its socket: `no server
+/// running on <socket>`, or `error connecting to <socket> (No such file or
+/// directory)`, or a socket left by a server that is gone (`Connection
+/// refused`).
+fn no_server(said: &str) -> bool {
+    said.starts_with("no server running")
+        || (said.starts_with("error connecting to")
+            && (said.ends_with("(No such file or directory)")
+                || said.ends_with("(Connection refused)")))
+}
+
 /// Why a program could not be run: tmux (or `ps`) is missing, or did not
 /// answer in time.
 fn cannot_run(error: &RunError) -> MuxError {
@@ -428,10 +446,7 @@ mod tests {
         let status = tmux.status();
         assert!(!status.available);
         assert_eq!(status.version.as_deref(), Some("3.8"));
-        assert_eq!(
-            status.detail.as_deref(),
-            Some("error connecting to /private/tmp/tmux-501/default (No such file or directory)")
-        );
+        assert_eq!(status.detail.as_deref(), Some("no tmux server is running"));
         assert!(matches!(
             Tmux::with_runner(FakeRunner::new().with_reply(Ok(failure(
                 "no server running on /private/tmp/tmux-501/default\n"
@@ -573,5 +588,29 @@ mod tests {
         assert_eq!(socket_of(""), None);
         assert_eq!(version("tmux 3.3a\n").as_deref(), Some("3.3a"));
         assert_eq!(version("tmux next-3.9\n"), None);
+    }
+
+    #[test]
+    fn only_a_missing_server_reads_as_no_server() {
+        assert!(no_server(
+            "no server running on /private/tmp/tmux-501/default"
+        ));
+        assert!(no_server(
+            "error connecting to /private/tmp/tmux-501/default (No such file or directory)"
+        ));
+        assert!(no_server(
+            "error connecting to /private/tmp/tmux-501/default (Connection refused)"
+        ));
+        assert!(!no_server(
+            "error connecting to /private/tmp/tmux-501/default (Permission denied)"
+        ));
+        let named = Tmux::with_runner(
+            FakeRunner::new().with_reply(Ok(failure("no server running on /tmp/tmux-501/work\n"))),
+        )
+        .on_socket(Some(PathBuf::from("/tmp/tmux-501/work")));
+        assert_eq!(
+            named.capture("w:%1").unwrap_err().to_string(),
+            "no tmux server runs on /tmp/tmux-501/work"
+        );
     }
 }
