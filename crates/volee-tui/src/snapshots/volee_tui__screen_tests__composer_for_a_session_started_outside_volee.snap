@@ -1,0 +1,28 @@
+---
+source: crates/volee-tui/src/screen_tests.rs
+expression: draw(&model)
+---
+" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline                !2 ▸6 12 "
+"╭ Agents · tree ───────────────────╮╭ Detail ──────────────────────────────────╮"
+"│ t ▸ tower                 24 min ││ infra · independent                      │"
+"│ n ├─ · invoicing          14 min ││ · idle · for 25 min                      │"
+"│ s │  ├─ ! invoice-schema   2 min ││ repo     infra › main from main          │"
+"│ v │  ├─ ! invoice-tools    1 min ││ worktree …are/volee/worktrees/infra/main │"
+"│ p │  └─ ✓ invoice-page     6 min ││ runs in  a terminal · opus               │"
+"│ l └─ · latency-audit      12 min ││ delivery nothing yet                     │"
+"│ ╭ Message to infra ────────────────────────────────────────────────────────╮ │"
+"│ │ infra was started outside volee: it cannot receive messages yet.         │ │"
+"│ │ kind   note   question   answer   contract   alert                       │ │"
+"│ │                                                                          │ │"
+"│▌│ Write to infra. Markdown is fine.                                        │─╯"
+"│ │                                                                          │─╮"
+"│ │                                                                          │ │"
+"│ ╰──────────────────────────────────────────────────────────────────────────╯e│"
+"│                                  ││                                          │"
+"│                                  ││ ╭────────────────────────────────────────│"
+"│                                  ││ │ >                                      │"
+"│                                  ││ ╰────────────────────────────────────────│"
+"│                                  ││   ? for shortcuts                        │"
+"│                                  ││                                          │"
+"╰──────────────────────────────────╯╰──────────────────────────────────────────╯"
+" enter send   alt-enter new line   tab/shift-tab kind   esc close               "

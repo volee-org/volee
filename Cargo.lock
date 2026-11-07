@@ -1877,6 +1877,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "ulid",
  "volee-core",
 ]
 
@@ -1902,6 +1903,7 @@ dependencies = [
  "insta",
  "ratatui",
  "serde",
+ "tempfile",
  "thiserror",
  "tokio",
  "toml",
@@ -1909,6 +1911,8 @@ dependencies = [
  "ulid",
  "unicode-width",
  "volee-core",
+ "volee-daemon",
+ "volee-proto",
  "vt100",
 ]
 

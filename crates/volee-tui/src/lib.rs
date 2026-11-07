@@ -8,7 +8,7 @@
 //! The interface follows the Elm architecture (ADR 0009): a model, messages,
 //! a pure update that returns effects, and a pure view. It keeps its own
 //! replica of the [`Registry`](volee_core::Registry), built from the events
-//! of a [`Source`]: the daemon client in `volee`, or [`DemoSource`] for
+//! of a [`Source`]: [`DaemonSource`] in `volee`, or [`DemoSource`] for
 //! `volee demo`.
 //!
 //! ```no_run
@@ -24,7 +24,9 @@
 mod activity;
 mod app;
 mod clock;
+mod daemon;
 mod demo;
+mod editor;
 pub mod keymap;
 mod layout;
 mod letters;
@@ -43,9 +45,10 @@ mod screen_tests;
 use std::sync::Arc;
 
 pub use clock::{Clock, ManualClock, SystemClock};
+pub use daemon::DaemonSource;
 pub use demo::DemoSource;
 pub use keymap::{Keymap, KeymapError};
-pub use source::{Source, SourceError, Subscription};
+pub use source::{Changes, Outgoing, Source, SourceError, Subscription, TakeOver};
 pub use theme::{ColorDepth, Theme, ThemeError};
 
 use crate::app::{Model, Msg};
@@ -92,8 +95,8 @@ pub enum TuiError {
 /// Runs the interface in the current terminal until the person quits.
 ///
 /// The terminal is restored on return, on error and on panic. Taking over an
-/// agent suspends the interface, runs [`Source::attach_command`] in this
-/// terminal, and comes back to the same agent.
+/// agent suspends the interface, runs the command of [`Source::attach`] in
+/// this terminal, and comes back to the same agent.
 pub async fn run(source: impl Source, options: Options) -> Result<(), TuiError> {
     let Subscription { snapshot, updates } = source.subscribe().await?;
     let mut screen = TerminalScreen::enter()?;

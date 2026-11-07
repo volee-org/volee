@@ -1,10 +1,12 @@
 //! The preview: an agent's terminal screen, inside volee.
 //!
-//! Harnesses replay a session's screen as raw terminal output (for Claude
-//! Code, `claude logs` at about 200x50, with cursor addressing and colors).
-//! That output goes through a terminal emulator of that size, and the
-//! resulting cells are drawn, cropped to the panel: the bottom of the screen
-//! stays in view, since that is where the latest output and the prompt are.
+//! Harnesses replay a session's recent output as raw terminal output (for
+//! Claude Code, `claude logs`, with cursor addressing and colors), drawn for
+//! the session's own terminal, which can be much larger than volee's panel.
+//! That output goes through a terminal emulator of the size its cursor
+//! addressing tells (at least 200x50), and the resulting cells are drawn,
+//! cropped to the panel: the bottom of the screen stays in view, since that
+//! is where the latest output and the prompt are.
 
 use std::num::NonZeroU16;
 
@@ -14,9 +16,57 @@ use ratatui::style::{Color, Modifier, Style};
 
 use crate::theme::{ColorDepth, StyleRole, Theme};
 
-/// The size of the emulated terminal.
+/// The smallest emulated terminal.
 const ROWS: u16 = 50;
 const COLUMNS: u16 = 200;
+
+/// The largest emulated terminal.
+const MAX_ROWS: u16 = 200;
+const MAX_COLUMNS: u16 = 500;
+
+/// Room after a forward move for the short text it places, such as the
+/// counters Claude Code right-aligns at the edge of its screen.
+const RIGHT_TEXT: u16 = 10;
+
+/// The size the output was drawn for, as far as its cursor addressing
+/// tells. Replayed in a smaller terminal, its lines wrap and its moves stop
+/// at the edges, which turns the screen into a jumble.
+fn screen_size(output: &str) -> (u16, u16) {
+    let number = |text: &str| -> u16 {
+        if text.is_empty() {
+            1
+        } else {
+            text.parse().unwrap_or(u16::MAX)
+        }
+    };
+    let (mut rows, mut columns) = (ROWS, COLUMNS);
+    let mut rest = output;
+    while let Some(start) = rest.find("\x1b[") {
+        let after = &rest[start + 2..];
+        let length = after
+            .find(|c: char| !(c.is_ascii_digit() || c == ';'))
+            .unwrap_or(after.len());
+        let (parameters, tail) = after.split_at(length);
+        let Some(command) = tail.chars().next() else {
+            break;
+        };
+        let mut numbers = parameters.split(';').map(number);
+        let first = numbers.next().unwrap_or(1);
+        match command {
+            'H' | 'f' => {
+                rows = rows.max(first);
+                columns = columns.max(numbers.next().unwrap_or(1));
+            }
+            'd' => rows = rows.max(first),
+            'G' | '`' => columns = columns.max(first),
+            'B' | 'E' => rows = rows.max(first.saturating_add(1)),
+            'C' => columns = columns.max(first.saturating_add(1 + RIGHT_TEXT)),
+            _ => {}
+        }
+        rest = &tail[command.len_utf8()..];
+    }
+    (rows.min(MAX_ROWS), columns.min(MAX_COLUMNS))
+}
 
 /// One cell of the screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,17 +89,18 @@ pub(crate) struct PreviewScreen {
 impl PreviewScreen {
     /// Runs raw terminal output through the emulator.
     pub(crate) fn parse(output: &str, depth: ColorDepth) -> Self {
-        let (Some(rows), Some(columns)) = (NonZeroU16::new(ROWS), NonZeroU16::new(COLUMNS)) else {
+        let (height, width) = screen_size(output);
+        let (Some(rows), Some(columns)) = (NonZeroU16::new(height), NonZeroU16::new(width)) else {
             return Self::default();
         };
         let mut parser = vt100::Parser::new(rows, columns, 0);
         parser.process(output.as_bytes());
         let screen = parser.screen();
-        let mut parsed: Vec<Vec<PreviewCell>> = Vec::with_capacity(usize::from(ROWS));
+        let mut parsed: Vec<Vec<PreviewCell>> = Vec::with_capacity(usize::from(height));
         let mut last_text = 0;
-        for row in 0..ROWS {
+        for row in 0..height {
             let mut cells = Vec::new();
-            for column in 0..COLUMNS {
+            for column in 0..width {
                 let Some(cell) = screen.cell(row, column) else {
                     break;
                 };
@@ -77,7 +128,7 @@ impl PreviewScreen {
         let (cursor_row, _) = screen.cursor_position();
         Self {
             rows: parsed,
-            anchor: last_text.max(cursor_row).min(ROWS - 1),
+            anchor: last_text.max(cursor_row).min(height - 1),
         }
     }
 
@@ -176,6 +227,24 @@ mod tests {
         let screen = PreviewScreen::parse(&output, ColorDepth::TrueColor);
         assert_eq!(screen.text()[49], "line 59");
         assert_eq!(screen.anchor, 49);
+    }
+
+    #[test]
+    fn a_larger_terminal_is_replayed_at_its_own_size() {
+        // A counter right-aligned on a wide screen, below row 50, then the
+        // cursor parked on the prompt.
+        let output = "\x1b[H\r\x1b[293C\x1b[70B42\x1b[73;1Hprompt";
+        assert_eq!(screen_size(output), (73, 304));
+        let screen = PreviewScreen::parse(output, ColorDepth::TrueColor);
+        let text = screen.text();
+        assert_eq!(text[70], format!("{}42", " ".repeat(293)));
+        assert_eq!(text[72], "prompt");
+        assert_eq!(screen.anchor, 72);
+        assert_eq!(screen_size("\x1b[10;5Hhere\x1b[?25l"), (ROWS, COLUMNS));
+        assert_eq!(
+            screen_size("\x1b[9999;99999H\x1b["),
+            (MAX_ROWS, MAX_COLUMNS)
+        );
     }
 
     #[test]

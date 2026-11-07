@@ -16,7 +16,8 @@ use volee_core::AgentId;
 use volee_core::message::MessageKind;
 use volee_core::mission::MissionKind;
 
-/// See, launch and coordinate every coding agent on your machine.
+/// See, launch and coordinate every coding agent on your machine. Without a
+/// command, opens the interface.
 #[derive(Debug, Parser)]
 #[command(name = "volee", version = volee_core::VERSION, about, long_about = None)]
 struct Cli {
@@ -260,18 +261,12 @@ fn main() -> ExitCode {
             ConfigCommand::Check => cmd::config::check(),
         }),
         Some(command) => async_main(command),
-        None => {
-            println!(
-                "volee {} is under construction: try `volee ls`, or see the roadmap at \
-                 https://volee-org.github.io/volee/project/roadmap.html",
-                volee_core::VERSION
-            );
-            ExitCode::SUCCESS
-        }
+        None => block_on(cmd::interface::run()),
     }
 }
 
-fn async_main(command: Command) -> ExitCode {
+/// Runs a command on a multi-threaded runtime and reports how it ended.
+fn block_on(command: impl Future<Output = anyhow::Result<()>>) -> ExitCode {
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -282,7 +277,11 @@ fn async_main(command: Command) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let result = runtime.block_on(async {
+    report(runtime.block_on(command))
+}
+
+fn async_main(command: Command) -> ExitCode {
+    block_on(async {
         match command {
             Command::Daemon(DaemonCommand::Run) => cmd::daemon::run().await,
             Command::Daemon(DaemonCommand::Start) => cmd::daemon::start().await,
@@ -322,8 +321,7 @@ fn async_main(command: Command) -> ExitCode {
                 unreachable!("these commands run without the async runtime")
             }
         }
-    });
-    report(result)
+    })
 }
 
 async fn mission(command: MissionCommand) -> anyhow::Result<()> {
@@ -383,6 +381,12 @@ mod tests {
         );
         let cli = Cli::try_parse_from(["volee", "demo"]).unwrap();
         assert!(matches!(cli.command, Some(Command::Demo { theme: None })));
+    }
+
+    #[test]
+    fn no_command_opens_the_interface() {
+        let cli = Cli::try_parse_from(["volee"]).unwrap();
+        assert!(cli.command.is_none());
     }
 
     fn parse(args: &[&str]) -> Command {

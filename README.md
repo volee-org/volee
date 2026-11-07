@@ -75,10 +75,12 @@ volee supports macOS and Linux and needs [Claude Code](https://code.claude.com)
 [installation guide](https://volee-org.github.io/volee/guide/installation.html)
 covers specific versions, manual downloads and uninstalling.
 
-Try the interface on a simulated team of agents, no setup needed:
+Open the interface on every agent of your machine, or try it on a simulated
+team of agents first, no setup needed:
 
 ```sh
-volee demo
+volee        # the agents on this machine; starts the daemon when needed
+volee demo   # a simulated team
 ```
 
 ![volee demo](docs/src/images/demo.gif)
