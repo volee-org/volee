@@ -33,6 +33,35 @@ pub struct ListedSession {
     /// Whether it runs in the harness's background supervisor (as opposed to
     /// a terminal).
     pub background: bool,
+    /// The harness's handle for commands on the session (for Claude Code,
+    /// the `id` of a background session). Sessions without one, such as
+    /// Claude Code's interactive sessions, cannot be stopped, removed,
+    /// previewed or attached through the harness.
+    pub handle: Option<String>,
+    /// Its process id, while the process is alive and the harness reports
+    /// it.
+    pub pid: Option<u32>,
+    /// When it started, when the harness reports it.
+    pub started_at: Option<Timestamp>,
+}
+
+impl ListedSession {
+    /// A session known by its key, directory and state; it is neither alive
+    /// nor in the background, and has no handle, process id or start time
+    /// until the caller sets them.
+    pub fn new(key: SessionKey, cwd: impl Into<PathBuf>, state: AgentState) -> Self {
+        Self {
+            key,
+            name: None,
+            cwd: cwd.into(),
+            state,
+            alive: false,
+            background: false,
+            handle: None,
+            pid: None,
+            started_at: None,
+        }
+    }
 }
 
 /// Every session a harness reports at one point in time.
@@ -183,12 +212,11 @@ mod tests {
 
     fn listed(id: &str, state: AgentState, alive: bool) -> ListedSession {
         ListedSession {
-            key: SessionKey::claude(id),
             name: Some(format!("session {id}")),
-            cwd: PathBuf::from("/work/alpha"),
-            state,
             alive,
             background: true,
+            handle: Some(id.to_owned()),
+            ..ListedSession::new(SessionKey::claude(id), "/work/alpha", state)
         }
     }
 
@@ -211,6 +239,16 @@ mod tests {
         let events = reconcile(registry, listing, Timestamp::from_millis(millis), ids());
         apply_all(registry, &events);
         events
+    }
+
+    #[test]
+    fn a_new_listed_session_has_no_optional_details() {
+        let session = ListedSession::new(SessionKey::claude("s1"), "/work", AgentState::Idle);
+        assert_eq!(session.name, None);
+        assert!(!session.alive && !session.background);
+        assert_eq!(session.handle, None);
+        assert_eq!(session.pid, None);
+        assert_eq!(session.started_at, None);
     }
 
     #[test]
