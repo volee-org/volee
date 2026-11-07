@@ -16,9 +16,10 @@
 
 </div>
 
-> [!WARNING]
-> volee is in early development. The first release (0.1) is being built in the
-> open: see the [roadmap](https://volee-org.github.io/volee/project/roadmap.html).
+> [!NOTE]
+> volee 0.1 is a first release, built in the open. Expect rough edges and tell
+> us about them; the [roadmap](https://volee-org.github.io/volee/project/roadmap.html)
+> says what comes next.
 
 ## Why
 
@@ -32,8 +33,8 @@ one screen:
 - **Who needs me?** Permission prompts, questions and finished work, sorted by
   urgency.
 - **What did they do?** Commits, diffs, push state, pull request and checks.
-- **Who talks to whom?** Messages between agents and with you, as threads (a
-  live graph comes next).
+- **Who talks to whom?** Messages between agents and with you, as threads and
+  as a live graph where each message travels along its edge.
 
 It also runs **missions**: a goal across one or more repositories, split by a
 coordinator agent and delivered by worker agents, with delivery checked by
@@ -83,6 +84,10 @@ volee demo   # a simulated team
 ```
 
 ![volee demo](docs/src/images/demo.gif)
+
+Then launch your first agent with the
+[getting started guide](https://volee-org.github.io/volee/guide/getting-started.html):
+it takes about ten minutes.
 
 ## Contributing
 
