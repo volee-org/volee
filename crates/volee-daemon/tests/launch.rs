@@ -270,7 +270,8 @@ async fn a_failed_launch_marks_the_agent_failed_and_keeps_the_worktree() {
     // It says what stays, and how to launch on that branch again.
     assert!(
         error.message.contains("kept the worktree")
-            && error.message.contains("git branch -d feat/broken"),
+            && error.message.contains("branch -d feat/broken")
+            && error.message.contains("git -C "),
         "{}",
         error.message
     );
