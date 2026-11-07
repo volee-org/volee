@@ -263,10 +263,17 @@ async fn a_failed_resume_is_told_to_the_human_once() {
     for body in ["First.", "Second."] {
         client.call::<SendMessage>(note(agent, body)).await.unwrap();
     }
-    let registry_now = until(&daemon.socket, |r| {
+    until(&daemon.socket, |r| {
         r.messages_from(Party::System)
             .iter()
             .any(|m| m.kind == MessageKind::Alert && m.body.contains("could not resume"))
+    })
+    .await;
+    // The second message may try once more (a new message lifts the pause
+    // between attempts); every failed attempt puts the agent back where it
+    // was, and the human is told only once.
+    let settled = until(&daemon.socket, |r| {
+        r.agent(agent).unwrap().state == AgentState::Stopped
     })
     .await;
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -278,8 +285,8 @@ async fn a_failed_resume_is_told_to_the_human_once() {
         .count();
     assert_eq!(alerts, 1, "told once");
     assert_eq!(
-        registry_now.agent(agent).unwrap().state,
-        AgentState::Stopped,
-        "the messages stay pending"
+        settled.pending_for(agent).len(),
+        2,
+        "both messages stay pending"
     );
 }
