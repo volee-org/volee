@@ -5,11 +5,12 @@ use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use volee_proto::PROTOCOL_VERSION;
-use volee_proto::client::Client;
+use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{Status, StatusParams};
 use volee_proto::paths::Paths;
+use volee_proto::rpc;
 
 /// How long to wait for a freshly started daemon to accept connections.
 const STARTUP: Duration = Duration::from_secs(5);
@@ -29,13 +30,37 @@ pub(crate) async fn connect_or_start() -> Result<Client> {
         spawn_daemon(&paths)?;
         wait_for_daemon(&paths).await?
     };
-    client
+    let status = client
         .call::<Status>(StatusParams {
             protocol: PROTOCOL_VERSION,
         })
-        .await
-        .context("the running daemon does not match this volee version")?;
-    Ok(client)
+        .await;
+    match status {
+        Ok(_) => Ok(client),
+        // A daemon too old or too new to read the request at all.
+        Err(ClientError::Rpc(refusal))
+            if matches!(
+                refusal.code,
+                rpc::PARSE_ERROR
+                    | rpc::INVALID_REQUEST
+                    | rpc::METHOD_NOT_FOUND
+                    | rpc::INVALID_PARAMS
+            ) =>
+        {
+            bail!(
+                "the running daemon does not match this volee version ({}): stop it with `volee \
+                 daemon stop` and run your command again",
+                refusal.message
+            )
+        }
+        // The daemon's own words, such as a protocol mismatch, which names
+        // both versions and how to restart it.
+        Err(ClientError::Rpc(refusal)) => Err(ClientError::Rpc(refusal).into()),
+        Err(error) => Err(anyhow::Error::new(error).context(format!(
+            "the volee daemon did not answer; see {}",
+            paths.log_dir().join("daemon.log").display()
+        ))),
+    }
 }
 
 /// Starts `volee daemon run` detached from this terminal, logging to the state

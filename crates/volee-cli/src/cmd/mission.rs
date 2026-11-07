@@ -3,20 +3,22 @@
 use std::fmt::Write as _;
 
 use anyhow::{Context, Result, bail};
-use volee_core::Registry;
-use volee_core::message::Party;
+use volee_core::message::{MessageKind, Party};
 use volee_core::mission::{Mission, MissionKind, MissionStatus};
 use volee_core::role::Role;
 use volee_core::time::{Elapsed, Timestamp};
+use volee_core::{MissionId, Registry};
 use volee_daemon::{Clock, SystemClock};
-use volee_proto::client::ClientError;
+use volee_proto::PROTOCOL_VERSION;
+use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     AbortMission, AbortParams, CloseMission, CloseParams, CreateMission, CreateMissionParams,
+    Status, StatusParams,
 };
 use volee_proto::rpc;
 
-use crate::connect::connect_or_start;
-use crate::{resolve, table};
+use crate::connect::{connect_or_start, paths};
+use crate::{resolve, table, text};
 
 /// What `volee mission new` asks for.
 #[derive(Debug)]
@@ -58,12 +60,64 @@ pub(crate) async fn new(request: NewMission) -> Result<()> {
              mission show {short}`.",
             coordinator.short()
         ),
-        None => println!(
-            "No coordinator could start: `volee mission show {short}` says why. The mission stays \
-             in planning."
+        None => bail!(
+            "{}\nTo abort it: `volee mission abort {short}`.",
+            no_coordinator(&client, created.mission).await
         ),
     }
     Ok(())
+}
+
+/// Why no coordinator started for `mission`: the alert the daemon posted in
+/// the mission's thread when its launch failed, else what the daemon says
+/// about Claude Code, without which it launches nothing.
+async fn no_coordinator(client: &Client, mission: MissionId) -> String {
+    const FAILED: &str = "volee could not launch the coordinator of this mission: ";
+    let alert = resolve::registry(client).await.ok().and_then(|registry| {
+        let thread = registry.mission(mission)?.thread;
+        registry
+            .thread_messages(thread)
+            .into_iter()
+            .rev()
+            .find(|message| message.from == Party::System && message.kind == MessageKind::Alert)
+            .map(|message| text::printable(&message.body).into_owned())
+    });
+    if let Some(alert) = alert {
+        if let Some(reason) = alert.strip_prefix(FAILED) {
+            return format!("no coordinator could start: {reason}");
+        }
+        return alert;
+    }
+    let status = client
+        .call::<Status>(StatusParams {
+            protocol: PROTOCOL_VERSION,
+        })
+        .await;
+    if let Some(harness) = status.ok().and_then(|status| {
+        status
+            .harnesses
+            .into_iter()
+            .find(|harness| !harness.available)
+    }) {
+        let detail = harness
+            .detail
+            .map(|detail| format!(" ({})", text::one_line(&detail)))
+            .unwrap_or_default();
+        return format!(
+            "no coordinator could start: Claude Code is not available to the daemon{detail}; see \
+             `volee daemon status`. The mission stays in planning."
+        );
+    }
+    match paths() {
+        Ok(paths) => format!(
+            "no coordinator could start, and the daemon did not say why: see {}. The mission \
+             stays in planning.",
+            paths.log_dir().join("daemon.log").display()
+        ),
+        Err(_) => "no coordinator could start, and the daemon did not say why. The mission \
+                   stays in planning."
+            .to_owned(),
+    }
 }
 
 /// Lists missions, open ones only unless `all`.
@@ -157,7 +211,12 @@ pub(crate) async fn close(input: &str, force: bool) -> Result<()> {
 /// The text of `volee mission show`.
 fn describe(registry: &Registry, mission: &Mission, now: Timestamp) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "{} ({})", mission.title, mission.id.short());
+    let _ = writeln!(
+        out,
+        "{} ({})",
+        text::one_line(&mission.title),
+        mission.id.short()
+    );
     let since = Elapsed::between(mission.created_at, now);
     let _ = writeln!(
         out,
@@ -165,7 +224,11 @@ fn describe(registry: &Registry, mission: &Mission, now: Timestamp) -> String {
         mission.status.label(),
         mission.kind.label()
     );
-    let _ = writeln!(out, "  repos        {}", mission.repos.join(", "));
+    let _ = writeln!(
+        out,
+        "  repos        {}",
+        text::one_line(&mission.repos.join(", "))
+    );
     let _ = writeln!(out, "  goal         {}", first_line(&mission.goal, 100));
     let agents = registry.mission_agents(mission.id);
     match agents.iter().find(|agent| agent.role == Role::Coordinator) {
@@ -173,7 +236,7 @@ fn describe(registry: &Registry, mission: &Mission, now: Timestamp) -> String {
             let _ = writeln!(
                 out,
                 "  coordinator  {} ({}), {}",
-                coordinator.name,
+                text::one_line(&coordinator.name),
                 coordinator.id.short(),
                 coordinator.state.label()
             );
@@ -199,8 +262,8 @@ fn describe(registry: &Registry, mission: &Mission, now: Timestamp) -> String {
                 out,
                 "    {} {} ({})  {}",
                 table::glyph(&worker.state),
-                worker.name,
-                worker.workspace.label(),
+                text::one_line(&worker.name),
+                text::one_line(&worker.workspace.label()),
                 first_line(&verdict, 90)
             );
         }
@@ -234,12 +297,30 @@ fn party(registry: &Registry, party: Party) -> String {
     match party {
         Party::Human => "you".to_owned(),
         Party::System => "volee".to_owned(),
-        Party::Agent(id) => registry
-            .agent(id)
-            .map_or_else(|| id.short(), |agent| agent.name.clone()),
+        Party::Agent(id) => registry.agent(id).map_or_else(
+            || id.short(),
+            |agent| text::one_line(&agent.name).into_owned(),
+        ),
     }
 }
 
+/// The first line of `text`, printable, cut to `max` characters.
 fn first_line(text: &str, max: usize) -> String {
-    table::truncate(text.lines().next().unwrap_or_default().trim(), max)
+    let line = text.lines().next().unwrap_or_default();
+    table::truncate(text::one_line(line).trim(), max)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::first_line;
+
+    #[test]
+    fn a_first_line_is_printable_and_cut() {
+        assert_eq!(
+            first_line("\x1b]0;owned\x07Done.\nsecond line", 40),
+            "]0;ownedDone."
+        );
+        assert_eq!(first_line("  report\r\nmore", 40), "report");
+        assert_eq!(first_line("abcdef", 4), "abc\u{2026}");
+    }
 }

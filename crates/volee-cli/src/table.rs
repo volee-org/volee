@@ -5,6 +5,8 @@ use volee_core::role::Role;
 use volee_core::time::{Elapsed, Timestamp};
 use volee_core::{Agent, AgentState, Registry};
 
+use crate::text::one_line;
+
 /// A symbol per state, so states read without color.
 pub(crate) fn glyph(state: &AgentState) -> &'static str {
     match state {
@@ -41,12 +43,12 @@ pub(crate) fn agents(agents: &[&Agent], now: Timestamp) -> String {
         rows.push([
             glyph(&agent.state).to_owned(),
             agent.state.label().to_owned(),
-            agent.name.clone(),
+            one_line(&agent.name).into_owned(),
             agent.id.short(),
             agent.role.label().to_owned(),
-            agent.workspace.label(),
+            one_line(&agent.workspace.label()).into_owned(),
             Elapsed::between(agent.state_since, now).to_string(),
-            truncate(&detail, 60),
+            truncate(&one_line(&detail), 60),
         ]);
     }
     align(&rows)
@@ -75,18 +77,20 @@ pub(crate) fn missions(registry: &Registry, missions: &[&Mission], now: Timestam
             .count();
         rows.push([
             mission.status.label().to_owned(),
-            truncate(&mission.title, 40),
+            truncate(&one_line(&mission.title), 40),
             mission.id.short(),
             mission.kind.label().to_owned(),
             format!("{delivered}/{} delivered", workers.len()),
             Elapsed::between(mission.created_at, now).to_string(),
             truncate(
-                &mission
-                    .repos
-                    .iter()
-                    .map(|repo| repo_label(repo))
-                    .collect::<Vec<_>>()
-                    .join(", "),
+                &one_line(
+                    &mission
+                        .repos
+                        .iter()
+                        .map(|repo| repo_label(repo))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
                 40,
             ),
         ]);
