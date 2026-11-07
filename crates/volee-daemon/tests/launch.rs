@@ -82,11 +82,18 @@ fn start() -> Running {
 
 /// A daemon whose configuration also holds `extra`.
 fn start_with(extra: &str) -> Running {
+    start_prepared(extra, |_| vec![])
+}
+
+/// A daemon whose configuration also holds `extra`. `prepare` gets the
+/// repository before the daemon starts, and returns events for its log.
+fn start_prepared(extra: &str, prepare: impl FnOnce(&Path) -> Vec<Event>) -> Running {
     let dir = tempfile::tempdir().unwrap();
     // Canonical, so that paths compare equal to what git reports.
     let root = dir.path().canonicalize().unwrap();
     let repo = root.join("alpha");
     repository(&repo);
+    let events = prepare(&repo);
     let paths = Paths::rooted(root.join("volee"));
     std::fs::create_dir_all(&paths.state_dir).unwrap();
     let socket = paths.socket.clone();
@@ -107,7 +114,7 @@ fn start_with(extra: &str) -> Running {
         .env("GIT_CONFIG_NOSYSTEM", "1");
     let config = Config {
         paths: paths.clone(),
-        log: Box::new(MemoryLog::with(mission_elsewhere())),
+        log: Box::new(MemoryLog::with([mission_elsewhere(), events].concat())),
         clock: Arc::new(ManualClock::at(10_000)),
         harnesses: vec![],
         spool: None,
@@ -267,11 +274,11 @@ async fn a_failed_launch_marks_the_agent_failed_and_keeps_the_worktree() {
         "{}",
         error.message
     );
-    // It says what stays, and how to launch on that branch again.
+    // It says what stays, and that the same command can simply run again.
     assert!(
         error.message.contains("kept the worktree")
-            && error.message.contains("branch -d feat/broken")
-            && error.message.contains("git -C "),
+            && error.message.contains("feat/broken")
+            && error.message.contains("run the same command again"),
         "{}",
         error.message
     );
@@ -311,6 +318,218 @@ async fn a_configured_folder_inside_a_repository_is_not_that_repository() {
     );
     assert!(!daemon.repo.join(".claude/worktrees/feat-docs").exists());
     assert_eq!(daemon.harness.launches().len(), 0);
+}
+
+/// Launches `branch` while the harness refuses: the worktree and the branch
+/// stay, and the agent failed before any session started. Returns it.
+async fn failed_launch(daemon: &Running, client: &Client, branch: &str) -> volee_core::AgentId {
+    daemon.harness.refuse_launches(true);
+    let error = rpc_error(client.call::<Spawn>(worker(branch)).await.unwrap_err());
+    assert!(
+        error.message.contains("run the same command again"),
+        "{}",
+        error.message
+    );
+    daemon.harness.refuse_launches(false);
+    let registry = registry(&daemon.socket).await;
+    let failed = registry
+        .agents()
+        .find(|agent| agent.workspace.branch.as_deref() == Some(branch))
+        .unwrap();
+    assert_eq!(failed.state, AgentState::Failed);
+    assert_eq!(failed.sessions, [], "no session ever started");
+    failed.id
+}
+
+#[tokio::test]
+async fn the_same_launch_runs_again_after_a_failure() {
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let failed = failed_launch(&daemon, &client, "feat/again").await;
+    let worktree = daemon.repo.join(".claude/worktrees/feat-again");
+
+    // The cause is fixed (say, the repository is trusted now): the same
+    // command again reuses what the failed launch left.
+    let spawned = client.call::<Spawn>(worker("feat/again")).await.unwrap();
+    assert_ne!(spawned.agent, failed);
+    assert_eq!(spawned.worktree, worktree.display().to_string());
+    assert_eq!(daemon.harness.launches().len(), 1);
+    let registry = registry(&daemon.socket).await;
+    assert!(
+        registry.agent(failed).is_none(),
+        "the failed agent is forgotten"
+    );
+    let agent = registry.agent(spawned.agent).unwrap();
+    assert_eq!(agent.state, AgentState::Launching);
+    assert_eq!(
+        agent.workspace.worktree.as_deref(),
+        Some(worktree.as_path())
+    );
+    assert_eq!(agent.workspace.branch.as_deref(), Some("feat/again"));
+    let tip = git(&daemon.repo, &["rev-parse", "feat/again"]);
+    assert_eq!(agent.workspace.start_commit.as_deref(), Some(tip.trim()));
+}
+
+#[tokio::test]
+async fn what_a_failed_launch_left_is_never_reused_once_something_was_done_in_it() {
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+
+    // A commit on the branch.
+    let committed = failed_launch(&daemon, &client, "feat/committed").await;
+    let tree = daemon.repo.join(".claude/worktrees/feat-committed");
+    std::fs::write(tree.join("invoice.rs"), "pub struct Invoice;\n").unwrap();
+    git(&tree, &["add", "invoice.rs"]);
+    git(&tree, &["commit", "--quiet", "-m", "Add invoices"]);
+    let error = rpc_error(
+        client
+            .call::<Spawn>(worker("feat/committed"))
+            .await
+            .unwrap_err(),
+    );
+    assert_eq!(error.code, rpc::REFUSED, "{}", error.message);
+
+    // A file nobody committed.
+    let untracked = failed_launch(&daemon, &client, "feat/untracked").await;
+    let tree = daemon.repo.join(".claude/worktrees/feat-untracked");
+    std::fs::write(tree.join("notes.md"), "draft\n").unwrap();
+    let error = rpc_error(
+        client
+            .call::<Spawn>(worker("feat/untracked"))
+            .await
+            .unwrap_err(),
+    );
+    assert_eq!(error.code, rpc::REFUSED, "{}", error.message);
+    assert!(tree.join("notes.md").is_file(), "nothing was touched");
+
+    // Forgotten by the person: nothing says the worktree is volee's leftover.
+    failed_launch(&daemon, &client, "feat/forgotten").await;
+    let forgotten = registry(&daemon.socket)
+        .await
+        .agents()
+        .find(|agent| agent.workspace.branch.as_deref() == Some("feat/forgotten"))
+        .unwrap()
+        .id;
+    client
+        .call::<volee_proto::methods::Forget>(volee_proto::methods::AgentParams {
+            agent: forgotten,
+        })
+        .await
+        .unwrap();
+    let error = rpc_error(
+        client
+            .call::<Spawn>(worker("feat/forgotten"))
+            .await
+            .unwrap_err(),
+    );
+    assert_eq!(error.code, rpc::REFUSED, "{}", error.message);
+
+    // The failed agents stay, and nothing launched.
+    let registry = registry(&daemon.socket).await;
+    assert!(registry.agent(committed).is_some());
+    assert!(registry.agent(untracked).is_some());
+    assert_eq!(daemon.harness.launches().len(), 0);
+}
+
+#[tokio::test]
+async fn an_agent_that_had_a_session_never_leaves_its_worktree_to_another() {
+    // A worker that ran (a session linked), then failed: its worktree is not
+    // a launch's leftover, even clean and without commits.
+    let ran = volee_core::AgentId::from_ulid(Ulid::from_parts(7_000, 1));
+    let daemon = start_prepared("", |repo| {
+        let worktree = repo.join(".claude/worktrees/feat-ran");
+        git(
+            repo,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                "feat/ran",
+                worktree.to_str().unwrap(),
+                "main",
+            ],
+        );
+        let at = Timestamp::from_millis;
+        vec![
+            Event::new(
+                at(1),
+                EventKind::AgentRegistered {
+                    agent: ran,
+                    name: "alpha-feat-ran".into(),
+                    role: Role::Worker,
+                    harness: volee_core::harness::HarnessKind::ClaudeCode,
+                    launched_by: volee_core::role::LaunchedBy::Human,
+                    parent: None,
+                    mission: None,
+                    workspace: volee_core::workspace::Workspace {
+                        repo: Some("alpha".into()),
+                        repo_root: Some(repo.to_path_buf()),
+                        worktree: Some(worktree.clone()),
+                        branch: Some("feat/ran".into()),
+                        base: Some("main".into()),
+                        ..volee_core::workspace::Workspace::at(&worktree)
+                    },
+                    location: volee_core::workspace::Location::Background,
+                },
+            ),
+            Event::new(
+                at(2),
+                EventKind::SessionLinked {
+                    agent: ran,
+                    session: volee_core::harness::SessionKey::claude("aaaa1111-0000"),
+                    origin: volee_core::harness::SessionOrigin::Started,
+                },
+            ),
+            Event::new(
+                at(3),
+                EventKind::StateChanged {
+                    agent: ran,
+                    state: AgentState::Failed,
+                    detail: None,
+                },
+            ),
+        ]
+    });
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let error = rpc_error(client.call::<Spawn>(worker("feat/ran")).await.unwrap_err());
+    assert_eq!(error.code, rpc::REFUSED, "{}", error.message);
+    assert!(registry(&daemon.socket).await.agent(ran).is_some());
+}
+
+#[tokio::test]
+async fn tidy_removes_what_a_failed_launch_left_untouched_and_keeps_the_branch() {
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let failed = failed_launch(&daemon, &client, "feat/tidy").await;
+    let worktree = daemon.repo.join(".claude/worktrees/feat-tidy");
+    // Wait for evidence read after the failure: it proves nothing was done.
+    for _ in 0..1_000 {
+        let registry = registry(&daemon.socket).await;
+        let agent = registry.agent(failed).unwrap();
+        if agent.delivery.checked_at.is_some() && !agent.delivery.is_stale_at(agent.state_since) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let outcome = client
+        .call::<volee_proto::methods::Tidy>(volee_proto::methods::TidyParams {
+            agent: failed,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, volee_proto::methods::TidyOutcome::Removed { .. }),
+        "{outcome:?}"
+    );
+    assert!(!worktree.exists());
+    assert_ne!(
+        git(&daemon.repo, &["branch", "--list", "feat/tidy"]).trim(),
+        "",
+        "the branch is kept"
+    );
+    assert!(registry(&daemon.socket).await.agent(failed).is_none());
 }
 
 #[tokio::test]

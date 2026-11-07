@@ -87,16 +87,7 @@ pub(crate) async fn spawn(
     let agent = shared.state.lock().await.new_agent_id();
     let worktree_name = slug(&params.branch);
     let worktree = target.root.join(IN_REPO_WORKTREES).join(&worktree_name);
-    let created = {
-        let git = Arc::clone(&git);
-        let (root, path, branch, base) = (
-            target.root.clone(),
-            worktree.clone(),
-            params.branch.clone(),
-            target.base.clone(),
-        );
-        blocking(move || git.add_worktree(&root, &path, &branch, &base)).await??
-    };
+    let start_commit = make_worktree(shared, &git, &target, &params.branch, &worktree).await?;
     exclude_worktrees(&target.root);
     let (settings_file, mcp_config_file) = write_agent_files(shared, &harness, agent)?;
 
@@ -111,7 +102,7 @@ pub(crate) async fn spawn(
         worktree: Some(worktree.clone()),
         branch: Some(params.branch.clone()),
         base: Some(target.base.clone()),
-        start_commit: Some(created.start_commit.clone()),
+        start_commit: Some(start_commit),
         ..Workspace::at(&worktree)
     };
     register(
@@ -223,6 +214,145 @@ pub(crate) async fn coordinator(
 
 /// A launch that failed once volee had created `worktree` on the new
 /// `branch`: both stay (ADR 0011), and the error says how to start again.
+/// The worktree of a new agent on `branch`, and the commit it starts at. The
+/// same launch run again after a failure reuses what that failure left,
+/// while nothing was done in it (ADR 0016); otherwise git creates the
+/// worktree, and refuses a branch or a directory that exists.
+async fn make_worktree(
+    shared: &Arc<Shared>,
+    git: &Arc<dyn Git>,
+    target: &Target,
+    branch: &str,
+    worktree: &Path,
+) -> Result<String, DaemonError> {
+    if let Some(start_commit) = reuse_untouched(shared, git, target, branch, worktree).await? {
+        return Ok(start_commit);
+    }
+    let git = Arc::clone(git);
+    let (root, path, branch, base) = (
+        target.root.clone(),
+        worktree.to_path_buf(),
+        branch.to_owned(),
+        target.base.clone(),
+    );
+    let created = blocking(move || git.add_worktree(&root, &path, &branch, &base)).await??;
+    Ok(created.start_commit)
+}
+
+/// The worktree and branch a failed launch left at `worktree` for `branch`,
+/// reused when nothing was done in them since (ADR 0016): the agent of that
+/// launch failed before any session started, the worktree is registered for
+/// the branch and clean, and the branch holds no commit of its own (none
+/// beyond its merge base with the base branch). That agent is then
+/// forgotten, and the branch's tip is returned as the new start commit.
+/// `None` in every other case: the launch then lets git create the worktree,
+/// which refuses a branch or a directory that exists.
+async fn reuse_untouched(
+    shared: &Arc<Shared>,
+    git: &Arc<dyn Git>,
+    target: &Target,
+    branch: &str,
+    worktree: &Path,
+) -> Result<Option<String>, DaemonError> {
+    let Some(failed) = untouched_failure(&*shared.state.lock().await, target, branch, worktree)
+    else {
+        return Ok(None);
+    };
+    let checked = {
+        let git = Arc::clone(git);
+        let (root, path, branch, base) = (
+            target.root.clone(),
+            worktree.to_path_buf(),
+            branch.to_owned(),
+            target.base.clone(),
+        );
+        blocking(move || untouched_tip(git.as_ref(), &root, &path, &branch, &base)).await?
+    };
+    let tip = match checked {
+        Ok(Some(tip)) => tip,
+        Ok(None) => return Ok(None),
+        Err(error) => {
+            tracing::warn!(%error, "cannot tell whether a failed launch left its worktree untouched");
+            return Ok(None);
+        }
+    };
+    // git ran off the lock: the failed agent must still be there, untouched,
+    // and forgetting it claims the worktree for this launch alone.
+    let mut state = shared.state.lock().await;
+    if untouched_failure(&state, target, branch, worktree) != Some(failed) {
+        return Ok(None);
+    }
+    let now = state.now();
+    state.commit(vec![Event::new(
+        now,
+        EventKind::AgentForgotten { agent: failed },
+    )])?;
+    tracing::info!(%failed, branch, "reusing what a failed launch left untouched");
+    Ok(Some(tip))
+}
+
+/// The agent of a launch that failed before any session started, which
+/// volee launched on `branch` in `worktree`, from the same base.
+fn untouched_failure(
+    state: &crate::state::State,
+    target: &Target,
+    branch: &str,
+    worktree: &Path,
+) -> Option<AgentId> {
+    state
+        .registry()
+        .agents()
+        .find(|agent| {
+            agent.launched_by != LaunchedBy::Outside
+                && agent.state == AgentState::Failed
+                && agent.sessions.is_empty()
+                && agent.workspace.repo_root.as_deref() == Some(target.root.as_path())
+                && agent.workspace.worktree.as_deref() == Some(worktree)
+                && agent.workspace.branch.as_deref() == Some(branch)
+                && agent.workspace.base.as_deref() == Some(target.base.as_str())
+        })
+        .map(|agent| agent.id)
+}
+
+/// The tip of `branch` when the worktree at `path` is registered for it,
+/// unlocked, clean (no change, no untracked file), and the branch holds no
+/// commit that `base` lacks; `None` otherwise.
+fn untouched_tip(
+    git: &dyn Git,
+    root: &Path,
+    path: &Path,
+    branch: &str,
+    base: &str,
+) -> Result<Option<String>, volee_git::GitError> {
+    let registered = git.worktrees(root)?.into_iter().any(|known| {
+        same_path(&known.path, path)
+            && known.branch.as_deref() == Some(branch)
+            && known.locked.is_none()
+            && known.prunable.is_none()
+    });
+    if !registered {
+        return Ok(None);
+    }
+    let query = volee_git::DeliveryQuery {
+        branch,
+        base,
+        unmerged_tip: None,
+    };
+    let report = git.delivery(path, &query)?;
+    let untouched = report.on_branch && report.delivery.commits == 0 && !report.delivery.dirty;
+    Ok(report.delivery.tip.filter(|_| untouched))
+}
+
+/// Whether two paths name the same directory, through symbolic links when
+/// both exist.
+fn same_path(a: &Path, b: &Path) -> bool {
+    a == b
+        || matches!(
+            (a.canonicalize(), b.canonicalize()),
+            (Ok(a), Ok(b)) if a == b
+        )
+}
+
 fn kept(error: DaemonError, repo: &Path, worktree: &Path, branch: &str) -> DaemonError {
     DaemonError::LaunchFailed {
         error: Box::new(error),

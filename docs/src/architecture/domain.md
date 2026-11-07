@@ -172,6 +172,9 @@ triggered it are already committed.
   to remove: the agent was launched by volee, the worktree lies under
   `<repository>/.claude/worktrees/`, and the delivery evidence was checked
   since the agent's last change (stale or missing evidence proves nothing).
+  An agent whose launch failed before any session started, with a clean
+  tree and no commit of its own, needs no delivery: nothing was ever done in
+  its worktree ([ADR 0016](../adr/0016-what-a-failed-launch-left-untouched.md)).
   The branch is never part of the decision: it is always kept.
 - **Delivery evidence** (`delivery::Delivery`) describes the agent's branch:
   `commits` counts its commits that the base branch does not have, and `tip`

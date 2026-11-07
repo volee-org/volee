@@ -135,7 +135,14 @@ part of it, until the next look-up finds them in it.
   exists but a later step failed (a hook, a checkout stopped at its timeout),
   volee says the worktree is there.
 - volee refuses to reuse an existing branch or directory, and checks both
-  before it touches the repository.
+  before it touches the repository, with one exception
+  ([ADR 0016](../adr/0016-what-a-failed-launch-left-untouched.md)): what a
+  failed launch left untouched. When the agent of an earlier launch on the
+  same branch, in the same worktree and from the same base, failed before
+  any session started, git still registers that worktree for the branch, the
+  worktree has no change and no untracked file, and the branch has no commit
+  beyond its merge base with the base branch, the same launch run again
+  reuses the worktree and forgets the failed agent.
 - Removing a worktree is never forced. volee refuses to remove the main
   checkout, a locked worktree, a worktree with uncommitted changes or
   untracked files, and a detached `HEAD` that no branch, tag or

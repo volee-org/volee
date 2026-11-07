@@ -336,6 +336,9 @@ pub fn tidy_check(agent: &Agent) -> Result<PathBuf, Vec<TidyRefusal>> {
             }
             reasons.push(refusal);
         }
+        // A launch that failed before any session started left a worktree
+        // in which nothing was ever done: no work can be lost (ADR 0016).
+        None if never_used(agent) => {}
         None => {
             if let TidyVerdict::Refused { reasons: more } =
                 tidy_verdict(&agent.state, &agent.delivery)
@@ -348,6 +351,17 @@ pub fn tidy_check(agent: &Agent) -> Result<PathBuf, Vec<TidyRefusal>> {
         Some(worktree) if reasons.is_empty() => Ok(worktree.clone()),
         _ => Err(reasons),
     }
+}
+
+/// Whether nothing was ever done in the agent's worktree, by the evidence
+/// (ADR 0016): its launch failed before any session started, its tree is
+/// clean, and its branch holds no commit that its base branch lacks. Checked
+/// only on fresh evidence, by [`tidy_check`].
+fn never_used(agent: &Agent) -> bool {
+    agent.state == AgentState::Failed
+        && agent.sessions.is_empty()
+        && agent.delivery.commits == 0
+        && !agent.delivery.dirty
 }
 
 /// Whether `worktree` is strictly inside `<repo_root>/.claude/worktrees/`,
@@ -585,6 +599,48 @@ mod tests {
             tidy_check(&tidy_candidate()),
             Ok(PathBuf::from("/work/alpha/.claude/worktrees/feat-x"))
         );
+    }
+
+    #[test]
+    fn a_worktree_a_failed_launch_left_untouched_may_be_tidied() {
+        let untouched = || Agent {
+            state: AgentState::Failed,
+            delivery: Delivery {
+                checked_at: Some(Timestamp::from_millis(2_000)),
+                ..Delivery::default()
+            },
+            ..tidy_candidate()
+        };
+        assert!(
+            tidy_check(&untouched()).is_ok(),
+            "nothing was ever done in it"
+        );
+
+        // Anything done in it, and the usual rule applies: not delivered.
+        let mut committed = untouched();
+        committed.delivery.commits = 1;
+        let mut dirty = untouched();
+        dirty.delivery.dirty = true;
+        let mut ran = untouched();
+        ran.sessions.push(crate::agent::SessionLink {
+            key: crate::harness::SessionKey::claude("c0ffee00-0000"),
+            origin: crate::harness::SessionOrigin::Started,
+            at: Timestamp::from_millis(500),
+        });
+        for agent in [committed, ran] {
+            assert_eq!(tidy_check(&agent), Err(vec![TidyRefusal::NotDelivered]));
+        }
+        assert_eq!(
+            tidy_check(&dirty),
+            Err(vec![
+                TidyRefusal::UncommittedChanges,
+                TidyRefusal::NotDelivered
+            ])
+        );
+        // Stale evidence proves nothing, untouched or not.
+        let mut stale = untouched();
+        stale.state_since = Timestamp::from_millis(3_000);
+        assert_eq!(tidy_check(&stale), Err(vec![TidyRefusal::EvidenceStale]));
     }
 
     #[test]

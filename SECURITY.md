@@ -52,7 +52,9 @@ give us a reasonable amount of time to ship a fix before you disclose publicly.
   unless you configure another, and never `bypassPermissions`.
 - volee never deletes branches.
 - Cleanup of worktrees and branches requires evidence that the work was
-  delivered.
+  delivered, or that nothing was ever done in the worktree (a launch that
+  failed before its session started, ADR 0016). volee reuses such a
+  worktree only for the same launch run again, never one that holds work.
 
 If you find a way to break one of these properties, please report it as a
 vulnerability.
