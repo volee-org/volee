@@ -62,9 +62,10 @@ pub enum DaemonError {
     /// which it keeps (ADR 0011): the message says that the same command
     /// can simply run again (ADR 0016).
     #[error(
-        "{error}. volee kept the worktree it made for the agent, {}, and its new branch {branch}: \
+        "{}. volee kept the worktree it made for the agent, {}, and its new branch {branch}: \
          once that is fixed, run the same command again, and volee reuses them as long as \
          nothing was done in them",
+        clause(error),
         worktree.display()
     )]
     LaunchFailed {
@@ -108,6 +109,13 @@ impl From<DaemonError> for RpcError {
     }
 }
 
+/// An error's message without its final period, to go before more words:
+/// the harness's own errors often end with one.
+fn clause(error: &DaemonError) -> String {
+    let text = error.to_string();
+    text.trim_end().trim_end_matches('.').to_owned()
+}
+
 /// The JSON-RPC code of `error`: a failed launch keeps the code of its cause.
 fn code(error: &DaemonError) -> i64 {
     match error {
@@ -142,5 +150,31 @@ fn code(error: &DaemonError) -> i64 {
             | volee_harness::HarnessError::UnsupportedVersion { .. },
         ) => rpc::UNAVAILABLE,
         _ => rpc::INTERNAL_ERROR,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_launch_says_its_cause_once() {
+        let error = DaemonError::LaunchFailed {
+            error: Box::new(DaemonError::Unavailable(
+                "Claude Code cannot start a session.".into(),
+            )),
+            repo: PathBuf::from("/work/shop"),
+            worktree: PathBuf::from("/work/shop/.claude/worktrees/feat-search"),
+            branch: "feat/search".into(),
+        };
+        let message = error.to_string();
+        assert!(
+            message.starts_with(
+                "Claude Code cannot start a session. volee kept the worktree it made for the \
+                 agent, /work/shop/.claude/worktrees/feat-search, and its new branch feat/search:"
+            ),
+            "{message}"
+        );
+        assert!(!message.contains(".."), "{message}");
     }
 }
