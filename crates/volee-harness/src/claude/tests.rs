@@ -118,7 +118,7 @@ fn capabilities_require_the_minimum_version() {
         ),
         "{error:?}"
     );
-    assert!(error.to_string().contains("2.1.300 or newer"), "{error}");
+    assert!(error.to_string().contains("2.1.319 or newer"), "{error}");
 }
 
 #[test]
