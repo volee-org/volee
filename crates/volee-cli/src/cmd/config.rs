@@ -62,10 +62,7 @@ pub(crate) fn check() -> Result<()> {
         println!("  permission mode   {mode}");
     }
     println!("  wake timeout      {} s", config.agents.wake_timeout);
-    println!(
-        "  worktrees         {}",
-        config.worktree_root(&paths.data_dir).display()
-    );
+    println!("  worktrees         inside each repository, in .claude/worktrees");
     if config.repos.is_empty() {
         println!("  repositories      none (add [repos.<name>] tables)");
     }

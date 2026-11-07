@@ -19,6 +19,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0010](0010-git-access.md) | Git is read through the git CLI behind a trait | Accepted |
 | [0011](0011-safety-and-delivery-evidence.md) | Destructive actions require delivery evidence | Accepted |
 | [0012](0012-language-license-and-scope.md) | Rust, dual MIT/Apache-2.0, Unix first | Accepted |
+| [0013](0013-worktrees-live-in-their-repository.md) | Agent worktrees live in their repository | Accepted |
 
 To propose a new decision, copy [the template](template.md), number it, and
 open a pull request.

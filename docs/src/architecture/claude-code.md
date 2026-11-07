@@ -135,22 +135,26 @@ What the adapter knows, and how it knows it:
   ``Workspace not trusted. Run `claude` in <dir> once and accept the trust
   prompt, then retry.`` (two variants name the home directory and a directory
   that cannot be found). volee reports it as `UntrustedDirectory` with the
-  directory. Whether a worktree created with `git worktree add` inherits its
-  repository's trust, inside or outside the repository, is not measured yet:
-  the probe needs to launch real background sessions, which the agent that
-  wrote this adapter was not allowed to do. Until it is, the daemon must
-  expect this error on the first launch in a new worktree location.
+  directory.
+- **Trust and worktrees** (measured with 2.1.319 in a trusted sandbox
+  repository, clean environment). Trust is recorded per path, and a
+  repository nested in a trusted folder does not inherit it. A worktree made
+  with `git worktree add` is untrusted wherever it lives, even under a
+  trusted repository's `.claude/worktrees/`. From the trusted main checkout,
+  `claude --bg --worktree=<name>` works, and when `.claude/worktrees/<name>`
+  already exists Claude Code reuses it on its current branch and locks it.
+  That is how volee launches every agent (`SpawnSpec::worktree`, [ADR
+  0013](../adr/0013-worktrees-live-in-their-repository.md)).
 - **Unknown sessions** (measured). `claude stop` and `claude logs` answer
   `No job matching '<id>'. Run 'claude agents' to list running sessions.`,
   `claude rm` answers `No job matching '<id>'`, all with exit status 1.
   volee reports `UnknownSession`.
-- **Deleting a session** (documented, not measured). `claude rm` deletes a
-  worktree Claude Code created for the session (it does so under
-  `.claude/worktrees/` when a session starts outside a linked worktree),
-  unless the worktree has uncommitted changes or unpushed commits: it then
-  keeps the session and says `kept <id>`, which volee reports as
-  `SessionKept`. A worktree someone else created and started the session
-  inside is left in place, which is the case of every agent volee launches.
+- **Deleting a session** (measured for the cases below). `claude rm` deletes
+  a worktree Claude Code created for the session. For a worktree that existed
+  before the session (every agent volee launches), it refused while the
+  branch had commits it could not find on a remote: it kept the session and
+  the worktree, still locked, said `kept <id>` (volee reports `SessionKept`)
+  and offered `--discard-unpushed <token>`, which volee never passes.
   volee still refuses to delete a session whose directory is in a linked git
   worktree unless the daemon passes `WorktreeRemoval::Delivered`, which it
   does only after `tidy_verdict` found delivery evidence

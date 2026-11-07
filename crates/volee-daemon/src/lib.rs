@@ -13,6 +13,7 @@ mod discovery;
 mod error;
 mod evidence;
 mod handlers;
+mod launch;
 mod log;
 mod missions;
 mod server;

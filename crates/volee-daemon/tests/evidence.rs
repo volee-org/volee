@@ -267,6 +267,7 @@ fn start(events: Vec<Event>, clock: Arc<ManualClock>, evidence: EvidenceSources)
         harness: None,
         discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence,
+        volee_bin: None,
     };
     Running {
         socket,

@@ -52,6 +52,24 @@ pub enum DaemonError {
     /// An event built from a request did not apply.
     #[error(transparent)]
     Apply(#[from] ApplyError),
+    /// A program the request needs (the harness, git) is not available.
+    #[error("{0}")]
+    Unavailable(String),
+    /// The harness failed.
+    #[error(transparent)]
+    Harness(#[from] volee_harness::HarnessError),
+    /// git failed or refused.
+    #[error(transparent)]
+    Git(#[from] volee_git::GitError),
+    /// Writing an agent's files failed.
+    #[error("cannot write {path}: {source}")]
+    Write {
+        /// The file.
+        path: PathBuf,
+        /// The underlying error.
+        #[source]
+        source: io::Error,
+    },
 }
 
 impl From<RouteError> for DaemonError {
@@ -69,9 +87,24 @@ impl From<DaemonError> for RpcError {
     fn from(error: DaemonError) -> Self {
         let code = match &error {
             DaemonError::NotFound(_) => rpc::NOT_FOUND,
-            DaemonError::Refused(_) => rpc::REFUSED,
-            DaemonError::InvalidParams(_) => rpc::INVALID_PARAMS,
+            DaemonError::Refused(_)
+            | DaemonError::Git(
+                volee_git::GitError::BranchExists { .. }
+                | volee_git::GitError::PathExists { .. }
+                | volee_git::GitError::InvalidBranchName { .. }
+                | volee_git::GitError::UnknownRevision { .. }
+                | volee_git::GitError::RemovalRefused { .. },
+            ) => rpc::REFUSED,
+            DaemonError::InvalidParams(_)
+            | DaemonError::Harness(volee_harness::HarnessError::InvalidRequest(_)) => {
+                rpc::INVALID_PARAMS
+            }
             DaemonError::VersionMismatch(_) => rpc::VERSION_MISMATCH,
+            DaemonError::Unavailable(_)
+            | DaemonError::Harness(
+                volee_harness::HarnessError::NotInstalled { .. }
+                | volee_harness::HarnessError::UnsupportedVersion { .. },
+            ) => rpc::UNAVAILABLE,
             _ => rpc::INTERNAL_ERROR,
         };
         Self::new(code, error.to_string())

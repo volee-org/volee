@@ -11,6 +11,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, broadcast, mpsc, watch};
 use tokio::task::JoinSet;
+use volee_git::Git;
 use volee_harness::Harness;
 use volee_proto::methods::{
     EVENTS_APPENDED, EventBatch, ForgeStatus, HarnessStatus, Method, SeqEvent, Subscribe,
@@ -46,6 +47,9 @@ pub struct Config {
     /// Where workspaces and delivery evidence are read from:
     /// [`EvidenceSources::default()`] reads nothing.
     pub evidence: EvidenceSources,
+    /// The volee program, which the hooks and MCP servers of launched agents
+    /// run. Without it, the daemon cannot launch agents.
+    pub volee_bin: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for Config {
@@ -62,6 +66,11 @@ impl std::fmt::Debug for Config {
 pub(crate) struct Shared {
     pub(crate) state: Mutex<State>,
     pub(crate) harnesses: Vec<HarnessStatus>,
+    pub(crate) harness: Option<Arc<dyn Harness>>,
+    pub(crate) git: Option<Arc<dyn Git>>,
+    pub(crate) settings: volee_config::Config,
+    pub(crate) volee_bin: Option<PathBuf>,
+    pub(crate) paths: Paths,
     /// What the evidence refresher learned about the forge, once it checked.
     forge: std::sync::Mutex<Option<ForgeStatus>>,
     shutdown: watch::Sender<bool>,
@@ -118,6 +127,11 @@ impl Daemon {
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
             harnesses: config.harnesses,
+            harness: config.harness.clone(),
+            git: config.evidence.git.clone(),
+            settings: config.evidence.settings.clone(),
+            volee_bin: config.volee_bin,
+            paths: config.paths,
             forge: std::sync::Mutex::new(None),
             shutdown,
         });

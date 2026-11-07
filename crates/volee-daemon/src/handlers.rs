@@ -17,7 +17,7 @@ use volee_proto::PROTOCOL_VERSION;
 use volee_proto::methods::{
     AbortMission, AgentParams, CloseMission, CreateMission, Empty, EventBatch, EventsSince, Forget,
     HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams, Method, SendMessage,
-    SendParams, Sent, Shutdown, SinceParams, Status, StatusInfo, StatusParams, WaitParams,
+    SendParams, Sent, Shutdown, SinceParams, Spawn, Status, StatusInfo, StatusParams, WaitParams,
     WaitReply,
 };
 use volee_proto::rpc::{self, RpcError};
@@ -50,6 +50,7 @@ pub(crate) async fn dispatch(
             respond(hook_ingest(shared, parse::<HookIngest>(params)?, Delivery::Live).await)
         }
         HookWait::NAME => respond(hook_wait(shared, parse::<HookWait>(params)?).await),
+        Spawn::NAME => respond(crate::launch::spawn(shared, parse::<Spawn>(params)?).await),
         CreateMission::NAME => {
             respond(missions::create(shared, parse::<CreateMission>(params)?).await)
         }

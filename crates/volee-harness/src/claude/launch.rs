@@ -98,6 +98,9 @@ pub(crate) fn args(resume: Option<&str>, spec: &SpawnSpec) -> Vec<OsString> {
     if let Some(text) = &spec.append_system_prompt {
         args.push(option("--append-system-prompt", text));
     }
+    if let Some(name) = &spec.worktree {
+        args.push(option("--worktree", name));
+    }
     args.push("--".into());
     args.push(prompt_operand(&spec.prompt).into());
     args
@@ -188,11 +191,25 @@ mod tests {
             allowed_tools: vec![],
             disallowed_tools: vec![],
             append_system_prompt: None,
+            worktree: None,
         }
     }
 
     fn strings(args: &[OsString]) -> Vec<&str> {
         args.iter().map(|arg| arg.to_str().unwrap()).collect()
+    }
+
+    #[test]
+    fn a_worktree_is_named_before_the_prompt() {
+        let spec = SpawnSpec {
+            cwd: "/work/alpha".into(),
+            worktree: Some("feat-invoices".into()),
+            ..spec()
+        };
+        let args = args(None, &spec);
+        let args = strings(&args);
+        let at = args.iter().position(|arg| *arg == "--").unwrap();
+        assert!(args[..at].contains(&"--worktree=feat-invoices"), "{args:?}");
     }
 
     #[test]

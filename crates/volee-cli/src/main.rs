@@ -38,6 +38,26 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Launch an agent on a new branch, in its own worktree.
+    Spawn {
+        /// The repository: a name from the configuration, or a directory.
+        repo: String,
+        /// The branch to create for the agent.
+        branch: String,
+        /// The task, as the agent's first prompt.
+        task: String,
+        /// The branch to start from; the repository's default branch when
+        /// absent.
+        #[arg(long)]
+        base: Option<String>,
+        /// The model; the configured one, else Claude Code's default.
+        #[arg(long)]
+        model: Option<String>,
+        /// A display name; derived from the repository and branch when
+        /// absent.
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Send messages to agents.
     #[command(subcommand)]
     Msg(MsgCommand),
@@ -243,6 +263,24 @@ fn async_main(command: Command) -> ExitCode {
                 cmd::msg::send(&to, body, kind.into()).await
             }
             Command::Mission(command) => mission(command).await,
+            Command::Spawn {
+                repo,
+                branch,
+                task,
+                base,
+                model,
+                name,
+            } => {
+                cmd::spawn::run(cmd::spawn::SpawnRequest {
+                    repo,
+                    branch,
+                    task,
+                    base,
+                    model,
+                    name,
+                })
+                .await
+            }
             Command::Mcp { agent } => cmd::mcp::run(agent).await,
             Command::Demo { theme } => cmd::demo::run(theme.as_deref()).await,
             Command::Hook { .. } | Command::Config(_) => {

@@ -152,6 +152,7 @@ fn start(events: Vec<Event>) -> Running {
         harness: None,
         discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
+        volee_bin: None,
     };
     let task = tokio::spawn(Daemon::serve(listener, config));
     Running {

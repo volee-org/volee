@@ -1,10 +1,8 @@
 //! `volee mission new | ls | show | abort | close`.
 
 use std::fmt::Write as _;
-use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use volee_config::Config;
 use volee_core::message::Party;
 use volee_core::mission::{Mission, MissionKind, MissionStatus};
 use volee_core::role::Role;
@@ -18,7 +16,7 @@ use volee_proto::methods::{
 };
 use volee_proto::rpc;
 
-use crate::connect::{connect_or_start, paths};
+use crate::connect::connect_or_start;
 use crate::{resolve, table};
 
 /// What `volee mission new` asks for.
@@ -32,12 +30,12 @@ pub(crate) struct NewMission {
 
 /// Creates a mission.
 pub(crate) async fn new(request: NewMission) -> Result<()> {
-    let config = load_config()?;
+    let config = resolve::load_config()?;
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
     let repos = request
         .repos
         .iter()
-        .map(|repo| repository(&config, &cwd, repo))
+        .map(|repo| resolve::repository(&config, &cwd, repo))
         .collect::<Result<Vec<_>>>()?;
     let client = connect_or_start().await?;
     let created = client
@@ -51,10 +49,21 @@ pub(crate) async fn new(request: NewMission) -> Result<()> {
         .await?;
     let short = created.mission.short();
     println!(
-        "Created mission {short} \"{}\" ({}). Follow it with `volee mission show {short}`.",
+        "Created mission {short} \"{}\" ({}).",
         request.title.trim(),
         request.kind.label()
     );
+    match created.coordinator {
+        Some(coordinator) => println!(
+            "Its coordinator ({}) is planning; it launches the workers. Follow it with `volee \
+             mission show {short}`.",
+            coordinator.short()
+        ),
+        None => println!(
+            "No coordinator could start: `volee mission show {short}` says why. The mission stays \
+             in planning."
+        ),
+    }
     Ok(())
 }
 
@@ -150,38 +159,6 @@ async fn registry(client: &Client) -> Result<Registry> {
     let batch = client.call::<EventsSince>(SinceParams::default()).await?;
     let events: Vec<Event> = batch.events.into_iter().map(|e| e.event).collect();
     Registry::from_events(&events).context("the daemon sent events that do not fit together")
-}
-
-fn load_config() -> Result<Config> {
-    let file = paths()?.config_file();
-    let home = std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default();
-    Ok(Config::load(&file, &home)?)
-}
-
-/// A repository as the daemon understands it: a name from the
-/// configuration, or the absolute path of a directory.
-fn repository(config: &Config, cwd: &Path, input: &str) -> Result<String> {
-    if config.repos.contains_key(input) {
-        return Ok(input.to_owned());
-    }
-    let path = cwd.join(input);
-    if !path.is_dir() {
-        bail!(
-            "unknown repository `{input}`: it is not a [repos.<name>] of the configuration (see \
-             `volee config check`) nor a directory"
-        );
-    }
-    let path = path
-        .canonicalize()
-        .with_context(|| format!("cannot resolve {}", path.display()))?;
-    if let Some((name, _)) = config.repo_at(&path) {
-        return Ok(name.to_owned());
-    }
-    path.into_os_string()
-        .into_string()
-        .map_err(|path| anyhow::anyhow!("{} is not valid UTF-8", Path::new(&path).display()))
 }
 
 /// The text of `volee mission show`.

@@ -25,6 +25,7 @@ pub(crate) async fn run() -> Result<()> {
         .with_context(|| format!("cannot create {}", paths.state_dir.display()))?;
     let log = SqliteLog::open(&paths.database())
         .with_context(|| format!("cannot open {}", paths.database().display()))?;
+    let volee_bin = std::env::current_exe().ok();
     let (harness, status) = detect_claude_code().await;
     if harness.is_some() {
         tracing::info!(version = ?status.version, "using Claude Code");
@@ -48,6 +49,7 @@ pub(crate) async fn run() -> Result<()> {
         harness,
         discovery_interval: DEFAULT_DISCOVERY_INTERVAL,
         evidence,
+        volee_bin,
     };
     Daemon::run(config)
         .await

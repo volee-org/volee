@@ -14,10 +14,6 @@
 # an hour anyway; volee then resumes them when a message arrives).
 wake_timeout = 3600
 
-[worktrees]
-# Where volee creates the worktrees of the agents it launches.
-# root = "~/.local/share/volee/worktrees"
-
 # One table per repository volee may launch agents in. The key is the name you
 # use on the command line and the name agents see.
 #
