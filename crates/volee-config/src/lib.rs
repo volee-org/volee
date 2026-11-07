@@ -52,8 +52,28 @@ pub struct Config {
     pub agents: AgentDefaults,
     /// Repositories volee may launch agents in, by name.
     pub repos: BTreeMap<String, Repo>,
+    /// Messaging settings.
+    pub messages: Messages,
     /// Interface settings.
     pub tui: Tui,
+}
+
+/// Messaging settings.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Messages {
+    /// Whether volee may summarize threads with a model. Off unless the
+    /// person turns it on: each summary runs the harness with their account.
+    pub summaries: bool,
+    /// The model for summaries; `haiku` when unset.
+    pub summary_model: Option<String>,
+}
+
+impl Messages {
+    /// The model summaries use.
+    pub fn summary_model(&self) -> &str {
+        self.summary_model.as_deref().unwrap_or("haiku")
+    }
 }
 
 /// Defaults for the agents volee launches.
