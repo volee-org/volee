@@ -62,17 +62,21 @@ pub(crate) async fn run() -> Result<()> {
 }
 
 /// The terminal multiplexers whose panes agents are looked for in
-/// (ADR 0015): tuios and tmux, when they are installed. None is required.
+/// (ADR 0015): tmux and tuios, when they are installed. None is required.
+///
+/// tmux comes first: a session in tmux inside a tuios pane runs in tmux's
+/// pane, even when tuios's hooks, through the variables it inherited, place
+/// it in the tuios pane; the first multiplexer that finds a session keeps it.
 fn multiplexers() -> Vec<Arc<dyn Multiplexer>> {
     let path = std::env::var("PATH").ok();
     let mut found: Vec<Arc<dyn Multiplexer>> = Vec::new();
-    if crate::tools::on_path("tuios", path.as_deref()) {
-        tracing::info!("looking for agents in tuios panes");
-        found.push(Arc::new(Tuios::new()));
-    }
     if crate::tools::on_path("tmux", path.as_deref()) {
         tracing::info!("looking for agents in tmux panes");
         found.push(Arc::new(Tmux::new()));
+    }
+    if crate::tools::on_path("tuios", path.as_deref()) {
+        tracing::info!("looking for agents in tuios panes");
+        found.push(Arc::new(Tuios::new()));
     }
     found
 }

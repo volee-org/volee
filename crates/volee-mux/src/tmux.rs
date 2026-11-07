@@ -9,9 +9,11 @@
 //!   or one of its ancestors, which `ps` gives.
 //! - **Capture**: `capture-pane -p -e`: the pane's rows with their colors.
 //! - **Focus**: `select-window` and `select-pane` make the pane current in
-//!   its session, which works with no client attached; then `switch-client`,
-//!   run from a tmux client, shows it there. With no client, tmux says "no
-//!   current client".
+//!   its session, which works with no client attached; then `switch-client`
+//!   shows it in the client volee runs in. That step runs only from a client
+//!   of the same server: run from anywhere else, tmux would switch a client
+//!   it picks itself, perhaps in another terminal. A shell compares the
+//!   server's socket, which `list-panes` reports, with the one `TMUX` names.
 //!
 //! Only reads and focus: nothing is typed into a pane, and no pane is
 //! created, closed or moved.
@@ -35,6 +37,11 @@ const TIMEOUT: Duration = Duration::from_secs(3);
 /// The program, looked up on the `PATH`.
 const PROGRAM: &str = "tmux";
 
+/// Runs the command in its arguments only from a client of the tmux server
+/// whose socket is its first argument: `TMUX` starts with that socket.
+const ONLY_FROM_THIS_SERVER: &str = "socket=$1; shift; case \"$TMUX\" in \"$socket\",*) exec \"$@\" ;; esac; \
+     echo \"this terminal is not a client of the tmux server that runs the pane\" >&2; exit 1";
+
 /// tmux, run by a [`CommandRunner`].
 ///
 /// ```no_run
@@ -49,6 +56,8 @@ pub struct Tmux<R = SystemRunner> {
     program: PathBuf,
     /// The server's socket; `None` for the default server.
     socket: Option<PathBuf>,
+    /// The server's socket as tmux reports it, once `list-panes` answered.
+    reported_socket: Mutex<Option<String>>,
     /// Sessions found outside every pane, with the process they ran then:
     /// a process never moves into a pane, so they are not asked about again.
     outside: Mutex<HashSet<(SessionKey, u32)>>,
@@ -85,6 +94,7 @@ impl<R: CommandRunner> Tmux<R> {
             runner,
             program: PathBuf::from(PROGRAM),
             socket: None,
+            reported_socket: Mutex::default(),
             outside: Mutex::default(),
         }
     }
@@ -142,24 +152,43 @@ impl<R: CommandRunner> Tmux<R> {
         }
     }
 
-    /// Every pane's process, with the pane's address.
+    /// Every pane's process, with the pane's address. Also learns the
+    /// server's socket, for the focus steps.
     fn panes(&self) -> Result<HashMap<u32, String>, MuxError> {
         let listed = self.run(&[
             "list-panes",
             "-a",
             "-F",
-            "#{pane_pid}\t#{pane_id}\t#{session_name}",
+            "#{pane_pid}\t#{pane_id}\t#{socket_path}\t#{session_name}",
         ])?;
-        Ok(listed
+        let mut socket = None;
+        let panes = listed
             .lines()
             .filter_map(|line| {
-                let mut fields = line.splitn(3, '\t');
+                let mut fields = line.splitn(4, '\t');
                 let pid = fields.next()?.parse().ok()?;
                 let pane = fields.next()?;
+                socket = Some(fields.next()?.to_owned()).filter(|path| !path.is_empty());
                 let session = fields.next()?;
                 Some((pid, target(session, pane)))
             })
-            .collect())
+            .collect();
+        if let Some(socket) = socket {
+            *self
+                .reported_socket
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(socket);
+        }
+        Ok(panes)
+    }
+
+    /// The server's socket: as tmux reported it, else as `TMUX` named it.
+    fn known_socket(&self) -> Option<String> {
+        self.reported_socket
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .or_else(|| self.socket.as_ref().map(|path| path.display().to_string()))
     }
 
     /// Every process's parent.
@@ -247,10 +276,18 @@ impl<R: CommandRunner> Multiplexer for Tmux<R> {
 
     fn focus_steps(&self, target: &str) -> Result<Vec<Vec<String>>, MuxError> {
         let (_, pane) = split_target(target)?;
+        // An unknown socket matches no `TMUX`: the switch is then left out,
+        // and the person is told how to attach.
+        let socket = self.known_socket().unwrap_or_default();
+        let mut switch: Vec<String> = ["sh", "-c", ONLY_FROM_THIS_SERVER, "sh", &socket]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        switch.extend(self.command(&["switch-client", "-t", pane]));
         Ok(vec![
             self.command(&["select-window", "-t", pane]),
             self.command(&["select-pane", "-t", pane]),
-            self.command(&["switch-client", "-t", pane]),
+            switch,
         ])
     }
 
@@ -262,7 +299,9 @@ impl<R: CommandRunner> Multiplexer for Tmux<R> {
         if let Some(socket) = &self.socket {
             command.extend(["-S".to_owned(), socket.display().to_string()]);
         }
-        command.extend(["attach".to_owned(), "-t".to_owned(), session.to_owned()]);
+        // `=` asks for this exact session, not the first whose name starts
+        // the same.
+        command.extend(["attach".to_owned(), "-t".to_owned(), format!("={session}")]);
         Some(command)
     }
 }
@@ -327,7 +366,8 @@ mod tests {
 
     /// `list-panes -a` as tmux 3.8 prints it: the shell of a pane in "my
     /// work", and a pane that runs a program of its own.
-    const PANES: &str = "48809\t%0\tmy work\n48812\t%1\tmy work\n";
+    const PANES: &str = "48809\t%0\t/private/tmp/tmux-501/default\tmy work\n\
+                         48812\t%1\t/private/tmp/tmux-501/default\tmy work\n";
 
     /// `ps`: the session's process (950) runs under the shell of pane %0.
     const PS: &str = "48809 1\n900 48809\n950 900\n980 1\n";
@@ -358,7 +398,7 @@ mod tests {
                 "list-panes",
                 "-a",
                 "-F",
-                "#{pane_pid}\t#{pane_id}\t#{session_name}"
+                "#{pane_pid}\t#{pane_id}\t#{socket_path}\t#{session_name}"
             ]
         );
         assert_eq!(calls[1], ["ps", "-axo", "pid=,ppid="]);
@@ -431,35 +471,85 @@ mod tests {
     }
 
     #[test]
-    fn focus_makes_the_pane_current_then_switches_the_client() {
-        let tmux = Tmux::with_runner(FakeRunner::new());
+    fn focus_makes_the_pane_current_then_switches_a_client_of_this_server() {
+        let tmux = Tmux::with_runner(FakeRunner::new().with_reply(Ok(Output::success(PANES))));
+        // Before any `list-panes`, the server's socket is unknown: the
+        // switch runs nowhere.
+        let unknown = tmux.focus_steps("my work:%1").unwrap();
+        assert_eq!(unknown[2][4], "");
+        tmux.panes().unwrap();
+        let steps = tmux.focus_steps("my work:%1").unwrap();
         assert_eq!(
-            tmux.focus_steps("my work:%1").unwrap(),
+            steps[..2],
             [
                 vec!["tmux", "-L", "default", "select-window", "-t", "%1"],
                 vec!["tmux", "-L", "default", "select-pane", "-t", "%1"],
-                vec!["tmux", "-L", "default", "switch-client", "-t", "%1"],
             ]
         );
-        assert!(tmux.runner.calls().is_empty(), "the client runs the steps");
+        assert_eq!(
+            steps[2],
+            [
+                "sh",
+                "-c",
+                ONLY_FROM_THIS_SERVER,
+                "sh",
+                "/private/tmp/tmux-501/default",
+                "tmux",
+                "-L",
+                "default",
+                "switch-client",
+                "-t",
+                "%1"
+            ]
+        );
+        assert_eq!(tmux.runner.calls().len(), 1, "the client runs the steps");
         assert_eq!(
             tmux.attach_command("my work:%1"),
             Some(vec![
                 "tmux".into(),
                 "attach".into(),
                 "-t".into(),
-                "my work".into()
+                "=my work".into()
             ])
         );
+    }
+
+    #[test]
+    fn the_switch_runs_only_in_a_client_of_the_same_server() {
+        let run = |tmux_env: Option<&str>| {
+            let mut command = std::process::Command::new("sh");
+            command
+                .args(["-c", ONLY_FROM_THIS_SERVER, "sh", "/tmp/tmux-501/de fault"])
+                .args(["echo", "switched"]);
+            match tmux_env {
+                Some(value) => command.env("TMUX", value),
+                None => command.env_remove("TMUX"),
+            };
+            command.output().unwrap()
+        };
+        let inside = run(Some("/tmp/tmux-501/de fault,4242,0"));
+        assert!(inside.status.success());
+        assert_eq!(String::from_utf8_lossy(&inside.stdout), "switched\n");
+        for elsewhere in [None, Some("/tmp/tmux-501/work,4242,0"), Some("")] {
+            let output = run(elsewhere);
+            assert!(!output.status.success(), "{elsewhere:?}");
+            assert!(output.stdout.is_empty(), "{elsewhere:?}");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stderr),
+                "this terminal is not a client of the tmux server that runs the pane\n"
+            );
+        }
     }
 
     #[test]
     fn the_server_of_the_environment_is_named_everywhere() {
         let socket = PathBuf::from("/tmp/tmux-501/work");
         let tmux = Tmux::with_runner(FakeRunner::new()).on_socket(Some(socket));
+        let switch = &tmux.focus_steps("w:%1").unwrap()[2];
         assert_eq!(
-            tmux.focus_steps("w:%1").unwrap()[2],
+            switch[4..],
             [
+                "/tmp/tmux-501/work",
                 "tmux",
                 "-S",
                 "/tmp/tmux-501/work",
@@ -470,7 +560,7 @@ mod tests {
         );
         assert_eq!(
             tmux.attach_command("w:%1").unwrap(),
-            ["tmux", "-S", "/tmp/tmux-501/work", "attach", "-t", "w"]
+            ["tmux", "-S", "/tmp/tmux-501/work", "attach", "-t", "=w"]
         );
         assert_eq!(
             socket_of("/tmp/tmux-501/default,48809,0"),

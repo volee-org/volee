@@ -38,6 +38,8 @@ const SESSION: &str = "e41ffe96-d588-4d61-b6a0-b75bdcebe52c";
 /// A multiplexer whose panes the test sets.
 #[derive(Debug, Default)]
 struct FakeMux {
+    /// Its name; `tuios` when empty.
+    name: &'static str,
     /// The sessions in its panes, and their addresses.
     panes: Mutex<Vec<(SessionKey, String)>>,
     /// Why it cannot answer, when it cannot.
@@ -47,6 +49,13 @@ struct FakeMux {
 }
 
 impl FakeMux {
+    fn named(name: &'static str) -> Self {
+        Self {
+            name,
+            ..Self::default()
+        }
+    }
+
     fn put(&self, key: &str, target: &str) {
         *self.panes.lock().unwrap() = vec![(SessionKey::claude(key), target.to_owned())];
     }
@@ -62,12 +71,16 @@ impl FakeMux {
 
 impl Multiplexer for FakeMux {
     fn name(&self) -> &'static str {
-        "tuios"
+        if self.name.is_empty() {
+            "tuios"
+        } else {
+            self.name
+        }
     }
 
     fn status(&self) -> MultiplexerStatus {
         MultiplexerStatus {
-            name: "tuios".into(),
+            name: self.name().into(),
             available: true,
             version: Some("0.12.1".into()),
             detail: None,
@@ -125,12 +138,23 @@ fn start() -> Running {
 
 /// A daemon whose log holds `history`, with the fake multiplexer or none.
 fn start_with(history: Vec<Event>, uses_mux: bool) -> Running {
+    let mux = Arc::new(FakeMux::default());
+    let muxes = if uses_mux {
+        vec![Arc::clone(&mux)]
+    } else {
+        Vec::new()
+    };
+    start_muxes(history, mux, muxes)
+}
+
+/// A daemon whose log holds `history` and which uses `muxes`, in order;
+/// `mux` is the one the test looks at.
+fn start_muxes(history: Vec<Event>, mux: Arc<FakeMux>, muxes: Vec<Arc<FakeMux>>) -> Running {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::rooted(dir.path());
     let socket = paths.socket.clone();
     let listener = UnixListener::bind(&socket).unwrap();
     let harness = Arc::new(FakeHarness::default());
-    let mux = Arc::new(FakeMux::default());
     let config = Config {
         paths,
         log: Box::new(MemoryLog::with(history)),
@@ -143,11 +167,10 @@ fn start_with(history: Vec<Event>, uses_mux: bool) -> Running {
         idle_discovery_interval: Duration::from_millis(10),
         evidence: EvidenceSources::default(),
         volee_bin: None,
-        multiplexers: if uses_mux {
-            vec![Arc::clone(&mux) as Arc<dyn Multiplexer>]
-        } else {
-            Vec::new()
-        },
+        multiplexers: muxes
+            .into_iter()
+            .map(|mux| mux as Arc<dyn Multiplexer>)
+            .collect(),
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -321,4 +344,57 @@ async fn a_pane_of_a_multiplexer_no_longer_used_is_forgotten() {
     let daemon = start_with(history, false);
     daemon.harness.set(vec![interactive(SESSION)]);
     located(&daemon.socket, &Location::Terminal).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_first_multiplexer_that_finds_a_session_keeps_it() {
+    // A session in tmux, inside a tuios pane whose variables it inherited:
+    // both multiplexers find it.
+    let tmux = Arc::new(FakeMux::named("tmux"));
+    let tuios = Arc::new(FakeMux::named("tuios"));
+    tmux.put(SESSION, "work:%1");
+    tuios.put(SESSION, "work:c434b5b6");
+    let daemon = start_muxes(
+        Vec::new(),
+        Arc::clone(&tmux),
+        vec![Arc::clone(&tmux), Arc::clone(&tuios)],
+    );
+    daemon.harness.set(vec![interactive(SESSION)]);
+    let in_tmux = Location::Pane {
+        multiplexer: "tmux".into(),
+        target: "work:%1".into(),
+    };
+    located(&daemon.socket, &in_tmux).await;
+    // Let a few more rounds pass: the agent stays, moved once.
+    for _ in 0..1_000 {
+        if tmux.asked.lock().unwrap().len() >= 6 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let registry = located(&daemon.socket, &in_tmux).await;
+    assert!(
+        registry
+            .agent_for_session(&SessionKey::claude(SESSION))
+            .is_some()
+    );
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let moves = client
+        .call::<EventsSince>(SinceParams::default())
+        .await
+        .unwrap()
+        .events
+        .into_iter()
+        .filter(|event| matches!(event.event.kind, EventKind::LocationChanged { .. }))
+        .count();
+    assert_eq!(moves, 1);
+    // tuios was never offered the session tmux had found.
+    let offered = tuios
+        .asked
+        .lock()
+        .unwrap()
+        .iter()
+        .flatten()
+        .any(|session| session.key == SessionKey::claude(SESSION));
+    assert!(!offered);
 }

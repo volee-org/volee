@@ -408,8 +408,10 @@ pane is found the same way, when tmux is installed and its server runs: volee
 follows the session's process to the pane that runs it. The Detail panel
 says `tmux · work`, the preview is the pane's screen, and `a` makes the pane
 current in its window and session, then switches your tmux client to it when
-volee runs inside tmux. With no client attached, volee says how to see it:
-`tmux attach -t <session>`.
+volee runs in a client of that same tmux server. From anywhere else (outside
+tmux, or in a client of another server), volee switches no client, not even
+one open in another terminal: it says how to see the pane instead,
+`tmux attach -t =<session>` (the `=` asks for that exact session).
 
 The daemon uses the default tmux server, or the one `TMUX` names when you
 run `volee daemon run` yourself inside tmux, and every command it runs or
