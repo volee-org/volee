@@ -151,6 +151,11 @@ What the adapter knows, and how it knows it:
   conversation in its worktree, as a fork with a new id. volee resumes agents
   this way to deliver messages (ADR 0006). Once two sessions record the same
   worktree, `claude rm` refuses to delete it and offers no way to force it.
+  The resumed session starts its MCP servers again, but the conversation it
+  continues may say that the volee server disconnected (it stopped with the
+  old session). A resumed model took that for the current state and wrote
+  that it could not answer, with its tools connected, so volee's resume
+  prompt starts by saying that the tools work in the new session.
 - **Unknown sessions** (measured). `claude stop` and `claude logs` answer
   `No job matching '<id>'. Run 'claude agents' to list running sessions.`,
   `claude rm` answers `No job matching '<id>'`, all with exit status 1.
