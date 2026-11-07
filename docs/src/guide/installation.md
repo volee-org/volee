@@ -49,6 +49,19 @@ The Linux binaries need glibc 2.35 or later (Ubuntu 22.04, Debian 12,
 Fedora 36 or newer). On other Linux systems, such as Alpine, install from
 source.
 
+## Shell completions
+
+`volee completions <shell>` prints a completion script for bash, elvish, fish,
+PowerShell or zsh. Put it where your shell looks for completions:
+
+```sh
+volee completions fish > ~/.config/fish/completions/volee.fish
+volee completions zsh > "${fpath[1]}/_volee"      # or any directory on your fpath
+volee completions bash > ~/.local/share/bash-completion/completions/volee
+```
+
+Run it again after an upgrade, so new commands complete too.
+
 ## From source
 
 Install with Cargo (Rust 1.89 or later):

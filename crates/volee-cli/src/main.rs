@@ -135,6 +135,12 @@ enum Command {
         #[arg(long, requires = "join", conflicts_with = "agent")]
         mission: Option<String>,
     },
+    /// Print the completion script of a shell (bash, elvish, fish,
+    /// powershell or zsh); the installation guide says where to put it.
+    Completions {
+        /// The shell.
+        shell: clap_complete::Shell,
+    },
     /// Open the interface on a simulated team of agents, to try volee.
     Demo {
         /// The theme, instead of the one in the configuration: a built-in
@@ -365,6 +371,11 @@ fn async_main(command: Command) -> ExitCode {
                 (None, Some(name)) => cmd::mcp::join(&name, &harness, mission.as_deref()).await,
                 (None, None) => unreachable!("clap requires --agent or --join"),
             },
+            Command::Completions { shell } => match completions(shell, &mut std::io::stdout()) {
+                // The reader stopped early (`| head`): nothing to report.
+                Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+                result => result.map_err(Into::into),
+            },
             Command::Demo { theme } => cmd::demo::run(theme.as_deref()).await,
             Command::Hook { .. } | Command::Config(_) => {
                 unreachable!("these commands run without the async runtime")
@@ -413,6 +424,16 @@ fn report(result: anyhow::Result<()>) -> ExitCode {
     }
 }
 
+/// Writes the completion script of `shell` for every command and option.
+/// It is built in memory first: `clap_complete` panics on a failed write,
+/// such as a pipe closed by `head`.
+fn completions(shell: clap_complete::Shell, out: &mut dyn std::io::Write) -> std::io::Result<()> {
+    let mut command = <Cli as clap::CommandFactory>::command();
+    let mut script = Vec::new();
+    clap_complete::generate(shell, &mut command, "volee", &mut script);
+    out.write_all(&script)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Cli, Command};
@@ -421,6 +442,23 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn completions_cover_the_commands() {
+        let cli = Cli::try_parse_from(["volee", "completions", "fish"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Completions {
+                shell: clap_complete::Shell::Fish
+            })
+        ));
+        let mut script = Vec::new();
+        super::completions(clap_complete::Shell::Fish, &mut script).unwrap();
+        let script = String::from_utf8(script).unwrap();
+        for command in ["spawn", "mission", "forget", "completions"] {
+            assert!(script.contains(command), "{command}");
+        }
     }
 
     #[test]
