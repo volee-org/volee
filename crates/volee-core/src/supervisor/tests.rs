@@ -236,7 +236,10 @@ fn when_every_worker_delivered_the_coordinator_is_asked_for_the_report() {
 }
 
 #[test]
-fn a_regression_moves_the_mission_back_to_running() {
+fn a_delivered_worker_working_again_keeps_the_mission_reporting() {
+    // Seen in a real mission: a worker that delivered was woken to answer
+    // its coordinator, and the mission bounced back to running, then asked
+    // for the final report a second time.
     let mut world = World::new(MissionKind::Change);
     world.register(1, Role::Worker, "billing");
     world.set_delivery(1, shipped());
@@ -244,8 +247,33 @@ fn a_regression_moves_the_mission_back_to_running() {
     world.step();
     assert_eq!(world.status(), MissionStatus::Reporting);
     world.set_state(1, AgentState::Working);
+    assert_eq!(world.step(), Decision::default());
+    assert_eq!(world.status(), MissionStatus::Reporting);
+    world.set_state(1, AgentState::Idle);
+    assert_eq!(world.step(), Decision::default(), "no second request");
+}
+
+#[test]
+fn a_regression_moves_the_mission_back_to_running() {
+    let mut world = World::new(MissionKind::Change);
+    world.register(1, Role::Worker, "billing");
+    world.set_delivery(1, shipped());
+    world.set_state(1, AgentState::Idle);
+    world.step();
+    assert_eq!(world.status(), MissionStatus::Reporting);
+    // It works again and stops with changes it did not commit.
+    world.set_state(1, AgentState::Working);
+    world.step();
+    let mut dirty = shipped();
+    dirty.dirty = true;
+    world.set_delivery(1, dirty);
+    world.set_state(1, AgentState::Idle);
     world.step();
     assert_eq!(world.status(), MissionStatus::Running);
+    assert_eq!(
+        world.assessments()[&agent(1)].verdict,
+        Verdict::NotDelivered
+    );
 }
 
 #[test]

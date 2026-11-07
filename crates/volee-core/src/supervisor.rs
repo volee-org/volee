@@ -76,7 +76,15 @@ pub fn supervise(registry: &Registry, mission: MissionId) -> Decision {
     let mut all_delivered = !workers.is_empty();
     for worker in &workers {
         let current = verdict_for(registry, record.kind, worker);
-        let delivered = matches!(current, Some((Verdict::Delivered, _)));
+        let delivered = match &current {
+            Some((verdict, _)) => *verdict == Verdict::Delivered,
+            // Working again after delivering (to answer a question, say):
+            // the delivery stands until a new verdict says otherwise.
+            None => record
+                .assessments
+                .get(&worker.id)
+                .is_some_and(|assessment| assessment.verdict == Verdict::Delivered),
+        };
         all_delivered &= delivered;
         let Some((verdict, evidence)) = current else {
             continue;
