@@ -114,8 +114,10 @@ daemon without a git source) is judged as it is.
 
 Every new or changed verdict is recorded as `worker-assessed` and told to the
 coordinator. When every worker delivered, the mission moves to `reporting`
-and the coordinator and the human are asked for the final report. A worker
-that regresses moves the mission back to `running`.
+and the coordinator and the human are asked for the final report, once. A
+delivered worker that works again (to answer its coordinator, say) keeps its
+delivery until a new verdict says otherwise; a new verdict that is not
+`delivered` moves the mission back to `running`.
 
 In the daemon (`volee-daemon`, module `missions`), supervision follows every
 commit: the daemon finds the missions the new events concern (an agent of
