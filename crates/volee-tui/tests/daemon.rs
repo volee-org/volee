@@ -212,20 +212,18 @@ async fn the_person_reads_and_a_daemon_without_claude_code_says_what_it_cannot_d
             .await,
         Err(SourceError::Failed(no_claude.to_owned()))
     );
-    // A mission is created even without Claude Code; its coordinator waits.
-    let created = source
-        .create_mission(MissionRequest {
-            title: "Invoice export".to_owned(),
-            kind: MissionKind::Change,
-            repos: vec!["billing".to_owned()],
-            goal: "Export invoices as CSV.".to_owned(),
-        })
-        .await
-        .unwrap();
-    assert_eq!(created.coordinator, None);
-    while registry.mission(created.mission).is_none() {
-        registry.apply(&next(&mut updates).await.unwrap()).unwrap();
-    }
+    // Without Claude Code, a mission is refused before anything is recorded.
+    assert!(matches!(
+        source
+            .create_mission(MissionRequest {
+                title: "Invoice export".to_owned(),
+                kind: MissionKind::Change,
+                repos: vec!["billing".to_owned()],
+                goal: "Export invoices as CSV.".to_owned(),
+            })
+            .await,
+        Err(SourceError::Failed(message)) if message.contains("needs Claude Code")
+    ));
 }
 
 #[tokio::test]
