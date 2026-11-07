@@ -28,8 +28,8 @@ use volee_harness::Harness;
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     AbortMission, AbortParams, AgentParams, CloseMission, CloseParams, CreateMission,
-    CreateMissionParams, EventsSince, HookIngest, HookParams, SendMessage, SendParams, SinceParams,
-    Stop,
+    CreateMissionParams, EventsSince, Forget, HookIngest, HookParams, SendMessage, SendParams,
+    SinceParams, Stop,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
@@ -588,6 +588,25 @@ async fn stopping_a_worker_tells_the_coordinator_once() {
         registry_now.agent(agent(API)).unwrap().hold,
         Some(Hold::StoppedByHuman { .. })
     ));
+}
+
+#[tokio::test]
+async fn an_agent_of_an_open_mission_is_not_forgotten() {
+    let mut events = mission_with_workers();
+    events.push(at(EventKind::StateChanged {
+        agent: agent(API),
+        state: AgentState::Stopped,
+        detail: None,
+    }));
+    let daemon = start(events);
+    let client = connect(&daemon).await;
+    let error = client
+        .call::<Forget>(AgentParams { agent: agent(API) })
+        .await
+        .unwrap_err();
+    let error = rpc_error(error);
+    assert_eq!(error.code, rpc::REFUSED);
+    assert!(error.message.contains("open mission"), "{}", error.message);
 }
 
 #[tokio::test]

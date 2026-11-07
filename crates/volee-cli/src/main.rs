@@ -84,6 +84,12 @@ enum Command {
         /// The agent: its name, short id or id.
         agent: String,
     },
+    /// Stop listing an agent that no longer runs; its sessions, worktree and
+    /// branch stay as they are.
+    Forget {
+        /// The agent: its name, short id or id.
+        agent: String,
+    },
     /// Remove the worktree of an agent whose work landed; its branch is kept.
     Tidy {
         /// The agent: its name, short id or id.
@@ -306,6 +312,7 @@ fn async_main(command: Command) -> ExitCode {
             Command::Logs { agent } => cmd::agent::logs(&agent).await,
             Command::Diff { agent, full } => cmd::agent::diff(&agent, full).await,
             Command::Stop { agent } => cmd::agent::stop(&agent).await,
+            Command::Forget { agent } => cmd::agent::forget(&agent).await,
             Command::Tidy {
                 agent,
                 all,

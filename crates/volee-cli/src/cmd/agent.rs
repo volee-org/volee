@@ -6,7 +6,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use volee_core::AgentId;
 use volee_proto::client::Client;
-use volee_proto::methods::{AgentParams, Attach, Diff, DiffParams, Preview, Stop};
+use volee_proto::methods::{AgentParams, Attach, Diff, DiffParams, Forget, Preview, Stop};
 
 use crate::connect::connect_or_start;
 use crate::{resolve, text};
@@ -84,6 +84,18 @@ pub(crate) async fn diff(input: &str, full: bool) -> Result<()> {
     if diff.truncated {
         eprintln!("volee: the diff of {name} is longer than this; see the rest in its worktree.");
     }
+    Ok(())
+}
+
+/// Stops listing an agent that no longer runs.
+pub(crate) async fn forget(input: &str) -> Result<()> {
+    let client = connect_or_start().await?;
+    let (agent, name) = agent(&client, input).await?;
+    client.call::<Forget>(AgentParams { agent }).await?;
+    println!(
+        "Forgot {name}: volee no longer lists it. Nothing else changed: its sessions, worktree \
+         and branch stay as they are."
+    );
     Ok(())
 }
 

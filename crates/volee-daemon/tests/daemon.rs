@@ -340,6 +340,15 @@ async fn a_wait_times_out_without_a_message() {
 async fn forgetting_an_unknown_agent_is_not_found() {
     let daemon = start();
     let client = connect(&daemon.socket).await;
+    // Its session ended: nothing runs any more.
+    client
+        .call::<HookIngest>(HookParams {
+            agent: agent(3),
+            event: "session-end".into(),
+            payload: serde_json::json!({ "hook_event_name": "SessionEnd", "reason": "other" }),
+        })
+        .await
+        .unwrap();
     client
         .call::<Forget>(AgentParams { agent: agent(3) })
         .await
@@ -352,6 +361,21 @@ async fn forgetting_an_unknown_agent_is_not_found() {
         panic!("expected an RPC error, got {error:?}");
     };
     assert_eq!(error.code, rpc::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_running_agent_volee_launched_is_not_forgotten() {
+    let daemon = start();
+    let client = connect(&daemon.socket).await;
+    let error = client
+        .call::<Forget>(AgentParams { agent: agent(1) })
+        .await
+        .unwrap_err();
+    let ClientError::Rpc(error) = error else {
+        panic!("expected an RPC error, got {error:?}");
+    };
+    assert_eq!(error.code, rpc::REFUSED);
+    assert!(error.message.contains("stop it first"), "{}", error.message);
 }
 
 #[tokio::test]
