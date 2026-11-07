@@ -48,8 +48,8 @@ give us a reasonable amount of time to ship a fix before you disclose publicly.
 - The daemon listens on a Unix socket that only the current user can read and
   write.
 - volee never edits your Claude Code settings.
-- volee launches agents with explicit permission modes. It never uses bypass
-  mode by default.
+- volee launches every agent with an explicit permission mode: `manual`
+  unless you configure another, and never `bypassPermissions`.
 - volee never deletes branches.
 - Cleanup of worktrees and branches requires evidence that the work was
   delivered.

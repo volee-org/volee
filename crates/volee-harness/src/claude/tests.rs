@@ -37,7 +37,7 @@ fn spec() -> SpawnSpec {
         prompt: "Fix the flaky test".into(),
         settings_file: "/state/agents/ag_1/settings.json".into(),
         mcp_config_file: "/state/agents/ag_1/mcp.json".into(),
-        permission_mode: None,
+        permission_mode: PermissionMode::Manual,
         allowed_tools: vec![],
         disallowed_tools: vec![],
         append_system_prompt: None,
@@ -213,7 +213,7 @@ fn spawn_passes_every_value_inside_its_option() {
     let spec = SpawnSpec {
         model: Some("opus".into()),
         prompt: "Fix the flaky test.\nThen report.".into(),
-        permission_mode: Some(PermissionMode::AcceptEdits),
+        permission_mode: PermissionMode::AcceptEdits,
         allowed_tools: vec!["Bash(cargo test *)".into(), "Edit".into()],
         disallowed_tools: vec!["WebFetch".into()],
         append_system_prompt: Some("-You are a volee worker.".into()),
@@ -253,14 +253,16 @@ fn spawn_passes_every_value_inside_its_option() {
 }
 
 #[test]
-fn spawn_passes_no_permission_mode_unless_configured() {
+fn spawn_passes_the_manual_mode_unless_configured() {
     let claude = claude(vec![Ok(backgrounded("7d3c1f0a"))]);
     claude.spawn(&spec()).unwrap();
     let args = only_call(&claude).args_lossy();
     assert!(
-        !args
-            .iter()
-            .any(|arg| arg.starts_with("--permission-mode") || arg.contains("dangerously")),
+        args.iter().any(|arg| arg == "--permission-mode=manual"),
+        "{args:?}"
+    );
+    assert!(
+        !args.iter().any(|arg| arg.contains("dangerously")),
         "{args:?}"
     );
 }
@@ -356,6 +358,7 @@ fn resume_continues_by_session_uuid() {
             "--settings=/state/agents/ag_1/settings.json",
             "--mcp-config=/state/agents/ag_1/mcp.json",
             "--strict-mcp-config",
+            "--permission-mode=manual",
             "--",
             "Fix the flaky test",
         ]

@@ -6,7 +6,8 @@
 # model = "opus"
 
 # Permission mode passed to Claude Code: "acceptEdits", "auto", "manual",
-# "dontAsk" or "plan". Unset: your own Claude Code default applies.
+# "dontAsk" or "plan". Unset: "manual", which asks before every tool that
+# needs permission (never your own Claude Code default).
 # permission_mode = "auto"
 
 # How long, in seconds, an idle agent stays reachable by messages before
