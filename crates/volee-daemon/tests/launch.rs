@@ -204,6 +204,17 @@ async fn a_worker_gets_its_own_worktree_and_session() {
     }
     let settings = std::fs::read_to_string(&spec.settings_file).unwrap();
     assert!(settings.contains(&spawned.agent.to_string()));
+    // The session runs under Claude Code's supervisor: it learns where this
+    // daemon is from its settings and its MCP configuration.
+    let socket = daemon.paths.socket.display().to_string();
+    let settings: serde_json::Value = serde_json::from_str(&settings).unwrap();
+    assert_eq!(settings["env"]["VOLEE_SOCKET"], socket.as_str());
+    let mcp: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&spec.mcp_config_file).unwrap()).unwrap();
+    assert_eq!(
+        mcp["mcpServers"]["volee"]["env"]["VOLEE_SOCKET"],
+        socket.as_str()
+    );
 }
 
 #[tokio::test]

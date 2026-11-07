@@ -24,7 +24,7 @@ use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, MissionId, Registry, ThreadId};
 use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
 use volee_mcp::VoleeMcp;
-use volee_mcp::tools::{ListArgs, OutcomeArg, ReportArgs};
+use volee_mcp::tools::{ListArgs, OutcomeArg, ReportArgs, SpawnArgs};
 use volee_proto::client::Client;
 use volee_proto::methods::{
     EventsSince, HookIngest, HookParams, SendMessage, SendParams, SinceParams,
@@ -302,6 +302,7 @@ async fn a_real_mcp_client_sees_every_tool() {
             "read_messages",
             "report",
             "send_message",
+            "spawn_worker",
             "whoami"
         ]
     );
@@ -425,4 +426,22 @@ async fn the_coordinator_closes_its_mission_after_reporting() {
     assert_eq!(mission.status, MissionStatus::Closed);
     let report = registry.message(mission.report.unwrap()).unwrap();
     assert!(report.body.contains("billing#7"));
+}
+
+#[tokio::test]
+async fn only_a_coordinator_launches_workers() {
+    let fixture = mission_fixture();
+    let worker = server_for(&fixture, agent(11)).await;
+    let refused = worker
+        .spawn_worker(Parameters(SpawnArgs {
+            repo: "billing".into(),
+            branch: "feat/more".into(),
+            task: "Do more.".into(),
+            name: None,
+            base: None,
+        }))
+        .await
+        .unwrap();
+    assert!(failed(&refused));
+    assert!(body(&refused).contains("coordinator"), "{}", body(&refused));
 }
