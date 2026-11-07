@@ -16,6 +16,7 @@ mod handlers;
 mod launch;
 mod log;
 mod missions;
+mod resume;
 mod server;
 mod sqlite;
 mod state;

@@ -147,6 +147,7 @@ impl Daemon {
             ));
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
+        let resumer = crate::resume::spawn(&shared);
         tracing::info!(socket = ?listener.local_addr().ok(), "volee daemon ready");
         let mut connections = JoinSet::new();
         loop {
@@ -163,8 +164,8 @@ impl Daemon {
         }
         tracing::info!("volee daemon stopping");
         connections.abort_all();
-        if let Some(refresher) = refresher {
-            refresher.abort();
+        for task in [refresher, resumer].into_iter().flatten() {
+            task.abort();
         }
         Ok(())
     }
