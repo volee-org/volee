@@ -82,7 +82,7 @@ impl Messages {
 pub struct AgentDefaults {
     /// The model, unless a repository sets one.
     pub model: Option<String>,
-    /// The permission mode passed to the harness.
+    /// The permission mode passed to the harness; `manual` when unset.
     pub permission_mode: Option<PermissionMode>,
     /// How long an idle agent's hook waits for messages, in seconds.
     pub wake_timeout: u64,

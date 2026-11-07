@@ -39,7 +39,7 @@ take-over = "ctrl-a"
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `model` | the harness default | Model for the agents volee launches, unless the repository sets one. |
-| `permission_mode` | the harness default | `acceptEdits`, `auto`, `manual`, `dontAsk` or `plan`, passed to Claude Code. volee never passes `bypassPermissions`. |
+| `permission_mode` | `manual` | `acceptEdits`, `auto`, `manual`, `dontAsk` or `plan`, passed to Claude Code with every launch and resume. `manual` asks before every tool that needs permission: a background agent then waits until you take it over and answer. volee never passes `bypassPermissions`, and never leaves the mode to your own Claude Code default. |
 | `wake_timeout` | `3600` | Seconds an idle agent stays reachable by the wake-up hook. Afterwards, a message resumes the session instead. |
 
 ## Worktrees

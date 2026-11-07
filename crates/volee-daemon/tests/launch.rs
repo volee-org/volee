@@ -22,7 +22,7 @@ use volee_core::time::Timestamp;
 use volee_core::{Event, EventKind, MissionId, Registry, ThreadId};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_git::GitCli;
-use volee_harness::Harness;
+use volee_harness::{Harness, PermissionMode};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     CreateMission, CreateMissionParams, EventsSince, SinceParams, Spawn, SpawnParams,
@@ -77,6 +77,11 @@ fn mission_elsewhere() -> Vec<Event> {
 }
 
 fn start() -> Running {
+    start_with("")
+}
+
+/// A daemon whose configuration starts with `extra`, before the repository.
+fn start_with(extra: &str) -> Running {
     let dir = tempfile::tempdir().unwrap();
     // Canonical, so that paths compare equal to what git reports.
     let root = dir.path().canonicalize().unwrap();
@@ -88,7 +93,7 @@ fn start() -> Running {
     let listener = UnixListener::bind(&socket).unwrap();
     let harness = Arc::new(FakeHarness::default());
     let settings = volee_config::Config::parse(
-        &format!("[repos.alpha]\npath = \"{}\"\n", repo.display()),
+        &format!("{extra}\n[repos.alpha]\npath = \"{}\"\n", repo.display()),
         Path::new("config.toml"),
         Path::new("/home/nobody"),
     )
@@ -218,6 +223,26 @@ async fn a_worker_gets_its_own_worktree_and_session() {
     assert_eq!(
         mcp["mcpServers"]["volee"]["env"]["VOLEE_SOCKET"],
         socket.as_str()
+    );
+}
+
+#[tokio::test]
+async fn agents_launch_in_manual_mode_unless_another_is_configured() {
+    // Never the person's own Claude Code default, which may skip every check.
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    client.call::<Spawn>(worker("feat/invoices")).await.unwrap();
+    assert_eq!(
+        daemon.harness.launches()[0].permission_mode,
+        PermissionMode::Manual
+    );
+
+    let daemon = start_with("[agents]\npermission_mode = \"acceptEdits\"\n");
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    client.call::<Spawn>(worker("feat/invoices")).await.unwrap();
+    assert_eq!(
+        daemon.harness.launches()[0].permission_mode,
+        PermissionMode::AcceptEdits
     );
 }
 

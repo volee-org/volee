@@ -87,9 +87,10 @@ pub struct SpawnSpec {
     /// project's own MCP servers can never stall a background session on an
     /// approval prompt.
     pub mcp_config_file: PathBuf,
-    /// The permission mode, from volee's configuration; `None` keeps the
-    /// user's default.
-    pub permission_mode: Option<PermissionMode>,
+    /// The permission mode, from volee's configuration, `manual` when it says
+    /// nothing. Always passed: the person's own default may skip every check,
+    /// and an agent that nobody watches must not inherit it.
+    pub permission_mode: PermissionMode,
     /// Tool rules allowed without asking, such as `Bash(cargo test *)`. From
     /// volee's configuration only: a rule here runs with nobody asked.
     pub allowed_tools: Vec<String>,
@@ -213,7 +214,7 @@ mod tests {
             prompt: "Fix the flaky test".into(),
             settings_file: "/state/agents/ag_1/settings.json".into(),
             mcp_config_file: "/state/agents/ag_1/mcp.json".into(),
-            permission_mode: None,
+            permission_mode: PermissionMode::Manual,
             allowed_tools: vec![],
             disallowed_tools: vec![],
             append_system_prompt: None,

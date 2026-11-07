@@ -33,7 +33,9 @@ and a rule that allows volee's own MCP tools) and its MCP configuration
 (`--mcp-config` with `--strict-mcp-config`, so the agent loads volee's tools
 and nothing else). The permission mode and tool rules come from volee's
 configuration only, never from an agent's request, and there is no way to
-ask for `bypassPermissions`.
+ask for `bypassPermissions`. Every launch and resume passes
+`--permission-mode`: the configured mode, else `manual`, never the person's
+own default, which may skip every check.
 
 Every value travels inside its option (`--name=alpha`, not `--name alpha`),
 so no value can be read as an option and no list option can swallow the next
