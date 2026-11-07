@@ -56,8 +56,57 @@ pub struct Config {
     pub messages: Messages,
     /// Mission settings.
     pub missions: Missions,
+    /// What the daemon does with git in the background.
+    pub git: GitSettings,
     /// Interface settings.
     pub tui: Tui,
+}
+
+/// What the daemon does with git in the background.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GitSettings {
+    /// Which repositories the daemon fetches.
+    pub fetch: Fetch,
+}
+
+/// Which repositories the daemon fetches in the background (`git fetch
+/// --prune origin`, at most every five minutes), so that push states and
+/// merges reflect the remote.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Fetch {
+    /// The repositories of agents volee launched: their remote is part of
+    /// the work volee started.
+    #[default]
+    Launched,
+    /// Also the repositories of sessions volee discovered but did not
+    /// launch.
+    All,
+    /// None: evidence compares with what your own fetches brought.
+    Never,
+}
+
+impl Fetch {
+    /// Whether the repository of an agent may be fetched, given whether
+    /// volee launched the agent.
+    pub const fn allows(self, launched_by_volee: bool) -> bool {
+        match self {
+            Self::Launched => launched_by_volee,
+            Self::All => true,
+            Self::Never => false,
+        }
+    }
+}
+
+impl fmt::Display for Fetch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Launched => "launched",
+            Self::All => "all",
+            Self::Never => "never",
+        })
+    }
 }
 
 /// Mission settings.
@@ -286,6 +335,25 @@ mod tests {
         assert_eq!(parse("").unwrap(), Config::default());
         assert_eq!(Config::default().agents.wake_timeout, 3_600);
         assert_eq!(Config::default().missions.max_workers, 8);
+        assert_eq!(Config::default().git.fetch, Fetch::Launched);
+    }
+
+    #[test]
+    fn background_fetches_follow_the_setting() {
+        let fetch = |text: &str| parse(text).unwrap().git.fetch;
+        assert_eq!(fetch("[git]\nfetch = \"all\""), Fetch::All);
+        assert_eq!(fetch("[git]\nfetch = \"never\""), Fetch::Never);
+        assert_eq!(fetch("[git]\nfetch = \"launched\""), Fetch::Launched);
+        // Repositories of agents volee launched, and only those, by default.
+        assert!(Fetch::Launched.allows(true));
+        assert!(!Fetch::Launched.allows(false));
+        assert!(Fetch::All.allows(false));
+        assert!(!Fetch::Never.allows(true));
+        let error = parse("[git]\nfetch = \"sometimes\"")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("sometimes"), "{error}");
+        assert!(parse("[git]\nfetch = true").is_err());
     }
 
     #[test]

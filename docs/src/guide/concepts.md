@@ -54,8 +54,9 @@ pushed, pull request opened or merged, checks passed, report delivered. Cleanup
 commands rely on evidence, never on the absence of a window or a process.
 
 volee keeps this evidence current by itself, for the sessions you started
-without volee too: it reads git in each agent's directory, fetches each
-repository with an agent (`git fetch --prune origin`, at most every five
-minutes) and, when the GitHub CLI is signed in, asks it about each agent's
-branch at most once a minute. A fetch only updates your remote-tracking
-branches. See [Git](../architecture/git.md).
+without volee too: it reads git in each agent's directory, fetches the
+repositories of the agents it launched (`git fetch --prune origin`, at most
+every five minutes; the [`[git] fetch`](configuration.md#git) setting decides
+which repositories, or none) and, when the GitHub CLI is signed in, asks it
+about each agent's branch at most once a minute. A fetch only updates your
+remote-tracking branches. See [Git](../architecture/git.md).

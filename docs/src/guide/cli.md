@@ -21,6 +21,22 @@ variables that identify that session or pane (such as `CLAUDE_CODE_SESSION_ID`
 or `TMUX_PANE`), so the agents it launches never inherit them. Your settings,
 such as `ANTHROPIC_API_KEY` or `CLAUDE_CODE_USE_BEDROCK`, are kept.
 
+### What the daemon does in the background
+
+While it runs, the daemon keeps what volee shows current by itself. None of
+it waits for you, and none of it changes your work:
+
+| What | How often | What it runs |
+| --- | --- | --- |
+| Find sessions | Every two seconds while the [interface](interface.md) is open, every thirty seconds otherwise | `claude agents --json --all` |
+| Read each agent's work | When it finishes a turn or stops, and every minute while it runs | git queries in its directory, which never change the repository |
+| Fetch | At most every five minutes per repository, for the repositories of agents volee launched | `git fetch --prune origin`; the [`[git] fetch`](configuration.md#git) setting chooses which repositories, or none |
+| Look up pull requests | At most once a minute per branch, and right after its agent stops | `gh pr list`, with your own `gh` sign-in, when the GitHub CLI is installed and signed in |
+
+Pull request look-ups use your GitHub account's API allowance, a few
+requests a minute with several agents running. Without `gh`, or signed out,
+volee skips them and `volee daemon status` says why.
+
 ## Agents
 
 ```sh
