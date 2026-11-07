@@ -8,7 +8,7 @@ use volee_core::{Agent, AgentState, Event, Registry};
 use volee_proto::methods::{EventsSince, SendMessage, SendParams, SinceParams};
 
 use crate::connect::connect_or_start;
-use crate::resolve;
+use crate::{resolve, text};
 
 /// Sends a message from the human to an agent, named as a person types it.
 pub(crate) async fn send(to: &str, body: String, kind: MessageKind) -> Result<()> {
@@ -20,7 +20,12 @@ pub(crate) async fn send(to: &str, body: String, kind: MessageKind) -> Result<()
     let to = resolve::agent(&registry, to)?;
     let (name, outlook) = registry.agent(to).map_or_else(
         || (to.short(), String::new()),
-        |agent| (agent.name.clone(), format!(" {}", outlook(agent))),
+        |agent| {
+            (
+                text::one_line(&agent.name).into_owned(),
+                format!(" {}", outlook(agent)),
+            )
+        },
     );
     let sent = client
         .call::<SendMessage>(SendParams {
@@ -39,7 +44,7 @@ pub(crate) async fn send(to: &str, body: String, kind: MessageKind) -> Result<()
 
 /// What happens to a message from the human to `agent`, in one sentence.
 fn outlook(agent: &Agent) -> String {
-    let name = &agent.name;
+    let name = text::one_line(&agent.name);
     if agent.launched_by == LaunchedBy::Outside {
         return format!(
             "volee did not launch {name}, so nothing hands it this message: {name} sees it only if \
@@ -115,6 +120,16 @@ mod tests {
                 detail: None,
             },
         ]
+    }
+
+    #[test]
+    fn the_outlook_never_prints_control_characters() {
+        let mut named = agent(LaunchedBy::Outside, vec![]);
+        // A name a coordinator chose, with a window title change in it.
+        named.name = "bill\u{1b}]0;owned\u{7}ing".into();
+        let line = outlook(&named);
+        assert!(!line.chars().any(char::is_control), "{line:?}");
+        assert!(line.contains("bill]0;owneding"), "{line}");
     }
 
     #[test]
