@@ -7,7 +7,10 @@ pub(crate) mod detail;
 pub(crate) mod diff;
 pub(crate) mod help;
 pub(crate) mod hints;
+pub(crate) mod inbox;
+pub(crate) mod launch;
 pub(crate) mod rail;
+pub(crate) mod tools;
 pub(crate) mod top_bar;
 
 use ratatui::buffer::Buffer;

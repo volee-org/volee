@@ -1,7 +1,9 @@
-//! The top bar: the volee badge, the numbered tabs and the counters.
+//! The top bar: the volee badge, the numbered tabs and the counters:
+//! questions waiting for the person (`?`) and unread messages (`✉`) when
+//! there are any, then the agents.
 //!
 //! ```text
-//!  volee   1 Hierarchy  2 Network  3 Repos  4 Timeline     ! 2 need you · ▸ 6 working · 12 agents
+//!  volee   1 Hierarchy  2 Network  3 Repos  4 Timeline   ? 1 · ✉ 2 · ! 2 need you · ▸ 6 working · 12 agents
 //! ```
 
 use ratatui::buffer::Buffer;
@@ -55,6 +57,50 @@ pub(crate) fn tab_areas(model: &Model) -> Vec<(Tab, Rect)> {
         .collect()
 }
 
+/// The counters, in full and in short: questions and unread messages
+/// when there are any, then the agents.
+fn counter_spans(model: &Model) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
+    let theme = &model.theme;
+    let (needs, working, all) = counters(&model.registry);
+    let dim = theme.style(StyleRole::TextDim);
+    let needs_style = theme.style(if needs > 0 {
+        StyleRole::CounterUrgent
+    } else {
+        StyleRole::Counter
+    });
+    let counter = theme.style(StyleRole::Counter);
+    let messages = crate::inbox::counts(&model.registry);
+    let mut full = Vec::new();
+    let mut short = Vec::new();
+    let urgent = theme.style(StyleRole::CounterUrgent);
+    for (count, glyph, style) in [
+        (messages.questions, "?", urgent),
+        (messages.unread, "✉", counter),
+    ] {
+        if count > 0 {
+            full.push(Span::styled(format!("{glyph} {count}"), style));
+            full.push(Span::styled(" · ", dim));
+            short.push(Span::styled(format!("{glyph}{count}"), style));
+            short.push(Span::styled(" ", dim));
+        }
+    }
+    full.extend([
+        Span::styled(format!("! {needs} need you"), needs_style),
+        Span::styled(" · ", dim),
+        Span::styled(format!("▸ {working} working"), counter),
+        Span::styled(" · ", dim),
+        Span::styled(format!("{all} agents"), counter),
+    ]);
+    short.extend([
+        Span::styled(format!("!{needs}"), needs_style),
+        Span::styled(" ", dim),
+        Span::styled(format!("▸{working}"), counter),
+        Span::styled(" ", dim),
+        Span::styled(format!("{all}"), counter),
+    ]);
+    (full, short)
+}
+
 /// Draws the bar.
 pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
@@ -90,28 +136,7 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
         x + u16::try_from(label.len()).unwrap_or(0)
     });
 
-    let (needs, working, all) = counters(&model.registry);
-    let dim = theme.style(StyleRole::TextDim);
-    let needs_style = theme.style(if needs > 0 {
-        StyleRole::CounterUrgent
-    } else {
-        StyleRole::Counter
-    });
-    let counter = theme.style(StyleRole::Counter);
-    let full = vec![
-        Span::styled(format!("! {needs} need you"), needs_style),
-        Span::styled(" · ", dim),
-        Span::styled(format!("▸ {working} working"), counter),
-        Span::styled(" · ", dim),
-        Span::styled(format!("{all} agents"), counter),
-    ];
-    let short = vec![
-        Span::styled(format!("!{needs}"), needs_style),
-        Span::styled(" ", dim),
-        Span::styled(format!("▸{working}"), counter),
-        Span::styled(" ", dim),
-        Span::styled(format!("{all}"), counter),
-    ];
+    let (full, short) = counter_spans(model);
     let width_of = |spans: &[Span<'_>]| -> u16 {
         u16::try_from(
             spans

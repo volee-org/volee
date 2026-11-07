@@ -2,23 +2,29 @@
 //!
 //! The interface follows the daemon's events through the shared feed of
 //! [`volee_proto::replica`], and asks the daemon for screens, diffs, take
-//! overs and messages with protocol calls. Starting the daemon is the
-//! caller's job: this module only talks to one that runs.
+//! overs, messages, summaries and launches with protocol calls. Starting the
+//! daemon is the caller's job: this module only talks to one that runs.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::mpsc;
 use volee_core::message::Party;
-use volee_core::{AgentId, Event};
+use volee_core::role::Role;
+use volee_core::{AgentId, Event, MessageId, ThreadId};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    AgentParams, Attach, Diff, DiffParams, Preview, SendMessage, SendParams,
+    AgentParams, Attach, CreateMission, CreateMissionParams, Diff, DiffParams, MarkRead,
+    MarkReadParams, Preview, SendMessage, SendParams, Spawn, SpawnParams, Summarize,
+    SummarizeParams,
 };
 use volee_proto::replica::{self, Feed, FeedEnd, ReplicaError, Updates};
 use volee_proto::rpc;
 
-use crate::source::{Changes, Outgoing, Source, SourceError, Subscription, TakeOver};
+use crate::source::{
+    Changes, MissionRequest, NewMission, Outgoing, Source, SourceError, SpawnRequest, Subscription,
+    Summary, TakeOver,
+};
 
 /// What the interface says once the daemon is gone.
 const LOST: &str = "lost the connection to the volee daemon";
@@ -117,7 +123,7 @@ impl Source for DaemonSource {
             body: message.body,
             refs: vec![],
             in_reply_to: message.in_reply_to,
-            thread: None,
+            thread: message.thread,
         };
         self.client
             .call::<SendMessage>(params)
@@ -139,6 +145,67 @@ impl Source for DaemonSource {
             env_remove: command.env_remove,
             hint: Some(command.hint).filter(|hint| !hint.trim().is_empty()),
         })
+    }
+
+    async fn mark_read(&self, message: MessageId) -> Result<(), SourceError> {
+        self.client
+            .call::<MarkRead>(MarkReadParams {
+                message,
+                by: Party::Human,
+            })
+            .await
+            .map(|_| ())
+            .map_err(|error| failure(error, "this volee daemon cannot mark messages read"))
+    }
+
+    async fn summarize(&self, thread: ThreadId) -> Result<Summary, SourceError> {
+        self.client
+            .call::<Summarize>(SummarizeParams { thread })
+            .await
+            .map(|summary| Summary {
+                text: summary.summary,
+                messages: summary.messages,
+                model: summary.model,
+            })
+            .map_err(|error| failure(error, "this volee daemon cannot summarize threads yet"))
+    }
+
+    async fn spawn(&self, request: SpawnRequest) -> Result<AgentId, SourceError> {
+        let params = SpawnParams {
+            repo: request.repo,
+            branch: request.branch,
+            base: None,
+            task: request.task,
+            // An agent the person launches answers to the person.
+            role: Role::Lead,
+            parent: None,
+            mission: None,
+            model: request.model,
+            name: None,
+        };
+        self.client
+            .call::<Spawn>(params)
+            .await
+            .map(|spawned| spawned.agent)
+            .map_err(|error| failure(error, "this volee daemon cannot launch agents"))
+    }
+
+    async fn create_mission(&self, request: MissionRequest) -> Result<NewMission, SourceError> {
+        let params = CreateMissionParams {
+            title: request.title,
+            kind: request.kind,
+            goal: request.goal,
+            repos: request.repos,
+            requested_by: None,
+        };
+        self.client
+            .call::<CreateMission>(params)
+            .await
+            .map(|created| NewMission {
+                mission: created.mission,
+                coordinator: created.coordinator,
+            })
+            .map_err(|error| failure(error, "this volee daemon cannot create missions"))
     }
 }
 

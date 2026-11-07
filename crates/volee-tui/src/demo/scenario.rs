@@ -27,7 +27,7 @@ pub(crate) const PERIOD_SECS: i64 = 40;
 const SEED: u128 = 0x00de_0000_0000_0000_0000;
 
 /// The fictional home directory of the demo.
-const HOME: &str = "/home/dev";
+pub(crate) const HOME: &str = "/home/dev";
 
 // Members of the cast, by index.
 pub(crate) const TOWER: usize = 0;
@@ -328,6 +328,9 @@ fn thread_id(start: Timestamp, thread: usize) -> ThreadId {
 
 /// The inbox thread, where questions to the person land.
 const INBOX: usize = 2;
+
+/// The thread of volee's alerts to the person.
+const VOLEE: usize = 3;
 
 fn ulid_at(at: Timestamp, random: u128) -> Ulid {
     Ulid::from_parts(u64::try_from(at.as_millis()).unwrap_or(0), SEED | random)
@@ -859,6 +862,30 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         None,
     );
 
+    // volee's own alerts land in a thread of their own.
+    script.at(
+        -420,
+        EventKind::ThreadOpened {
+            thread: Thread {
+                id: thread_id(start, VOLEE),
+                title: "volee".to_owned(),
+                mission: None,
+                participants: vec![Party::System, Party::Human],
+                opened_at: start.plus_millis(-420_000),
+            },
+        },
+    );
+    script.message(
+        -420,
+        7,
+        VOLEE,
+        Party::System,
+        &[Party::Human],
+        MessageKind::Alert,
+        "explore-traces stopped with a message waiting; volee resumed its session to deliver it.",
+        None,
+    );
+
     let mut events = script.events;
     // A stable sort keeps the order of events written at the same second.
     events.sort_by_key(|event| event.at);
@@ -922,19 +949,8 @@ fn beat(start: Timestamp, cycle: i64, offset: i64) -> Vec<Event> {
         }
         16 => script.activity(base * 1_000, TRACE_GATEWAY, "Read src/middleware/auth.rs"),
         18 => {
-            if first {
-                let to = Party::Agent(script.id(INVOICE_TOOLS));
-                script.message(
-                    base,
-                    10,
-                    INBOX,
-                    Party::Human,
-                    &[to],
-                    MessageKind::Answer,
-                    "Accept a draft flag, false by default.",
-                    None,
-                );
-            }
+            // It goes on with the rest of its task; its question stays
+            // pinned in the person's messages until they answer it.
             script.state(base, INVOICE_TOOLS, AgentState::Working, None);
             script.activity(
                 base * 1_000,

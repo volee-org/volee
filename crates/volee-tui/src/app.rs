@@ -14,17 +14,22 @@ use volee_core::event::{Event, EventKind};
 use volee_core::message::{MessageKind, Party};
 use volee_core::role::Role;
 use volee_core::time::Timestamp;
-use volee_core::{Agent, AgentId, MessageId, Registry};
+use volee_core::{Agent, AgentId, MessageId, Registry, ThreadId};
 
 use crate::activity::ActivityLog;
 use crate::editor::TextField;
+use crate::inbox::InboxView;
 use crate::keymap::{Action, Context, KeyCombo, Keymap};
+use crate::launch::LaunchDialog;
 use crate::layout::{Mode, ScreenLayout};
 use crate::letters::Letters;
 use crate::preview::PreviewScreen;
-use crate::source::{Changes, Outgoing, SourceError, TakeOver};
+use crate::source::{
+    Changes, MissionRequest, NewMission, Outgoing, SourceError, SpawnRequest, Summary, TakeOver,
+};
 use crate::text;
 use crate::theme::Theme;
+use crate::tools::{Tool, ToolMenu};
 use crate::views::hierarchy::{self, Direction, Scene, SceneKey, ZoomChoice};
 
 /// The views, in tab order.
@@ -80,6 +85,21 @@ pub(crate) enum Overlay {
     Composer,
     /// The changes of an agent.
     Diff(DiffView),
+    /// The person's messages.
+    Inbox(InboxView),
+    /// The programs to open an agent's worktree with.
+    Tools(ToolMenu),
+    /// A dialog that launches an agent or a mission.
+    Launch(Box<LaunchDialog>),
+}
+
+/// What the interface knows from the configuration and the machine.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Settings {
+    /// Programs to open a worktree with.
+    pub(crate) tools: Vec<Tool>,
+    /// Repositories agents and missions can be launched in.
+    pub(crate) repos: Vec<String>,
 }
 
 /// A question asked on the bottom line.
@@ -112,8 +132,12 @@ pub(crate) struct Draft {
     pub(crate) field: TextField,
     /// The agent's question to the person that an answer replies to.
     pub(crate) question: Option<MessageId>,
+    /// The thread it goes in, for a reply; the source picks one otherwise.
+    pub(crate) thread: Option<ThreadId>,
     /// The source is sending it.
     pub(crate) sending: bool,
+    /// The window to come back to when the composer closes.
+    pub(crate) back: Option<Box<Overlay>>,
 }
 
 /// The changes window.
@@ -275,6 +299,26 @@ pub(crate) enum Msg {
         /// How it ended.
         result: Result<(), String>,
     },
+    /// The source marked a message read, or could not.
+    MarkedRead(Result<(), SourceError>),
+    /// A thread's summary arrived, or why there is none.
+    Summarized {
+        /// The thread.
+        thread: ThreadId,
+        /// The summary, or why there is none.
+        result: Result<Summary, SourceError>,
+    },
+    /// The source launched an agent, or refused.
+    Launched(Result<AgentId, SourceError>),
+    /// The source created a mission, or refused.
+    MissionCreated(Result<NewMission, SourceError>),
+    /// A tool ran in this terminal, or started in its own window.
+    ToolFinished {
+        /// The tool's name.
+        label: String,
+        /// How it went.
+        result: Result<(), String>,
+    },
 }
 
 /// What the run loop must do after an update.
@@ -302,6 +346,24 @@ pub(crate) enum Effect {
     },
     /// Send a message through the source.
     Send(Outgoing),
+    /// Mark a message to the person read.
+    MarkRead(MessageId),
+    /// Ask for a thread's summary.
+    Summarize(ThreadId),
+    /// Launch an agent.
+    Spawn(SpawnRequest),
+    /// Create a mission.
+    CreateMission(MissionRequest),
+    /// Run a tool on a worktree: in this terminal, or detached in a window
+    /// of its own.
+    RunTool {
+        /// Its name, for notices.
+        label: String,
+        /// Whether it opens a window of its own.
+        detached: bool,
+        /// What to run.
+        take_over: TakeOver,
+    },
 }
 
 /// The spinner of working agents.
@@ -357,6 +419,10 @@ pub(crate) struct Model {
     pub(crate) pending_take_over: Option<AgentId>,
     /// Why the source stopped, once it has: the screen no longer updates.
     pub(crate) offline: Option<String>,
+    /// What the configuration and the machine offer.
+    pub(crate) settings: Settings,
+    /// An agent just launched, to select once it appears.
+    pub(crate) awaited: Option<AgentId>,
 
     /// The terminal size.
     pub(crate) size: (u16, u16),
@@ -414,6 +480,8 @@ impl Model {
             draft: None,
             pending_take_over: None,
             offline: None,
+            settings: Settings::default(),
+            awaited: None,
             size,
             layout: ScreenLayout::default(),
             rail: Vec::new(),
@@ -482,6 +550,9 @@ impl Model {
             Some(Overlay::Help { .. }) => return vec![Context::Help],
             Some(Overlay::Composer) => return vec![Context::Composer],
             Some(Overlay::Diff(_)) => return vec![Context::Diff],
+            Some(Overlay::Inbox(_)) => return vec![Context::Inbox],
+            Some(Overlay::Tools(_)) => return vec![Context::Tools],
+            Some(Overlay::Launch(_)) => return vec![Context::Dialog],
             None => {}
         }
         if self.filter.editing {
@@ -516,7 +587,20 @@ impl Model {
         panes
     }
 
-    fn notify(&mut self, text: impl Into<String>, error: bool) {
+    /// Selects an agent now, or as soon as it appears.
+    pub(crate) fn follow(&mut self, agent: AgentId) {
+        if self.registry.agent(agent).is_some() {
+            let mut effects = Vec::new();
+            self.select(agent, &mut effects);
+            // The end of the update asks for the new agent's screen.
+            self.preview = PreviewState::default();
+            self.awaited = None;
+        } else {
+            self.awaited = Some(agent);
+        }
+    }
+
+    pub(crate) fn notify(&mut self, text: impl Into<String>, error: bool) {
         self.notice = Some(Notice {
             text: text.into(),
             error,
@@ -586,6 +670,9 @@ impl Model {
             match &event.kind {
                 EventKind::AgentRegistered { agent, name, .. } => {
                     self.letters.assign(*agent, name);
+                    if self.awaited == Some(*agent) {
+                        self.follow(*agent);
+                    }
                 }
                 EventKind::ActivityRecorded { agent, .. } => {
                     self.activity.record(*agent, event.at);
@@ -872,7 +959,12 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         answer @ (Msg::PreviewLoaded { .. }
         | Msg::DiffLoaded { .. }
         | Msg::TakeOverReady { .. }
-        | Msg::MessageSent { .. }) => dirty = on_answer(model, answer, &mut effects),
+        | Msg::MessageSent { .. }
+        | Msg::MarkedRead(_)
+        | Msg::Summarized { .. }
+        | Msg::Launched(_)
+        | Msg::MissionCreated(_)
+        | Msg::ToolFinished { .. }) => dirty = on_answer(model, answer, &mut effects),
         Msg::Resumed { agent, result } => {
             let name = model.name_of(agent);
             match result {
@@ -970,11 +1062,10 @@ fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool 
                         .draft
                         .as_ref()
                         .is_some_and(|draft| draft.to == to && draft.sending)
+                        && let Some(draft) = model.draft.take()
+                        && model.overlay == Some(Overlay::Composer)
                     {
-                        model.draft = None;
-                        if model.overlay == Some(Overlay::Composer) {
-                            model.overlay = None;
-                        }
+                        model.overlay = draft.back.map(|back| *back);
                     }
                     model.notify(format!("Message sent to {name}."), false);
                 }
@@ -988,6 +1079,34 @@ fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool 
                 }
             }
         }
+        other => return on_window_answer(model, other),
+    }
+    true
+}
+
+/// The answers to the requests of the messages, the tools and the launch
+/// dialogs; returns whether anything changed.
+fn on_window_answer(model: &mut Model, answer: Msg) -> bool {
+    match answer {
+        Msg::MarkedRead(result) => {
+            if let Err(error) = result {
+                let reason = error.to_string();
+                let reason = text::clause(&reason);
+                model.notify(format!("Could not mark the message read: {reason}."), true);
+            }
+        }
+        Msg::Summarized { thread, result } => {
+            return crate::inbox::summarized(model, thread, result);
+        }
+        Msg::Launched(result) => return crate::launch::launched(model, result),
+        Msg::MissionCreated(result) => return crate::launch::mission_created(model, result),
+        Msg::ToolFinished { label, result } => match result {
+            Ok(()) => model.notify(format!("Back from {label}."), false),
+            Err(error) => {
+                let reason = text::clause(&error);
+                model.notify(format!("Could not open {label}: {reason}."), true);
+            }
+        },
         // The other messages are not answers.
         _ => return false,
     }
@@ -1055,6 +1174,10 @@ fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
         }
         return;
     }
+    if matches!(model.overlay, Some(Overlay::Launch(_))) {
+        crate::launch::on_key(model, key, effects);
+        return;
+    }
     if model.filter.editing {
         match model.keymap.action(&[Context::Filter], key) {
             Some(Action::Apply) => model.filter.editing = false,
@@ -1088,8 +1211,10 @@ fn edit_filter(model: &mut Model, key: KeyCombo) {
 }
 
 fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Vec<Effect>) {
+    if perform_windows(model, context, action, effects) {
+        return;
+    }
     match action {
-        Action::Quit => request_quit(model, effects),
         Action::Help => {
             model.overlay = match model.overlay {
                 Some(Overlay::Help { .. }) => None,
@@ -1178,8 +1303,39 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
     }
 }
 
+/// The keys of the messages, the tools and the launch dialogs, and the
+/// keys that open them; returns whether the key was one of them.
+fn perform_windows(
+    model: &mut Model,
+    context: Context,
+    action: Action,
+    effects: &mut Vec<Effect>,
+) -> bool {
+    match (context, action) {
+        (_, Action::Quit) => request_quit(model, effects),
+        (Context::Inbox, _) => crate::inbox::perform(model, action, effects),
+        (Context::Tools, _) => crate::tools::perform(model, action, effects),
+        (_, Action::Messages) => crate::inbox::open(model),
+        (_, Action::OpenWith) => {
+            let agent = match &model.overlay {
+                Some(Overlay::Diff(diff)) => Some(diff.agent),
+                _ => model.selected,
+            };
+            if let Some(agent) = agent {
+                crate::tools::open_menu(model, agent);
+            }
+        }
+        (_, Action::NewAgent) => crate::launch::open(model, crate::launch::DialogKind::Agent),
+        (_, Action::NewMission) => {
+            crate::launch::open(model, crate::launch::DialogKind::Mission);
+        }
+        _ => return false,
+    }
+    true
+}
+
 /// Quits, unless a draft would be lost: then asks first.
-fn request_quit(model: &mut Model, effects: &mut Vec<Effect>) {
+pub(crate) fn request_quit(model: &mut Model, effects: &mut Vec<Effect>) {
     if model
         .draft
         .as_ref()
@@ -1229,6 +1385,7 @@ fn open_composer(model: &mut Model) {
             draft.to = agent;
             draft.kind = kind;
             draft.question = question;
+            draft.thread = None;
         }
         None => {
             model.draft = Some(Draft {
@@ -1236,7 +1393,9 @@ fn open_composer(model: &mut Model) {
                 kind,
                 field: TextField::default(),
                 question,
+                thread: None,
                 sending: false,
+                back: None,
             });
         }
     }
@@ -1264,7 +1423,12 @@ fn compose(model: &mut Model, action: Action, effects: &mut Vec<Effect>) {
             }
         }
         Action::Back => {
-            model.overlay = None;
+            // Back to the window the composer was opened from, if any.
+            model.overlay = model
+                .draft
+                .as_mut()
+                .and_then(|draft| draft.back.take())
+                .map(|back| *back);
             if model
                 .draft
                 .as_ref()
@@ -1293,6 +1457,7 @@ fn send_draft(model: &mut Model, effects: &mut Vec<Effect>) {
         kind: draft.kind,
         body,
         in_reply_to: draft.question.filter(|_| draft.kind == MessageKind::Answer),
+        thread: draft.thread,
     }));
 }
 
@@ -1305,29 +1470,9 @@ fn edit(model: &mut Model, change: impl FnOnce(&mut TextField)) {
 
 /// Keys the composer does not bind edit the text.
 fn edit_draft(model: &mut Model, key: KeyCombo) {
-    use ratatui::crossterm::event::KeyCode;
-    let control = key.ctrl_held();
-    match key.code() {
-        KeyCode::Backspace | KeyCode::Char('w') if control => {
-            edit(model, TextField::delete_word);
-        }
-        KeyCode::Char('u') if control => edit(model, TextField::delete_to_line_start),
-        KeyCode::Char('a') if control => edit(model, TextField::home),
-        KeyCode::Char('e') if control => edit(model, TextField::end),
-        KeyCode::Backspace => edit(model, TextField::backspace),
-        KeyCode::Delete => edit(model, TextField::delete),
-        KeyCode::Left => edit(model, TextField::left),
-        KeyCode::Right => edit(model, TextField::right),
-        KeyCode::Up => edit(model, TextField::up),
-        KeyCode::Down => edit(model, TextField::down),
-        KeyCode::Home => edit(model, TextField::home),
-        KeyCode::End => edit(model, TextField::end),
-        _ => {
-            if let Some(c) = key.typed_char() {
-                edit(model, |field| field.insert(c.encode_utf8(&mut [0; 4])));
-            }
-        }
-    }
+    edit(model, |field| {
+        crate::editor::apply_key(field, key);
+    });
 }
 
 /// Pasted text goes to the composer or the filter prompt, whichever has
@@ -1339,6 +1484,10 @@ fn on_paste(model: &mut Model, text: &str) -> bool {
     if model.overlay == Some(Overlay::Composer) {
         let text = crate::editor::clean_paste(text);
         edit(model, |field| field.insert(&text));
+        return true;
+    }
+    if let Some(Overlay::Launch(dialog)) = &mut model.overlay {
+        crate::launch::paste(dialog, text);
         return true;
     }
     if model.filter.editing && model.overlay.is_none() {
@@ -1466,9 +1615,14 @@ fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> 
         let action = match mouse.kind {
             MouseEventKind::ScrollDown => Action::Down,
             MouseEventKind::ScrollUp => Action::Up,
-            // A click outside the composer could lose a sentence: only the
-            // keys close it.
-            MouseEventKind::Down(_) if model.overlay != Some(Overlay::Composer) => {
+            // A click closes a window that holds nothing typed; the
+            // composer, the messages and the dialogs close with keys.
+            MouseEventKind::Down(_)
+                if matches!(
+                    model.overlay,
+                    Some(Overlay::Help { .. } | Overlay::Diff(_) | Overlay::Tools(_))
+                ) =>
+            {
                 model.overlay = None;
                 return true;
             }
@@ -1477,6 +1631,12 @@ fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> 
         let context = match model.overlay {
             Some(Overlay::Help { .. }) => Context::Help,
             Some(Overlay::Diff(_)) => Context::Diff,
+            Some(Overlay::Inbox(_)) => {
+                for _ in 0..2 {
+                    crate::inbox::perform(model, action, effects);
+                }
+                return true;
+            }
             _ => return false,
         };
         for _ in 0..2 {

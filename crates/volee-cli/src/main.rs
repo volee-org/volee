@@ -8,6 +8,7 @@ mod cmd;
 mod connect;
 mod resolve;
 mod table;
+mod tools;
 
 use std::process::ExitCode;
 

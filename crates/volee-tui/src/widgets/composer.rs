@@ -15,7 +15,6 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::Span;
 use ratatui::widgets::{Clear, Widget};
-use unicode_width::UnicodeWidthChar;
 use volee_core::message::MessageKind;
 use volee_core::role::LaunchedBy;
 
@@ -36,8 +35,8 @@ pub(crate) fn render(model: &Model, draft: &Draft, area: Rect, buf: &mut Buffer)
     let width = (TEXT_WIDTH + 4).min(area.width.saturating_sub(4));
     let text_width = width.saturating_sub(4).max(1);
     let field = &draft.field;
-    let rows = wrap(field.text(), usize::from(text_width));
-    let (cursor_row, cursor_column) = cursor_position(&rows, field.text(), field.cursor());
+    let rows = text::wrap(field.text(), usize::from(text_width));
+    let (cursor_row, cursor_column) = text::cursor_position(&rows, field.text(), field.cursor());
     let name = model.name_of(draft.to);
     let header = header(model, draft, &name);
     let body = rows
@@ -151,80 +150,12 @@ fn header(model: &Model, draft: &Draft, name: &str) -> Vec<Vec<Span<'static>>> {
     lines
 }
 
-/// The rows of `text` in a field `width` cells wide, as byte ranges without
-/// the line breaks. Long lines break after the last space that fits, or
-/// anywhere when a word is longer than a row.
-fn wrap(text: &str, width: usize) -> Vec<(usize, usize)> {
-    let width = width.max(1);
-    let mut rows = Vec::new();
-    let mut line_start = 0;
-    for line in text.split('\n') {
-        let line_end = line_start + line.len();
-        let mut start = line_start;
-        loop {
-            let mut used = 0;
-            let mut fit = start;
-            let mut space = None;
-            for (index, c) in text[start..line_end].char_indices() {
-                let cells = c.width().unwrap_or(0);
-                if used + cells > width {
-                    break;
-                }
-                used += cells;
-                if c == ' ' {
-                    space = Some(start + index);
-                }
-                fit = start + index + c.len_utf8();
-            }
-            if fit >= line_end {
-                rows.push((start, line_end));
-                break;
-            }
-            if text[fit..].starts_with(' ') {
-                rows.push((start, fit));
-                start = fit + 1;
-            } else if let Some(space) = space.filter(|space| *space > start) {
-                rows.push((start, space));
-                start = space + 1;
-            } else {
-                // A character wider than the row still takes a row.
-                let fit = if fit == start {
-                    start + text[start..].chars().next().map_or(1, char::len_utf8)
-                } else {
-                    fit
-                };
-                rows.push((start, fit));
-                start = fit;
-            }
-        }
-        line_start = line_end + 1;
-    }
-    rows
-}
-
-/// The row and the column of the cursor among `rows`. At a soft break the
-/// cursor goes to the start of the next row.
-fn cursor_position(rows: &[(usize, usize)], text: &str, cursor: usize) -> (usize, usize) {
-    let mut found = None;
-    for (row, (start, end)) in rows.iter().enumerate() {
-        if *start <= cursor && cursor < *end {
-            found = Some((row, *start));
-            break;
-        }
-        if cursor == *end {
-            found = Some((row, *start));
-        }
-    }
-    let (row, start) = found.unwrap_or((rows.len().saturating_sub(1), cursor));
-    (row, text::width(&text[start..cursor.max(start)]))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn rows(text: &str, width: usize) -> Vec<&str> {
-        wrap(text, width)
+        text::wrap(text, width)
             .into_iter()
             .map(|(start, end)| &text[start..end])
             .collect()
@@ -246,16 +177,24 @@ mod tests {
     #[test]
     fn the_cursor_follows_the_rows() {
         let text = "keep it false";
-        let wrapped = wrap(text, 10);
-        assert_eq!(cursor_position(&wrapped, text, 0), (0, 0));
-        assert_eq!(cursor_position(&wrapped, text, 7), (0, 7), "on the space");
-        assert_eq!(cursor_position(&wrapped, text, 8), (1, 0));
-        assert_eq!(cursor_position(&wrapped, text, text.len()), (1, 5));
+        let wrapped = text::wrap(text, 10);
+        assert_eq!(text::cursor_position(&wrapped, text, 0), (0, 0));
+        assert_eq!(
+            text::cursor_position(&wrapped, text, 7),
+            (0, 7),
+            "on the space"
+        );
+        assert_eq!(text::cursor_position(&wrapped, text, 8), (1, 0));
+        assert_eq!(text::cursor_position(&wrapped, text, text.len()), (1, 5));
         let text = "abcdefghij";
-        let wrapped = wrap(text, 5);
-        assert_eq!(cursor_position(&wrapped, text, 5), (1, 0), "soft break");
+        let wrapped = text::wrap(text, 5);
+        assert_eq!(
+            text::cursor_position(&wrapped, text, 5),
+            (1, 0),
+            "soft break"
+        );
         let text = "one\n";
-        let wrapped = wrap(text, 10);
-        assert_eq!(cursor_position(&wrapped, text, 4), (1, 0));
+        let wrapped = text::wrap(text, 10);
+        assert_eq!(text::cursor_position(&wrapped, text, 4), (1, 0));
     }
 }

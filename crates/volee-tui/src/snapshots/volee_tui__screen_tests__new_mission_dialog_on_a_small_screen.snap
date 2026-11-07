@@ -1,0 +1,28 @@
+---
+source: crates/volee-tui/src/screen_tests.rs
+expression: draw(&model)
+---
+" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline          ?1 ✉2 !2 ▸6 12 "
+"╭ Agents · tree ───────────────────╮╭ Detail ──────────────────────────────────╮"
+"│▌t ▸ tower                 24 min ││ tower · lead                             │"
+"│ n ├─ · invoicing          14 min ││ ▸ working · for 24 min                   │"
+"│ s │  ├─ ! invoice-schema   2 min ││ repo     platform › main                 │"
+"│ ╭ New mission ─────────────────────────────────────────────────────────────╮ │"
+"│ │ title        Invoice export                                              │ │"
+"│ │                                                                          │ │"
+"│ │ kind          change    analysis                                         │ │"
+"│ │                                                                          │ │"
+"│ │ repositories ■ billing  □ dashboard  □ gateway  □ mcp-server ›           │ │"
+"│ │                                                                          │ │"
+"│ │ goal         what the mission delivers, as its coordinator will read it  │─╯"
+"│ │                                                                          │─╮"
+"│ │                                                                          │ │"
+"│ │                                                                          │t│"
+"│ │                                                                          │ │"
+"│ │                                                                          │─│"
+"│ ╰──────────────────────────────────────────────────────────────────────────╯ │"
+"│                                  ││ ╰────────────────────────────────────────│"
+"│                                  ││   ? for shortcuts                        │"
+"│                                  ││                                          │"
+"╰──────────────────────────────────╯╰──────────────────────────────────────────╯"
+" tab/shift-tab field   enter launch   esc cancel                                "

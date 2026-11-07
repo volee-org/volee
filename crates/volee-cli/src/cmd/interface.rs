@@ -7,6 +7,7 @@ use volee_config::Config;
 use volee_tui::{ColorDepth, DaemonSource, Keymap, Options, Theme};
 
 use crate::connect::{connect_or_start, paths};
+use crate::tools;
 
 /// Starts the daemon when it does not run, then shows its agents until the
 /// person quits. The theme and the key overrides come from the
@@ -21,8 +22,9 @@ pub(crate) async fn run() -> Result<()> {
     Ok(())
 }
 
-/// The interface's colors and keys from the configuration file; `theme`
-/// replaces the configured theme.
+/// The interface's colors, keys, repositories and tools from the
+/// configuration file and the machine; `theme` replaces the configured
+/// theme.
 pub(crate) fn options(theme: Option<&str>) -> Result<Options> {
     let paths = paths()?;
     let home = std::env::var_os("HOME")
@@ -42,8 +44,20 @@ pub(crate) fn options(theme: Option<&str>) -> Result<Options> {
         .map(|(action, key)| (action.as_str(), vec![key.as_str()]));
     let keymap = Keymap::with_overrides(overrides)
         .with_context(|| format!("{}: [tui.keys]", file.display()))?;
+    let var = |name: &str| std::env::var(name).ok();
+    let path = std::env::var("PATH").ok();
+    let has = |program: &str| tools::on_path(program, path.as_deref());
+    let diffview = tools::data_home(var).is_some_and(|data| tools::diffview_installed(&data));
+    let machine = tools::Machine {
+        var: &var,
+        has: &has,
+        diffview,
+    };
     let mut options = Options::default();
     options.theme = theme;
     options.keymap = keymap;
+    options.tools =
+        tools::resolve(&config.tui.tools, &machine).with_context(|| file.display().to_string())?;
+    options.repos = config.repos.keys().cloned().collect();
     Ok(options)
 }

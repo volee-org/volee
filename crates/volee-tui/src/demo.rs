@@ -8,6 +8,7 @@
 //! and the whole story loops. Everything derives from the start time, so a
 //! fixed clock gives the same screen on every run.
 
+mod requests;
 mod scenario;
 mod screens;
 
@@ -22,7 +23,10 @@ use volee_core::time::Timestamp;
 use volee_core::{AgentId, MessageId, Registry, ThreadId};
 
 use crate::clock::Clock;
-use crate::source::{Changes, Outgoing, Source, SourceError, Subscription, TakeOver};
+use crate::source::{
+    Changes, MissionRequest, NewMission, Outgoing, Source, SourceError, SpawnRequest, Subscription,
+    Summary, TakeOver,
+};
 
 /// A [`Source`] with a simulated team of agents, for `volee demo`,
 /// screenshots and tests.
@@ -48,12 +52,15 @@ pub struct DemoSource {
 /// Where the demo sends its events.
 type Updates = mpsc::Sender<Result<Event, SourceError>>;
 
-/// What the demo needs to post the person's messages.
+/// What the demo needs to answer the person's requests.
 #[derive(Debug, Default)]
 struct Outbox {
     sender: Option<Updates>,
     threads: Vec<(AgentId, ThreadId)>,
     sent: u128,
+    /// The events the person's requests made, which the scenario does not
+    /// know about.
+    made: Vec<Event>,
 }
 
 impl DemoSource {
@@ -85,7 +92,10 @@ impl DemoSource {
 
     /// The screen of an agent at `at`, as raw terminal output.
     pub fn screen_at(&self, agent: AgentId, at: Timestamp) -> Result<String, SourceError> {
-        let registry = Registry::from_events(&self.events_until(at))
+        let mut events = self.events_until(at);
+        // Agents the person launched have a screen too.
+        events.extend(self.outbox().made.iter().filter(|e| e.at <= at).cloned());
+        let registry = Registry::from_events(&events)
             .map_err(|error| SourceError::Failed(error.to_string()))?;
         let record = registry
             .agent(agent)
@@ -97,6 +107,45 @@ impl DemoSource {
         // The outbox holds plain data, so a panic elsewhere cannot leave it
         // inconsistent.
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The repositories the person can launch agents and missions in.
+    pub fn repos(&self) -> Vec<String> {
+        requests::repos()
+    }
+
+    /// The scenario now, with what the person's requests changed.
+    fn registry_now(&self) -> Result<Registry, SourceError> {
+        let mut events = self.events_until(self.clock.now());
+        events.extend(self.outbox().made.iter().cloned());
+        Registry::from_events(&events).map_err(|error| SourceError::Failed(error.to_string()))
+    }
+
+    /// Identifiers for one request.
+    fn ids(&self) -> requests::Ids {
+        let mut outbox = self.outbox();
+        outbox.sent += 1;
+        requests::Ids {
+            at: self.clock.now(),
+            random: 0x0f00_0000 + outbox.sent * 0x100,
+        }
+    }
+
+    /// Sends the events of a request, and remembers them.
+    async fn emit(&self, events: Vec<Event>) -> Result<(), SourceError> {
+        let sender = {
+            let mut outbox = self.outbox();
+            outbox.made.extend(events.iter().cloned());
+            outbox.sender.clone()
+        }
+        .ok_or_else(|| SourceError::Disconnected("not subscribed yet".to_owned()))?;
+        for event in events {
+            sender
+                .send(Ok(event))
+                .await
+                .map_err(|_| SourceError::Disconnected("the interface stopped".to_owned()))?;
+        }
+        Ok(())
     }
 }
 
@@ -139,21 +188,49 @@ impl Source for DemoSource {
     }
 
     async fn send_message(&self, message: Outgoing) -> Result<(), SourceError> {
+        let registry = self.registry_now()?;
         let to = message.to;
-        let member = scenario::member_of(self.start, to).ok_or(SourceError::UnknownAgent(to))?;
+        let name = registry
+            .agent(to)
+            .map(|agent| agent.name.clone())
+            .ok_or(SourceError::UnknownAgent(to))?;
         let now = self.clock.now();
-        let (sender, events) = self.message_events(member, message, now)?;
-        for event in events {
-            sender
-                .send(Ok(event))
-                .await
-                .map_err(|_| SourceError::Disconnected("the interface stopped".to_owned()))?;
-        }
-        Ok(())
+        let events = self.message_events(&registry, &name, message, now)?;
+        self.emit(events).await
     }
 
     fn attach(&self, agent: AgentId) -> impl Future<Output = Result<TakeOver, SourceError>> + Send {
         std::future::ready(self.take_over(agent))
+    }
+
+    async fn mark_read(&self, message: MessageId) -> Result<(), SourceError> {
+        let registry = self.registry_now()?;
+        let event = requests::read(&registry, message, self.clock.now())?;
+        self.emit(vec![event]).await
+    }
+
+    fn summarize(
+        &self,
+        thread: ThreadId,
+    ) -> impl Future<Output = Result<Summary, SourceError>> + Send {
+        std::future::ready(
+            self.registry_now()
+                .and_then(|registry| requests::summary(&registry, thread)),
+        )
+    }
+
+    async fn spawn(&self, request: SpawnRequest) -> Result<AgentId, SourceError> {
+        let registry = self.registry_now()?;
+        let (agent, events) = requests::spawn(&registry, &request, &mut self.ids())?;
+        self.emit(events).await?;
+        Ok(agent)
+    }
+
+    async fn create_mission(&self, request: MissionRequest) -> Result<NewMission, SourceError> {
+        let registry = self.registry_now()?;
+        let (created, events) = requests::mission(&registry, &request, &mut self.ids())?;
+        self.emit(events).await?;
+        Ok(created)
     }
 }
 
@@ -224,34 +301,51 @@ impl DemoSource {
         ))
     }
 
-    /// The events that post a message from the person to an agent (and
-    /// open their thread the first time), with the channel to send them on.
+    /// The events that post a message from the person to an agent: in the
+    /// thread asked for, the thread of the message it answers, the agent's
+    /// mission thread, or their own thread, opened the first time.
     fn message_events(
         &self,
-        member: usize,
+        registry: &Registry,
+        name: &str,
         message: Outgoing,
         now: Timestamp,
-    ) -> Result<(Updates, Vec<Event>), SourceError> {
+    ) -> Result<Vec<Event>, SourceError> {
         let Outgoing {
             to,
             kind,
             body,
             in_reply_to,
+            thread,
         } = message;
         let mut outbox = self.outbox();
-        let sender = outbox
-            .sender
-            .clone()
-            .ok_or_else(|| SourceError::Disconnected("not subscribed yet".to_owned()))?;
+        if outbox.sender.is_none() {
+            return Err(SourceError::Disconnected("not subscribed yet".to_owned()));
+        }
         outbox.sent += 1;
         let random = 0x0e00_0000 + outbox.sent;
         let at = u64::try_from(now.as_millis()).unwrap_or(0);
         let mut events = Vec::new();
-        let known = outbox
-            .threads
-            .iter()
-            .find(|(agent, _)| *agent == to)
-            .map(|(_, thread)| *thread);
+        let known = thread
+            .or_else(|| {
+                in_reply_to
+                    .and_then(|id| registry.message(id))
+                    .map(|question| question.thread)
+            })
+            .or_else(|| {
+                registry
+                    .agent(to)
+                    .and_then(|agent| agent.mission)
+                    .and_then(|mission| registry.mission(mission))
+                    .map(|mission| mission.thread)
+            })
+            .or_else(|| {
+                outbox
+                    .threads
+                    .iter()
+                    .find(|(agent, _)| *agent == to)
+                    .map(|(_, thread)| *thread)
+            });
         let thread = if let Some(thread) = known {
             thread
         } else {
@@ -262,7 +356,7 @@ impl DemoSource {
                 EventKind::ThreadOpened {
                     thread: Thread {
                         id: thread,
-                        title: format!("You and {}", scenario::CAST[member].name),
+                        title: format!("You and {name}"),
                         mission: None,
                         participants: vec![Party::Human, Party::Agent(to)],
                         opened_at: now,
@@ -291,7 +385,7 @@ impl DemoSource {
                 },
             },
         ));
-        Ok((sender, events))
+        Ok(events)
     }
 }
 
@@ -314,6 +408,7 @@ mod tests {
             kind,
             body: body.to_owned(),
             in_reply_to: None,
+            thread: None,
         }
     }
 
@@ -374,9 +469,12 @@ mod tests {
             snapshot,
             mut updates,
         } = demo.subscribe().await.unwrap();
-        let question = MessageId::from_ulid(Ulid::from_parts(1, 1));
+        let mut registry = Registry::from_events(&snapshot).unwrap();
+        let question = registry.unanswered_questions()[0].clone();
+        // The answer goes in the question's thread, and a note to a
+        // mission's worker in the mission's thread, as the daemon does.
         demo.send_message(Outgoing {
-            in_reply_to: Some(question),
+            in_reply_to: Some(question.id),
             ..to(tools, MessageKind::Answer, "Yes, false by default.")
         })
         .await
@@ -384,18 +482,96 @@ mod tests {
         demo.send_message(to(tools, MessageKind::Note, "Thanks"))
             .await
             .unwrap();
+        for _ in 0..2 {
+            registry
+                .apply(&updates.recv().await.unwrap().unwrap())
+                .unwrap();
+        }
+        let answer = registry.thread_messages(question.thread);
+        assert_eq!(answer.last().unwrap().in_reply_to, Some(question.id));
+        assert!(registry.unanswered_questions().is_empty(), "answered");
+        let mission = registry
+            .mission(registry.agent(tools).unwrap().mission.unwrap())
+            .unwrap();
+        let note = registry.thread_messages(mission.thread);
+        assert_eq!(note.last().unwrap().body, "Thanks");
+    }
+
+    #[tokio::test]
+    async fn the_person_reads_summarizes_and_launches() {
+        let (demo, _clock) = demo();
+        let Subscription {
+            snapshot,
+            mut updates,
+        } = demo.subscribe().await.unwrap();
         let mut registry = Registry::from_events(&snapshot).unwrap();
+        let question = registry.unanswered_questions()[0].clone();
+        demo.mark_read(question.id).await.unwrap();
+        registry
+            .apply(&updates.recv().await.unwrap().unwrap())
+            .unwrap();
+        let receipt = registry.message(question.id).unwrap().receipt(Party::Human);
+        assert!(receipt.unwrap().read_at.is_some());
+        let summary = demo.summarize(question.thread).await.unwrap();
+        assert_eq!(summary.messages, 1);
+        assert!(
+            summary.text.contains("a question from invoice-tools"),
+            "{}",
+            summary.text
+        );
+
+        // The repositories of the agents volee launched; not the sessions'.
+        assert_eq!(
+            demo.repos(),
+            [
+                "billing",
+                "dashboard",
+                "gateway",
+                "mcp-server",
+                "platform",
+                "search"
+            ]
+        );
+        let request = SpawnRequest {
+            repo: "billing".into(),
+            branch: "feat/export".into(),
+            task: "Export invoices as CSV.".into(),
+            model: Some("sonnet".into()),
+        };
+        let agent = demo.spawn(request.clone()).await.unwrap();
         for _ in 0..3 {
             registry
                 .apply(&updates.recv().await.unwrap().unwrap())
                 .unwrap();
         }
-        let thread = registry
-            .thread_between(Party::Human, Party::Agent(tools))
+        let launched = registry.agent(agent).unwrap();
+        assert_eq!(launched.name, "billing-feat-export");
+        assert_eq!(launched.model.as_deref(), Some("sonnet"));
+        assert_eq!(
+            demo.spawn(request).await,
+            Err(SourceError::Failed(
+                "branch `feat/export` already exists".into()
+            ))
+        );
+
+        let created = demo
+            .create_mission(MissionRequest {
+                title: "Invoice export".into(),
+                kind: volee_core::mission::MissionKind::Change,
+                repos: vec!["billing".into(), "dashboard".into()],
+                goal: "Export invoices as CSV from the dashboard.".into(),
+            })
+            .await
             .unwrap();
-        let messages = registry.thread_messages(thread.id);
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].in_reply_to, Some(question));
+        for _ in 0..6 {
+            registry
+                .apply(&updates.recv().await.unwrap().unwrap())
+                .unwrap();
+        }
+        let coordinator = registry.agent(created.coordinator.unwrap()).unwrap();
+        assert_eq!(coordinator.name, "coordinator-invoice-export");
+        let mission = registry.mission(created.mission).unwrap();
+        assert_eq!(mission.coordinator, Some(coordinator.id));
     }
 
     #[tokio::test]

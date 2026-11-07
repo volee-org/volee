@@ -9,7 +9,7 @@
 use std::collections::VecDeque;
 use std::future::Future;
 use std::io::{self, Stdout, stdout};
-use std::process::{Command, ExitStatus};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::{Arc, Once};
 use std::time::Duration;
 
@@ -67,6 +67,10 @@ pub(crate) trait Screen {
     /// Suspends the interface, runs the take over in this terminal, and
     /// comes back to the same state.
     async fn take_over(&mut self, take_over: &TakeOver) -> io::Result<ExitStatus>;
+
+    /// Starts a program with a window of its own, detached from this
+    /// terminal, and does not wait for it.
+    fn detach(&mut self, program: &TakeOver) -> io::Result<()>;
 }
 
 /// Runs the loop until the person quits or the terminal goes away.
@@ -98,6 +102,16 @@ pub(crate) async fn event_loop<S: Screen, Src: Source>(
                         // messages come before any input typed meanwhile.
                         let (width, height) = screen.size()?;
                         queue.push_front(Msg::Resumed { agent, result });
+                        queue.push_front(Msg::Resize { width, height });
+                    }
+                    Effect::RunTool {
+                        label,
+                        detached,
+                        take_over,
+                    } => {
+                        let result = run_tool(screen, &take_over, detached).await;
+                        let (width, height) = screen.size()?;
+                        queue.push_front(Msg::ToolFinished { label, result });
                         queue.push_front(Msg::Resize { width, height });
                     }
                     request => run_request(request, &source, &results),
@@ -193,8 +207,44 @@ fn run_request<Src: Source>(
             let result = source.send_message(message).await;
             Msg::MessageSent { to, result }
         }),
+        Effect::MarkRead(message) => spawn(results, async move {
+            Msg::MarkedRead(source.mark_read(message).await)
+        }),
+        Effect::Summarize(thread) => spawn(results, async move {
+            let result = source.summarize(thread).await;
+            Msg::Summarized { thread, result }
+        }),
+        Effect::Spawn(request) => spawn(results, async move {
+            Msg::Launched(source.spawn(request).await)
+        }),
+        Effect::CreateMission(request) => spawn(results, async move {
+            Msg::MissionCreated(source.create_mission(request).await)
+        }),
         // The loop runs these itself.
-        Effect::Quit | Effect::TakeOver { .. } => {}
+        Effect::Quit | Effect::TakeOver { .. } | Effect::RunTool { .. } => {}
+    }
+}
+
+/// Runs a tool on a worktree: in this terminal, the interface stepping
+/// aside, or detached in a window of its own. A worktree that is not on this
+/// machine (an agent of another machine, or the demo's) is said plainly.
+async fn run_tool<S: Screen>(
+    screen: &mut S,
+    take_over: &TakeOver,
+    detached: bool,
+) -> Result<(), String> {
+    if let Some(dir) = take_over.cwd.as_deref()
+        && !dir.is_dir()
+    {
+        return Err(format!("{} is not a folder on this machine", dir.display()));
+    }
+    if detached {
+        return screen.detach(take_over).map_err(|error| error.to_string());
+    }
+    match screen.take_over(take_over).await {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(format!("it ended with {status}")),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -308,6 +358,28 @@ impl Screen for TerminalScreen {
             },
             () = self.signals.recv() => Input::Interrupted,
         }
+    }
+
+    fn detach(&mut self, program: &TakeOver) -> io::Result<()> {
+        let mut command = Command::new(&program.program);
+        command
+            .args(&program.args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if let Some(cwd) = &program.cwd {
+            command.current_dir(cwd);
+        }
+        // Its own process group: Ctrl+C in volee does not reach it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+            command.process_group(0);
+        }
+        let mut child = command.spawn()?;
+        // Reap it when it exits, so it does not linger as a zombie.
+        std::thread::spawn(move || child.wait());
+        Ok(())
     }
 
     async fn take_over(&mut self, take_over: &TakeOver) -> io::Result<ExitStatus> {
@@ -463,6 +535,11 @@ mod tests {
             self.taken_over.push(take_over.program.clone());
             std::future::ready(Ok(ExitStatus::from_raw(0)))
         }
+
+        fn detach(&mut self, program: &TakeOver) -> io::Result<()> {
+            self.taken_over.push(format!("{} &", program.program));
+            Ok(())
+        }
     }
 
     fn key(c: char) -> Input {
@@ -566,15 +643,23 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(model.draft, None, "sent");
-        let thread = model
+        // The answer went in the question's thread, and the question is no
+        // longer waiting.
+        let answer = model
             .registry
-            .thread_between(Party::Human, Party::Agent(tools))
+            .messages_from(Party::Human)
+            .into_iter()
+            .next_back()
             .unwrap();
-        let messages = model.registry.thread_messages(thread.id);
-        let answer = messages.last().unwrap();
         assert_eq!(answer.body, "Yes");
         assert_eq!(answer.kind, MessageKind::Answer);
-        assert!(answer.in_reply_to.is_some());
+        let question = model.registry.message(answer.in_reply_to.unwrap()).unwrap();
+        assert_eq!(question.from, Party::Agent(tools));
+        assert_eq!(answer.thread, question.thread);
+        assert!(
+            model.registry.unanswered_questions().is_empty(),
+            "the question is answered"
+        );
     }
 
     #[tokio::test(start_paused = true)]

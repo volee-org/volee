@@ -1,0 +1,28 @@
+---
+source: crates/volee-tui/src/screen_tests.rs
+expression: draw(&model)
+---
+" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline          ?1 ✉2 !2 ▸6 12 "
+"╭ Agents · tree ───────────────────╮╭ Detail ──────────────────────────────────╮"
+"│▌╭ Messages · 1 question for you · 2 unread ────────────────────────────────╮ │"
+"│ │▌? invoice-tools asks… 1 min │ Inbox                                      │ │"
+"│ │   Should create_invoice ac… │                                            │ │"
+"│ │ ● Inbox               1 min │ ● invoice-tools → you · question · 1 min ag│ │"
+"│ │   question · invoice-tools… │ Should create_invoice accept a draft flag, │ │"
+"│ │   ◆ Invoicing         5 min │ or always issue a final invoice?           │ │"
+"│ │   report · invoice-page: I… │                                            │ │"
+"│ │ ● volee               7 min │                                            │ │"
+"│ │   alert · volee: explore-t… │                                            │ │"
+"│ │   ◆ Latency audit    11 min │                                            │ │"
+"│ │   contract · latency-audit… │                                            │─╯"
+"│ │                             │                                            │─╮"
+"│ │                             │                                            │ │"
+"│ │                             │                                            │t│"
+"│ │                             │                                            │ │"
+"│ │                             │                                            │─│"
+"│ │                             │                                            │ │"
+"│ │                             │                                            │─│"
+"│ │                             │                                            │ │"
+"│ ╰──────────────────────────────────────────────────────────────────────────╯ │"
+"╰──────────────────────────────────╯╰──────────────────────────────────────────╯"
+" j/k move   enter read   r reply   s summarize   esc close                      "

@@ -32,6 +32,9 @@ theme = "catppuccin-mocha"
 
 [tui.keys]
 take-over = "ctrl-a"
+
+[tui.tools]
+git = "gitui"
 ```
 
 ## `[agents]`
@@ -82,3 +85,33 @@ thread and nothing else.
 | --- | --- | --- |
 | `theme` | `catppuccin-mocha` | A built-in theme or a file in `~/.config/volee/themes/`; see [Themes](themes.md). |
 | `keys` | none | Key overrides by action name, such as `take-over = "ctrl-a"`; the [interface guide](interface.md#keys) lists the actions. |
+| `tools` | found on the machine | Programs `o` opens an agent's worktree with; see below. |
+
+### `[tui.tools]`
+
+The interface can open an agent's worktree in your own tools. None is
+required and none is forced: volee offers the ones it finds, and each key
+below replaces what it would find.
+
+| Key | Found when unset | Runs |
+| --- | --- | --- |
+| `editor` | `$VISUAL`, then `$EDITOR`, with `.` | in this terminal |
+| `diff` | `nvim -c 'DiffviewOpen {base}'`, when diffview.nvim is installed | in this terminal |
+| `git` | `lazygit`, when installed | in this terminal |
+| `ide` | `code {dir}`, when VS Code's `code` is installed | in a window of its own, in the background |
+
+Each value is a command line, split like a shell would (quotes, no
+variables or pipes) and run in the agent's worktree. `{dir}` stands for
+the worktree and `{base}` for the branch the agent started from. An empty
+string turns a tool off, even when it is installed:
+
+```toml
+[tui.tools]
+editor = "hx"                   # instead of $EDITOR
+diff = "git difftool -d {base}"
+git = ""                        # never offer lazygit
+ide = "zed {dir}"
+```
+
+Tools that run in the terminal take it over, as taking over an agent does,
+and the interface comes back when they exit.

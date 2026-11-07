@@ -12,9 +12,12 @@ use crate::cmd::interface::options;
 /// configured theme.
 pub(crate) async fn run(theme: Option<&str>) -> Result<()> {
     let clock = Arc::new(SystemClock);
+    let demo = DemoSource::new(clock.clone());
     let mut options = options(theme)?;
-    options.clock = clock.clone();
+    options.clock = clock;
     options.banner = Some("demo · simulated data".to_owned());
-    volee_tui::run(DemoSource::new(clock), options).await?;
+    // The demo's own repositories, so its launch dialogs have choices.
+    options.repos = demo.repos();
+    volee_tui::run(demo, options).await?;
     Ok(())
 }
