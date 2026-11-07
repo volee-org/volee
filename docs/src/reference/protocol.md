@@ -122,9 +122,11 @@ sequence number it applied.
 
 A client a person watches, such as the interface, subscribes with
 `interactive` set to `true`. While at least one interactive subscription is
-open, the daemon lists the harness's sessions every two seconds instead of
-every thirty, and a new one triggers a listing at once, so the client opens
-on fresh data ([discovery](../architecture/domain.md#reconciliation)). The
+open, the daemon lists the harness's sessions every two to ten seconds
+(two after a listing that changed something, longer while nothing changes)
+instead of every thirty, and a new one triggers a listing at once, so the
+client opens on fresh data
+([discovery](../architecture/domain.md#reconciliation)). The
 subscription stops counting when it ends or its connection closes. Programs,
 such as an agent's MCP server, leave it `false`: agents volee launched
 report through their hooks in real time anyway.

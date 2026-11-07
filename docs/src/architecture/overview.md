@@ -159,7 +159,15 @@ volee follows the XDG base directory layout on every platform:
 
 ## Performance budget
 
-- Daemon idle: under 1 % CPU and under 30 MB of memory.
+- Daemon idle: under 1 % CPU and under 30 MB of memory. Measured on the
+  0.1 release build: 9.4 MB, and 0.03 s of CPU in two minutes.
+- Session discovery: each `claude agents --json --all` costs about 0.17 s
+  of CPU and starts a Node process of about 150 MB. Listing every two
+  seconds would cost about 8.5 % of a core for as long as the interface is
+  open, so the daemon lists every two seconds only after a listing that
+  changed something, backs off to every ten seconds (about 1.7 % of a core)
+  while nothing changes, and lists every thirty seconds (about 0.6 %) when
+  no interface is open.
 - TUI frame: under 5 ms at 200x60. Animation ticks only run while something
   moves.
 - Git is never polled more than once a minute per worktree, unless an event

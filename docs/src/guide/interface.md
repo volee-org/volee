@@ -20,9 +20,13 @@ volee
 starting it in the background when it does not run yet, and shows every
 agent it knows: the Claude Code sessions it finds on the machine, wherever
 they were started, and the agents volee launched itself. The daemon looks
-for sessions as soon as the interface opens, then every two seconds while it
-stays open (every thirty seconds when no interface is open), so new sessions
-show up within a couple of seconds; nothing needs to be configured first.
+for sessions as soon as the interface opens, then while it stays open every
+two seconds after a look that found something new, slowing down to every ten
+seconds while nothing changes (every thirty seconds when no interface is
+open). A session started elsewhere therefore shows up within ten seconds at
+worst, and changes come in quick succession after that; agents volee
+launched show up at once, through their hooks. Nothing needs to be
+configured first.
 
 Everything on the screen comes from the daemon, and so do the actions:
 

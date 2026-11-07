@@ -46,9 +46,14 @@ pub struct Config {
     /// The harness whose sessions the daemon discovers, when one is
     /// installed.
     pub harness: Option<Arc<dyn Harness>>,
-    /// How often the harness is listed while at least one interactive
-    /// client (the interface) is subscribed.
+    /// While at least one interactive client (the interface) is subscribed:
+    /// the wait between two listings after one that changed something,
+    /// after a new interactive client and after a refresh request.
     pub discovery_interval: Duration,
+    /// While at least one interactive client is subscribed: the longest
+    /// wait, which the wait doubles towards after each listing that changed
+    /// nothing. Equal to `discovery_interval` for a fixed cadence.
+    pub max_discovery_interval: Duration,
     /// How often the harness is listed while no interactive client is
     /// subscribed. Agents volee launched report through their hooks either
     /// way; only sessions started elsewhere show up later.
@@ -159,6 +164,7 @@ impl Daemon {
         if let Some(harness) = config.harness {
             let cadence = Cadence {
                 watched: config.discovery_interval,
+                watched_max: config.max_discovery_interval,
                 idle: config.idle_discovery_interval,
             };
             tokio::spawn(crate::discovery::run(

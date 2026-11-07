@@ -27,6 +27,7 @@ mod watchers;
 pub use clock::{Clock, ManualClock, SystemClock};
 pub use discovery::DEFAULT_IDLE_INTERVAL as DEFAULT_IDLE_DISCOVERY_INTERVAL;
 pub use discovery::DEFAULT_INTERVAL as DEFAULT_DISCOVERY_INTERVAL;
+pub use discovery::DEFAULT_MAX_INTERVAL as DEFAULT_MAX_DISCOVERY_INTERVAL;
 pub use error::DaemonError;
 pub use evidence::EvidenceSources;
 pub use log::{EventLog, LogError, MemoryLog};
