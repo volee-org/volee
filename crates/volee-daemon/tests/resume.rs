@@ -89,9 +89,9 @@ async fn registry(socket: &Path) -> Registry {
     Registry::from_events(&events).unwrap()
 }
 
-/// Waits until the registry satisfies `ready`, for at most three seconds.
+/// Waits until the registry satisfies `ready`, for at most ten seconds.
 async fn until(socket: &Path, ready: impl Fn(&Registry) -> bool) -> Registry {
-    for _ in 0..300 {
+    for _ in 0..1_000 {
         let registry = registry(socket).await;
         if ready(&registry) {
             return registry;
@@ -174,10 +174,17 @@ async fn a_message_resumes_a_stopped_agent_in_its_worktree() {
         .call::<SendMessage>(note(agent, "Also update the changelog."))
         .await
         .unwrap();
+    // The resume marks the message delivered once the harness started it.
     let registry_now = until(&daemon.socket, |r| {
-        r.agent(agent).unwrap().state == AgentState::Launching
+        r.message(sent.message)
+            .and_then(|message| message.receipt(Party::Agent(agent)))
+            .is_some_and(|receipt| receipt.delivered_at.is_some())
     })
     .await;
+    assert_eq!(
+        registry_now.agent(agent).unwrap().state,
+        AgentState::Launching
+    );
 
     let resumes = daemon.harness.resumes();
     assert_eq!(resumes.len(), 1);

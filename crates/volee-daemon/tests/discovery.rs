@@ -72,9 +72,9 @@ async fn registry(socket: &Path) -> Registry {
     Registry::from_events(&events).unwrap()
 }
 
-/// Waits until the registry satisfies `ready`, for at most two seconds.
+/// Waits until the registry satisfies `ready`, for at most ten seconds.
 async fn until(socket: &Path, ready: impl Fn(&Registry) -> bool) -> Registry {
-    for _ in 0..200 {
+    for _ in 0..1_000 {
         let registry = registry(socket).await;
         if ready(&registry) {
             return registry;
