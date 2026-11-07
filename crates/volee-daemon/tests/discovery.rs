@@ -19,7 +19,9 @@ use volee_core::{Event, Registry};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_harness::Harness;
 use volee_proto::client::Client;
-use volee_proto::methods::{EventsSince, SinceParams, Subscribe, SubscribeParams};
+use volee_proto::methods::{
+    EventsSince, RefreshDiscovery, RefreshParams, SinceParams, Subscribe, SubscribeParams,
+};
 use volee_proto::paths::Paths;
 
 fn session(id: &str, name: &str, state: AgentState, alive: bool) -> ListedSession {
@@ -270,4 +272,115 @@ async fn a_session_that_disappears_is_not_marked_done() {
     .await;
     let agent = registry.agents().next().unwrap();
     assert_ne!(agent.state, AgentState::Done, "gone is not done");
+}
+
+/// Asks the daemon for a listing now, as `volee ls` does.
+async fn refresh(socket: &Path, timeout_ms: Option<u64>) -> bool {
+    let client = Client::connect(socket).await.unwrap();
+    client
+        .call::<RefreshDiscovery>(RefreshParams { timeout_ms })
+        .await
+        .unwrap()
+        .listed
+}
+
+#[tokio::test]
+async fn a_refresh_lists_at_once_and_answers_once_the_listing_is_applied() {
+    // Both waits last an hour: only the request can cause a listing.
+    let daemon = start_with(HOUR, HOUR);
+    eventually("the daemon lists once when it starts", || {
+        daemon.harness.listings() == 1
+    })
+    .await;
+    daemon.harness.set(vec![session(
+        "eeee5555-0000",
+        "hotfix",
+        AgentState::Working,
+        true,
+    )]);
+    assert!(refresh(&daemon.socket, None).await);
+    // Read once, right after the answer: the session is already an agent.
+    let registry = registry(&daemon.socket).await;
+    assert_eq!(registry.agents().next().unwrap().name, "hotfix");
+    assert_eq!(daemon.harness.listings(), 2);
+}
+
+#[tokio::test]
+async fn concurrent_refreshes_share_a_listing() {
+    let daemon = start_with(HOUR, HOUR);
+    eventually("the daemon lists once when it starts", || {
+        daemon.harness.listings() == 1
+    })
+    .await;
+    // Slow listings: every request arrives while the first one runs.
+    daemon.harness.slow_listings(Duration::from_millis(300));
+    let requests: Vec<_> = (0..5)
+        .map(|_| {
+            let socket = daemon.socket.clone();
+            tokio::spawn(async move { refresh(&socket, None).await })
+        })
+        .collect();
+    for request in requests {
+        assert!(request.await.unwrap());
+    }
+    // The listing at start, the one the requests caused, and at most one
+    // more for requests that came in once it had started.
+    assert!(
+        daemon.harness.listings() <= 3,
+        "{}",
+        daemon.harness.listings()
+    );
+}
+
+#[tokio::test]
+async fn a_refresh_gives_up_after_its_timeout_and_the_listing_goes_on() {
+    let daemon = start_with(HOUR, HOUR);
+    eventually("the daemon lists once when it starts", || {
+        daemon.harness.listings() == 1
+    })
+    .await;
+    daemon.harness.slow_listings(Duration::from_millis(500));
+    let asked = tokio::time::Instant::now();
+    assert!(!refresh(&daemon.socket, Some(50)).await);
+    assert!(asked.elapsed() < Duration::from_millis(450));
+    eventually("the listing completes anyway", || {
+        daemon.harness.listings() == 2
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_failed_listing_is_not_a_fresh_one() {
+    let daemon = start_with(HOUR, HOUR);
+    eventually("the daemon lists once when it starts", || {
+        daemon.harness.listings() == 1
+    })
+    .await;
+    daemon.harness.fail(true);
+    assert!(!refresh(&daemon.socket, None).await);
+    assert_eq!(daemon.harness.listings(), 2, "it was tried");
+}
+
+#[tokio::test]
+async fn without_a_harness_a_refresh_answers_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::rooted(dir.path());
+    let socket = paths.socket.clone();
+    let listener = UnixListener::bind(&socket).unwrap();
+    let config = Config {
+        paths,
+        log: Box::new(MemoryLog::with(vec![])),
+        clock: Arc::new(ManualClock::at(10_000)),
+        harnesses: vec![],
+        spool: None,
+        harness: None,
+        discovery_interval: HOUR,
+        idle_discovery_interval: HOUR,
+        evidence: EvidenceSources::default(),
+        volee_bin: None,
+    };
+    tokio::spawn(Daemon::serve(listener, config));
+    let asked = tokio::time::Instant::now();
+    assert!(!refresh(&socket, Some(5_000)).await);
+    assert!(asked.elapsed() < Duration::from_secs(4), "no waiting");
 }

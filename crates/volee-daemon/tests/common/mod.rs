@@ -31,12 +31,19 @@ pub(crate) struct FakeHarness {
     sessions_gone: Mutex<bool>,
     keep_on_remove: Mutex<bool>,
     listings: Mutex<usize>,
+    listing_delay: Mutex<Duration>,
 }
 
 impl FakeHarness {
     /// How many times the daemon listed sessions so far.
     pub(crate) fn listings(&self) -> usize {
         *self.listings.lock().unwrap()
+    }
+
+    /// Makes each listing take `delay`, like `claude agents` on a loaded
+    /// machine.
+    pub(crate) fn slow_listings(&self, delay: Duration) {
+        *self.listing_delay.lock().unwrap() = delay;
     }
 
     /// Makes `remove` answer as Claude Code does for a worktree it did not
@@ -127,6 +134,8 @@ impl Harness for FakeHarness {
 
     fn list(&self) -> Result<Listing, HarnessError> {
         *self.listings.lock().unwrap() += 1;
+        let delay = *self.listing_delay.lock().unwrap();
+        std::thread::sleep(delay);
         if *self.failing.lock().unwrap() {
             return Err(unsupported("agents"));
         }

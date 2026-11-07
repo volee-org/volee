@@ -83,8 +83,11 @@ agents --json --all`: when it starts, then every two seconds while an
 interactive client (the interface) is subscribed, and every thirty seconds
 otherwise (`discovery_interval` and `idle_discovery_interval` of its
 configuration). A new interactive subscription triggers a listing at once,
-so the interface opens on fresh data. Each wait starts when the previous
-listing ends, so a slow listing on a loaded machine never runs back to back.
+so the interface opens on fresh data, and so does a `discovery.refresh`
+request, which answers once a listing that started after it is applied
+(`volee ls` sends one; requests made meanwhile share the listing). Each wait
+starts when the previous listing ends, so a slow listing on a loaded machine
+never runs back to back.
 Agents volee launched report through their hooks in real time either way;
 only sessions started elsewhere, and sessions that end without a word, show
 up later while nobody watches. The listing runs outside the state lock, so a

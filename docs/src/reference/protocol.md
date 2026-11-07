@@ -20,6 +20,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `daemon.shutdown` | none | none; the daemon stops after answering |
 | `events.since` | `after` (sequence number, optional) | `events` (sequence number and event), `last_seq` |
 | `events.subscribe` | `after` (optional), `interactive` (optional, `false` by default) | the same batch, then `events.appended` notifications |
+| `discovery.refresh` | `timeout_ms` (optional: 3,000 by default, 10,000 at most) | `listed`: whether a listing that started after the request was applied in time |
 | `agents.forget` | `agent` | none |
 | `agents.preview` | `agent` | `screen`: the agent's recent terminal output, with its escape sequences |
 | `agents.diff` | `agent`, optional `full` | `text`: a summary by file, or the full patch; `truncated` |
@@ -127,6 +128,14 @@ on fresh data ([discovery](../architecture/domain.md#reconciliation)). The
 subscription stops counting when it ends or its connection closes. Programs,
 such as an agent's MCP server, leave it `false`: agents volee launched
 report through their hooks in real time anyway.
+
+A one-off command that wants the sessions as they are now, such as
+`volee ls`, sends `discovery.refresh` before `events.since`. The daemon
+lists at once and answers when a listing that started after the request is
+applied, or when `timeout_ms` runs out; the listing then still completes in
+the background. Requests made while a listing runs share the next one.
+`listed` is `false` without a harness, after a failed listing, or after the
+timeout: the events then show the last listing, as before.
 
 Rust clients get all of this from `volee_proto::replica`: `subscribe` returns
 the backlog and a feed of the events that follow, which drops repeats and

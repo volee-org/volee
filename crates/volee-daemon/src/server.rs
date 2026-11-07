@@ -22,7 +22,7 @@ use volee_proto::paths::Paths;
 use volee_proto::rpc::{self, Id, Notification, Outcome, Request, Response, RpcError, Version2};
 
 use crate::clock::Clock;
-use crate::discovery::Cadence;
+use crate::discovery::{Cadence, Refreshes};
 use crate::error::DaemonError;
 use crate::evidence::EvidenceSources;
 use crate::handlers::{dispatch, parse};
@@ -82,6 +82,8 @@ pub(crate) struct Shared {
     pub(crate) paths: Paths,
     /// The interactive subscriptions open now, which set discovery's pace.
     pub(crate) watchers: Watchers,
+    /// Requests for a listing now, and how listings progress.
+    pub(crate) refreshes: Refreshes,
     /// Agents being launched for each mission, counted against its limit.
     pub(crate) slots: crate::launch::Slots,
     /// What the evidence refresher learned about the forge, once it checked.
@@ -146,6 +148,7 @@ impl Daemon {
             volee_bin: config.volee_bin,
             paths: config.paths,
             watchers: Watchers::new(),
+            refreshes: Refreshes::new(),
             slots: crate::launch::Slots::default(),
             forge: std::sync::Mutex::new(None),
             shutdown,
