@@ -11,8 +11,8 @@ use volee_core::ids::ThreadId;
 use volee_core::message::{Message, Party, Receipt, Thread};
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
-use volee_core::{Agent, AgentId, Event, EventKind};
-use volee_harness::hooks::{HookPayload, HookSignal, SessionSource, interpret};
+use volee_core::{Agent, AgentId, Event, EventKind, Registry};
+use volee_harness::hooks::{HookPayload, HookSignal, SessionSource, interpret, stop_block_output};
 use volee_proto::PROTOCOL_VERSION;
 use volee_proto::methods::{
     AbortMission, AgentParams, CloseMission, CreateMission, Empty, EventBatch, EventsSince, Forget,
@@ -22,7 +22,6 @@ use volee_proto::methods::{
 };
 use volee_proto::rpc::{self, RpcError};
 
-use crate::delivery::{sender_label, stop_block_output};
 use crate::error::DaemonError;
 use crate::server::Shared;
 use crate::state::State;
@@ -464,6 +463,18 @@ fn session_start_events(
         ));
     }
     events
+}
+
+/// A party as thread titles name it.
+fn sender_label(registry: &Registry, party: Party) -> String {
+    match party {
+        Party::Human => "the human".to_owned(),
+        Party::System => "volee".to_owned(),
+        Party::Agent(id) => registry.agent(id).map_or_else(
+            || id.to_string(),
+            |agent| format!("{} ({})", agent.name, agent.role),
+        ),
+    }
 }
 
 /// The first line of `text`, cut to `max` characters.

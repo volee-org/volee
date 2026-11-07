@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde_json::Value;
 use volee_core::harness::{HarnessKind, SessionKey};
 use volee_core::ids::AgentId;
-use volee_core::reconcile::Listing;
+use volee_core::reconcile::{ListedSession, Listing};
 
 use crate::error::HarnessError;
 use crate::spec::{SpawnSpec, Spawned};
@@ -29,10 +29,29 @@ pub struct Capabilities {
     pub background_sessions: bool,
 }
 
+/// What [`Harness::remove`] may do when the session works in a git worktree,
+/// which the harness may delete along with the session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorktreeRemoval {
+    /// Refuse to remove a session whose directory is inside a linked git
+    /// worktree.
+    Refuse,
+    /// The work in the session's worktree is delivered: the daemon passes
+    /// this only after `volee_core::delivery::tidy_verdict` allowed tidying
+    /// the agent
+    /// ([ADR 0011](https://volee-org.github.io/volee/adr/0011-safety-and-delivery-evidence.html)).
+    Delivered,
+}
+
 /// A coding harness, as the daemon sees it.
 ///
 /// Every method blocks until the harness's command finishes (each one has a
 /// timeout). Implementations are shared between threads.
+///
+/// Sessions are acted on as the harness last listed them: the listing gives
+/// the handle the harness takes in its commands. A session without a handle
+/// (for Claude Code, an interactive session) cannot be stopped, removed,
+/// previewed or attached: [`HarnessError::NotControllable`].
 ///
 /// Safety rules stay with the caller: volee stops and removes only sessions
 /// it launched, and never on a guess
@@ -59,26 +78,32 @@ pub trait Harness: fmt::Debug + Send + Sync {
 
     /// Stops a background session. Its conversation is kept and can be
     /// resumed.
-    fn stop(&self, session: &SessionKey) -> Result<(), HarnessError>;
+    fn stop(&self, session: &ListedSession) -> Result<(), HarnessError>;
 
-    /// Deletes a background session.
-    fn remove(&self, session: &SessionKey) -> Result<(), HarnessError>;
+    /// Deletes a background session. A session that works in a git worktree
+    /// is removed only with [`WorktreeRemoval::Delivered`].
+    fn remove(
+        &self,
+        session: &ListedSession,
+        worktree: WorktreeRemoval,
+    ) -> Result<(), HarnessError>;
 
     /// The session's recent terminal output, as raw bytes with terminal
     /// escape sequences, for previews.
-    fn logs(&self, session: &SessionKey) -> Result<Vec<u8>, HarnessError>;
+    fn logs(&self, session: &ListedSession) -> Result<Vec<u8>, HarnessError>;
 
     /// The command that opens the session in the current terminal, for
     /// taking it over. The caller runs it with inherited standard streams
     /// after releasing the terminal.
-    fn attach_command(&self, session: &SessionKey) -> Result<Command, HarnessError>;
+    fn attach_command(&self, session: &ListedSession) -> Result<Command, HarnessError>;
 
-    /// The per-agent settings that connect the agent's hooks to volee,
-    /// written to the file passed as [`SpawnSpec::settings_file`].
+    /// The per-agent settings that connect the agent's hooks to volee and
+    /// allow its volee tools, written to the file passed as
+    /// [`SpawnSpec::settings_file`].
     ///
     /// `volee_bin` is the absolute path of the `volee` binary the hooks run;
-    /// `rewake_timeout` bounds how long an idle agent's message waiter may
-    /// wait before the harness ends it.
+    /// `rewake_timeout` bounds how long an idle agent's message waiter waits
+    /// (at most a day).
     fn agent_settings(
         &self,
         volee_bin: &Path,

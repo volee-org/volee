@@ -69,7 +69,7 @@ mod version;
 
 pub use claude::ClaudeCode;
 pub use error::{HarnessError, ParseError, RequestError};
-pub use harness::{Capabilities, Harness};
+pub use harness::{Capabilities, Harness, WorktreeRemoval};
 pub use runner::{CommandRunner, Invocation, Output, RunError, SystemRunner};
 pub use spec::{PermissionMode, SpawnSpec, Spawned};
 pub use version::{ParseVersionError, Version};

@@ -16,8 +16,8 @@ fn signal(json: &str) -> HookSignal {
 }
 
 const SESSION_START: &str = r#"{
-  "session_id": "4402670e-5b60-4cdc-8cf3-be456e780815",
-  "transcript_path": "/Users/me/.claude/projects/-work-alpha/4402670e-5b60-4cdc-8cf3-be456e780815.jsonl",
+  "session_id": "7d3c1f0a-2b4e-4c6d-9e8f-0a1b2c3d4e5f",
+  "transcript_path": "/Users/me/.claude/projects/-work-alpha/7d3c1f0a-2b4e-4c6d-9e8f-0a1b2c3d4e5f.jsonl",
   "cwd": "/work/alpha",
   "hook_event_name": "SessionStart",
   "model": "claude-opus-5",
@@ -31,12 +31,12 @@ fn session_start() {
     assert_eq!(
         signal(SESSION_START),
         HookSignal::SessionStarted {
-            session_id: "4402670e-5b60-4cdc-8cf3-be456e780815".into(),
+            session_id: "7d3c1f0a-2b4e-4c6d-9e8f-0a1b2c3d4e5f".into(),
             source: Some(SessionSource::Startup),
             model: Some("claude-opus-5".into()),
             title: Some("alpha worker".into()),
             transcript_path: Some(PathBuf::from(
-                "/Users/me/.claude/projects/-work-alpha/4402670e-5b60-4cdc-8cf3-be456e780815.jsonl"
+                "/Users/me/.claude/projects/-work-alpha/7d3c1f0a-2b4e-4c6d-9e8f-0a1b2c3d4e5f.jsonl"
             )),
         }
     );

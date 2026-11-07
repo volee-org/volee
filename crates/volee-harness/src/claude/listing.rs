@@ -7,6 +7,7 @@ use serde_json::Value;
 use volee_core::harness::{HarnessKind, SessionKey};
 use volee_core::reconcile::{ListedSession, Listing};
 use volee_core::state::{AgentState, InputRequest};
+use volee_core::time::Timestamp;
 
 use crate::error::ParseError;
 use crate::lenient;
@@ -19,6 +20,10 @@ use crate::lenient;
 #[serde(rename_all = "camelCase")]
 struct RawSession {
     session_id: String,
+    /// Background sessions only: the id `stop`, `rm`, `logs` and `attach`
+    /// take.
+    #[serde(default, deserialize_with = "lenient::optional")]
+    id: Option<String>,
     #[serde(default, deserialize_with = "lenient::optional")]
     cwd: Option<PathBuf>,
     /// `interactive` or `background`.
@@ -26,6 +31,9 @@ struct RawSession {
     kind: Option<String>,
     #[serde(default, deserialize_with = "lenient::optional")]
     name: Option<String>,
+    /// Milliseconds since the Unix epoch.
+    #[serde(default, deserialize_with = "lenient::optional")]
+    started_at: Option<i64>,
     /// Background sessions only: `working`, `blocked`, `done`, `failed` or
     /// `stopped`.
     #[serde(default, deserialize_with = "lenient::optional")]
@@ -56,18 +64,27 @@ impl RawSession {
             cwd: self.cwd.unwrap_or_default(),
             alive,
             background: self.kind.as_deref() == Some("background"),
+            handle: self.id.filter(|id| !id.trim().is_empty()),
+            pid: self
+                .pid
+                .as_ref()
+                .and_then(Value::as_u64)
+                .and_then(|pid| u32::try_from(pid).ok()),
+            started_at: self.started_at.map(Timestamp::from_millis),
         }
     }
 }
 
 /// Maps the output of `claude agents --json --all` to a [`Listing`].
 ///
-/// Each session is keyed by its session UUID, is alive while it has a
-/// process id, and is a background session when its kind is `background`;
-/// [`session_state`] maps its state. The listing is complete (it includes
-/// finished sessions) unless an element could not be read: such an element
-/// is skipped and the listing is marked incomplete, so that it can never make
-/// a session look gone.
+/// Each session is keyed by its session UUID, keeps the `id` Claude Code
+/// takes in its commands as its [`handle`](ListedSession::handle) (only
+/// background sessions have one), is alive while it has a process id, and
+/// is a background session when its kind is `background`; [`session_state`]
+/// maps its state. The listing is complete (it includes finished sessions)
+/// unless an element could not be read: such an element is skipped and the
+/// listing is marked incomplete, so that it can never make a session look
+/// gone.
 pub fn parse_listing(stdout: &[u8]) -> Result<Listing, ParseError> {
     let elements: Vec<Value> = serde_json::from_slice(stdout).map_err(ParseError::Listing)?;
     let mut complete = true;
@@ -164,10 +181,11 @@ pub fn input_request(waiting_for: &str) -> InputRequest {
 mod tests {
     use super::*;
 
-    /// The two elements measured on Claude Code 2.1.319, verbatim.
-    const MEASURED: &str = r#"[
-{"id":"4402670e","cwd":"/Users/jeff/Developer/414Aptitudes/wibeo","kind":"background","startedAt":1790611230754,"sessionId":"4402670e-5b60-4cdc-8cf3-be456e780815","name":"neon billing investigation","state":"done"},
-{"pid":95631,"id":"b60aa3b9","cwd":"/Users/jeff/Developer/Labs/tuios-cockpit/.claude/worktrees/fix-x","kind":"background","startedAt":1793984015804,"sessionId":"b60aa3b9-73ea-4599-91a5-0725e0c83482","name":"cockpit open launch failure","status":"busy","state":"working"}
+    /// Two elements shaped exactly like Claude Code 2.1.319's output (same
+    /// keys and value types), with invented values.
+    const SAMPLE: &str = r#"[
+{"id":"7d3c1f0a","cwd":"/Users/me/work/alpha","kind":"background","startedAt":1790000000000,"sessionId":"7d3c1f0a-2b4e-4c6d-9e8f-0a1b2c3d4e5f","name":"refactor the parser","state":"done"},
+{"pid":4242,"id":"c4e5a6b7","cwd":"/Users/me/work/beta/.claude/worktrees/fix-login","kind":"background","startedAt":1790000360000,"sessionId":"c4e5a6b7-8901-4cde-8f01-23456789abcd","name":"fix the login flow","status":"busy","state":"working"}
 ]"#;
 
     fn parse(json: &str) -> Listing {
@@ -185,28 +203,34 @@ mod tests {
     }
 
     #[test]
-    fn maps_the_measured_elements() {
-        let listing = parse(MEASURED);
+    fn maps_elements_shaped_like_claude_output() {
+        let listing = parse(SAMPLE);
         assert_eq!(listing.harness, HarnessKind::ClaudeCode);
         assert!(listing.complete);
         assert_eq!(
             listing.sessions,
             [
                 ListedSession {
-                    key: SessionKey::claude("4402670e-5b60-4cdc-8cf3-be456e780815"),
-                    name: Some("neon billing investigation".into()),
-                    cwd: "/Users/jeff/Developer/414Aptitudes/wibeo".into(),
+                    key: SessionKey::claude("7d3c1f0a-2b4e-4c6d-9e8f-0a1b2c3d4e5f"),
+                    name: Some("refactor the parser".into()),
+                    cwd: "/Users/me/work/alpha".into(),
                     state: AgentState::Stopped,
                     alive: false,
                     background: true,
+                    handle: Some("7d3c1f0a".into()),
+                    pid: None,
+                    started_at: Some(Timestamp::from_millis(1_790_000_000_000)),
                 },
                 ListedSession {
-                    key: SessionKey::claude("b60aa3b9-73ea-4599-91a5-0725e0c83482"),
-                    name: Some("cockpit open launch failure".into()),
-                    cwd: "/Users/jeff/Developer/Labs/tuios-cockpit/.claude/worktrees/fix-x".into(),
+                    key: SessionKey::claude("c4e5a6b7-8901-4cde-8f01-23456789abcd"),
+                    name: Some("fix the login flow".into()),
+                    cwd: "/Users/me/work/beta/.claude/worktrees/fix-login".into(),
                     state: AgentState::Working,
                     alive: true,
                     background: true,
+                    handle: Some("c4e5a6b7".into()),
+                    pid: Some(4242),
+                    started_at: Some(Timestamp::from_millis(1_790_000_360_000)),
                 },
             ]
         );
@@ -224,6 +248,9 @@ mod tests {
         assert!(busy.alive);
         assert!(!busy.background);
         assert_eq!(busy.name, None, "an empty name is no name");
+        assert_eq!(busy.handle, None, "interactive sessions have no id");
+        assert_eq!(busy.pid, Some(1));
+        assert_eq!(busy.started_at, Some(Timestamp::from_millis(1)));
         assert_eq!(
             session("waiting").state,
             needs(InputRequest::Other {
@@ -335,6 +362,20 @@ mod tests {
         assert_eq!(session.name, None);
         assert!(session.alive);
         assert!(!session.background, "an unreadable kind is not background");
+        assert_eq!(session.started_at, None, "an unreadable start is no start");
+        assert_eq!(session.handle, None);
+    }
+
+    #[test]
+    fn odd_process_ids_and_handles_are_dropped_not_fatal() {
+        let session = only(
+            r#"[{"sessionId":"eeee5555-0000-0000-0000-000000000000","id":"  ","pid":"1234"}]"#,
+        );
+        assert!(session.alive, "a pid of any type means a live process");
+        assert_eq!(session.pid, None);
+        assert_eq!(session.handle, None, "a blank id is no handle");
+        let huge = only(r#"[{"sessionId":"s","pid":99999999999}]"#);
+        assert_eq!(huge.pid, None);
     }
 
     #[test]

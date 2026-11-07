@@ -16,7 +16,9 @@ use volee_core::reconcile::{ListedSession, Listing};
 use volee_core::state::AgentState;
 use volee_core::{AgentId, Event, Registry};
 use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
-use volee_harness::{Capabilities, Harness, HarnessError, SpawnSpec, Spawned, Version};
+use volee_harness::{
+    Capabilities, Harness, HarnessError, SpawnSpec, Spawned, Version, WorktreeRemoval,
+};
 use volee_proto::client::Client;
 use volee_proto::methods::{EventsSince, SinceParams};
 use volee_proto::paths::Paths;
@@ -78,19 +80,19 @@ impl Harness for FakeHarness {
         Err(unsupported("resume"))
     }
 
-    fn stop(&self, _: &SessionKey) -> Result<(), HarnessError> {
+    fn stop(&self, _: &ListedSession) -> Result<(), HarnessError> {
         Err(unsupported("stop"))
     }
 
-    fn remove(&self, _: &SessionKey) -> Result<(), HarnessError> {
+    fn remove(&self, _: &ListedSession, _: WorktreeRemoval) -> Result<(), HarnessError> {
         Err(unsupported("remove"))
     }
 
-    fn logs(&self, _: &SessionKey) -> Result<Vec<u8>, HarnessError> {
+    fn logs(&self, _: &ListedSession) -> Result<Vec<u8>, HarnessError> {
         Err(unsupported("logs"))
     }
 
-    fn attach_command(&self, _: &SessionKey) -> Result<Command, HarnessError> {
+    fn attach_command(&self, _: &ListedSession) -> Result<Command, HarnessError> {
         Err(unsupported("attach"))
     }
 
@@ -104,14 +106,12 @@ impl Harness for FakeHarness {
 }
 
 fn session(id: &str, name: &str, state: AgentState, alive: bool) -> ListedSession {
-    ListedSession {
-        key: SessionKey::claude(id),
-        name: Some(name.to_owned()),
-        cwd: PathBuf::from("/work/alpha"),
-        state,
-        alive,
-        background: true,
-    }
+    let mut session = ListedSession::new(SessionKey::claude(id), "/work/alpha", state);
+    session.name = Some(name.to_owned());
+    session.alive = alive;
+    session.background = true;
+    session.handle = Some(id[..8].to_owned());
+    session
 }
 
 struct Running {
