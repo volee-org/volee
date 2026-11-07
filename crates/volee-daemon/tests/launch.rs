@@ -129,6 +129,7 @@ fn start_prepared(extra: &str, prepare: impl FnOnce(&Path) -> Vec<Event>) -> Run
             ..EvidenceSources::default()
         },
         volee_bin: Some(PathBuf::from("/opt/volee/bin/volee")),
+        multiplexers: Vec::new(),
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

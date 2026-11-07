@@ -73,6 +73,7 @@ fn start() -> Running {
             ..EvidenceSources::default()
         },
         volee_bin: Some(PathBuf::from("/opt/volee/bin/volee")),
+        multiplexers: Vec::new(),
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

@@ -1781,6 +1781,7 @@ dependencies = [
  "volee-git",
  "volee-harness",
  "volee-mcp",
+ "volee-mux",
  "volee-proto",
  "volee-store",
  "volee-tui",
@@ -1821,6 +1822,7 @@ dependencies = [
  "volee-core",
  "volee-git",
  "volee-harness",
+ "volee-mux",
  "volee-proto",
  "volee-store",
 ]
@@ -1867,6 +1869,18 @@ dependencies = [
  "volee-core",
  "volee-daemon",
  "volee-proto",
+]
+
+[[package]]
+name = "volee-mux"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+ "volee-core",
+ "volee-harness",
 ]
 
 [[package]]

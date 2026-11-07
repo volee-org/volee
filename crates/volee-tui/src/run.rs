@@ -71,6 +71,11 @@ pub(crate) trait Screen {
     /// Starts a program with a window of its own, detached from this
     /// terminal, and does not wait for it.
     fn detach(&mut self, program: &TakeOver) -> io::Result<()>;
+
+    /// Runs the steps that bring a multiplexer pane forward, one after the
+    /// other, keeping the terminal: they print nothing on it. The first that
+    /// fails says why.
+    fn bring_forward(&mut self, steps: &[Vec<String>]) -> Result<(), String>;
 }
 
 /// Runs the loop until the person quits or the terminal goes away.
@@ -103,6 +108,14 @@ pub(crate) async fn event_loop<S: Screen, Src: Source>(
                         let (width, height) = screen.size()?;
                         queue.push_front(Msg::Resumed { agent, result });
                         queue.push_front(Msg::Resize { width, height });
+                    }
+                    Effect::FocusPane { agent, focus } => {
+                        let result = screen.bring_forward(&focus.steps);
+                        queue.push_front(Msg::PaneFocused {
+                            agent,
+                            focus,
+                            result,
+                        });
                     }
                     Effect::RunTool {
                         label,
@@ -221,7 +234,10 @@ fn run_request<Src: Source>(
             Msg::MissionCreated(source.create_mission(request).await)
         }),
         // The loop runs these itself.
-        Effect::Quit | Effect::TakeOver { .. } | Effect::RunTool { .. } => {}
+        Effect::Quit
+        | Effect::TakeOver { .. }
+        | Effect::FocusPane { .. }
+        | Effect::RunTool { .. } => {}
     }
 }
 
@@ -379,6 +395,30 @@ impl Screen for TerminalScreen {
         let mut child = command.spawn()?;
         // Reap it when it exits, so it does not linger as a zombie.
         std::thread::spawn(move || child.wait());
+        Ok(())
+    }
+
+    fn bring_forward(&mut self, steps: &[Vec<String>]) -> Result<(), String> {
+        for step in steps {
+            let Some((program, args)) = step.split_first() else {
+                continue;
+            };
+            let output = Command::new(program)
+                .args(args)
+                .stdin(Stdio::null())
+                .output()
+                .map_err(|error| format!("cannot run {program}: {error}"))?;
+            if !output.status.success() {
+                // The multiplexer's own words, from the first line it wrote.
+                let said = String::from_utf8_lossy(&output.stderr);
+                let said = said.lines().next().unwrap_or_default().trim();
+                return Err(if said.is_empty() {
+                    format!("{program} ended with {}", output.status)
+                } else {
+                    format!("{program} says: {said}")
+                });
+            }
+        }
         Ok(())
     }
 
@@ -540,6 +580,13 @@ mod tests {
             self.taken_over.push(format!("{} &", program.program));
             Ok(())
         }
+
+        fn bring_forward(&mut self, steps: &[Vec<String>]) -> Result<(), String> {
+            for step in steps {
+                self.taken_over.push(step.join(" "));
+            }
+            Ok(())
+        }
     }
 
     fn key(c: char) -> Input {
@@ -612,6 +659,60 @@ mod tests {
                 .notice
                 .as_ref()
                 .is_some_and(|n| n.text.starts_with("Back from"))
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pane_is_brought_forward_without_giving_up_the_terminal() {
+        let start = Timestamp::from_millis(1_793_986_617_000);
+        let clock = ManualClock::new(start);
+        let source = DemoSource::new(Arc::new(clock.clone()));
+        let Subscription { updates, .. } = source.subscribe().await.unwrap();
+        let (mut screen, send) = screen(120, 40);
+        let mut model = Model::new(Theme::default(), Keymap::default(), None, (120, 40), start);
+        let step = |words: &[&str]| words.iter().map(|word| (*word).to_owned()).collect();
+        let take_over = TakeOver {
+            program: String::new(),
+            args: Vec::new(),
+            cwd: None,
+            env_remove: Vec::new(),
+            hint: None,
+            focus: Some(crate::source::PaneFocus {
+                multiplexer: "tuios".into(),
+                session: "work".into(),
+                steps: vec![
+                    step(&["tuios", "focus-window", "-s", "work", "3f2a"]),
+                    step(&["tuios", "switch-session", "work"]),
+                ],
+            }),
+        };
+        type_later(send, vec![vec![key('q')]]);
+        let agent = crate::demo::agent_id(start, crate::demo::INFRA);
+        event_loop(
+            &mut screen,
+            Arc::new(source),
+            updates,
+            &mut model,
+            &clock,
+            Msg::TakeOverReady {
+                agent,
+                result: Ok(take_over),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            screen.taken_over,
+            [
+                "tuios focus-window -s work 3f2a",
+                "tuios switch-session work"
+            ]
+        );
+        let notice = model.notice.as_ref().unwrap();
+        assert!(
+            notice
+                .text
+                .ends_with("is in front: tuios pane, session work.")
         );
     }
 

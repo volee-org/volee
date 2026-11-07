@@ -83,6 +83,7 @@ fn start(summaries: bool) -> Running {
             ..EvidenceSources::default()
         },
         volee_bin: None,
+        multiplexers: Vec::new(),
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

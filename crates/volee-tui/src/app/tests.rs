@@ -15,7 +15,7 @@ use crate::demo::{
     DemoSource, EXPLORE_HANDLERS, INFRA, INVOICE_PAGE, INVOICE_SCHEMA, INVOICE_TOOLS, INVOICING,
     LATENCY_AUDIT, TOWER, TRACE_GATEWAY,
 };
-use crate::source::{Changes, Outgoing, SourceError, TakeOver};
+use crate::source::{Changes, Outgoing, PaneFocus, SourceError, TakeOver};
 use crate::views::hierarchy::Zoom;
 use crate::views::timeline::Scale;
 
@@ -292,6 +292,7 @@ fn a_asks_the_source_then_takes_over_the_selected_agent() {
         cwd: None,
         env_remove: vec!["CLAUDE_CODE_SESSION_ID".into()],
         hint: Some("Press Ctrl+Z to come back.".into()),
+        focus: None,
     };
     let effects = update(
         &mut model,
@@ -344,6 +345,69 @@ fn a_asks_the_source_then_takes_over_the_selected_agent() {
         press(&mut model, "a"),
         [Effect::PrepareTakeOver(schema)],
         "the next take over can start"
+    );
+}
+
+#[test]
+fn an_agent_in_a_pane_is_brought_forward_instead_of_taken_over() {
+    let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    press(&mut model, "'s");
+    assert_eq!(press(&mut model, "a"), [Effect::PrepareTakeOver(schema)]);
+    let focus = PaneFocus {
+        multiplexer: "tuios".into(),
+        session: "work".into(),
+        steps: vec![vec!["tuios".into(), "switch-session".into(), "work".into()]],
+    };
+    let effects = update(
+        &mut model,
+        Msg::TakeOverReady {
+            agent: schema,
+            result: Ok(TakeOver {
+                program: String::new(),
+                args: Vec::new(),
+                cwd: None,
+                env_remove: Vec::new(),
+                hint: None,
+                focus: Some(focus.clone()),
+            }),
+        },
+    );
+    assert_eq!(
+        effects,
+        [Effect::FocusPane {
+            agent: schema,
+            focus: focus.clone()
+        }]
+    );
+    update(
+        &mut model,
+        Msg::PaneFocused {
+            agent: schema,
+            focus: focus.clone(),
+            result: Ok(()),
+        },
+    );
+    let notice = model.notice.as_ref().unwrap();
+    assert!(!notice.error);
+    assert_eq!(
+        notice.text,
+        "invoice-schema is in front: tuios pane, session work."
+    );
+    update(
+        &mut model,
+        Msg::PaneFocused {
+            agent: schema,
+            focus,
+            result: Err("tuios says: no window named 3f2a in session work".into()),
+        },
+    );
+    let notice = model.notice.as_ref().unwrap();
+    assert!(notice.error);
+    assert_eq!(
+        notice.text,
+        "Could not bring invoice-schema forward in tuios: tuios says: no window named 3f2a in \
+         session work."
     );
 }
 

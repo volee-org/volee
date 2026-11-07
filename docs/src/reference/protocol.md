@@ -109,6 +109,16 @@ session. `agents.stop` also refuses agents volee did not launch
 with the environment variables in `env_remove` removed; the harness keeps the
 agent running when the person comes back.
 
+An agent whose session runs in a multiplexer pane the daemon found
+([ADR 0015](../adr/0015-tuios-location-adapter.md)) is not refused:
+`agents.preview` returns what the pane shows, each row placed with a cursor
+move, and `agents.attach` returns an empty `program` and a `focus` object
+(`multiplexer`, `session`, `steps`). The client runs each step, a program and
+its arguments, in order, in its own environment and without giving up its
+terminal, so that the multiplexer acts on the person's own client.
+`daemon.status` lists the multiplexers the daemon uses in `multiplexers`,
+with whether each answers now.
+
 `agents.diff` compares the agent's worktree (committed and uncommitted
 changes, and the files it created) with the merge base of the branch it
 started from. The text is at most 512 KiB, cut at a line break when longer,

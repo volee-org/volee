@@ -21,6 +21,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0012](0012-language-license-and-scope.md) | Rust, dual MIT/Apache-2.0, Unix first | Accepted |
 | [0013](0013-worktrees-live-in-their-repository.md) | Agent worktrees live in their repository | Accepted |
 | [0014](0014-agents-of-other-harnesses-join-through-mcp.md) | Agents of other harnesses join through MCP | Accepted |
+| [0015](0015-tuios-location-adapter.md) | tuios is the first location adapter | Accepted |
 | [0016](0016-what-a-failed-launch-left-untouched.md) | Reuse or tidy what a failed launch left untouched (refines 0011) | Accepted |
 
 ## Not built yet
@@ -37,9 +38,10 @@ come:
 - [0006](0006-messaging.md): configurable routing policies, and a wake
   action for sessions volee did not launch, which cannot receive messages
   yet.
-- [0008](0008-multiplexers-are-optional.md): location adapters. 0.1.0 has
-  none: a session running in a pane is listed, and you switch to its pane
-  yourself.
+- [0008](0008-multiplexers-are-optional.md): location adapters for tmux
+  and Zellij. tuios has one ([0015](0015-tuios-location-adapter.md)); a
+  session running in another multiplexer's pane is listed, and you switch to
+  its pane yourself.
 - [0011](0011-safety-and-delivery-evidence.md): `volee tidy --force`. 0.1.0
   cannot remove a worktree without delivery evidence.
 - [0012](0012-language-license-and-scope.md): the Homebrew formula and the

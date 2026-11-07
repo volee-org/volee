@@ -8,7 +8,6 @@ use ratatui::text::Span;
 use volee_core::Agent;
 use volee_core::agent::Hold;
 use volee_core::time::Elapsed;
-use volee_core::workspace::Location;
 
 use super::{panel, put_spans, state_glyph, truncated};
 use crate::app::{Model, Pane};
@@ -116,15 +115,7 @@ fn facts(model: &Model, agent: &Agent) -> Vec<(&'static str, String)> {
     } else {
         facts.push(("folder", workspace.cwd.display().to_string()));
     }
-    let location = match &agent.location {
-        Location::Background => "background".to_owned(),
-        Location::Pane {
-            multiplexer,
-            target,
-        } => format!("{multiplexer} {target}"),
-        Location::Terminal => "a terminal".to_owned(),
-        Location::Unknown => "unknown".to_owned(),
-    };
+    let location = agent.location.label();
     let runs = match &agent.model {
         Some(model) => format!("{location} · {model}"),
         None => location,

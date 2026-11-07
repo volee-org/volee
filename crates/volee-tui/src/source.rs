@@ -166,10 +166,11 @@ pub struct Changes {
 }
 
 /// How to take over an agent: a program that runs in this terminal until
-/// the person comes back to volee.
+/// the person comes back to volee, or, for an agent in a terminal
+/// multiplexer pane, the steps that bring that pane forward.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TakeOver {
-    /// The program, such as `claude`.
+    /// The program, such as `claude`; empty when `focus` is given.
     pub program: String,
     /// Its arguments.
     pub args: Vec<String>,
@@ -181,6 +182,22 @@ pub struct TakeOver {
     /// A sentence telling the person how to come back, printed before the
     /// program starts.
     pub hint: Option<String>,
+    /// For an agent in a multiplexer pane (ADR 0015): the pane to bring
+    /// forward, instead of running `program`. The interface keeps the
+    /// terminal.
+    pub focus: Option<PaneFocus>,
+}
+
+/// How to bring forward the multiplexer pane an agent runs in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaneFocus {
+    /// The multiplexer, such as `tuios`.
+    pub multiplexer: String,
+    /// Its session that holds the pane, said for people.
+    pub session: String,
+    /// The commands to run, in order, in volee's own environment: each is a
+    /// program and its arguments.
+    pub steps: Vec<Vec<String>>,
 }
 
 /// Why a request to the source failed.

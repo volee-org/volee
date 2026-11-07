@@ -61,7 +61,8 @@ pub enum Location {
     Pane {
         /// The multiplexer, for example `tmux` or `tuios`.
         multiplexer: String,
-        /// The multiplexer's own address of the pane.
+        /// The multiplexer's own address of the pane, written
+        /// `<session>:<pane>` (ADR 0015).
         target: String,
     },
     /// In a terminal volee cannot address.
@@ -69,6 +70,28 @@ pub enum Location {
     /// Not known yet.
     #[default]
     Unknown,
+}
+
+impl Location {
+    /// Where the agent runs, said for people: `background`, the multiplexer
+    /// and the session that holds its pane (`tuios · work`), `a terminal`
+    /// or `unknown`.
+    pub fn label(&self) -> String {
+        match self {
+            Self::Background => "background".to_owned(),
+            Self::Pane {
+                multiplexer,
+                target,
+            } => {
+                let session = target
+                    .rsplit_once(':')
+                    .map_or(target.as_str(), |(session, _)| session);
+                format!("{multiplexer} · {session}")
+            }
+            Self::Terminal => "a terminal".to_owned(),
+            Self::Unknown => "unknown".to_owned(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -88,5 +111,21 @@ mod tests {
     #[test]
     fn location_defaults_to_unknown() {
         assert_eq!(Location::default(), Location::Unknown);
+    }
+
+    #[test]
+    fn a_pane_is_named_by_its_multiplexer_and_session() {
+        let pane = |target: &str| Location::Pane {
+            multiplexer: "tuios".into(),
+            target: target.into(),
+        };
+        assert_eq!(
+            pane("main-session:475fc3f0").label(),
+            "tuios · main-session"
+        );
+        assert_eq!(pane("build:api:3f2a").label(), "tuios · build:api");
+        assert_eq!(pane("plain").label(), "tuios · plain");
+        assert_eq!(Location::Terminal.label(), "a terminal");
+        assert_eq!(Location::Background.label(), "background");
     }
 }

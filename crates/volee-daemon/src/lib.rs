@@ -18,6 +18,7 @@ mod join;
 mod launch;
 mod log;
 mod missions;
+mod panes;
 mod resume;
 mod server;
 mod sqlite;

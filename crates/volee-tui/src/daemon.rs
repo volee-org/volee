@@ -23,8 +23,8 @@ use volee_proto::replica::{self, Feed, FeedEnd, ReplicaError, Updates};
 use volee_proto::rpc;
 
 use crate::source::{
-    Changes, MissionRequest, NewMission, Outgoing, Source, SourceError, SpawnRequest, Subscription,
-    Summary, TakeOver,
+    Changes, MissionRequest, NewMission, Outgoing, PaneFocus, Source, SourceError, SpawnRequest,
+    Subscription, Summary, TakeOver,
 };
 
 /// What the interface says once the daemon is gone.
@@ -169,6 +169,11 @@ impl Source for DaemonSource {
             cwd: command.cwd.map(PathBuf::from),
             env_remove: command.env_remove,
             hint: Some(command.hint).filter(|hint| !hint.trim().is_empty()),
+            focus: command.focus.map(|focus| PaneFocus {
+                multiplexer: focus.multiplexer,
+                session: focus.session,
+                steps: focus.steps,
+            }),
         })
     }
 
