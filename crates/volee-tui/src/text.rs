@@ -140,9 +140,50 @@ pub(crate) fn cursor_position(
     (row, width(&text[start..cursor.max(start)]))
 }
 
+/// `words` as one command line that a POSIX shell or fish runs as is: a word
+/// stays as it is when no shell treats its characters specially, and is
+/// single-quoted otherwise, such as an empty word or a name with a space.
+pub(crate) fn command_line(words: &[String]) -> String {
+    words
+        .iter()
+        .map(|word| shell_word(word))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn shell_word(word: &str) -> Cow<'_, str> {
+    let plain = !word.is_empty()
+        && word
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_-./:,+@%".contains(&byte));
+    if plain {
+        Cow::Borrowed(word)
+    } else {
+        Cow::Owned(format!("'{}'", word.replace('\'', r"'\''")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_lines_quote_only_what_a_shell_would_split() {
+        let words = |list: &[&str]| {
+            list.iter()
+                .map(|word| (*word).to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            command_line(&words(&["tuios", "attach", "work"])),
+            "tuios attach work"
+        );
+        assert_eq!(
+            command_line(&words(&["tuios", "--server", "", "attach", "my work"])),
+            "tuios --server '' attach 'my work'"
+        );
+        assert_eq!(command_line(&words(&["it's"])), r"'it'\''s'");
+    }
 
     #[test]
     fn messages_fit_into_sentences() {
