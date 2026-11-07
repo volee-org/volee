@@ -63,6 +63,7 @@ pub(crate) fn check() -> Result<()> {
     }
     println!("  wake timeout      {} s", config.agents.wake_timeout);
     println!("  worktrees         inside each repository, in .claude/worktrees");
+    println!("  background fetch  {}", config.git.fetch);
     if config.repos.is_empty() {
         println!("  repositories      none (add [repos.<name>] tables)");
     }

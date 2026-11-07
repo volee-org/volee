@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use tokio::net::UnixListener;
 use tokio::task::JoinHandle;
 use ulid::Ulid;
+use volee_config::Fetch;
 use volee_core::delivery::{ChecksState, PrState, PullRequest, PushState};
 use volee_core::harness::HarnessKind;
 use volee_core::message::{Party, Thread};
@@ -168,6 +169,18 @@ impl Sandbox {
         );
         (clone, worktree)
     }
+
+    /// A commit someone else pushed to `origin`'s `main` after the project
+    /// was cloned: only a fetch brings it to the clone.
+    fn pushed_by_a_teammate(&self) -> String {
+        let root = self.root.clone();
+        self.git(&root, &["clone", "--quiet", "origin.git", "teammate"]);
+        let teammate = self.path("teammate");
+        self.configure(&teammate);
+        let pushed = self.commit(&teammate, "NEWS.md", "News\n");
+        self.git(&teammate, &["push", "--quiet", "origin", "main"]);
+        pushed
+    }
 }
 
 /// A forge that answers what the test says, and counts lookups.
@@ -203,12 +216,22 @@ impl Forge for FakeForge {
 }
 
 fn registered(n: u128, role: Role, cwd: &Path, mission: Option<MissionId>) -> Event {
+    registered_by(n, role, cwd, mission, LaunchedBy::Human)
+}
+
+fn registered_by(
+    n: u128,
+    role: Role,
+    cwd: &Path,
+    mission: Option<MissionId>,
+    launched_by: LaunchedBy,
+) -> Event {
     at(EventKind::AgentRegistered {
         agent: agent(n),
         name: format!("agent-{n}"),
         role,
         harness: HarnessKind::ClaudeCode,
-        launched_by: LaunchedBy::Human,
+        launched_by,
         parent: None,
         mission,
         workspace: Workspace::at(cwd),
@@ -312,6 +335,38 @@ fn settings(clone: &Path) -> volee_config::Config {
         clone.display()
     );
     volee_config::Config::parse(&text, Path::new("config.toml"), Path::new("/nowhere")).unwrap()
+}
+
+/// Whether the daemon fetched the repository of one agent, launched by
+/// `launched_by`, before its first evidence, with `[git] fetch` set to
+/// `fetch`. The fetch, when allowed, runs before the evidence is read.
+async fn fetched_before_the_first_check(fetch: Fetch, launched_by: LaunchedBy) -> bool {
+    let sandbox = Sandbox::new();
+    let (clone, worktree) = sandbox.project();
+    let pushed = sandbox.pushed_by_a_teammate();
+    let mut settings = settings(&clone);
+    settings.git.fetch = fetch;
+    let evidence = EvidenceSources {
+        settings,
+        ..EvidenceSources::git(Arc::new(sandbox.cli()))
+    };
+    let log = vec![registered_by(1, Role::Lead, &worktree, None, launched_by)];
+    let daemon = start(log, Arc::new(ManualClock::at(10_000)), evidence);
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    eventually(&client, "a first check", |registry, _| {
+        registry.agent(agent(1))?.delivery.checked_at
+    })
+    .await;
+    sandbox.git(&clone, &["rev-parse", "origin/main"]) == pushed
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn only_the_repositories_the_person_allows_are_fetched() {
+    // By default, the repositories of agents volee launched, and only those.
+    assert!(fetched_before_the_first_check(Fetch::Launched, LaunchedBy::Human).await);
+    assert!(!fetched_before_the_first_check(Fetch::Launched, LaunchedBy::Outside).await);
+    assert!(fetched_before_the_first_check(Fetch::All, LaunchedBy::Outside).await);
+    assert!(!fetched_before_the_first_check(Fetch::Never, LaunchedBy::Human).await);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

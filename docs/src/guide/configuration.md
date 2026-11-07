@@ -89,6 +89,28 @@ coordinator that reaches the limit gets a refusal that tells it to ask you.
 Workers also stay in the repositories the mission names: volee compares their
 main checkouts, never their directory names.
 
+## `[git]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `fetch` | `"launched"` | Which repositories the daemon fetches in the background: `"launched"` (those of agents volee launched), `"all"` (also those of sessions volee only discovered) or `"never"`. |
+
+To tell whether an agent's commits are pushed, and whether its branch was
+merged, volee compares the branch with `origin`. The daemon therefore runs
+`git fetch --prune origin` in an agent's repository at most every five
+minutes, in batch mode: a fetch that needs a password fails instead of
+waiting, and only your remote-tracking branches change (`--prune` forgets the
+ones deleted on the remote; `FETCH_HEAD` is left alone).
+
+By default it fetches only the repositories of agents volee launched: their
+remote is part of the work volee started. A session you started yourself is
+yours, and so is its remote: volee reads its repository but leaves fetching
+to you, and compares with what your last fetch brought. Set `"all"` to have
+those repositories fetched too, or `"never"` to fetch only by hand (for
+example on a metered connection, or with remotes that need a hardware key).
+With fetches off, push states and merges are as current as your last fetch,
+and new agents start from `origin/<base>` as that fetch left it.
+
 ## `[tui]`
 
 | Key | Default | Meaning |

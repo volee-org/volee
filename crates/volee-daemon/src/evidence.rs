@@ -12,7 +12,9 @@
 //!   read again at once;
 //! - every [`refresh_interval`](EvidenceSources::refresh_interval), the
 //!   evidence of live agents is read again, and each repository is fetched
-//!   at most every [`fetch_interval`](EvidenceSources::fetch_interval).
+//!   at most every [`fetch_interval`](EvidenceSources::fetch_interval), when
+//!   the person's `[git] fetch` setting allows it for the agent (by default,
+//!   only for agents volee launched).
 //!
 //! git and the forge run on blocking threads, never under the state lock,
 //! for a few agents at a time and one job per agent; triggers that arrive
@@ -28,6 +30,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Semaphore, broadcast};
 use tokio::task::JoinHandle;
 use volee_core::delivery::{Delivery, PullRequest};
+use volee_core::role::LaunchedBy;
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
 use volee_core::workspace::Workspace;
@@ -442,9 +445,13 @@ impl Refresher {
     }
 
     async fn refresh_delivery(&self, agent: AgentId, forge_now: bool) {
-        let Some(((workspace, unmerged_tip), checked_at)) = self
+        let Some(((workspace, unmerged_tip, launched_by_volee), checked_at)) = self
             .read(agent, |found| {
-                (found.workspace.clone(), found.delivery.unmerged_tip.clone())
+                (
+                    found.workspace.clone(),
+                    found.delivery.unmerged_tip.clone(),
+                    found.launched_by != LaunchedBy::Outside,
+                )
             })
             .await
         else {
@@ -453,7 +460,11 @@ impl Refresher {
         let (Some(branch), Some(base)) = (workspace.branch.clone(), workspace.base.clone()) else {
             return;
         };
-        if let Some(root) = &workspace.repo_root {
+        // The person decides whose remotes volee may fetch (`[git] fetch`):
+        // by default, only those of the work volee started.
+        if let Some(root) = &workspace.repo_root
+            && self.settings.git.fetch.allows(launched_by_volee)
+        {
             self.fetch_if_due(root).await;
         }
         let dir = workspace.cwd.clone();
