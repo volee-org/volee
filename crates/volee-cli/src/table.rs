@@ -35,11 +35,7 @@ pub(crate) fn agents(agents: &[&Agent], now: Timestamp) -> String {
     ];
     let mut rows: Vec<[String; 8]> = vec![header.map(str::to_owned)];
     for agent in agents {
-        let detail = agent
-            .detail
-            .clone()
-            .or_else(|| agent.last_activity.as_ref().map(|a| a.summary.clone()))
-            .unwrap_or_default();
+        let detail = row_detail(agent);
         rows.push([
             glyph(&agent.state).to_owned(),
             agent.state.label().to_owned(),
@@ -140,6 +136,21 @@ pub(crate) fn truncate(text: &str, max: usize) -> String {
     }
 }
 
+/// The detail column: the state's own detail, else what a waiting agent
+/// waits for, else the last thing it did. A waiting agent's last tool would
+/// read as if it waited for permission to use it.
+fn row_detail(agent: &Agent) -> String {
+    agent
+        .detail
+        .clone()
+        .or_else(|| match &agent.state {
+            AgentState::NeedsInput { request } => Some(format!("waits for {}", request.describe())),
+            _ => None,
+        })
+        .or_else(|| agent.last_activity.as_ref().map(|a| a.summary.clone()))
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +174,45 @@ mod tests {
     fn long_details_are_cut() {
         assert_eq!(truncate("abcdef", 4), "abc\u{2026}");
         assert_eq!(truncate("abc", 4), "abc");
+    }
+
+    #[test]
+    fn a_waiting_agent_shows_what_it_waits_for_not_its_last_tool() {
+        use volee_core::harness::HarnessKind;
+        use volee_core::role::{LaunchedBy, Role};
+        use volee_core::state::InputRequest;
+        use volee_core::workspace::{Location, Workspace};
+        use volee_core::{AgentId, Event, EventKind};
+        let id = AgentId::from_ulid(ulid::Ulid::from_parts(1, 1));
+        let at = |kind| Event::new(Timestamp::from_millis(1), kind);
+        let registry = Registry::from_events(&[
+            at(EventKind::AgentRegistered {
+                agent: id,
+                name: "billing".into(),
+                role: Role::Worker,
+                harness: HarnessKind::ClaudeCode,
+                launched_by: LaunchedBy::Human,
+                parent: None,
+                mission: None,
+                workspace: Workspace::default(),
+                location: Location::Background,
+            }),
+            at(EventKind::ActivityRecorded {
+                agent: id,
+                summary: "mcp__volee__send_message".into(),
+            }),
+            at(EventKind::StateChanged {
+                agent: id,
+                state: AgentState::NeedsInput {
+                    request: InputRequest::Other {
+                        detail: "waiting".into(),
+                    },
+                },
+                detail: None,
+            }),
+        ])
+        .unwrap();
+        assert_eq!(row_detail(registry.agent(id).unwrap()), "waits for you");
     }
 
     #[test]

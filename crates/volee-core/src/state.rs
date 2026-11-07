@@ -72,6 +72,23 @@ pub enum StateCategory {
     Lost,
 }
 
+impl InputRequest {
+    /// What the agent waits for, in a few words for people.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Permission { tool: Some(tool) } => format!("permission to use {tool}"),
+            Self::Permission { tool: None } => "a permission".to_owned(),
+            Self::Question => "an answer to its question".to_owned(),
+            Self::Dialog => "a dialog to be answered".to_owned(),
+            // The listing's own words when it says nothing more precise.
+            Self::Other { detail } => match detail.trim() {
+                "" | "waiting" | "blocked" => "you".to_owned(),
+                other => other.to_owned(),
+            },
+        }
+    }
+}
+
 impl AgentState {
     /// The coarse family of this state.
     pub const fn category(&self) -> StateCategory {
@@ -127,6 +144,28 @@ impl fmt::Display for AgentState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_request_says_what_the_agent_waits_for() {
+        let permission = InputRequest::Permission {
+            tool: Some("Bash".into()),
+        };
+        assert_eq!(permission.describe(), "permission to use Bash");
+        assert_eq!(
+            InputRequest::Question.describe(),
+            "an answer to its question"
+        );
+        let waiting = InputRequest::Other {
+            detail: "waiting".into(),
+        };
+        assert_eq!(waiting.describe(), "you");
+        let sandbox = InputRequest::Other {
+            detail: "sandbox request".into(),
+        };
+        assert_eq!(sandbox.describe(), "sandbox request");
+        let blank = InputRequest::Other { detail: " ".into() };
+        assert_eq!(blank.describe(), "you");
+    }
 
     #[test]
     fn categories_sort_by_urgency() {
