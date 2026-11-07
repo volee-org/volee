@@ -228,7 +228,9 @@ id.
 Creating a mission starts its coordinator: a Claude Code session in the main
 checkout of the mission's first repository, with Claude Code's editing tools
 turned off. It plans the work and launches one worker per task with the MCP
-tool `spawn_worker`, each in its own worktree.
+tool `spawn_worker`, each in its own worktree. Without Claude Code (missing,
+or too old), `volee mission new` refuses before recording anything, and
+`volee daemon status` says why.
 
 volee checks each worker when it stops. A change worker has delivered when
 its commits are pushed with an open pull request, or merged; an analysis
