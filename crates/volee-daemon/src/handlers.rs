@@ -18,8 +18,8 @@ use volee_proto::PROTOCOL_VERSION;
 use volee_proto::methods::{
     AbortMission, AgentParams, Attach, CloseMission, CreateMission, Diff, Empty, EventBatch,
     EventsSince, Forget, HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams,
-    Method, Preview, SendMessage, SendParams, Sent, Shutdown, SinceParams, Spawn, Status,
-    StatusInfo, StatusParams, Stop, Summarize, Tidy, WaitParams, WaitReply,
+    Method, Preview, RefreshDiscovery, SendMessage, SendParams, Sent, Shutdown, SinceParams, Spawn,
+    Status, StatusInfo, StatusParams, Stop, Summarize, Tidy, WaitParams, WaitReply,
 };
 use volee_proto::rpc::{self, RpcError};
 
@@ -45,6 +45,9 @@ pub(crate) async fn dispatch(
             respond(Ok(Empty {}))
         }
         EventsSince::NAME => respond(events_since(shared, parse::<EventsSince>(params)?).await),
+        RefreshDiscovery::NAME => {
+            respond(crate::discovery::refresh(shared, parse::<RefreshDiscovery>(params)?).await)
+        }
         Forget::NAME => respond(forget(shared, parse::<Forget>(params)?).await),
         SendMessage::NAME => respond(send_message(shared, parse::<SendMessage>(params)?).await),
         MarkRead::NAME => respond(mark_read(shared, parse::<MarkRead>(params)?).await),

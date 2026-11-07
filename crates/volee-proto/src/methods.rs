@@ -194,6 +194,37 @@ method!(
     EventBatch
 );
 
+// ---- discovery ------------------------------------------------------------
+
+/// Parameters of [`RefreshDiscovery`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RefreshParams {
+    /// How long to wait for the listing, in milliseconds: three seconds when
+    /// absent, ten at most.
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+}
+
+/// The result of [`RefreshDiscovery`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Refreshed {
+    /// Whether a listing that started after the request succeeded in time:
+    /// the events since show every session the harness listed. `false` when
+    /// discovery is off, the listing failed, or it took longer than the
+    /// timeout (it then still completes in the background).
+    pub listed: bool,
+}
+
+method!(
+    /// Lists the harness's sessions now, instead of at the next turn of
+    /// discovery, and answers once that listing is applied. For one-off
+    /// commands such as `volee ls`; concurrent requests share one listing.
+    RefreshDiscovery,
+    "discovery.refresh",
+    RefreshParams,
+    Refreshed
+);
+
 // ---- agents ---------------------------------------------------------------
 
 /// Parameters naming one agent.
@@ -618,6 +649,7 @@ mod tests {
             Shutdown::NAME,
             EventsSince::NAME,
             Subscribe::NAME,
+            RefreshDiscovery::NAME,
             Forget::NAME,
             Tidy::NAME,
             Spawn::NAME,
