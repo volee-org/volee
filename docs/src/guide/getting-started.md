@@ -13,7 +13,9 @@ volee daemon status
 Other commands start the daemon on their own when they need it; here it is
 started by hand, because `volee daemon status` only reports. The status
 names the Claude Code version it found, and whether `gh` is there to read
-pull requests. If Claude Code is missing or too old, the line says why.
+pull requests. If Claude Code is missing or too old, the line says why. Right
+after the start, the `forge` line may say `gh not checked yet`: volee checks
+`gh` in the background, so ask again a few seconds later.
 
 ## 2. See every agent on the machine
 
