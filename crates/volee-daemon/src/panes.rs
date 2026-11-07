@@ -122,8 +122,10 @@ pub(crate) fn hosted(sessions: &[ListedSession]) -> Vec<Hosted> {
 
 /// Asks every multiplexer which panes `live` sessions run in, and records
 /// where their agents run. Agents left in a pane whose session no longer
-/// runs go back to a plain terminal.
+/// runs go back to a plain terminal, and so do agents in a pane of a
+/// multiplexer this daemon does not use (it was used by an earlier run).
 pub(crate) async fn locate(shared: &Arc<Shared>, live: &[Hosted]) {
+    forget_unused(shared).await;
     for adapter in shared.panes.adapters.clone() {
         let name = adapter.name();
         let ended = in_panes_of(shared, name, live).await;
@@ -174,6 +176,39 @@ pub(crate) async fn locate(shared: &Arc<Shared>, live: &[Hosted]) {
             Ok(_) => tracing::debug!(multiplexer = name, events = count, "agents located"),
             Err(error) => tracing::error!(%error, "cannot record where agents run"),
         }
+    }
+}
+
+/// Moves the agents recorded in a pane of a multiplexer this daemon does not
+/// use back to a plain terminal: volee can neither show nor reach that pane.
+async fn forget_unused(shared: &Arc<Shared>) {
+    let mut state = shared.state.lock().await;
+    let now = state.now();
+    let mut unused: Vec<(String, Vec<SessionKey>)> = Vec::new();
+    for agent in state.registry().agents() {
+        let Location::Pane { multiplexer, .. } = &agent.location else {
+            continue;
+        };
+        let Some(link) = agent.current_session() else {
+            continue;
+        };
+        if shared.panes.adapter(multiplexer).is_some() {
+            continue;
+        }
+        match unused.iter_mut().find(|(name, _)| name == multiplexer) {
+            Some((_, keys)) => keys.push(link.key.clone()),
+            None => unused.push((multiplexer.clone(), vec![link.key.clone()])),
+        }
+    }
+    let events: Vec<_> = unused
+        .iter()
+        .flat_map(|(name, keys)| relocate(state.registry(), name, keys, &[], now))
+        .collect();
+    if events.is_empty() {
+        return;
+    }
+    if let Err(error) = state.commit(events) {
+        tracing::error!(%error, "cannot record where agents run");
     }
 }
 
