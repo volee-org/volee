@@ -414,6 +414,35 @@ method!(
     Empty
 );
 
+// ---- threads --------------------------------------------------------------
+
+/// Parameters of [`Summarize`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SummarizeParams {
+    /// The thread.
+    pub thread: ThreadId,
+}
+
+/// The result of [`Summarize`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadSummary {
+    /// The summary, as plain text.
+    pub summary: String,
+    /// How many messages it covers.
+    pub messages: usize,
+    /// The model that wrote it.
+    pub model: String,
+}
+
+method!(
+    /// Summarizes a thread with a model. Refused unless the person turned
+    /// summaries on in the configuration.
+    Summarize,
+    "threads.summarize",
+    SummarizeParams,
+    ThreadSummary
+);
+
 // ---- missions -------------------------------------------------------------
 
 /// Parameters of [`CreateMission`].
@@ -574,6 +603,7 @@ mod tests {
             MarkRead::NAME,
             HookIngest::NAME,
             HookWait::NAME,
+            Summarize::NAME,
             CreateMission::NAME,
             AbortMission::NAME,
             CloseMission::NAME,

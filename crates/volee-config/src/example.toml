@@ -23,6 +23,13 @@ wake_timeout = 3600
 # model = "sonnet"         # overrides [agents] model for this repository
 # setup = "bun install"    # first step the agent runs in a new worktree
 
+[messages]
+# Summaries of long threads, written by a model when you ask for one
+# (`volee summary <mission or agent>`). Off by default: each summary runs
+# Claude Code with your account, usually for a few cents.
+# summaries = true
+# summary_model = "haiku"
+
 [tui]
 # "catppuccin-mocha" (default), "catppuccin-macchiato", "catppuccin-frappe",
 # "catppuccin-latte", "terminal", or the name of a file in

@@ -30,6 +30,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `hooks.ingest` | `agent`, `event`, `payload` | `stdout`: what the hook prints, if anything |
 | `hooks.wait` | `agent`, `timeout_ms` | `text`: messages that wake the agent, or `null` |
 | `agents.spawn` | `repo`, `branch`, `task`, `role`, optional `base`, `parent`, `mission`, `model`, `name` | `agent`, `worktree` |
+| `threads.summarize` | `thread` | `summary`, `messages`, `model`; refused unless `[messages] summaries` is on |
 | `missions.create` | `title`, `kind` (`change` or `analysis`), `goal`, `repos`, optional `requested_by` | `mission`, `thread`, `coordinator` |
 | `missions.abort` | `mission`, optional `reason` | none |
 | `missions.close` | `mission`, optional `report`, `force`, `by` | none |
