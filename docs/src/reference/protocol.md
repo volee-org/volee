@@ -19,12 +19,13 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `daemon.status` | `protocol` (the client's protocol version, or 0) | version, protocol, pid, start time, last event, agent count, harnesses |
 | `daemon.shutdown` | none | none; the daemon stops after answering |
 | `events.since` | `after` (sequence number, optional) | `events` (sequence number and event), `last_seq` |
-| `events.subscribe` | `after` (optional) | the same batch, then `events.appended` notifications |
+| `events.subscribe` | `after` (optional), `interactive` (optional, `false` by default) | the same batch, then `events.appended` notifications |
 | `agents.forget` | `agent` | none |
 | `agents.preview` | `agent` | `screen`: the agent's recent terminal output, with its escape sequences |
 | `agents.diff` | `agent`, optional `full` | `text`: a summary by file, or the full patch; `truncated` |
 | `agents.attach` | `agent` | `program`, `args`, `cwd`, `env_remove`, `hint`: the command that takes the agent over |
 | `agents.stop` | `agent` | none |
+| `agents.tidy` | `agent`, optional `dry_run` | `outcome`: `removed` or `would-remove` (`worktree`, `branch`), or `kept` (`reasons`) |
 | `messages.send` | `from`, `to`, `kind`, `body`, optional `refs`, `in_reply_to`, `thread` | `message`, `thread` |
 | `messages.read` | `message`, `by` | none |
 | `hooks.ingest` | `agent`, `event`, `payload` | `stdout`: what the hook prints, if anything |
@@ -35,7 +36,27 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `missions.abort` | `mission`, optional `reason` | none |
 | `missions.close` | `mission`, optional `report`, `force`, `by` | none |
 
-One more method, `agents.tidy`, arrives with cleanup.
+### Tidying
+
+`agents.tidy` follows [ADR 0011](../adr/0011-safety-and-delivery-evidence.md):
+it removes nothing without delivery evidence and never deletes a branch.
+`delivery::tidy_check` decides from the registry: the agent was launched by
+volee, works in a worktree under `<repository>/.claude/worktrees/`, is not
+running, and its delivery evidence, checked since its last change, shows a
+clean tree and landed work (merged, merged pull request, or report).
+Otherwise the result is `kept` with every reason, each with a `reason` tag
+(`busy`, `uncommitted-changes`, `not-delivered`, `not-launched-by-volee`,
+`not-a-volee-worktree`, `evidence-not-checked`, `evidence-stale`,
+`kept-by-harness`, `refused-by-git`) and a sentence for people when
+displayed.
+
+When the evidence allows it, the daemon asks the harness to delete the
+session (with the evidence), checks the verdict again, unlocks the worktree
+if the harness left it locked, and lets git remove it; git still refuses
+changes and commits that no branch keeps, and never forces. It then records
+the workspace without its worktree and forgets the agent; its events stay in
+the log. With `dry_run`, the answer is `would-remove` or `kept`, and nothing
+is touched.
 
 ### Launching
 
@@ -98,11 +119,21 @@ than 4,096 events behind receives `events.lagged` (with the number of events
 it `skipped`) and is dropped; it can resubscribe with `after` set to the last
 sequence number it applied.
 
+A client a person watches, such as the interface, subscribes with
+`interactive` set to `true`. While at least one interactive subscription is
+open, the daemon lists the harness's sessions every two seconds instead of
+every thirty, and a new one triggers a listing at once, so the client opens
+on fresh data ([discovery](../architecture/domain.md#reconciliation)). The
+subscription stops counting when it ends or its connection closes. Programs,
+such as an agent's MCP server, leave it `false`: agents volee launched
+report through their hooks in real time anyway.
+
 Rust clients get all of this from `volee_proto::replica`: `subscribe` returns
 the backlog and a feed of the events that follow, which drops repeats and
-picks up again after a lag on request, and `Replica` keeps a `Registry` up
-to date from a feed. The MCP server reads a `Replica`; the interface follows
-a feed, because it also needs the events themselves.
+picks up again after a lag on request (`subscribe_interactive` does the
+same for a client a person watches), and `Replica` keeps a `Registry` up to
+date from a feed. The MCP server reads a `Replica`; the interface follows an
+interactive feed, because it also needs the events themselves.
 
 ## Errors
 

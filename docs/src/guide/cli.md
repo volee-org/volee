@@ -29,9 +29,13 @@ volee ls --json   # the same, as JSON for scripts
 ```
 
 The list includes every live Claude Code session on the machine, in a
-terminal or in the background, whoever started it: the daemon discovers them
-within two seconds. Finished sessions you never saw through volee are left
-out; `volee daemon status` tells you whether Claude Code was found.
+terminal or in the background, whoever started it. Agents volee launched
+report through their hooks the moment something happens. The daemon finds
+the other sessions by listing them: every two seconds while the
+[interface](interface.md) is open, and every thirty seconds otherwise, so an
+idle daemon costs next to nothing. Opening the interface lists them at once.
+Finished sessions you never saw through volee are left out; `volee daemon
+status` tells you whether Claude Code was found.
 
 Each line shows a symbol and a word for the state, so the list reads without
 color:
@@ -57,7 +61,7 @@ volee logs <agent>          # its recent terminal output
 volee diff <agent>          # its changes against the branch it started from, by file
 volee diff <agent> --full   # the same changes, as a full patch
 volee attach <agent>        # take it over in this terminal; Ctrl+Z comes back
-volee stop <agent>          # stop it; its conversation is kept
+volee stop <agent>          # stop it; volee does not resume it until you message it
 ```
 
 `volee logs` prints the screen the harness recorded, with its colors.
@@ -70,7 +74,10 @@ These commands work on every background session, including the ones you
 started yourself. A session running in a terminal of its own (an interactive
 `claude`) is shown by `volee ls`, but only that terminal can show or control
 it. `volee stop` only stops the agents volee launched: stop the others where
-they were started.
+they were started. A stopped agent keeps its conversation, and volee does not
+resume it on its own, even when other agents write to it, until you send it a
+message yourself. `volee stop` on an agent that is not running only records
+that.
 
 ## Launching agents
 
@@ -90,6 +97,30 @@ Claude Code only starts background sessions in repositories you trust: run
 `claude` once in each repository and accept its trust prompt. volee says so
 when it is missing, and starts nothing.
 
+## Tidying worktrees
+
+```sh
+volee tidy <agent>             # remove its worktree if its work landed
+volee tidy --all               # the same for every agent volee launched
+volee tidy --all --dry-run     # say what would be removed, touch nothing
+```
+
+`volee tidy` removes the worktree of an agent only when the evidence says
+its work landed: its branch is merged into its base branch, its pull request
+is merged, or, for analysis work, its report was delivered. The worktree
+must also be clean, the agent must not be running, and volee must have
+checked the agent's work since its last change. It only touches agents volee
+launched, in the worktrees it created under `.claude/worktrees/`. It never
+deletes a branch and has no way to force a removal: when something is
+missing, it says what, for example:
+
+```text
+Kept billing-feat-invoices: its work has not landed: not merged into its base branch, no merged pull request, no report.
+```
+
+Once the worktree is gone, the agent leaves `volee ls`; its history stays in
+volee's event log, and its branch stays in the repository.
+
 ## Messages
 
 ```sh
@@ -100,8 +131,17 @@ volee msg send ag_x7k2pq "Use TTC." --kind answer
 A message reaches a working agent at the end of its turn, and wakes an idle
 agent at once. When the session of an agent volee launched has ended (Claude
 Code stops idle background sessions after about an hour), volee resumes it in
-its worktree with the message as its prompt; if that fails, it tells you once. Agents you did not launch through volee cannot receive
-messages yet.
+its worktree with the message as its prompt; if that fails, it tells you once.
+Two cases are never resumed on their own:
+
+- an agent you stopped with `volee stop`: messages from agents and from volee
+  wait, and your next message to it resumes it with all of them;
+- an agent whose mission is over (closed or aborted): its messages wait until
+  it runs again, which only you can decide, with `claude --resume` in its
+  worktree.
+
+Agents you did not launch through volee cannot receive messages yet.
+`volee msg send` says, after sending, which of these cases applies.
 
 ## Summaries
 

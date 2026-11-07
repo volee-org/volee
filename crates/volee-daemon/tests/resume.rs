@@ -14,6 +14,7 @@ use std::time::Duration;
 use common::{FakeHarness, repository};
 use serde_json::json;
 use tokio::net::UnixListener;
+use volee_core::agent::Hold;
 use volee_core::harness::{SessionKey, SessionOrigin};
 use volee_core::message::{MessageKind, Party};
 use volee_core::reconcile::ListedSession;
@@ -25,7 +26,8 @@ use volee_git::GitCli;
 use volee_harness::Harness;
 use volee_proto::client::Client;
 use volee_proto::methods::{
-    EventsSince, HookIngest, HookParams, SendMessage, SendParams, SinceParams, Spawn, SpawnParams,
+    AgentParams, EventsSince, HookIngest, HookParams, SendMessage, SendParams, SinceParams, Spawn,
+    SpawnParams, Stop,
 };
 use volee_proto::paths::Paths;
 
@@ -63,6 +65,7 @@ fn start() -> Running {
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
         discovery_interval: Duration::from_millis(20),
+        idle_discovery_interval: Duration::from_millis(20),
         evidence: EvidenceSources {
             git: Some(Arc::new(git)),
             settings,
@@ -109,8 +112,8 @@ fn listed(id: &str, handle: &str, cwd: &Path) -> ListedSession {
     session
 }
 
-/// Launches a worker, lets its first session start, then end.
-async fn stopped_worker(daemon: &Running) -> AgentId {
+/// Launches a worker and lets its first session start.
+async fn running_worker(daemon: &Running) -> AgentId {
     let client = Client::connect(&daemon.socket).await.unwrap();
     let spawned = client
         .call::<Spawn>(SpawnParams {
@@ -126,26 +129,43 @@ async fn stopped_worker(daemon: &Running) -> AgentId {
         })
         .await
         .unwrap();
-    for (event, payload) in [
-        (
-            "session-start",
-            json!({ "hook_event_name": "SessionStart", "session_id": "first-session", "source": "startup" }),
-        ),
-        (
-            "session-end",
-            json!({ "hook_event_name": "SessionEnd", "session_id": "first-session", "reason": "other" }),
-        ),
-    ] {
-        client
-            .call::<HookIngest>(HookParams {
-                agent: spawned.agent,
-                event: event.into(),
-                payload,
-            })
-            .await
-            .unwrap();
-    }
+    hook(
+        &client,
+        spawned.agent,
+        "session-start",
+        json!({ "hook_event_name": "SessionStart", "session_id": "first-session", "source": "startup" }),
+    )
+    .await;
     spawned.agent
+}
+
+/// Launches a worker, lets its first session start, then end.
+async fn stopped_worker(daemon: &Running) -> AgentId {
+    let agent = running_worker(daemon).await;
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    session_ends(&client, agent).await;
+    agent
+}
+
+async fn session_ends(client: &Client, agent: AgentId) {
+    hook(
+        client,
+        agent,
+        "session-end",
+        json!({ "hook_event_name": "SessionEnd", "session_id": "first-session", "reason": "other" }),
+    )
+    .await;
+}
+
+async fn hook(client: &Client, agent: AgentId, event: &str, payload: serde_json::Value) {
+    client
+        .call::<HookIngest>(HookParams {
+            agent,
+            event: event.into(),
+            payload,
+        })
+        .await
+        .unwrap();
 }
 
 fn note(to: AgentId, body: &str) -> SendParams {
@@ -263,10 +283,17 @@ async fn a_failed_resume_is_told_to_the_human_once() {
     for body in ["First.", "Second."] {
         client.call::<SendMessage>(note(agent, body)).await.unwrap();
     }
-    let registry_now = until(&daemon.socket, |r| {
+    until(&daemon.socket, |r| {
         r.messages_from(Party::System)
             .iter()
             .any(|m| m.kind == MessageKind::Alert && m.body.contains("could not resume"))
+    })
+    .await;
+    // The second message may try once more (a new message lifts the pause
+    // between attempts); every failed attempt puts the agent back where it
+    // was, and the human is told only once.
+    let settled = until(&daemon.socket, |r| {
+        r.agent(agent).unwrap().state == AgentState::Stopped
     })
     .await;
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -278,8 +305,85 @@ async fn a_failed_resume_is_told_to_the_human_once() {
         .count();
     assert_eq!(alerts, 1, "told once");
     assert_eq!(
-        registry_now.agent(agent).unwrap().state,
-        AgentState::Stopped,
-        "the messages stay pending"
+        settled.pending_for(agent).len(),
+        2,
+        "both messages stay pending"
     );
+}
+
+#[tokio::test]
+async fn a_stopped_agent_waits_for_the_human_to_write_to_it() {
+    let daemon = start();
+    let agent = stopped_worker(&daemon).await;
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    // It is not running: the stop only holds it.
+    client.call::<Stop>(AgentParams { agent }).await.unwrap();
+    assert!(
+        daemon
+            .harness
+            .actions()
+            .iter()
+            .all(|(action, _)| action != "stop")
+    );
+    let mut notice = note(agent, "A notice from volee.");
+    notice.from = Party::System;
+    client.call::<SendMessage>(notice).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(daemon.harness.resumes().len(), 0, "held");
+    assert!(matches!(
+        registry(&daemon.socket).await.agent(agent).unwrap().hold,
+        Some(Hold::StoppedByHuman { .. })
+    ));
+
+    // The human writes to it: the hold lifts and every waiting message goes.
+    let sent = client
+        .call::<SendMessage>(note(agent, "Carry on."))
+        .await
+        .unwrap();
+    let delivered = until(&daemon.socket, |r| {
+        r.message(sent.message)
+            .and_then(|message| message.receipt(Party::Agent(agent)))
+            .is_some_and(|receipt| receipt.delivered_at.is_some())
+    })
+    .await;
+    assert_eq!(delivered.agent(agent).unwrap().hold, None);
+    let resumes = daemon.harness.resumes();
+    assert_eq!(resumes.len(), 1);
+    let prompt = &resumes[0].1.prompt;
+    assert!(
+        prompt.contains("A notice from volee.") && prompt.contains("Carry on."),
+        "{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn a_message_waiting_for_a_stopped_agent_does_not_restart_it() {
+    let daemon = start();
+    let agent = running_worker(&daemon).await;
+    let worktree = daemon.repo.join(".claude/worktrees/feat-invoices");
+    daemon
+        .harness
+        .set(vec![listed("first-session", "abcd1234", &worktree)]);
+    until(&daemon.socket, |r| r.agent(agent).unwrap().state.is_live()).await;
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    // Sent while it works: it waits for the end of the turn.
+    client
+        .call::<SendMessage>(note(agent, "Also update the changelog."))
+        .await
+        .unwrap();
+    client.call::<Stop>(AgentParams { agent }).await.unwrap();
+    assert!(
+        daemon
+            .harness
+            .actions()
+            .contains(&("stop".to_owned(), "abcd1234".to_owned()))
+    );
+
+    // The session ends; the message still waits, and nothing resumes it.
+    daemon.harness.set(vec![]);
+    session_ends(&client, agent).await;
+    let ended = until(&daemon.socket, |r| !r.agent(agent).unwrap().state.is_live()).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(daemon.harness.resumes().len(), 0);
+    assert_eq!(ended.pending_for(agent).len(), 1);
 }

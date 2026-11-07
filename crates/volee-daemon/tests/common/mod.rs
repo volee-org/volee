@@ -29,9 +29,22 @@ pub(crate) struct FakeHarness {
     refuse_launches: Mutex<bool>,
     actions: Mutex<Vec<(String, String)>>,
     sessions_gone: Mutex<bool>,
+    keep_on_remove: Mutex<bool>,
+    listings: Mutex<usize>,
 }
 
 impl FakeHarness {
+    /// How many times the daemon listed sessions so far.
+    pub(crate) fn listings(&self) -> usize {
+        *self.listings.lock().unwrap()
+    }
+
+    /// Makes `remove` answer as Claude Code does for a worktree it did not
+    /// create: it keeps the session (and leaves the worktree locked).
+    pub(crate) fn keep_on_remove(&self, keep: bool) {
+        *self.keep_on_remove.lock().unwrap() = keep;
+    }
+
     /// Every action on a session so far, as `(action, handle)`.
     pub(crate) fn actions(&self) -> Vec<(String, String)> {
         self.actions.lock().unwrap().clone()
@@ -113,6 +126,7 @@ impl Harness for FakeHarness {
     }
 
     fn list(&self) -> Result<Listing, HarnessError> {
+        *self.listings.lock().unwrap() += 1;
         if *self.failing.lock().unwrap() {
             return Err(unsupported("agents"));
         }
@@ -152,8 +166,25 @@ impl Harness for FakeHarness {
         self.act("stop", session).map(drop)
     }
 
-    fn remove(&self, _: &ListedSession, _: WorktreeRemoval) -> Result<(), HarnessError> {
-        Err(unsupported("remove"))
+    /// Records the removal with the evidence it was given (`remove` or
+    /// `remove-delivered`).
+    fn remove(
+        &self,
+        session: &ListedSession,
+        worktree: WorktreeRemoval,
+    ) -> Result<(), HarnessError> {
+        let action = match worktree {
+            WorktreeRemoval::Refuse => "remove",
+            WorktreeRemoval::Delivered => "remove-delivered",
+        };
+        let handle = self.act(action, session)?;
+        if *self.keep_on_remove.lock().unwrap() {
+            return Err(HarnessError::SessionKept {
+                handle,
+                reason: "its worktree has 1 unpushed commit".to_owned(),
+            });
+        }
+        Ok(())
     }
 
     /// A screen with a color escape, like `claude logs` prints.

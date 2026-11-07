@@ -19,8 +19,10 @@ volee
 `volee` with no command connects to the [daemon](cli.md#the-daemon),
 starting it in the background when it does not run yet, and shows every
 agent it knows: the Claude Code sessions it finds on the machine, wherever
-they were started, and the agents volee launched itself. New sessions show
-up within a couple of seconds; nothing needs to be configured first.
+they were started, and the agents volee launched itself. The daemon looks
+for sessions as soon as the interface opens, then every two seconds while it
+stays open (every thirty seconds when no interface is open), so new sessions
+show up within a couple of seconds; nothing needs to be configured first.
 
 Everything on the screen comes from the daemon, and so do the actions:
 
