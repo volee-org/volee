@@ -26,7 +26,7 @@ use super::hierarchy::{Zoom, ZoomChoice};
 use crate::app::Model;
 use crate::text;
 use crate::theme::{StyleRole, Theme};
-use crate::widgets::{put_spans, state_glyph, truncated};
+use crate::widgets::{placeholder, put_spans, state_glyph, truncated};
 
 /// A worktree, or the main checkout, and the agents in it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -445,17 +445,14 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
     let state = &model.repos;
     if state.lines.is_empty() {
         let message = if model.registry.agents().next().is_none() {
-            "No agents yet: their repositories and worktrees will show here."
+            model
+                .settings
+                .without_claude_code()
+                .unwrap_or("No agents yet: their repositories and worktrees will show here.")
         } else {
             "No agent matches the filter."
         };
-        put_spans(
-            buf,
-            area.x + 1,
-            area.y,
-            &[Span::styled(message, theme.style(StyleRole::Placeholder))],
-            area.width.saturating_sub(1),
-        );
+        placeholder(model, message, area, buf);
         return;
     }
     for (row, line) in (0u16..).zip(state.lines.iter().skip(state.offset)) {

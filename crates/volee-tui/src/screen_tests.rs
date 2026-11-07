@@ -429,7 +429,17 @@ fn new_agent_dialog_with_a_refusal() {
         &mut model,
         "Export invoices as CSV, one file per month.",
     );
+    // Enter starts a second line of the task; ctrl-s launches.
     keys(&demo, &mut model, &[KeyCode::Enter]);
+    type_text(&demo, &mut model, "Keep amounts in cents.");
+    let effects = update(
+        &mut model,
+        Msg::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)),
+    );
+    assert!(
+        matches!(effects.as_slice(), [Effect::Spawn(_)]),
+        "{effects:?}"
+    );
     update(
         &mut model,
         Msg::Launched(Err(crate::source::SourceError::Failed(
@@ -453,6 +463,45 @@ fn new_mission_dialog_on_a_small_screen() {
         &[KeyCode::Tab, KeyCode::Tab, KeyCode::Char(' ')],
     );
     assert_snapshot!(draw(&model));
+}
+
+/// A machine where no agent ever ran, on the given tab.
+fn empty_machine(tab: char, width: u16, height: u16, claude_code_available: bool) -> Model {
+    let mut model = Model::new(
+        Theme::default(),
+        Keymap::default(),
+        None,
+        (width, height),
+        start(),
+    );
+    model.settings.claude_code_available = claude_code_available;
+    update(&mut model, Msg::Events(Vec::new()));
+    update(
+        &mut model,
+        Msg::Key(KeyEvent::new(KeyCode::Char(tab), KeyModifiers::NONE)),
+    );
+    model
+}
+
+#[test]
+fn without_claude_code_the_empty_views_say_where_to_look() {
+    for tab in ['1', '2', '3', '4'] {
+        let found = draw(&empty_machine(tab, 120, 40, true));
+        assert!(!found.contains("volee daemon status"), "{found}");
+        let missing = draw(&empty_machine(tab, 120, 40, false));
+        assert!(missing.contains("volee daemon status"), "{missing}");
+        assert!(!missing.contains("Start Claude Code"), "{missing}");
+    }
+    for (tab, view) in [('1', "hierarchy"), ('2', "network")] {
+        assert_snapshot!(
+            format!("no_claude_code_{view}_at_120x40"),
+            draw(&empty_machine(tab, 120, 40, false))
+        );
+    }
+    assert_snapshot!(
+        "no_claude_code_hierarchy_at_80x24",
+        draw(&empty_machine('1', 80, 24, false))
+    );
 }
 
 #[test]

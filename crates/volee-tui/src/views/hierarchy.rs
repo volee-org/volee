@@ -19,8 +19,8 @@ use super::tree_layout::{self, Forest, Node, Placement, Spacing};
 use crate::app::Model;
 use crate::text;
 use crate::theme::StyleRole;
-use crate::widgets::canvas::Canvas;
 use crate::widgets::card::{self, CardContext};
+use crate::widgets::{self, canvas::Canvas};
 
 /// How much each card shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -588,19 +588,13 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
     let scene = &model.scene;
     if scene.nodes.is_empty() {
         let message = if model.registry.agents().next().is_none() {
-            "No agents yet. Start Claude Code anywhere, or launch one with volee spawn."
+            model.settings.without_claude_code().unwrap_or(
+                "No agents yet. Start Claude Code anywhere, or launch one with volee spawn.",
+            )
         } else {
             "Nothing to show here."
         };
-        let line = text::truncate(message, usize::from(area.width));
-        let width = u16::try_from(text::width(&line)).unwrap_or(0);
-        let x = area.x + area.width.saturating_sub(width) / 2;
-        buf.set_string(
-            x,
-            area.y + area.height / 2,
-            line,
-            theme.style(StyleRole::Placeholder),
-        );
+        widgets::centered_placeholder(model, message, area, buf);
         return;
     }
     let edges = Edges {

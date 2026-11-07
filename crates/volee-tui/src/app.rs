@@ -99,12 +99,34 @@ pub(crate) enum Overlay {
 }
 
 /// What the interface knows from the configuration and the machine.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Settings {
     /// Programs to open a worktree with.
     pub(crate) tools: Vec<Tool>,
     /// Repositories agents and missions can be launched in.
     pub(crate) repos: Vec<String>,
+    /// Whether the source can use Claude Code: false when the daemon did
+    /// not find it, or found a version too old for volee.
+    pub(crate) claude_code_available: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            tools: Vec::new(),
+            repos: Vec::new(),
+            claude_code_available: true,
+        }
+    }
+}
+
+impl Settings {
+    /// What a view without agents says when volee cannot use Claude Code on
+    /// this machine, instead of waiting for agents that cannot come.
+    pub(crate) fn without_claude_code(&self) -> Option<&'static str> {
+        (!self.claude_code_available)
+            .then_some("volee cannot use Claude Code here: run `volee daemon status` to see why.")
+    }
 }
 
 /// A question asked on the bottom line.

@@ -76,6 +76,40 @@ struct Outbox {
     made: Vec<Event>,
 }
 
+/// Leaves out the scenario's answers in the person's name to questions the
+/// person already answered, with their deliveries, so a question never gets
+/// two answers from the person.
+#[derive(Debug, Default)]
+struct Superseded {
+    /// The scenario's answers left out so far.
+    skipped: Vec<MessageId>,
+}
+
+impl Superseded {
+    /// Whether the scenario's `event` still happens, given what the
+    /// person's requests `made`.
+    fn keeps(&mut self, made: &[Event], event: &Event) -> bool {
+        match &event.kind {
+            EventKind::MessagePosted { message } if message.from == Party::Human => {
+                let Some(question) = message.in_reply_to else {
+                    return true;
+                };
+                let answered = made.iter().any(|earlier| {
+                    earlier.at <= event.at
+                        && matches!(&earlier.kind, EventKind::MessagePosted { message: answer }
+                            if answer.from == Party::Human && answer.in_reply_to == Some(question))
+                });
+                if answered {
+                    self.skipped.push(message.id);
+                }
+                !answered
+            }
+            EventKind::MessageDelivered { message, .. } => !self.skipped.contains(message),
+            _ => true,
+        }
+    }
+}
+
 impl DemoSource {
     /// A demo that starts now, according to `clock`.
     pub fn new(clock: Arc<dyn Clock>) -> Self {
@@ -98,9 +132,15 @@ impl DemoSource {
         self.start
     }
 
-    /// Every event of the scenario up to `until`, oldest first.
+    /// Every event of the scenario up to `until`, oldest first, except its
+    /// answers to questions the person already answered.
     pub fn events_until(&self, until: Timestamp) -> Vec<Event> {
+        let made = self.outbox().made.clone();
+        let mut superseded = Superseded::default();
         scenario::events_until(self.start, until)
+            .into_iter()
+            .filter(|event| superseded.keeps(&made, event))
+            .collect()
     }
 
     /// The screen of an agent at `at`, as raw terminal output.
@@ -171,17 +211,28 @@ impl Source for DemoSource {
         let (sender, updates) = mpsc::channel(256);
         self.outbox().sender = Some(sender.clone());
         let start = self.start;
+        let state = Arc::clone(&self.state);
         tokio::spawn(async move {
             let origin = tokio::time::Instant::now();
+            let mut superseded = Superseded::default();
             for event in scenario::beats(start).skip_while(|event| event.at <= now) {
                 let wait = Duration::from_millis(now.millis_until(event.at));
                 tokio::time::sleep_until(origin + wait).await;
-                if sender.send(Ok(event)).await.is_err() {
+                let keep = {
+                    let outbox = state.lock().unwrap_or_else(PoisonError::into_inner);
+                    superseded.keeps(&outbox.made, &event)
+                };
+                if keep && sender.send(Ok(event)).await.is_err() {
                     break;
                 }
             }
         });
-        std::future::ready(Ok(Subscription { snapshot, updates }))
+        // The demo plays Claude Code sessions of its own.
+        std::future::ready(Ok(Subscription {
+            snapshot,
+            updates,
+            claude_code_available: true,
+        }))
     }
 
     fn preview(&self, agent: AgentId) -> impl Future<Output = Result<String, SourceError>> + Send {
@@ -440,7 +491,9 @@ mod tests {
         let Subscription {
             snapshot,
             mut updates,
+            claude_code_available,
         } = demo.subscribe().await.unwrap();
+        assert!(claude_code_available, "the demo plays Claude Code sessions");
         assert_eq!(snapshot, demo.events_until(start()));
         let first = updates.recv().await.unwrap().unwrap();
         assert_eq!(first.at, start().plus_millis(2_000));
@@ -481,6 +534,7 @@ mod tests {
         let Subscription {
             snapshot,
             mut updates,
+            ..
         } = demo.subscribe().await.unwrap();
         let mut registry = Registry::from_events(&snapshot).unwrap();
         let question = registry.unanswered_questions()[0].clone();
@@ -516,12 +570,61 @@ mod tests {
         assert_eq!(note.last().unwrap().body, "Thanks");
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn the_scenario_does_not_answer_a_question_the_person_answered() {
+        let (demo, clock) = demo();
+        let Subscription {
+            snapshot,
+            mut updates,
+            ..
+        } = demo.subscribe().await.unwrap();
+        let mut registry = Registry::from_events(&snapshot).unwrap();
+        // The draft flag, which the scenario answers in the person's name
+        // 18 seconds in.
+        let question = registry.unanswered_questions()[0].clone();
+        demo.send_message(Outgoing {
+            in_reply_to: Some(question.id),
+            ..to(
+                agent_id(start(), INVOICE_TOOLS),
+                MessageKind::Answer,
+                "Yes, false by default.",
+            )
+        })
+        .await
+        .unwrap();
+        let until = start().plus_millis(30_000);
+        loop {
+            let event = updates.recv().await.unwrap().unwrap();
+            if event.at > until {
+                break;
+            }
+            // No delivery of an answer that was left out.
+            registry.apply(&event).unwrap();
+        }
+        let answers = |registry: &Registry| -> Vec<String> {
+            registry
+                .thread_messages(question.thread)
+                .iter()
+                .filter(|message| message.in_reply_to == Some(question.id))
+                .map(|message| message.body.clone())
+                .collect()
+        };
+        assert_eq!(answers(&registry), ["Yes, false by default."]);
+        // Later requests see the same story.
+        clock.advance(30_000);
+        assert_eq!(
+            answers(&demo.registry_now().unwrap()),
+            ["Yes, false by default."]
+        );
+    }
+
     #[tokio::test]
     async fn the_person_reads_summarizes_and_launches() {
         let (demo, _clock) = demo();
         let Subscription {
             snapshot,
             mut updates,
+            ..
         } = demo.subscribe().await.unwrap();
         let mut registry = Registry::from_events(&snapshot).unwrap();
         let question = registry.unanswered_questions()[0].clone();

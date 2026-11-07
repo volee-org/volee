@@ -110,7 +110,12 @@ async fn the_snapshot_and_the_updates_build_the_daemons_registry() {
     let Subscription {
         snapshot,
         mut updates,
+        claude_code_available,
     } = source.subscribe().await.unwrap();
+    assert!(
+        !claude_code_available,
+        "the daemon's status says it found no Claude Code"
+    );
     let mut registry = Registry::from_events(&snapshot).unwrap();
     assert_eq!(registry.agents().count(), 2);
     assert!(
@@ -152,6 +157,7 @@ async fn the_person_reads_and_a_daemon_without_claude_code_says_what_it_cannot_d
     let Subscription {
         snapshot,
         mut updates,
+        ..
     } = source.subscribe().await.unwrap();
     let mut registry = Registry::from_events(&snapshot).unwrap();
     // The worker asks the person something.

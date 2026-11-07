@@ -327,6 +327,8 @@ actions! {
     NextField => "next-field",
     /// The previous field of a dialog.
     PreviousField => "previous-field",
+    /// Launch what a dialog describes: the agent, or the mission.
+    Launch => "launch",
 }
 
 impl FromStr for Action {
@@ -783,10 +785,12 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Tools, &[key(K::Esc), ch('q'), ch('o')], A::Back, "close the menu", Some("close")),
         bind(C::Tools, &[ctrl('c')], A::Quit, "quit volee", None),
 
+        // Enter never launches: a launch costs money, and the task and the
+        // goal take several lines.
+        bind(C::Dialog, &[ctrl('s')], A::Launch, "launch the agent, or create the mission", Some("launch")),
         bind(C::Dialog, &[key(K::Tab)], A::NextField, "next field", Some("field")),
         bind(C::Dialog, &[key(K::BackTab)], A::PreviousField, "previous field", Some("field")),
-        bind(C::Dialog, &[key(K::Enter)], A::Apply, "launch", Some("launch")),
-        bind(C::Dialog, &[alt_enter, ctrl('j')], A::NewLine, "start a new line in the task or the goal", None),
+        bind(C::Dialog, &[key(K::Enter), alt_enter, ctrl('j')], A::NewLine, "a new line in the task or the goal, the next field elsewhere", Some("new line")),
         bind(C::Dialog, &[key(K::Esc)], A::Back, "cancel", Some("cancel")),
         bind(C::Dialog, &[ctrl('c')], A::Quit, "quit volee", None),
 

@@ -88,6 +88,10 @@ pub struct Subscription {
     /// Every later event, in order. A source that stops sends why, as an
     /// error, before it closes the channel.
     pub updates: mpsc::Receiver<Result<Event, SourceError>>,
+    /// Whether volee can use Claude Code on this machine: the daemon found
+    /// it, recent enough to list its sessions and launch agents. The daemon
+    /// checks when it starts, and `volee daemon status` says why it cannot.
+    pub claude_code_available: bool,
 }
 
 /// A message from the person using volee to an agent.
