@@ -101,7 +101,36 @@ pub(crate) struct Shared {
     pub(crate) presence: crate::join::Presence,
     /// What the evidence refresher learned about the forge, once it checked.
     forge: std::sync::Mutex<Option<ForgeStatus>>,
+    /// The agents being launched now, from just before their registration
+    /// until their session started or their launch failed: a listing in
+    /// between must not take them for launches that stalled.
+    launches: std::sync::Mutex<std::collections::HashSet<AgentId>>,
     shutdown: watch::Sender<bool>,
+}
+
+/// An agent being launched, until this guard drops; see
+/// [`Shared::begin_launch`].
+pub(crate) struct LaunchGuard {
+    shared: Arc<Shared>,
+    agent: AgentId,
+}
+
+impl std::fmt::Debug for LaunchGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LaunchGuard")
+            .field("agent", &self.agent)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for LaunchGuard {
+    fn drop(&mut self) {
+        self.shared
+            .launches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.agent);
+    }
 }
 
 impl Shared {
@@ -113,6 +142,27 @@ impl Shared {
         // A plain value that is never left half-written: a poisoned lock
         // still holds a valid one.
         self.forge
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Marks `agent` as being launched until the guard drops. Taken before
+    /// the agent is registered, so that no listing sees it unguarded.
+    pub(crate) fn begin_launch(self: &Arc<Self>, agent: AgentId) -> LaunchGuard {
+        self.launches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(agent);
+        LaunchGuard {
+            shared: Arc::clone(self),
+            agent,
+        }
+    }
+
+    /// The agents being launched now.
+    pub(crate) fn launches_in_flight(&self) -> std::collections::HashSet<AgentId> {
+        self.launches
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
@@ -173,6 +223,7 @@ impl Daemon {
             panes: crate::panes::Panes::new(config.multiplexers),
             presence: crate::join::Presence::default(),
             forge: std::sync::Mutex::new(None),
+            launches: std::sync::Mutex::default(),
             shutdown,
         });
         tokio::spawn({
