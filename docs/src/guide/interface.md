@@ -79,8 +79,9 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   selected agent is the same in every view and in the list.
 - **Detail.** Facts about the selected agent: role, state and since when,
   its mission and the mission supervisor's verdict on its work, repository
-  and branch, worktree, where it runs and with which model, delivery
-  evidence, last activity and session.
+  and branch, worktree, where it runs and with which model, whether it is
+  held (you stopped it, or its mission is over: volee will not resume it on
+  its own), delivery evidence, last activity and session.
 - **Preview.** The selected agent's terminal screen, kept up to date while
   it works. The bottom of the screen, where the latest output is, stays in
   view; scroll it with `j` and `k` when the panel has the keyboard.
