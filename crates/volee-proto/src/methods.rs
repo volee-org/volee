@@ -269,7 +269,8 @@ pub struct PreviewText {
 }
 
 method!(
-    /// The agent's recent terminal output.
+    /// The agent's recent terminal output. Refused for an agent in a terminal
+    /// of its own (an interactive session), which only that terminal shows.
     Preview,
     "agents.preview",
     AgentParams,
@@ -291,6 +292,10 @@ pub struct DiffParams {
 pub struct DiffText {
     /// A unified diff, or `git diff --stat` output.
     pub text: String,
+    /// Whether the diff was longer than the daemon returns and `text` holds
+    /// only its beginning, cut at a line break.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 method!(
@@ -311,16 +316,30 @@ pub struct AttachCommand {
     pub args: Vec<String>,
     /// Its working directory.
     pub cwd: Option<String>,
+    /// Environment variables to remove before running it: the ones that
+    /// would tie it to another agent's session.
+    #[serde(default)]
+    pub env_remove: Vec<String>,
     /// A sentence telling the person how to come back.
     pub hint: String,
 }
 
 method!(
-    /// How to take over an agent in the client's terminal.
+    /// How to take over an agent in the client's terminal. Refused for an
+    /// agent in a terminal of its own: switch to that terminal instead.
     Attach,
     "agents.attach",
     AgentParams,
     AttachCommand
+);
+
+method!(
+    /// Stops an agent's session; its conversation is kept and can be
+    /// resumed. Refused for agents volee did not launch (ADR 0011).
+    Stop,
+    "agents.stop",
+    AgentParams,
+    Empty
 );
 
 // ---- messages -------------------------------------------------------------
@@ -537,6 +556,7 @@ mod tests {
             Preview::NAME,
             Diff::NAME,
             Attach::NAME,
+            Stop::NAME,
             SendMessage::NAME,
             MarkRead::NAME,
             HookIngest::NAME,

@@ -50,6 +50,28 @@ color:
 Each agent also has a short id such as `ag_x7k2pq`. Wherever a command asks
 for an agent, you can type its name, that short id, or its full id.
 
+### Acting on an agent
+
+```sh
+volee logs <agent>          # its recent terminal output
+volee diff <agent>          # its changes against the branch it started from, by file
+volee diff <agent> --full   # the same changes, as a full patch
+volee attach <agent>        # take it over in this terminal; Ctrl+Z comes back
+volee stop <agent>          # stop it; its conversation is kept
+```
+
+`volee logs` prints the screen the harness recorded, with its colors.
+`volee diff` compares the agent's worktree, committed or not, with the merge
+base of its base branch, and lists the files it created; a very long diff is
+cut, and the rest is in the worktree. `volee attach` hands this terminal to
+the agent until you press `Ctrl+Z`; the agent keeps running after you leave.
+
+These commands work on every background session, including the ones you
+started yourself. A session running in a terminal of its own (an interactive
+`claude`) is shown by `volee ls`, but only that terminal can show or control
+it. `volee stop` only stops the agents volee launched: stop the others where
+they were started.
+
 ## Launching agents
 
 ```sh

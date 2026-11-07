@@ -21,6 +21,7 @@ use volee_harness::hooks::format_messages_for_agent;
 use volee_proto::methods::SeqEvent;
 
 use crate::clock::Clock;
+use crate::control::Sessions;
 use crate::error::DaemonError;
 use crate::log::EventLog;
 
@@ -46,6 +47,9 @@ pub(crate) struct State {
     /// Sessions the daemon started or resumed and no event linked yet, by
     /// the harness's handle, with the agent they belong to.
     expected: HashMap<String, (AgentId, SessionOrigin)>,
+    /// The harness sessions the daemon can act on. Not persisted: rebuilt by
+    /// the next listing.
+    sessions: Sessions,
 }
 
 impl std::fmt::Debug for State {
@@ -78,11 +82,23 @@ impl State {
             expected: HashMap::new(),
             clock,
             started_at,
+            sessions: Sessions::default(),
         })
     }
 
     pub(crate) fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    /// The harness sessions the daemon can act on.
+    pub(crate) fn sessions(&self) -> &Sessions {
+        &self.sessions
+    }
+
+    /// The harness sessions the daemon can act on, to record a listing or a
+    /// launch.
+    pub(crate) fn sessions_mut(&mut self) -> &mut Sessions {
+        &mut self.sessions
     }
 
     pub(crate) fn now(&self) -> Timestamp {
@@ -133,6 +149,17 @@ impl State {
     /// The agent waiting for the session the harness calls `handle`.
     pub(crate) fn take_expected(&mut self, handle: &str) -> Option<(AgentId, SessionOrigin)> {
         self.expected.remove(handle)
+    }
+
+    /// The handle of the session the daemon started or resumed for `agent`
+    /// and no listing has shown yet. When a launch and a resume both wait,
+    /// the resume (the newer session) wins.
+    pub(crate) fn expected_handle(&self, agent: AgentId) -> Option<&str> {
+        self.expected
+            .iter()
+            .filter(|(_, (owner, _))| *owner == agent)
+            .max_by_key(|(handle, (_, origin))| (*origin != SessionOrigin::Started, *handle))
+            .map(|(handle, _)| handle.as_str())
     }
 
     /// A new agent identifier.
@@ -302,5 +329,24 @@ mod tests {
         let last = ids.last().unwrap().to_string();
         // Different kinds share one sequence, after their prefix.
         assert!(thread["th_".len()..] > last["msg_".len()..]);
+    }
+
+    #[test]
+    fn the_expected_session_of_an_agent_prefers_its_resume() {
+        let mut state = State::load(
+            Box::new(MemoryLog::with(vec![])),
+            Arc::new(ManualClock::at(1_000)),
+        )
+        .unwrap();
+        let agent = state.new_agent_id();
+        let other = state.new_agent_id();
+        assert_eq!(state.expected_handle(agent), None);
+        state.expect_session("aaaa1111".into(), agent, SessionOrigin::Started);
+        state.expect_session("ffff9999".into(), other, SessionOrigin::Started);
+        assert_eq!(state.expected_handle(agent), Some("aaaa1111"));
+        state.expect_session("0000beef".into(), agent, SessionOrigin::Forked);
+        assert_eq!(state.expected_handle(agent), Some("0000beef"));
+        state.take_expected("0000beef");
+        assert_eq!(state.expected_handle(agent), Some("aaaa1111"));
     }
 }

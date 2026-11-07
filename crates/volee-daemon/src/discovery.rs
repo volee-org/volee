@@ -69,6 +69,7 @@ pub(crate) async fn run(
         {
             tracing::error!(%error, "cannot link sessions started by volee");
         }
+        state.sessions_mut().record(&listing);
         let events = reconcile(state.registry(), &listing, now, || state.new_agent_id());
         if events.is_empty() {
             continue;

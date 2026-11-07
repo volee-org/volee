@@ -674,7 +674,8 @@ pub(crate) fn worker_instructions(
     )
 }
 
-fn harness(shared: &Shared) -> Result<Arc<dyn Harness>, DaemonError> {
+/// The harness, or why the daemon has none.
+pub(crate) fn harness(shared: &Shared) -> Result<Arc<dyn Harness>, DaemonError> {
     shared.harness.clone().ok_or_else(|| {
         DaemonError::Unavailable(
             "Claude Code is not available to this daemon; see `volee daemon status`".into(),
@@ -682,7 +683,8 @@ fn harness(shared: &Shared) -> Result<Arc<dyn Harness>, DaemonError> {
     })
 }
 
-fn git(shared: &Shared) -> Result<Arc<dyn Git>, DaemonError> {
+/// git, or why the daemon has none.
+pub(crate) fn git(shared: &Shared) -> Result<Arc<dyn Git>, DaemonError> {
     shared
         .git
         .clone()

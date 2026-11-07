@@ -58,6 +58,29 @@ enum Command {
         #[arg(long)]
         name: Option<String>,
     },
+    /// Take an agent over in this terminal; Ctrl+Z comes back.
+    Attach {
+        /// The agent: its name, short id or id.
+        agent: String,
+    },
+    /// Print an agent's recent terminal output.
+    Logs {
+        /// The agent: its name, short id or id.
+        agent: String,
+    },
+    /// Show an agent's changes against the branch it started from.
+    Diff {
+        /// The agent: its name, short id or id.
+        agent: String,
+        /// The full patch instead of a summary by file.
+        #[arg(long)]
+        full: bool,
+    },
+    /// Stop an agent volee launched; its conversation is kept.
+    Stop {
+        /// The agent: its name, short id or id.
+        agent: String,
+    },
     /// Send messages to agents.
     #[command(subcommand)]
     Msg(MsgCommand),
@@ -259,6 +282,10 @@ fn async_main(command: Command) -> ExitCode {
             Command::Daemon(DaemonCommand::Stop) => cmd::daemon::stop().await,
             Command::Daemon(DaemonCommand::Status) => cmd::daemon::status().await,
             Command::Ls { json } => cmd::ls::run(json).await,
+            Command::Attach { agent } => cmd::agent::attach(&agent).await,
+            Command::Logs { agent } => cmd::agent::logs(&agent).await,
+            Command::Diff { agent, full } => cmd::agent::diff(&agent, full).await,
+            Command::Stop { agent } => cmd::agent::stop(&agent).await,
             Command::Msg(MsgCommand::Send { to, body, kind }) => {
                 cmd::msg::send(&to, body, kind.into()).await
             }
@@ -348,5 +375,34 @@ mod tests {
         );
         let cli = Cli::try_parse_from(["volee", "demo"]).unwrap();
         assert!(matches!(cli.command, Some(Command::Demo { theme: None })));
+    }
+
+    fn parse(args: &[&str]) -> Command {
+        Cli::try_parse_from(args).unwrap().command.unwrap()
+    }
+
+    #[test]
+    fn agent_commands_take_an_agent_as_people_type_it() {
+        assert!(matches!(
+            parse(&["volee", "attach", "alpha-feat-x"]),
+            Command::Attach { agent } if agent == "alpha-feat-x"
+        ));
+        assert!(matches!(
+            parse(&["volee", "logs", "ag_x7k2pq"]),
+            Command::Logs { agent } if agent == "ag_x7k2pq"
+        ));
+        assert!(matches!(
+            parse(&["volee", "diff", "alpha"]),
+            Command::Diff { agent, full: false } if agent == "alpha"
+        ));
+        assert!(matches!(
+            parse(&["volee", "diff", "alpha", "--full"]),
+            Command::Diff { full: true, .. }
+        ));
+        assert!(matches!(
+            parse(&["volee", "stop", "alpha"]),
+            Command::Stop { agent } if agent == "alpha"
+        ));
+        assert!(Cli::try_parse_from(["volee", "attach"]).is_err());
     }
 }

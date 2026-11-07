@@ -5,12 +5,21 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use volee_config::Config;
-use volee_core::{AgentId, MissionId, Registry};
+use volee_core::{AgentId, Event, MissionId, Registry};
+use volee_proto::client::Client;
+use volee_proto::methods::{EventsSince, SinceParams};
 
 use crate::connect::paths;
 
 /// The shortest identifier ending accepted, so that a typo rarely matches.
 const MIN_SUFFIX: usize = 4;
+
+/// The daemon's registry, rebuilt from its event log.
+pub(crate) async fn registry(client: &Client) -> Result<Registry> {
+    let batch = client.call::<EventsSince>(SinceParams::default()).await?;
+    let events: Vec<Event> = batch.events.into_iter().map(|e| e.event).collect();
+    Registry::from_events(&events).context("the daemon sent events that do not fit together")
+}
 
 /// The agent `input` names: its identifier, its short identifier, or its
 /// exact name.
