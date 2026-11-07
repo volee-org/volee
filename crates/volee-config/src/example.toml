@@ -21,7 +21,6 @@ wake_timeout = 3600
 # path = "~/code/billing"
 # base = "develop"         # the repository's default branch when unset
 # model = "sonnet"         # overrides [agents] model for this repository
-# setup = "bun install"    # first step the agent runs in a new worktree
 
 [messages]
 # Summaries of long threads, written by a model when you ask for one
@@ -29,6 +28,11 @@ wake_timeout = 3600
 # Claude Code with your account, usually for a few cents.
 # summaries = true
 # summary_model = "haiku"
+
+[missions]
+# The most agents one mission may launch besides its coordinator, counting
+# those that already stopped. A coordinator asking for more is refused.
+# max_workers = 8
 
 [tui]
 # "catppuccin-mocha" (default), "catppuccin-macchiato", "catppuccin-frappe",
