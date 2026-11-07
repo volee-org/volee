@@ -12,6 +12,7 @@ use crate::harness::SessionKey;
 use crate::ids::{AgentId, MessageId, MissionId, ThreadId};
 use crate::message::{Message, MessageKind, Party, Thread};
 use crate::mission::{Assessment, Mission};
+use crate::role::LaunchedBy;
 use crate::state::AgentState;
 
 /// An event that does not fit the current state. The daemon validates events
@@ -358,6 +359,27 @@ impl Registry {
     /// An agent by identifier.
     pub fn agent(&self, id: AgentId) -> Option<&Agent> {
         self.agents.get(&id)
+    }
+
+    /// Why `id` cannot be forgotten now, in words for the person: an agent
+    /// volee launched that still runs, or an agent of an open mission.
+    /// `None` when it can be, or when the registry does not know it.
+    #[must_use]
+    pub fn forget_refusal(&self, id: AgentId) -> Option<String> {
+        let record = self.agent(id)?;
+        let name = &record.name;
+        if record.launched_by != LaunchedBy::Outside && record.state.is_live() {
+            return Some(format!(
+                "{name} is still running: stop it first (`volee stop {name}`), then forget it"
+            ));
+        }
+        let mission = record.mission.and_then(|mission| self.mission(mission))?;
+        (!mission.status.is_over()).then(|| {
+            format!(
+                "{name} belongs to the open mission \"{}\": close or abort the mission first",
+                mission.title
+            )
+        })
     }
 
     /// The agent that owns a harness session, current or past.

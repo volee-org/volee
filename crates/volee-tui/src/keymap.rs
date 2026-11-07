@@ -263,6 +263,8 @@ actions! {
     Message => "message",
     /// Show the selected agent's changes.
     Diff => "diff",
+    /// Forget the selected agent: stop listing it, after asking.
+    Forget => "forget",
     /// Move down.
     Down => "down",
     /// Move up.
@@ -678,6 +680,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &[ch('o')], A::OpenWith, "open the selected agent's worktree in your editor, diff viewer or git tool", None),
         bind(C::Global, &[ch('n')], A::NewAgent, "launch an agent in a new worktree", None),
         bind(C::Global, &[ch('N')], A::NewMission, "create a mission, which launches its coordinator", None),
+        bind(C::Global, &[ch('F')], A::Forget, "forget the selected agent: stop listing it (asks first)", None),
         bind(C::Global, &[key(K::Tab)], A::NextPane, "focus the next panel", None),
         bind(C::Global, &[key(K::BackTab)], A::PreviousPane, "focus the previous panel", None),
         bind(C::Global, &[ch('1')], A::ShowHierarchy, "show the hierarchy", None),

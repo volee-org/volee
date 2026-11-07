@@ -60,16 +60,21 @@ struct Running {
 /// A daemon with a lead (1) and its worker "api" (2), without Claude Code
 /// or a version control program.
 fn start() -> Running {
+    start_with(vec![
+        registered(agent(1), "lead", None),
+        registered(agent(2), "api", Some(agent(1))),
+    ])
+}
+
+/// A daemon whose log starts with `events`.
+fn start_with(events: Vec<Event>) -> Running {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::rooted(dir.path());
     let socket = paths.socket.clone();
     let listener = UnixListener::bind(&socket).unwrap();
     let config = Config {
         paths,
-        log: Box::new(MemoryLog::with(vec![
-            registered(agent(1), "lead", None),
-            registered(agent(2), "api", Some(agent(1))),
-        ])),
+        log: Box::new(MemoryLog::with(events)),
         clock: Arc::new(ManualClock::at(10_000)),
         harnesses: vec![],
         spool: None,
@@ -284,4 +289,43 @@ async fn the_updates_say_when_the_daemon_goes_away() {
         source.preview(agent(2)).await,
         Err(SourceError::Disconnected(_))
     ));
+}
+
+#[tokio::test]
+async fn the_interface_forgets_what_the_daemon_lets_it() {
+    // "notes" is a session found outside volee: forgotten even while it
+    // runs. "api" was launched by the person and is still starting.
+    let mut outside = registered(agent(3), "notes", None);
+    if let EventKind::AgentRegistered { launched_by, .. } = &mut outside.kind {
+        *launched_by = LaunchedBy::Outside;
+    }
+    let daemon = start_with(vec![
+        registered(agent(1), "lead", None),
+        registered(agent(2), "api", Some(agent(1))),
+        outside,
+    ]);
+    let source = source(&daemon).await;
+    let Subscription {
+        snapshot,
+        mut updates,
+        ..
+    } = source.subscribe().await.unwrap();
+    let mut registry = Registry::from_events(&snapshot).unwrap();
+    match source.forget(agent(2)).await {
+        Err(SourceError::Unsupported(message)) => assert_eq!(
+            message,
+            "api is still running: stop it first (`volee stop api`), then forget it"
+        ),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    source.forget(agent(3)).await.unwrap();
+    loop {
+        let event = next(&mut updates).await.unwrap();
+        registry.apply(&event).unwrap();
+        if matches!(event.kind, EventKind::AgentForgotten { .. }) {
+            break;
+        }
+    }
+    assert!(registry.agent(agent(3)).is_none());
+    assert!(registry.agent(agent(2)).is_some());
 }

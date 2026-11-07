@@ -233,6 +233,10 @@ fn run_request<Src: Source>(
         Effect::CreateMission(request) => spawn(results, async move {
             Msg::MissionCreated(source.create_mission(request).await)
         }),
+        Effect::Forget { agent, name } => spawn(results, async move {
+            let result = source.forget(agent).await;
+            Msg::Forgot { name, result }
+        }),
         // The loop runs these itself.
         Effect::Quit
         | Effect::TakeOver { .. }

@@ -149,6 +149,8 @@ pub(crate) enum Prompt {
     Jump,
     /// Quitting would lose the draft: quit anyway?
     Quit,
+    /// Forget this agent: stop listing it?
+    Forget(AgentId),
 }
 
 /// The kinds of message the person can send, in the composer's order.
@@ -371,6 +373,14 @@ pub(crate) enum Msg {
         /// How it went.
         result: Result<(), String>,
     },
+    /// The source forgot an agent, or refused.
+    Forgot {
+        /// The agent's name, kept from the request: once forgotten, the
+        /// registry no longer has it.
+        name: String,
+        /// How it went.
+        result: Result<(), SourceError>,
+    },
 }
 
 /// What the run loop must do after an update.
@@ -414,6 +424,13 @@ pub(crate) enum Effect {
     Spawn(SpawnRequest),
     /// Create a mission.
     CreateMission(MissionRequest),
+    /// Forget an agent: the source stops listing it.
+    Forget {
+        /// The agent.
+        agent: AgentId,
+        /// Its name, for the notice that follows.
+        name: String,
+    },
     /// Run a tool on a worktree: in this terminal, or detached in a window
     /// of its own.
     RunTool {
@@ -624,7 +641,7 @@ impl Model {
 
     /// The key contexts that apply now, the most specific first.
     pub(crate) fn contexts(&self) -> Vec<Context> {
-        if self.prompt == Some(Prompt::Quit) {
+        if matches!(self.prompt, Some(Prompt::Quit | Prompt::Forget(_))) {
             return vec![Context::Confirm];
         }
         match self.overlay {
@@ -1133,7 +1150,8 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         | Msg::Summarized { .. }
         | Msg::Launched(_)
         | Msg::MissionCreated(_)
-        | Msg::ToolFinished { .. }) => dirty = on_answer(model, answer, &mut effects),
+        | Msg::ToolFinished { .. }
+        | Msg::Forgot { .. }) => dirty = on_answer(model, answer, &mut effects),
         Msg::Resumed { agent, result } => {
             let name = model.name_of(agent);
             match result {
@@ -1188,11 +1206,14 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     }
     model.relayout();
     // The layout pass may have moved the selection (the agent left, or the
-    // filter hides it): the preview follows.
-    if let Some(selected) = model.selected
-        && model.preview.agent != Some(selected)
-    {
-        model.request_preview(selected, &mut effects);
+    // filter hides it): the preview follows, and shows nothing once nothing
+    // is selected, rather than the screen of an agent that left.
+    match model.selected {
+        Some(selected) if model.preview.agent != Some(selected) => {
+            model.request_preview(selected, &mut effects);
+        }
+        None if model.preview.agent.is_some() => model.preview = PreviewState::default(),
+        _ => {}
     }
     model.dirty |= dirty;
     effects
@@ -1320,6 +1341,21 @@ fn on_window_answer(model: &mut Model, answer: Msg) -> bool {
                 model.notify(format!("Could not open {label}: {reason}."), true);
             }
         },
+        Msg::Forgot { name, result } => match result {
+            Ok(()) => model.notify(
+                format!(
+                    "Forgot {name}: volee no longer lists it. Its sessions, worktree and branch \
+                     stay as they are."
+                ),
+                false,
+            ),
+            // The daemon's own words: it refuses an agent volee launched
+            // that still runs, and an agent of an open mission.
+            Err(error) => {
+                let reason = text::clause(&error.to_string()).to_owned();
+                model.notify(format!("Could not forget {name}: {reason}."), true);
+            }
+        },
         // The other messages are not answers.
         _ => return false,
     }
@@ -1377,6 +1413,22 @@ fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
             match model.keymap.action(&[Context::Confirm], key) {
                 Some(Action::Confirm | Action::Quit) => effects.push(Effect::Quit),
                 Some(Action::Back) => model.prompt = None,
+                _ => {}
+            }
+            return;
+        }
+        Some(Prompt::Forget(agent)) => {
+            match model.keymap.action(&[Context::Confirm], key) {
+                Some(Action::Confirm) => {
+                    model.prompt = None;
+                    let name = model.name_of(agent);
+                    effects.push(Effect::Forget { agent, name });
+                }
+                Some(Action::Back) => model.prompt = None,
+                Some(Action::Quit) => {
+                    model.prompt = None;
+                    request_quit(model, effects);
+                }
                 _ => {}
             }
             return;
@@ -1473,6 +1525,11 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
             }
         }
         Action::Message => open_composer(model),
+        Action::Forget => {
+            if let Some(agent) = model.selected {
+                model.prompt = Some(Prompt::Forget(agent));
+            }
+        }
         Action::Diff => {
             if let Some(agent) = model.selected {
                 open_diff(model, agent, false, effects);

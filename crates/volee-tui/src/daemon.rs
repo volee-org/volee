@@ -15,7 +15,7 @@ use volee_core::role::Role;
 use volee_core::{AgentId, Event, MessageId, ThreadId};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    AgentParams, Attach, CreateMission, CreateMissionParams, Diff, DiffParams, MarkRead,
+    AgentParams, Attach, CreateMission, CreateMissionParams, Diff, DiffParams, Forget, MarkRead,
     MarkReadParams, Preview, SendMessage, SendParams, Spawn, SpawnParams, Status, StatusParams,
     Summarize, SummarizeParams,
 };
@@ -199,6 +199,14 @@ impl Source for DaemonSource {
                 model: summary.model,
             })
             .map_err(|error| failure(error, "this volee daemon cannot summarize threads yet"))
+    }
+
+    async fn forget(&self, agent: AgentId) -> Result<(), SourceError> {
+        self.client
+            .call::<Forget>(AgentParams { agent })
+            .await
+            .map(|_| ())
+            .map_err(|error| failure(error, "this volee daemon cannot forget agents"))
     }
 
     async fn spawn(&self, request: SpawnRequest) -> Result<AgentId, SourceError> {

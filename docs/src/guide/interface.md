@@ -402,6 +402,15 @@ whether volee found tuios
 ([ADR 0015](../adr/0015-tuios-location-adapter.md)). tmux and Zellij are
 not supported yet.
 
+## Forgetting an agent
+
+`F` forgets the selected agent, after asking on the bottom line: volee stops
+listing it and ignores its sessions from then on, as `volee forget` does.
+Nothing is stopped or deleted: its sessions, worktree and branch stay as
+they are. volee refuses an agent it launched that still runs (stop it first
+with `volee stop`) and an agent of an open mission, and the bottom line says
+which.
+
 ## Keys
 
 `q` quits at once, unless a message you started would be lost: then volee
@@ -433,6 +442,7 @@ take-over = "ctrl-a"
 | `o` | open the selected agent's worktree in your editor, diff viewer or git tool | `open-with` |
 | `n` | launch an agent in a new worktree | `new-agent` |
 | `N` | create a mission, which launches its coordinator | `new-mission` |
+| `F` | forget the selected agent: stop listing it (asks first) | `forget` |
 | `tab` | focus the next panel | `next-pane` |
 | `shift-tab` | focus the previous panel | `previous-pane` |
 | `1` | show the hierarchy | `show-hierarchy` |
