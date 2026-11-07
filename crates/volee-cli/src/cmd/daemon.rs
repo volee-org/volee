@@ -12,7 +12,7 @@ use volee_daemon::{
 };
 use volee_git::{GhCli, GitCli};
 use volee_harness::{ClaudeCode, Harness};
-use volee_mux::{Multiplexer, Tuios};
+use volee_mux::{Multiplexer, Tmux, Tuios};
 use volee_proto::client::Client;
 use volee_proto::methods::{Empty, ForgeStatus, HarnessStatus, Shutdown, Status, StatusParams};
 use volee_proto::paths::Paths;
@@ -62,13 +62,17 @@ pub(crate) async fn run() -> Result<()> {
 }
 
 /// The terminal multiplexers whose panes agents are looked for in
-/// (ADR 0015): tuios, when it is installed. None is required.
+/// (ADR 0015): tuios and tmux, when they are installed. None is required.
 fn multiplexers() -> Vec<Arc<dyn Multiplexer>> {
     let path = std::env::var("PATH").ok();
     let mut found: Vec<Arc<dyn Multiplexer>> = Vec::new();
     if crate::tools::on_path("tuios", path.as_deref()) {
         tracing::info!("looking for agents in tuios panes");
         found.push(Arc::new(Tuios::new()));
+    }
+    if crate::tools::on_path("tmux", path.as_deref()) {
+        tracing::info!("looking for agents in tmux panes");
+        found.push(Arc::new(Tmux::new()));
     }
     found
 }
