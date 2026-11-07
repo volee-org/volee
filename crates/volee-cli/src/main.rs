@@ -65,7 +65,7 @@ enum Command {
         /// The agent: its name, short id or id.
         agent: String,
     },
-    /// Print an agent's recent terminal output.
+    /// Print an agent's screen as it looks now, as plain text.
     Logs {
         /// The agent: its name, short id or id.
         agent: String,

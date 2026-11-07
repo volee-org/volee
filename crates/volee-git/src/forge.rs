@@ -11,9 +11,29 @@ use volee_core::delivery::{ChecksState, PrState, PullRequest};
 use crate::command::Runner;
 use crate::error::GitError;
 use crate::parse::ParseError;
+use crate::remote::RepoSlug;
 
 /// The fields `gh pr list --json` is asked for.
-const PR_FIELDS: &str = "number,url,state,isDraft,statusCheckRollup";
+const PR_FIELDS: &str =
+    "number,url,state,isDraft,statusCheckRollup,headRefOid,headRepository,headRepositoryOwner";
+
+/// How many pull requests named after the branch are read, most recent
+/// first, to find the one that is the branch's.
+const CANDIDATES: usize = 10;
+
+/// An agent's branch, as its pull request must show it: see
+/// [`Forge::pull_request`].
+#[derive(Clone, Copy, Debug)]
+pub struct BranchHead<'a> {
+    /// The branch's name.
+    pub branch: &'a str,
+    /// The repository the branch is pushed to (`origin`, see
+    /// [`Git::origin`](crate::Git::origin)); `None` when it is not a
+    /// repository on a forge, and then no pull request is the branch's.
+    pub origin: Option<&'a RepoSlug>,
+    /// The commit the branch points to.
+    pub tip: &'a str,
+}
 
 /// Where the pull requests of a repository come from.
 ///
@@ -25,9 +45,19 @@ pub trait Forge: Send + Sync {
     /// the network (to check the sign-in): call it once, in the background.
     fn status(&self) -> ForgeStatus;
 
-    /// The most recent pull request opened from `branch` of the repository
-    /// that contains `repo`, whatever its state; `None` when there is none.
-    fn pull_request(&self, repo: &Path, branch: &str) -> Result<Option<PullRequest>, GitError>;
+    /// The most recent pull request, whatever its state, opened from
+    /// `head.branch` of `head.origin` and whose head commit is `head.tip`;
+    /// `None` when there is none. A pull request with the same branch name
+    /// from another repository (a fork) or at another commit (an old pull
+    /// request of a reused branch name) is not the branch's.
+    ///
+    /// `repo` is any directory of the repository; the forge finds the
+    /// repository that pull requests target from its remotes.
+    fn pull_request(
+        &self,
+        repo: &Path,
+        head: &BranchHead<'_>,
+    ) -> Result<Option<PullRequest>, GitError>;
 }
 
 /// What is known about a forge client: see [`Forge::status`].
@@ -153,15 +183,26 @@ impl Forge for GhCli {
         }
     }
 
-    fn pull_request(&self, repo: &Path, branch: &str) -> Result<Option<PullRequest>, GitError> {
+    fn pull_request(
+        &self,
+        repo: &Path,
+        head: &BranchHead<'_>,
+    ) -> Result<Option<PullRequest>, GitError> {
+        if head.origin.is_none() {
+            // Not pushed to a repository on a forge: nothing to ask.
+            return Ok(None);
+        }
+        // `gh pr list --head` matches the branch name only, in every fork:
+        // the candidates are filtered by repository and commit below.
         self.runner
             .request(repo, self.timeout)
             .args(["pr", "list"])
             // `--head=` keeps a branch that starts with a dash from looking
             // like an option.
-            .arg(format!("--head={branch}"))
-            .args(["--state", "all", "--json", PR_FIELDS, "--limit", "1"])
-            .parse(parse_pull_requests)
+            .arg(format!("--head={}", head.branch))
+            .args(["--state", "all", "--json", PR_FIELDS, "--limit"])
+            .arg(CANDIDATES.to_string())
+            .parse(|output| parse_pull_requests(output, head))
     }
 }
 
@@ -176,6 +217,45 @@ struct GhPullRequest {
     is_draft: bool,
     #[serde(default)]
     status_check_rollup: Option<Vec<GhCheck>>,
+    /// The commit at the head of the pull request.
+    #[serde(default)]
+    head_ref_oid: Option<String>,
+    /// The repository the head branch lives in; `null` once it is deleted.
+    #[serde(default)]
+    head_repository: Option<GhRepository>,
+    /// Its owner.
+    #[serde(default)]
+    head_repository_owner: Option<GhOwner>,
+}
+
+impl GhPullRequest {
+    /// Whether this pull request is the branch's: opened from its
+    /// repository, at its tip.
+    fn is_from(&self, head: &BranchHead<'_>) -> bool {
+        let from_origin = match (
+            head.origin,
+            &self.head_repository_owner,
+            &self.head_repository,
+        ) {
+            (Some(origin), Some(owner), Some(repository)) => {
+                origin.is(&owner.login, &repository.name)
+            }
+            _ => false,
+        };
+        from_origin && self.head_ref_oid.as_deref() == Some(head.tip)
+    }
+}
+
+/// A repository in `gh` output.
+#[derive(Deserialize)]
+struct GhRepository {
+    name: String,
+}
+
+/// A repository owner in `gh` output.
+#[derive(Deserialize)]
+struct GhOwner {
+    login: String,
 }
 
 /// One check of a pull request: a check run (GitHub Actions and apps) or a
@@ -203,12 +283,16 @@ enum Outcome {
     Failed,
 }
 
-/// Parses `gh pr list --json` with [`PR_FIELDS`]: the first pull request of
-/// the list, if any.
-fn parse_pull_requests(output: &[u8]) -> Result<Option<PullRequest>, ParseError> {
+/// Parses `gh pr list --json` with [`PR_FIELDS`], most recent first: the
+/// first pull request that is the branch's (see [`Forge::pull_request`]),
+/// if any.
+fn parse_pull_requests(
+    output: &[u8],
+    head: &BranchHead<'_>,
+) -> Result<Option<PullRequest>, ParseError> {
     let list: Vec<GhPullRequest> = serde_json::from_slice(output)
         .map_err(|error| ParseError::new(format!("not a list of pull requests: {error}")))?;
-    let Some(found) = list.into_iter().next() else {
+    let Some(found) = list.into_iter().find(|candidate| candidate.is_from(head)) else {
         return Ok(None);
     };
     Ok(Some(PullRequest {
@@ -216,6 +300,7 @@ fn parse_pull_requests(output: &[u8]) -> Result<Option<PullRequest>, ParseError>
         state: pr_state(&found.state, found.is_draft)?,
         checks: checks_state(found.status_check_rollup.as_deref().unwrap_or_default()),
         url: found.url,
+        head: found.head_ref_oid,
     }))
 }
 
@@ -288,10 +373,44 @@ mod tests {
         )
     }
 
+    /// The tip of the branch in these tests, `feat/x` of `volee-org/volee`.
+    const TIP: &str = "6adc11fa9619748617663ded520ce631e9292269";
+
+    /// Parses `gh` output for that branch.
+    fn parse(output: &[u8]) -> Result<Option<PullRequest>, ParseError> {
+        let origin = RepoSlug {
+            owner: "volee-org".into(),
+            name: "volee".into(),
+        };
+        let head = BranchHead {
+            branch: "feat/x",
+            origin: Some(&origin),
+            tip: TIP,
+        };
+        parse_pull_requests(output, &head)
+    }
+
+    /// The fields that say where a pull request comes from.
+    fn head_fields(owner: &str, oid: &str) -> String {
+        format!(
+            r#""headRefOid":"{oid}","headRepository":{{"id":"R_1","name":"volee"}},"headRepositoryOwner":{{"id":"O_1","login":"{owner}"}}"#
+        )
+    }
+
+    /// One pull request, opened from `owner/volee` at `oid`.
+    fn candidate(number: u64, state: &str, owner: &str, oid: &str) -> String {
+        format!(
+            r#"{{"number":{number},"url":"https://github.com/volee-org/volee/pull/{number}","state":"{state}","isDraft":false,"statusCheckRollup":[],{}}}"#,
+            head_fields(owner, oid)
+        )
+    }
+
+    /// The branch's own pull request, alone in the list.
     fn list(state: &str, draft: bool, checks: &[String]) -> Vec<u8> {
         format!(
-            r#"[{{"number":12,"url":"https://github.com/volee-org/volee/pull/12","state":"{state}","isDraft":{draft},"statusCheckRollup":[{}]}}]"#,
-            checks.join(",")
+            r#"[{{"number":12,"url":"https://github.com/volee-org/volee/pull/12","state":"{state}","isDraft":{draft},"statusCheckRollup":[{}],{}}}]"#,
+            checks.join(","),
+            head_fields("volee-org", TIP)
         )
         .into_bytes()
     }
@@ -300,39 +419,62 @@ mod tests {
     fn a_pull_request_is_read_from_gh() {
         let output = list("OPEN", false, &[check_run("COMPLETED", Some("SUCCESS"))]);
         assert_eq!(
-            parse_pull_requests(&output).unwrap(),
+            parse(&output).unwrap(),
             Some(PullRequest {
                 number: 12,
                 url: "https://github.com/volee-org/volee/pull/12".into(),
                 state: PrState::Open,
                 checks: ChecksState::Passing,
+                head: Some(TIP.into()),
             })
         );
     }
 
     #[test]
-    fn states_include_drafts() {
-        let state = |state, draft| {
-            parse_pull_requests(&list(state, draft, &[]))
+    fn only_a_pull_request_from_origin_at_the_tip_is_the_branch_s() {
+        let old = "0dd5ed0dd5ed0dd5ed0dd5ed0dd5ed0dd5ed0dd5";
+        let found = |candidates: &[String]| {
+            parse(format!("[{}]", candidates.join(",")).as_bytes())
                 .unwrap()
-                .unwrap()
-                .state
+                .map(|pr| pr.number)
         };
+        // A reused branch name: an old pull request, merged long ago.
+        assert_eq!(found(&[candidate(3, "MERGED", "volee-org", old)]), None);
+        // A fork with the same branch name, even at the same commit.
+        assert_eq!(found(&[candidate(9, "OPEN", "someone", TIP)]), None);
+        // The branch's own pull request, behind a newer one from a fork and
+        // ahead of the old one; owners compare without case.
+        assert_eq!(
+            found(&[
+                candidate(11, "OPEN", "someone", old),
+                candidate(10, "OPEN", "Volee-Org", TIP),
+                candidate(3, "MERGED", "volee-org", old),
+            ]),
+            Some(10)
+        );
+    }
+
+    #[test]
+    fn a_pull_request_whose_head_repository_is_gone_is_not_the_branch_s() {
+        let output = format!(
+            r#"[{{"number":5,"url":"u","state":"CLOSED","isDraft":false,"statusCheckRollup":[],"headRefOid":"{TIP}","headRepository":null,"headRepositoryOwner":null}}]"#
+        );
+        assert_eq!(parse(output.as_bytes()).unwrap(), None);
+    }
+
+    #[test]
+    fn states_include_drafts() {
+        let state = |state, draft| parse(&list(state, draft, &[])).unwrap().unwrap().state;
         assert_eq!(state("OPEN", true), PrState::Draft);
         assert_eq!(state("OPEN", false), PrState::Open);
         assert_eq!(state("MERGED", false), PrState::Merged);
         assert_eq!(state("CLOSED", false), PrState::Closed);
-        assert!(parse_pull_requests(&list("REOPENED", false, &[])).is_err());
+        assert!(parse(&list("REOPENED", false, &[])).is_err());
     }
 
     #[test]
     fn checks_combine_into_one_state() {
-        let checks = |runs: &[String]| {
-            parse_pull_requests(&list("OPEN", false, runs))
-                .unwrap()
-                .unwrap()
-                .checks
-        };
+        let checks = |runs: &[String]| parse(&list("OPEN", false, runs)).unwrap().unwrap().checks;
         let passed = check_run("COMPLETED", Some("SUCCESS"));
         let skipped = check_run("COMPLETED", Some("SKIPPED"));
         let running = check_run("IN_PROGRESS", None);
@@ -349,17 +491,22 @@ mod tests {
 
     #[test]
     fn no_pull_request_is_none_and_garbage_is_an_error() {
-        assert_eq!(parse_pull_requests(b"[]").unwrap(), None);
+        assert_eq!(parse(b"[]").unwrap(), None);
+        let without_checks = format!(
+            r#"[{{"number":1,"url":"u","state":"OPEN","isDraft":false,"statusCheckRollup":null,{}}}]"#,
+            head_fields("volee-org", TIP)
+        );
         assert_eq!(
-            parse_pull_requests(
-                br#"[{"number":1,"url":"u","state":"OPEN","isDraft":false,"statusCheckRollup":null}]"#
-            )
-            .unwrap()
-            .unwrap()
-            .checks,
+            parse(without_checks.as_bytes()).unwrap().unwrap().checks,
             ChecksState::None
         );
-        assert!(parse_pull_requests(b"no pull requests").is_err());
+        // Output of a `gh` too old to print heads: no pull request is proven
+        // to be the branch's.
+        assert_eq!(
+            parse(br#"[{"number":1,"url":"u","state":"MERGED","isDraft":false}]"#).unwrap(),
+            None
+        );
+        assert!(parse(b"no pull requests").is_err());
     }
 
     #[test]

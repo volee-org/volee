@@ -58,14 +58,16 @@ for an agent, you can type its name, that short id, or its full id.
 ### Acting on an agent
 
 ```sh
-volee logs <agent>          # its recent terminal output
+volee logs <agent>          # its screen as it looks now
 volee diff <agent>          # its changes against the branch it started from, by file
 volee diff <agent> --full   # the same changes, as a full patch
 volee attach <agent>        # take it over in this terminal; Ctrl+Z comes back
 volee stop <agent>          # stop it; volee does not resume it until you message it
 ```
 
-`volee logs` prints the screen the harness recorded, with its colors.
+`volee logs` prints the agent's screen as it looks now, as plain text: the
+harness records every frame its interface drew, and volee replays them to
+keep only the last one.
 `volee diff` compares the agent's worktree, committed or not, with the merge
 base of its base branch, and lists the files it created; a very long diff is
 cut, and the rest is in the worktree. `volee attach` hands this terminal to
@@ -208,7 +210,8 @@ volee demo --theme terminal       # with another theme than the configured one
 the agents it knows until you quit. `volee demo` needs no daemon and touches
 nothing: it shows a fictional lead, two missions and their workers, and two
 sessions volee did not launch, whose states change and who write to each
-other every few seconds. Both take their theme, keys and `reduced_motion`
+other and to you every few seconds, along the routes the daemon allows.
+Both take their theme, keys and `reduced_motion`
 setting from the `[tui]` table of the configuration. The
 [interface guide](interface.md) describes the screen, what needs the daemon,
 and every key.

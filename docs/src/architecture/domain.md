@@ -117,6 +117,11 @@ Delivery evidence depends on the mission kind:
   tree; a merged branch or pull request always counts;
 - **analysis**: a `report` message from the worker.
 
+A pull request counts only when its head commit is the branch's tip
+(`Delivery::pull_request_at_tip`): an old pull request of a reused branch
+name, or one read before the branch moved on, proves nothing about the work
+as it is.
+
 A change worker is judged only on fresh evidence: evidence checked before it
 stopped (`checked_at` earlier than its `state_since`) may miss its last
 commits, push or pull request, so the verdict waits for the daemon's next
@@ -165,6 +170,7 @@ triggered it are already committed.
   is part of the base branch. The daemon passes the previous `unmerged_tip`
   back to git on each check; `delivery-updated` events keep it across
   restarts. `checked_at` is when the daemon began the check that produced the
-  evidence, which tells the supervisor whether it is fresh (above). How git
-  computes each fact, and when the daemon checks, is described in
-  [Git](git.md).
+  evidence, which tells the supervisor whether it is fresh (above). The pull
+  request carries its `head` commit, so the supervisor and cleanup count it
+  only at that tip. How git computes each fact, how a pull request is matched
+  to the branch, and when the daemon checks, is described in [Git](git.md).

@@ -12,5 +12,6 @@ mod errors;
 mod fetch;
 mod forge;
 mod hostile;
+mod origin;
 mod repo_info;
 mod worktrees;

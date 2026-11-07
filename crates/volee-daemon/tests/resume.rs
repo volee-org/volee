@@ -218,6 +218,12 @@ async fn a_message_resumes_a_stopped_agent_in_its_worktree() {
         spec.prompt
     );
     assert!(
+        spec.prompt.starts_with("volee resumed this conversation")
+            && spec.prompt.contains("tools (send_message"),
+        "a resumed agent hears that its tools work: {}",
+        spec.prompt
+    );
+    assert!(
         spec.append_system_prompt
             .as_deref()
             .unwrap()

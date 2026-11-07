@@ -5,6 +5,7 @@
 # User guide
 
 - [Installation](guide/installation.md)
+- [Getting started](guide/getting-started.md)
 - [Concepts](guide/concepts.md)
 - [The interface](guide/interface.md)
 - [Themes](guide/themes.md)

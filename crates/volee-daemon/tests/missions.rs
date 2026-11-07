@@ -114,12 +114,15 @@ fn shipped(n: u128) -> Event {
         delivery: Delivery {
             commits: 2,
             push: PushState::UpToDate,
+            // Opened at the branch's tip, the only pull request that counts.
             pull_request: Some(PullRequest {
                 number: u64::try_from(n).unwrap(),
                 url: format!("https://example.com/pull/{n}"),
                 state: PrState::Open,
                 checks: ChecksState::Passing,
+                head: Some(format!("c0ffee{n}")),
             }),
+            tip: Some(format!("c0ffee{n}")),
             ..Delivery::default()
         },
     })

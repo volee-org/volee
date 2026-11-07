@@ -29,6 +29,12 @@ const SEED: u128 = 0x00de_0000_0000_0000_0000;
 /// The fictional home directory of the demo.
 const HOME: &str = "/home/dev";
 
+// The tips of the demo's pushed branches. A pull request counts as evidence
+// only at its branch's tip, so the demo's pull requests have them as heads.
+const INVOICE_PAGE_TIP: &str = "9c41d07e2b5a8f63c0e1d4b7a2f95e8c6d3b1a04";
+const INFRA_TIP: &str = "5e7a1c93d0b24f86a1c3e5d7f9b2a4c6e8d0f1a3";
+const WEBSITE_TIP: &str = "b3d5f7a9c1e3052749e6a8c0d2f4b6a8c0e2d4f6";
+
 // Members of the cast, by index.
 pub(crate) const TOWER: usize = 0;
 pub(crate) const INVOICING: usize = 1;
@@ -335,14 +341,9 @@ fn message_id(start: Timestamp, seconds: i64, id: u128) -> MessageId {
 /// The inbox thread, where questions to the person land.
 const INBOX: usize = 2;
 
-/// Direct threads between two agents, outside missions.
-const LOAD_BALANCER: usize = 3;
-const INVOICES_URL: usize = 4;
-const TOKEN_CALLS: usize = 5;
-
 /// Questions answered after the start, as (seconds, number): the question
-/// to the person about a draft flag, and the question from the latency
-/// audit to Invoicing about token calls.
+/// to the person about a draft flag, and the latency audit's question about
+/// token calls, which the person relays to Invoicing.
 const DRAFT_QUESTION: (i64, u128) = (-60, 6);
 const TOKEN_QUESTION: (i64, u128) = (-30, 13);
 
@@ -471,18 +472,6 @@ impl Script {
             .checked_at
             .get_or_insert(self.start.plus_millis(seconds * 1_000));
         self.at(seconds, EventKind::DeliveryUpdated { agent, delivery });
-    }
-
-    /// Opens the direct thread of two agents, outside missions.
-    fn direct_thread(&mut self, seconds: i64, thread: usize, a: usize, b: usize) {
-        let thread = Thread {
-            id: thread_id(self.start, thread),
-            title: format!("{} and {}", CAST[a].name, CAST[b].name),
-            mission: None,
-            participants: vec![Party::Agent(self.id(a)), Party::Agent(self.id(b))],
-            opened_at: self.start.plus_millis(seconds * 1_000),
-        };
-        self.at(seconds, EventKind::ThreadOpened { thread });
     }
 
     /// The mission supervisor's verdict on a worker.
@@ -798,6 +787,7 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         url: "https://git.example.com/dashboard/pull/42".to_owned(),
         state: PrState::Open,
         checks,
+        head: Some(INVOICE_PAGE_TIP.to_owned()),
     };
     let page = |checks| Delivery {
         commits: 3,
@@ -808,6 +798,7 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         },
         push: PushState::UpToDate,
         pull_request: Some(pr(checks)),
+        tip: Some(INVOICE_PAGE_TIP.to_owned()),
         ..Delivery::default()
     };
     script.delivery(-400, INVOICE_PAGE, page(ChecksState::Pending));
@@ -853,6 +844,7 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         url: "https://git.example.com/infra/pull/12".to_owned(),
         state,
         checks,
+        head: Some(INFRA_TIP.to_owned()),
     };
     let opened = |checks| Delivery {
         commits: 2,
@@ -863,6 +855,7 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         },
         push: PushState::UpToDate,
         pull_request: Some(lb(PrState::Open, checks)),
+        tip: Some(INFRA_TIP.to_owned()),
         ..Delivery::default()
     };
     script.delivery(-1_620, INFRA, opened(ChecksState::Pending));
@@ -874,6 +867,7 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
             push: PushState::UpToDate,
             merged_into_base: true,
             pull_request: Some(lb(PrState::Merged, ChecksState::Passing)),
+            tip: Some(INFRA_TIP.to_owned()),
             ..Delivery::default()
         },
     );
@@ -946,40 +940,37 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         None,
     );
 
-    // Across missions and harnesses: the infra session, a Codex CLI agent
-    // volee did not launch, asks a worker of the latency audit; a session
-    // started by hand asks a worker of Invoicing; a worker of one mission
-    // asks a worker of the other, and waits for the answer at the start.
-    script.direct_thread(-650, LOAD_BALANCER, INFRA, TRACE_GATEWAY);
-    let load_balancer = script.message(
-        -650,
+    // Outside a mission, an agent writes to its family, its coordinator and
+    // you (ADR 0006): the sessions volee did not launch, one of them a Codex
+    // CLI agent, ask you; a worker of one mission asks you about the other
+    // one, and waits for the answer at the start.
+    let merge = script.message(
+        -1_530,
         7,
-        LOAD_BALANCER,
+        INBOX,
         party(&script, INFRA),
-        &[party(&script, TRACE_GATEWAY)],
+        &[Party::Human],
         MessageKind::Question,
-        "Could the new load balancer explain the p95 change? The gateway moved behind it on \
-         Nov 4 (infra PR #12).",
+        "PR #12 is green: it moves the gateway behind the new load balancer. Shall I merge it, \
+         or will you after a review?",
         None,
     );
     script.message(
-        -610,
+        -1_210,
         8,
-        LOAD_BALANCER,
-        party(&script, TRACE_GATEWAY),
+        INBOX,
+        Party::Human,
         &[party(&script, INFRA)],
         MessageKind::Answer,
-        "Checked the traces: the load balancer adds 2 ms at p95. The regression is elsewhere; \
-         I will send you the report.",
-        Some(load_balancer),
+        "Reviewed: I am merging it now.",
+        Some(merge),
     );
-    script.direct_thread(-450, INVOICES_URL, BROKEN_LINKS, INVOICE_PAGE);
     let url = script.message(
         -450,
         9,
-        INVOICES_URL,
+        INBOX,
         party(&script, BROKEN_LINKS),
-        &[party(&script, INVOICE_PAGE)],
+        &[Party::Human],
         MessageKind::Question,
         "The docs link to /billing/invoices. Is that the final URL of the new invoices page?",
         None,
@@ -987,23 +978,22 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
     script.message(
         -420,
         12,
-        INVOICES_URL,
-        party(&script, INVOICE_PAGE),
+        INBOX,
+        Party::Human,
         &[party(&script, BROKEN_LINKS)],
         MessageKind::Answer,
         "It is /invoices; /billing/invoices redirects there.",
         Some(url),
     );
-    script.direct_thread(TOKEN_QUESTION.0, TOKEN_CALLS, TRACE_GATEWAY, INVOICE_TOOLS);
     script.message(
         TOKEN_QUESTION.0,
         TOKEN_QUESTION.1,
-        TOKEN_CALLS,
+        INBOX,
         party(&script, TRACE_GATEWAY),
-        &[party(&script, INVOICE_TOOLS)],
+        &[Party::Human],
         MessageKind::Question,
-        "Does create_invoice fetch a token from /auth/token on every call? That call is where \
-         search p95 doubled.",
+        "Can you ask Invoicing whether create_invoice fetches a token from /auth/token on every \
+         call? That call is where search p95 doubled.",
         None,
     );
 
@@ -1191,13 +1181,16 @@ fn beat(start: Timestamp, cycle: i64, offset: i64) -> Vec<Event> {
     events
 }
 
-/// The thread of the two coordinators, opened in the first loop.
-const COORDINATORS: usize = 6;
+/// The number of the person's question to invoice-tools, relaying the
+/// latency audit's question 20 seconds into the first loop.
+const RELAYED_QUESTION: u128 = 28;
 
 /// What agents tell each other at a beat, so messages keep moving on the
-/// network in every loop, and what the first loop delivers: the latency
-/// audit's answer to Invoicing, pull request #42 merged, and pull request #7
-/// opened by the session started by hand.
+/// network in every loop, and what the first loop delivers. Every message
+/// takes a route volee allows (ADR 0006): across missions, you relay the
+/// latency audit's question to Invoicing, and the audit's coordinator warns
+/// the lead, who warns Invoicing's coordinator. Pull request #42 merges and
+/// the session started by hand opens pull request #7.
 #[allow(clippy::too_many_lines)] // One arm per beat reads best as one table.
 fn conversations(script: &mut Script, cycle: i64, offset: i64) {
     let base = cycle * PERIOD_SECS + offset;
@@ -1231,6 +1224,21 @@ fn conversations(script: &mut Script, cycle: i64, offset: i64) {
                 None,
             );
         }
+        20 => {
+            // You relay the latency audit's question to Invoicing.
+            let to = party(script, INVOICE_TOOLS);
+            script.message(
+                base,
+                RELAYED_QUESTION,
+                INBOX,
+                Party::Human,
+                &[to],
+                MessageKind::Question,
+                "The latency audit asks: does create_invoice fetch a token from /auth/token on \
+                 every call?",
+                None,
+            );
+        }
         22 => {
             let (from, to) = (party(script, INVOICE_TOOLS), party(script, INVOICE_SCHEMA));
             script.message(
@@ -1244,41 +1252,65 @@ fn conversations(script: &mut Script, cycle: i64, offset: i64) {
                 None,
             );
             if first {
+                let from = party(script, INVOICE_TOOLS);
+                script.message(
+                    base,
+                    29,
+                    INBOX,
+                    from,
+                    &[Party::Human],
+                    MessageKind::Answer,
+                    "No: one token per session, cached for 10 minutes. create_invoice never \
+                     calls /auth/token itself.",
+                    Some(message_id(start, base - 2, RELAYED_QUESTION)),
+                );
                 // Woken by the search report, the latency audit's coordinator
-                // warns the other mission.
+                // warns the lead who asked for both missions.
                 script.state(
                     base,
                     LATENCY_AUDIT,
                     AgentState::Working,
                     Some("Reading the search report"),
                 );
-                script.direct_thread(base, COORDINATORS, LATENCY_AUDIT, INVOICING);
-                let (from, to) = (party(script, LATENCY_AUDIT), party(script, INVOICING));
+                let (from, to) = (party(script, LATENCY_AUDIT), party(script, TOWER));
                 script.message(
                     base,
                     23,
-                    COORDINATORS,
+                    1,
                     from,
                     &[to],
                     MessageKind::Note,
-                    "Heads-up from the latency audit: the gateway's auth middleware calls \
-                     /auth/token on every request, and your MCP tools go through the gateway.",
+                    "Heads-up: the gateway's auth middleware calls /auth/token on every request, \
+                     and Invoicing's MCP tools go through the gateway.",
                     None,
                 );
             }
         }
         24 if first => {
-            let (from, to) = (party(script, INVOICE_TOOLS), party(script, TRACE_GATEWAY));
+            let to = party(script, TRACE_GATEWAY);
             script.message(
                 base,
                 24,
-                TOKEN_CALLS,
-                from,
+                INBOX,
+                Party::Human,
                 &[to],
                 MessageKind::Answer,
-                "No: one token per session, cached for 10 minutes. create_invoice never calls \
-                 /auth/token itself.",
+                "Invoicing says: one token per session, cached for 10 minutes; create_invoice \
+                 never calls /auth/token itself.",
                 Some(message_id(start, TOKEN_QUESTION.0, TOKEN_QUESTION.1)),
+            );
+            // The lead passes the heads-up on to Invoicing's coordinator.
+            let (from, to) = (party(script, TOWER), party(script, INVOICING));
+            script.message(
+                base,
+                30,
+                0,
+                from,
+                &[to],
+                MessageKind::Note,
+                "From the latency audit: the gateway calls /auth/token on every request. Check \
+                 that the invoice tools keep their token.",
+                None,
             );
             script.state(
                 base,
@@ -1311,7 +1343,9 @@ fn conversations(script: &mut Script, cycle: i64, offset: i64) {
                             url: "https://git.example.com/dashboard/pull/42".to_owned(),
                             state: PrState::Merged,
                             checks: ChecksState::Passing,
+                            head: Some(INVOICE_PAGE_TIP.to_owned()),
                         }),
+                        tip: Some(INVOICE_PAGE_TIP.to_owned()),
                         ..Delivery::default()
                     },
                 );
@@ -1351,7 +1385,9 @@ fn conversations(script: &mut Script, cycle: i64, offset: i64) {
                         url: "https://git.example.com/website/pull/7".to_owned(),
                         state: PrState::Open,
                         checks,
+                        head: Some(WEBSITE_TIP.to_owned()),
                     }),
+                    tip: Some(WEBSITE_TIP.to_owned()),
                     ..Delivery::default()
                 },
             );
@@ -1448,7 +1484,9 @@ mod tests {
         );
         assert_eq!(registry.children(agent_id(start(), TRACE_GATEWAY)).len(), 2);
         assert_eq!(registry.missions().count(), 2);
-        assert_eq!(registry.unanswered_questions().len(), 1);
+        // invoice-tools' draft flag, and the latency audit's question about
+        // Invoicing's token calls.
+        assert_eq!(registry.unanswered_questions().len(), 2);
         let independents: Vec<_> = registry
             .agents()
             .filter(|agent| agent.role == Role::Independent)
@@ -1457,6 +1495,46 @@ mod tests {
         assert_eq!(independents.len(), 2);
         assert!(independents.contains(&Location::Background));
         assert!(independents.contains(&Location::Terminal));
+    }
+
+    #[test]
+    fn every_message_takes_a_route_volee_allows() {
+        // The demo replays through the routing the daemon enforces
+        // (ADR 0006), over a few loops: a message the daemon would refuse,
+        // between two agents of different missions for example, fails here.
+        let until = start().plus_millis(PERIOD_SECS * 1_000 * 3);
+        let mut registry = Registry::new();
+        let mut routes = 0;
+        for event in events_until(start(), until) {
+            if let EventKind::MessagePosted { message } = &event.kind {
+                for to in message.recipients() {
+                    if let Err(error) = registry.check_route(message.from, to) {
+                        panic!("the daemon would refuse \"{}\": {error}", message.body);
+                    }
+                    routes += 1;
+                }
+            }
+            registry.apply(&event).unwrap();
+        }
+        // The replay did check the history and three loops of messages.
+        assert!(routes >= 30, "only {routes} routes checked");
+        // The second harness stays in the conversation: infra, a Codex CLI
+        // session, asks you, and you answer it.
+        let infra = Party::Agent(agent_id(start(), INFRA));
+        assert!(
+            registry
+                .messages()
+                .any(|m| m.from == infra && m.is_for(Party::Human))
+        );
+        assert!(
+            registry
+                .messages()
+                .any(|m| m.from == Party::Human && m.is_for(infra))
+        );
+        // What an earlier demo did, and the daemon refuses: infra writing
+        // straight to a worker of the latency audit.
+        let gateway = Party::Agent(agent_id(start(), TRACE_GATEWAY));
+        assert!(registry.check_route(infra, gateway).is_err());
     }
 
     #[test]
