@@ -4,8 +4,8 @@ The `volee-harness` crate is how volee talks to Claude Code. It relies only
 on documented commands and hooks, never on Claude Code's internal files
 ([ADR 0004](../adr/0004-sources-and-reconciliation.md)). Everything on this
 page was measured on Claude Code 2.1.319 or taken from its documentation, as
-marked; volee needs 2.1.300 or newer and says so at startup when the
-installed version is older.
+marked; volee needs 2.1.319 or newer, the version it was measured on, and
+says so at startup when the installed version is older.
 
 The daemon uses the adapter through the `Harness` trait, so other harnesses
 can join later. Every command runs through a `CommandRunner` with a timeout,

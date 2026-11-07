@@ -3,8 +3,9 @@
 ## Requirements
 
 - macOS (Apple Silicon or Intel) or Linux (x86_64 or ARM64).
-- [Claude Code](https://code.claude.com) 2.1.300 or later, for the agent
-  features (background sessions and `claude agents --json`).
+- [Claude Code](https://code.claude.com) 2.1.319 or later, for the agent
+  features (background sessions, `claude agents --json`, permission modes).
+  `claude update` brings it up to date.
 - git 2.40 or later.
 - Optional: the [GitHub CLI](https://cli.github.com) (`gh`), signed in with
   `gh auth login`. With it, volee shows the pull request opened from each

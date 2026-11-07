@@ -50,9 +50,11 @@ use crate::runner::{CommandRunner, Invocation, Output, RunError, SystemRunner};
 use crate::spec::{Completion, SpawnSpec, Spawned};
 use crate::version::Version;
 
-/// The oldest Claude Code with background sessions (`claude --bg`, `attach`,
-/// `logs`, `stop`, `rm`) and `claude agents --json`.
-pub const MINIMUM_VERSION: Version = Version::new(2, 1, 300);
+/// The oldest Claude Code volee runs agents with: the version every behaviour
+/// it relies on was measured on (background sessions, `claude agents
+/// --json`, `--worktree` with `--resume`, `--permission-mode=manual`). Older
+/// versions may lack one of them, and a launch would fail on every agent.
+pub const MINIMUM_VERSION: Version = Version::new(2, 1, 319);
 
 /// The environment variables that Claude Code sets for the processes it
 /// starts (its shell commands, hooks, MCP servers and background sessions)
@@ -86,7 +88,7 @@ pub const SESSION_VARIABLES: &[&str] = &[
 ];
 
 /// What [`MINIMUM_VERSION`] is needed for, in error messages.
-const NEEDED_FOR: &str = "background sessions and `claude agents --json`";
+const NEEDED_FOR: &str = "the agent features it was tested with";
 
 /// How long a failure message from Claude Code may be, in characters.
 const MAX_FAILURE_MESSAGE: usize = 500;
