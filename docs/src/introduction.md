@@ -31,8 +31,9 @@ do*. volee shows what they do.
   and with you, and a live graph where each message travels along its edge.
 - **Missions**: give a goal across several repositories to a coordinator
   agent; volee supervises its workers and checks that the work was delivered.
-- **Your terminal**: jump into an agent with a key and come back with
-  `Ctrl+Z`. No multiplexer or editor is required.
+- **Your terminal, your tools**: jump into an agent with a key and come back
+  with `Ctrl+Z`; open its worktree in your editor, your diff viewer or your
+  git interface. None of them is required, and no multiplexer either.
 
 ## Where to go next
 
