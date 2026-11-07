@@ -23,14 +23,12 @@ use volee_proto::methods::{EventsSince, SinceParams};
 use volee_proto::paths::Paths;
 
 fn session(id: &str, name: &str, state: AgentState, alive: bool) -> ListedSession {
-    ListedSession {
-        key: SessionKey::claude(id),
-        name: Some(name.to_owned()),
-        cwd: PathBuf::from("/work/alpha"),
-        state,
-        alive,
-        background: true,
-    }
+    let mut session = ListedSession::new(SessionKey::claude(id), "/work/alpha", state);
+    session.name = Some(name.to_owned());
+    session.alive = alive;
+    session.background = true;
+    session.handle = Some(id[..8].to_owned());
+    session
 }
 
 struct Running {

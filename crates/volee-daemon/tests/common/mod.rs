@@ -12,7 +12,9 @@ use serde_json::{Value, json};
 use volee_core::AgentId;
 use volee_core::harness::{HarnessKind, SessionKey, SessionOrigin};
 use volee_core::reconcile::{ListedSession, Listing};
-use volee_harness::{Capabilities, Harness, HarnessError, SpawnSpec, Spawned, Version};
+use volee_harness::{
+    Capabilities, Harness, HarnessError, SpawnSpec, Spawned, Version, WorktreeRemoval,
+};
 
 /// A harness whose listing the test sets, and which records launches.
 #[derive(Debug, Default)]
@@ -83,7 +85,7 @@ impl Harness for FakeHarness {
         }
         self.launches.lock().unwrap().push(spec.clone());
         Ok(Spawned {
-            short_id: "abcd1234".to_owned(),
+            handle: "abcd1234".to_owned(),
             name: Some(spec.name.clone()),
             origin: SessionOrigin::Started,
         })
@@ -93,19 +95,19 @@ impl Harness for FakeHarness {
         Err(unsupported("resume"))
     }
 
-    fn stop(&self, _: &SessionKey) -> Result<(), HarnessError> {
+    fn stop(&self, _: &ListedSession) -> Result<(), HarnessError> {
         Err(unsupported("stop"))
     }
 
-    fn remove(&self, _: &SessionKey) -> Result<(), HarnessError> {
+    fn remove(&self, _: &ListedSession, _: WorktreeRemoval) -> Result<(), HarnessError> {
         Err(unsupported("remove"))
     }
 
-    fn logs(&self, _: &SessionKey) -> Result<Vec<u8>, HarnessError> {
+    fn logs(&self, _: &ListedSession) -> Result<Vec<u8>, HarnessError> {
         Err(unsupported("logs"))
     }
 
-    fn attach_command(&self, _: &SessionKey) -> Result<Command, HarnessError> {
+    fn attach_command(&self, _: &ListedSession) -> Result<Command, HarnessError> {
         Err(unsupported("attach"))
     }
 

@@ -2,8 +2,9 @@
 //! per-agent configuration that installs them.
 //!
 //! Every agent volee launches gets a settings file (passed with
-//! `--settings`, which adds hooks to the user's own) whose hooks run
-//! `volee hook <event> --agent <id>`, see [`agent_settings`]. The command
+//! `--settings`, which adds to the user's own settings) whose hooks run
+//! `volee hook <event> --agent <id>` and which allows volee's MCP tools, see
+//! [`agent_settings`]. The command
 //! receives one JSON object on standard input: a [`HookPayload`].
 //! [`interpret`] turns it into a [`HookSignal`] that the daemon folds into
 //! the agent's state.
@@ -31,8 +32,13 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use volee_core::state::{AgentState, InputRequest};
 
-pub use delivery::{format_messages_for_agent, stop_block_output};
-pub use settings::{HOOK_TIMEOUT_SECS, REWAKE_GRACE_SECS, agent_settings, mcp_config};
+pub use delivery::{
+    MAX_DELIVERY_CHARS, RenderedMessages, format_messages_for_agent, stop_block_output,
+};
+pub use settings::{
+    HOOK_TIMEOUT_SECS, MAX_REWAKE_SECS, REWAKE_GRACE_SECS, VOLEE_TOOLS_RULE, agent_settings,
+    mcp_config,
+};
 pub use summary::{tool_summary, written_files};
 
 use crate::lenient;

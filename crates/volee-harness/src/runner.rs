@@ -38,6 +38,9 @@ pub struct Invocation {
     pub cwd: Option<PathBuf>,
     /// Environment variables set on top of the caller's environment.
     pub env: Vec<(OsString, OsString)>,
+    /// Environment variables removed from the caller's environment, for
+    /// example the ones that tie a process to another harness session.
+    pub env_remove: Vec<OsString>,
     /// Bytes written to the program's standard input, which is closed
     /// afterwards. Without them, standard input is empty.
     pub stdin: Option<Vec<u8>>,
@@ -47,13 +50,14 @@ pub struct Invocation {
 
 impl Invocation {
     /// An invocation of `program` with no arguments, in the caller's
-    /// directory, with empty standard input.
+    /// directory and environment, with empty standard input.
     pub fn new(program: impl Into<PathBuf>, timeout: Duration) -> Self {
         Self {
             program: program.into(),
             args: Vec::new(),
             cwd: None,
             env: Vec::new(),
+            env_remove: Vec::new(),
             stdin: None,
             timeout,
         }
@@ -88,6 +92,17 @@ impl Invocation {
     #[must_use]
     pub fn env(mut self, key: impl Into<OsString>, value: impl Into<OsString>) -> Self {
         self.env.push((key.into(), value.into()));
+        self
+    }
+
+    /// Removes environment variables from the program's environment.
+    #[must_use]
+    pub fn env_remove<I>(mut self, keys: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<OsString>,
+    {
+        self.env_remove.extend(keys.into_iter().map(Into::into));
         self
     }
 
@@ -184,7 +199,10 @@ pub enum RunError {
 /// program runs, so a chatty program never blocks on a full pipe. When the
 /// program exits but a process it started in the background keeps the pipes
 /// open (as a daemonizing launcher may), the runner returns what it read so
-/// far after a short grace period instead of waiting for that process.
+/// far after a short grace period instead of waiting for that process. The
+/// helper threads keep draining those pipes until they close, so that
+/// process never writes into a closed pipe, which would kill it with
+/// `SIGPIPE`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemRunner;
 
@@ -220,6 +238,9 @@ impl CommandRunner for SystemRunner {
         for (key, value) in &invocation.env {
             command.env(key, value);
         }
+        for key in &invocation.env_remove {
+            command.env_remove(key);
+        }
         if let Some(cwd) = &invocation.cwd {
             command.current_dir(cwd);
         }
@@ -236,9 +257,47 @@ impl CommandRunner for SystemRunner {
         match start_helpers(&mut child, invocation) {
             Ok(receiver) => collect(&mut child, &receiver, invocation),
             Err(source) => {
-                kill(&mut child);
+                child.kill_and_reap();
                 Err(io_error(source))
             }
+        }
+    }
+}
+
+/// Where a running program stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Status {
+    /// It still runs.
+    Running,
+    /// It exited, with this code (`None` when a signal ended it).
+    Exited(Option<i32>),
+}
+
+/// The parts of a running program that [`collect`] drives; a trait so that
+/// tests can fake a program whose status cannot be read.
+trait Process {
+    /// Whether the program still runs.
+    fn status(&mut self) -> io::Result<Status>;
+
+    /// Kills the program and reaps it.
+    fn kill_and_reap(&mut self);
+}
+
+impl Process for Child {
+    fn status(&mut self) -> io::Result<Status> {
+        Ok(self
+            .try_wait()?
+            .map_or(Status::Running, |status| Status::Exited(status.code())))
+    }
+
+    fn kill_and_reap(&mut self) {
+        // The program may exit on its own between the last check and here;
+        // failing to kill it then is expected.
+        if let Err(error) = self.kill() {
+            tracing::debug!(%error, "could not kill a program");
+        }
+        if let Err(error) = self.wait() {
+            tracing::debug!(%error, "could not reap a program");
         }
     }
 }
@@ -296,7 +355,9 @@ fn file_name(program: &Path) -> String {
 }
 
 /// Forwards everything read from `source` to `sink`, chunk by chunk, until
-/// the pipe closes or nobody listens any more.
+/// the pipe closes. Once nobody listens any more, it keeps reading and drops
+/// the bytes: closing the pipe early would kill a process that still writes
+/// to it.
 fn pump(
     program: &Path,
     mut source: impl Read + Send + 'static,
@@ -309,12 +370,13 @@ fn pump(
     };
     spawn_helper(program, role, move || {
         let mut buffer = [0_u8; 8192];
+        let mut listening = true;
         loop {
             match source.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(read) => {
-                    if sink.send((stream, buffer[..read].to_vec())).is_err() {
-                        break;
+                    if listening && sink.send((stream, buffer[..read].to_vec())).is_err() {
+                        listening = false;
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
@@ -327,10 +389,10 @@ fn pump(
     })
 }
 
-/// Waits for the program to exit, gathering its output, and kills it when it
-/// runs past its timeout.
+/// Waits for the program to exit, gathering its output. Kills it when it runs
+/// past its timeout or when its status cannot be read.
 fn collect(
-    child: &mut Child,
+    child: &mut impl Process,
     receiver: &Receiver<Chunk>,
     invocation: &Invocation,
 ) -> Result<Output, RunError> {
@@ -341,13 +403,19 @@ fn collect(
     let mut pause = Duration::from_millis(1);
     loop {
         if exited.is_none() {
-            let status = child.try_wait().map_err(|source| RunError::Io {
-                program: invocation.program.clone(),
-                source,
-            })?;
-            if let Some(status) = status {
-                output.code = status.code();
-                exited = Some(Instant::now());
+            match child.status() {
+                Ok(Status::Exited(code)) => {
+                    output.code = code;
+                    exited = Some(Instant::now());
+                }
+                Ok(Status::Running) => {}
+                Err(source) => {
+                    child.kill_and_reap();
+                    return Err(RunError::Io {
+                        program: invocation.program.clone(),
+                        source,
+                    });
+                }
             }
         }
         match exited {
@@ -361,7 +429,7 @@ fn collect(
                 break;
             }
             None if started.elapsed() >= invocation.timeout => {
-                kill(child);
+                child.kill_and_reap();
                 return Err(RunError::TimedOut {
                     program: invocation.program.clone(),
                     timeout: invocation.timeout,
@@ -393,18 +461,6 @@ fn append(output: &mut Output, (stream, bytes): Chunk) {
     match stream {
         Stream::Stdout => output.stdout.extend_from_slice(&bytes),
         Stream::Stderr => output.stderr.extend_from_slice(&bytes),
-    }
-}
-
-/// Kills and reaps a program that ran too long.
-fn kill(child: &mut Child) {
-    // The program may exit on its own between the timeout check and here;
-    // failing to kill it then is expected.
-    if let Err(error) = child.kill() {
-        tracing::debug!(%error, "could not kill a program that timed out");
-    }
-    if let Err(error) = child.wait() {
-        tracing::debug!(%error, "could not reap a program that timed out");
     }
 }
 
@@ -516,10 +572,67 @@ mod tests {
             .args(["--json", "--all"])
             .cwd("/work")
             .env("KEY", "value")
+            .env_remove(["CLAUDECODE"])
             .stdin("input");
         assert_eq!(invocation.args_lossy(), ["agents", "--json", "--all"]);
         assert_eq!(invocation.cwd.as_deref(), Some(Path::new("/work")));
         assert_eq!(invocation.env, [("KEY".into(), "value".into())]);
+        assert_eq!(invocation.env_remove, [OsString::from("CLAUDECODE")]);
         assert_eq!(invocation.stdin.as_deref(), Some(&b"input"[..]));
+    }
+
+    #[test]
+    fn removes_inherited_environment_variables() {
+        let output = SystemRunner
+            .run(&sh("printf %s \"${HOME-removed}\"").env_remove(["HOME"]))
+            .unwrap();
+        assert_eq!(output.stdout, b"removed");
+    }
+
+    #[test]
+    fn a_background_process_can_keep_writing_after_the_program_exits() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("survived");
+        // The second write happens after the runner returned: with the pipe
+        // closed, it would kill the background process before `touch`.
+        let script = format!(
+            "(sleep 0.5; printf late; sleep 0.3; printf later; touch '{}') & printf started",
+            marker.display()
+        );
+        let output = SystemRunner.run(&sh(&script)).unwrap();
+        assert_eq!(output.stdout, b"started");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !marker.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            marker.exists(),
+            "the background process died writing into a closed pipe"
+        );
+    }
+
+    /// A program whose status cannot be read.
+    #[derive(Debug, Default)]
+    struct Unreadable {
+        killed: bool,
+    }
+
+    impl Process for Unreadable {
+        fn status(&mut self) -> io::Result<Status> {
+            Err(io::Error::other("status unavailable"))
+        }
+
+        fn kill_and_reap(&mut self) {
+            self.killed = true;
+        }
+    }
+
+    #[test]
+    fn a_program_whose_status_cannot_be_read_is_killed() {
+        let (_sender, receiver) = mpsc::channel();
+        let mut program = Unreadable::default();
+        let error = collect(&mut program, &receiver, &sh("true")).unwrap_err();
+        assert!(matches!(error, RunError::Io { .. }), "{error:?}");
+        assert!(program.killed);
     }
 }

@@ -9,7 +9,6 @@
 //! Start it with [`Daemon::run`]; build its dependencies with [`Config`].
 
 mod clock;
-mod delivery;
 mod discovery;
 mod error;
 mod handlers;

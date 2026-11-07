@@ -14,7 +14,7 @@ use std::sync::Arc;
 use common::{FakeHarness, git, repository};
 use tokio::net::UnixListener;
 use ulid::Ulid;
-use volee_core::message::{Party, Thread};
+use volee_core::message::{MessageKind, Party, Thread};
 use volee_core::mission::{Mission, MissionKind, MissionStatus};
 use volee_core::role::Role;
 use volee_core::state::AgentState;
@@ -24,7 +24,9 @@ use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
 use volee_git::GitCli;
 use volee_harness::Harness;
 use volee_proto::client::{Client, ClientError};
-use volee_proto::methods::{EventsSince, SinceParams, Spawn, SpawnParams};
+use volee_proto::methods::{
+    CreateMission, CreateMissionParams, EventsSince, SinceParams, Spawn, SpawnParams,
+};
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
 
@@ -183,7 +185,9 @@ async fn a_worker_gets_its_own_worktree_and_session() {
     let launches = daemon.harness.launches();
     assert_eq!(launches.len(), 1);
     let spec = &launches[0];
-    assert_eq!(spec.cwd, worktree);
+    // Started from the trusted main checkout, in volee's worktree (ADR 0013).
+    assert_eq!(spec.cwd, daemon.repo);
+    assert_eq!(spec.worktree.as_deref(), Some("feat-invoices"));
     assert_eq!(spec.prompt, "Add invoices to the billing module.");
     assert!(
         spec.append_system_prompt
@@ -286,4 +290,92 @@ async fn unknown_repositories_and_empty_tasks_are_rejected() {
         let error = rpc_error(client.call::<Spawn>(params).await.unwrap_err());
         assert_eq!(error.code, rpc::INVALID_PARAMS, "{}", error.message);
     }
+}
+
+fn invoicing() -> CreateMissionParams {
+    CreateMissionParams {
+        title: "Invoicing".into(),
+        kind: MissionKind::Change,
+        goal: "Add invoices to the billing module.".into(),
+        repos: vec!["alpha".into()],
+        requested_by: None,
+    }
+}
+
+#[tokio::test]
+async fn a_new_mission_gets_a_coordinator_that_cannot_edit() {
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let created = client.call::<CreateMission>(invoicing()).await.unwrap();
+    let coordinator = created.coordinator.expect("a coordinator was launched");
+
+    let registry = registry(&daemon.socket).await;
+    let agent = registry.agent(coordinator).unwrap();
+    assert_eq!(agent.role, Role::Coordinator);
+    assert_eq!(agent.mission, Some(created.mission));
+    assert_eq!(
+        registry.mission(created.mission).unwrap().coordinator,
+        Some(coordinator),
+        "linked to its mission"
+    );
+
+    let spec = daemon.harness.launches().pop().unwrap();
+    assert_eq!(spec.cwd, daemon.repo, "plans from the main checkout");
+    assert_eq!(spec.worktree, None);
+    for tool in ["Edit", "Write", "NotebookEdit"] {
+        assert!(spec.disallowed_tools.iter().any(|t| t == tool), "{tool}");
+    }
+    assert!(spec.prompt.contains("Add invoices to the billing module."));
+    let instructions = spec.append_system_prompt.unwrap();
+    assert!(instructions.contains("coordinator"));
+    assert!(instructions.contains("spawn_worker"));
+    assert!(instructions.contains("close_mission"));
+}
+
+#[tokio::test]
+async fn a_coordinator_that_cannot_start_is_reported_to_the_human() {
+    let daemon = start();
+    daemon.harness.refuse_launches(true);
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let created = client.call::<CreateMission>(invoicing()).await.unwrap();
+    assert_eq!(created.coordinator, None);
+    let registry = registry(&daemon.socket).await;
+    let mission = registry.mission(created.mission).unwrap();
+    assert_eq!(mission.status, MissionStatus::Planning);
+    let alerts: Vec<_> = registry
+        .thread_messages(created.thread)
+        .into_iter()
+        .filter(|message| message.kind == MessageKind::Alert)
+        .collect();
+    assert_eq!(alerts.len(), 1);
+    assert!(alerts[0].body.contains("could not launch the coordinator"));
+}
+
+#[tokio::test]
+async fn a_mission_worker_reports_to_its_coordinator() {
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let created = client.call::<CreateMission>(invoicing()).await.unwrap();
+    let coordinator = created.coordinator.unwrap();
+    let spawned = client
+        .call::<Spawn>(SpawnParams {
+            parent: Some(coordinator),
+            mission: Some(created.mission),
+            ..worker("feat/invoices")
+        })
+        .await
+        .unwrap();
+    let registry = registry(&daemon.socket).await;
+    let agent = registry.agent(spawned.agent).unwrap();
+    assert_eq!(agent.parent, Some(coordinator));
+    assert_eq!(agent.mission, Some(created.mission));
+    let spec = daemon.harness.launches().pop().unwrap();
+    let instructions = spec.append_system_prompt.unwrap();
+    assert!(instructions.contains("worker of the volee mission \"Invoicing\""));
+    assert!(instructions.contains("pull request"));
+    // The mission now runs: it has a worker.
+    assert_eq!(
+        registry.mission(created.mission).unwrap().status,
+        MissionStatus::Running
+    );
 }

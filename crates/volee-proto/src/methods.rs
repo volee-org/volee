@@ -389,6 +389,9 @@ pub struct CreatedMission {
     pub mission: MissionId,
     /// Its conversation thread.
     pub thread: ThreadId,
+    /// Its coordinator, when volee could launch one.
+    #[serde(default)]
+    pub coordinator: Option<AgentId>,
 }
 
 method!(

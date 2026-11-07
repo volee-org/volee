@@ -1,6 +1,12 @@
-//! Launching agents (ADR 0002, ADR 0010): a worktree on a new branch, the
+//! Launching agents (ADR 0002, ADR 0013): a worktree on a new branch, the
 //! agent's hook settings and MCP configuration, then a background session of
 //! the harness.
+//!
+//! The worktree lives in the repository, at `.claude/worktrees/<branch>`, and
+//! the session starts from the repository's main checkout with
+//! `--worktree=<branch>`: Claude Code checks its trust on the main checkout
+//! and reuses the worktree volee created. Started directly in a fresh
+//! worktree, a background session would be refused as untrusted.
 //!
 //! Every slow step (git, the harness) runs off the state lock. The agent is
 //! registered before its session starts, so that the session's first hooks
@@ -11,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use volee_core::harness::HarnessKind;
-use volee_core::mission::MissionKind;
+use volee_core::mission::{Mission, MissionKind};
 use volee_core::role::{LaunchedBy, Role};
 use volee_core::state::AgentState;
 use volee_core::workspace::{Location, Workspace};
@@ -23,9 +29,8 @@ use volee_proto::methods::{SpawnParams, Spawned};
 use crate::error::DaemonError;
 use crate::server::Shared;
 
-/// The directory, inside a repository, where volee puts its worktrees. Claude
-/// Code uses the same one for its own, which keeps the repository's trust and
-/// its ignore rule in one place.
+/// The directory, inside a repository, where volee puts its worktrees: the
+/// one Claude Code looks into for `--worktree`.
 const IN_REPO_WORKTREES: &str = ".claude/worktrees";
 
 /// A repository resolved for a launch.
@@ -82,7 +87,8 @@ pub(crate) async fn spawn(
     }
 
     let agent = shared.state.lock().await.new_agent_id();
-    let worktree = worktree_path(shared, &target, &params.branch);
+    let worktree_name = slug(&params.branch);
+    let worktree = target.root.join(IN_REPO_WORKTREES).join(&worktree_name);
     let created = {
         let git = Arc::clone(&git);
         let (root, path, branch, base) = (
@@ -93,9 +99,7 @@ pub(crate) async fn spawn(
         );
         blocking(move || git.add_worktree(&root, &path, &branch, &base)).await??
     };
-    if worktree.starts_with(target.root.join(IN_REPO_WORKTREES)) {
-        exclude_worktrees(&target.root);
-    }
+    exclude_worktrees(&target.root);
     let (settings_file, mcp_config_file) = write_agent_files(shared, &harness, agent)?;
 
     let name = params
@@ -130,7 +134,7 @@ pub(crate) async fn spawn(
             .map(str::to_owned)
     });
     let spec = SpawnSpec {
-        cwd: worktree.clone(),
+        cwd: target.root.clone(),
         name: name.clone(),
         model,
         prompt: task,
@@ -145,12 +149,124 @@ pub(crate) async fn spawn(
             &target,
             &params.branch,
         )),
+        worktree: Some(worktree_name),
     };
     start_session(shared, &harness, agent, spec).await?;
     Ok(Spawned {
         agent,
         worktree: worktree.display().to_string(),
     })
+}
+
+/// Launches the coordinator of a new mission, in the main checkout of its
+/// first repository. It plans and delegates; it is told never to change files
+/// there, and Claude Code's editing tools are disabled for it.
+pub(crate) async fn coordinator(
+    shared: &Arc<Shared>,
+    mission: MissionId,
+) -> Result<AgentId, DaemonError> {
+    let harness = harness(shared)?;
+    let git = git(shared)?;
+    let record = shared
+        .state
+        .lock()
+        .await
+        .registry()
+        .mission(mission)
+        .cloned()
+        .ok_or_else(|| DaemonError::NotFound(format!("unknown mission {mission}")))?;
+    let first = record.repos.first().ok_or_else(|| {
+        DaemonError::InvalidParams("a mission needs at least one repository".into())
+    })?;
+    let target = resolve(shared, &git, first, None).await?;
+    let agent = shared.state.lock().await.new_agent_id();
+    let (settings_file, mcp_config_file) = write_agent_files(shared, &harness, agent)?;
+    let name = format!("coordinator-{}", slug(&record.title.to_lowercase()));
+    let workspace = Workspace {
+        repo: Some(target.name.clone()),
+        repo_root: Some(target.root.clone()),
+        ..Workspace::at(&target.root)
+    };
+    register(
+        shared,
+        agent,
+        &name,
+        Role::Coordinator,
+        None,
+        Some(mission),
+        workspace,
+    )
+    .await?;
+    let spec = SpawnSpec {
+        cwd: target.root.clone(),
+        name,
+        model: shared
+            .settings
+            .model_for(Some(&target.name))
+            .map(str::to_owned),
+        prompt: coordinator_prompt(&record),
+        settings_file,
+        mcp_config_file,
+        permission_mode: permission_mode(shared),
+        allowed_tools: Vec::new(),
+        disallowed_tools: ["Edit", "Write", "NotebookEdit"]
+            .map(str::to_owned)
+            .to_vec(),
+        append_system_prompt: Some(coordinator_instructions(&record)),
+        worktree: None,
+    };
+    start_session(shared, &harness, agent, spec).await?;
+    Ok(agent)
+}
+
+/// The coordinator's first prompt: the mission itself.
+fn coordinator_prompt(mission: &Mission) -> String {
+    format!(
+        "Mission \"{}\" ({} mission).\n\nGoal:\n{}\n\nRepositories: {}.\n\nPlan the work, then \
+         launch the workers with `spawn_worker`.",
+        mission.title,
+        mission.kind.label(),
+        mission.goal.trim(),
+        mission.repos.join(", ")
+    )
+}
+
+/// How a coordinator works, appended to its system prompt so that it
+/// survives compaction.
+fn coordinator_instructions(mission: &Mission) -> String {
+    let delivery = match mission.kind {
+        MissionKind::Change => {
+            "This is a change mission: each worker commits on its own branch, pushes it and \
+             opens a draft pull request, then reports. volee counts a worker as delivered only \
+             when its commits are pushed and its pull request is open (or merged)."
+        }
+        MissionKind::Analysis => {
+            "This is an analysis mission: workers must not change code. Each one investigates \
+             and sends its findings with `report`; that report is what volee counts as \
+             delivered."
+        }
+    };
+    format!(
+        "You are the coordinator of the volee mission \"{title}\". volee shows every coding agent \
+         on this machine to the human and checks their work. You plan and coordinate; workers do \
+         the work.\n\n\
+         1. Read what you need to plan. You are in the main checkout of one of the mission's \
+         repositories: never change files here.\n\
+         2. Split the goal into a few independent tasks and launch one worker per task with \
+         `spawn_worker` (repository, a new branch such as `feat/<topic>`, and the task). A worker \
+         knows only what you write: give it the context, what to change or find, the acceptance \
+         criteria and how to check its work. Prefer few workers.\n\
+         3. Then wait. Do not poll and do not sleep: volee wakes you with a message when a worker \
+         stops, with the evidence it checked. Answer workers' questions with `send_message`. When \
+         a worker stopped without delivering, tell it what is missing.\n\
+         4. When volee tells you every worker delivered, send the final report to the human with \
+         `report`: what changed, a link to every pull request or report, and what the human must \
+         review. Then call `close_mission`.\n\n\
+         {delivery}\n\n\
+         Write to the human (`send_message` to \"human\") only for decisions that are theirs. Keep \
+         every message short.",
+        title = mission.title
+    )
 }
 
 /// Checks the parent and the mission a launch names, and returns what the
@@ -230,7 +346,7 @@ async fn start_session(
     };
     match started {
         Ok(spawned) => {
-            tracing::info!(%agent, short_id = %spawned.short_id, "agent launched");
+            tracing::info!(%agent, handle = %spawned.handle, "agent launched");
             Ok(())
         }
         Err(error) => {
@@ -300,16 +416,6 @@ pub(crate) async fn resolve(
             })?
     };
     Ok(Target { name, root, base })
-}
-
-/// Where the agent's worktree goes: under the configured root when there is
-/// one, else inside the repository, where Claude Code puts its own.
-fn worktree_path(shared: &Shared, target: &Target, branch: &str) -> PathBuf {
-    let slug = slug(branch);
-    match &shared.settings.worktrees.root {
-        Some(root) => root.join(&target.name).join(slug),
-        None => target.root.join(IN_REPO_WORKTREES).join(slug),
-    }
 }
 
 /// A branch name as a directory name: `feat/invoices` becomes

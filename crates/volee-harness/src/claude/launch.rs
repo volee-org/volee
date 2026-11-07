@@ -13,8 +13,9 @@ const SEPARATOR: char = '\u{b7}';
 /// What `claude --bg` reported about the session it started.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Backgrounded {
-    /// The session's short id: the first characters of its session UUID.
-    pub short_id: String,
+    /// The session's id, which `claude agents` lists and `stop`, `rm`,
+    /// `logs` and `attach` take (the first characters of its session UUID).
+    pub id: String,
     /// The session's display name, when one was printed.
     pub name: Option<String>,
 }
@@ -46,67 +47,71 @@ pub fn parse_backgrounded(output: &str) -> Result<Backgrounded, ParseError> {
             return Err(ParseError::InvalidShortId(id.to_owned()));
         }
         return Ok(Backgrounded {
-            short_id: id.to_owned(),
+            id: id.to_owned(),
             name: name.filter(|name| !name.is_empty()).map(str::to_owned),
         });
     }
     Err(ParseError::NoBackgroundedLine)
 }
 
-/// Whether `id` looks like a short session id that can safely be passed back
-/// to `claude`. Claude Code 2.1.319 prints eight hexadecimal digits; any
-/// short run of letters, digits and dashes is accepted so that a longer id
-/// in a future version does not orphan the session it started.
+/// Whether `id` looks like a session id that can safely be passed back to
+/// `claude`. Claude Code 2.1.319 prints eight hexadecimal digits; any short
+/// run of letters, digits and dashes is accepted so that a longer id in a
+/// future version does not orphan the session it started.
 fn is_short_id(id: &str) -> bool {
     (4..=36).contains(&id.len()) && super::is_argument_safe(id)
 }
 
 /// The arguments of `claude --bg` for `spec`, resuming `resume` when given.
 ///
-/// Free text never reaches the parser as an option: the prompt comes after
-/// `--`, and every variadic option (`--mcp-config`, `--allowedTools`,
-/// `--disallowedTools`) is followed by another option or by `--`, so it
-/// cannot swallow the prompt.
+/// Every value travels inside its option as `--opt=value` (checked against
+/// Claude Code 2.1.319, which also rejects unknown options), so no value can
+/// be read as an option and no variadic option (`--mcp-config`,
+/// `--allowedTools`, `--disallowedTools`) can swallow the next argument. Tool
+/// rules go in one comma-separated value, the list form the option
+/// documents. The prompt comes last, after `--`.
 pub(crate) fn args(resume: Option<&str>, spec: &SpawnSpec) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec!["--bg".into()];
     if let Some(session) = resume {
-        push_option(&mut args, "--resume", session);
+        args.push(option("--resume", session));
     }
     if !spec.name.trim().is_empty() {
-        push_option(&mut args, "--name", &spec.name);
+        args.push(option("--name", &spec.name));
     }
     if let Some(model) = &spec.model {
-        push_option(&mut args, "--model", model);
+        args.push(option("--model", model));
     }
-    push_option(&mut args, "--settings", &spec.settings_file);
-    push_option(&mut args, "--mcp-config", &spec.mcp_config_file);
+    args.push(option("--settings", &spec.settings_file));
+    args.push(option("--mcp-config", &spec.mcp_config_file));
     args.push("--strict-mcp-config".into());
     if let Some(mode) = spec.permission_mode {
-        push_option(&mut args, "--permission-mode", mode.as_str());
+        args.push(option("--permission-mode", mode.as_str()));
     }
     for (flag, rules) in [
         ("--allowedTools", &spec.allowed_tools),
         ("--disallowedTools", &spec.disallowed_tools),
     ] {
         if !rules.is_empty() {
-            args.push(flag.into());
-            args.extend(rules.iter().map(Into::into));
+            args.push(option(flag, rules.join(",")));
         }
     }
     if let Some(text) = &spec.append_system_prompt {
-        push_option(&mut args, "--append-system-prompt", text);
+        args.push(option("--append-system-prompt", text));
+    }
+    if let Some(name) = &spec.worktree {
+        args.push(option("--worktree", name));
     }
     args.push("--".into());
     args.push(prompt_operand(&spec.prompt).into());
     args
 }
 
-/// Appends an option and its value as two arguments. Claude Code's parser
-/// always takes the argument after an option that needs a value as that
-/// value, even when it starts with a dash.
-fn push_option(args: &mut Vec<OsString>, name: &str, value: impl AsRef<OsStr>) {
-    args.push(name.into());
-    args.push(value.as_ref().to_os_string());
+/// One `--name=value` argument.
+fn option(name: &str, value: impl AsRef<OsStr>) -> OsString {
+    let mut arg = OsString::from(name);
+    arg.push("=");
+    arg.push(value.as_ref());
+    arg
 }
 
 /// The prompt as the last argument of `claude`.
@@ -114,10 +119,13 @@ fn push_option(args: &mut Vec<OsString>, name: &str, value: impl AsRef<OsStr>) {
 /// Claude Code's parser runs a subcommand when the first operand is its name,
 /// even after `--`: a one-word prompt such as `update` or `purge` would run
 /// `claude update` or `claude purge` instead of starting a session. A prompt
-/// without whitespace gets a trailing newline, which no subcommand name has
-/// and which the model does not notice.
+/// without whitespace gets a trailing newline, which no subcommand name has.
+/// A prompt starting with `-` gets a leading newline, so that it can never
+/// be read as an option either. The model does not notice either newline.
 fn prompt_operand(prompt: &str) -> String {
-    if prompt.chars().any(char::is_whitespace) {
+    if prompt.starts_with('-') {
+        format!("\n{prompt}")
+    } else if prompt.chars().any(char::is_whitespace) {
         prompt.to_owned()
     } else {
         format!("{prompt}\n")
@@ -183,6 +191,7 @@ mod tests {
             allowed_tools: vec![],
             disallowed_tools: vec![],
             append_system_prompt: None,
+            worktree: None,
         }
     }
 
@@ -191,23 +200,36 @@ mod tests {
     }
 
     #[test]
+    fn a_worktree_is_named_before_the_prompt() {
+        let spec = SpawnSpec {
+            cwd: "/work/alpha".into(),
+            worktree: Some("feat-invoices".into()),
+            ..spec()
+        };
+        let args = args(None, &spec);
+        let args = strings(&args);
+        let at = args.iter().position(|arg| *arg == "--").unwrap();
+        assert!(args[..at].contains(&"--worktree=feat-invoices"), "{args:?}");
+    }
+
+    #[test]
     fn reads_the_backgrounded_line_among_hints() {
-        let output = "backgrounded \u{b7} 4402670e \u{b7} neon billing investigation\n\
-                      \n  claude attach 4402670e   open it here\n  claude logs 4402670e     see its output\n";
+        let output = "backgrounded \u{b7} 7d3c1f0a \u{b7} refactor the parser\n\
+                      \n  claude attach 7d3c1f0a   open it here\n  claude logs 7d3c1f0a     see its output\n";
         assert_eq!(
             parse_backgrounded(output).unwrap(),
             Backgrounded {
-                short_id: "4402670e".into(),
-                name: Some("neon billing investigation".into()),
+                id: "7d3c1f0a".into(),
+                name: Some("refactor the parser".into()),
             }
         );
     }
 
     #[test]
     fn the_name_may_contain_the_separator() {
-        let output = "\n  backgrounded \u{b7} b60aa3b9 \u{b7} api \u{b7} billing \u{b7} v2  \n";
+        let output = "\n  backgrounded \u{b7} c4e5a6b7 \u{b7} api \u{b7} billing \u{b7} v2  \n";
         let background = parse_backgrounded(output).unwrap();
-        assert_eq!(background.short_id, "b60aa3b9");
+        assert_eq!(background.id, "c4e5a6b7");
         assert_eq!(
             background.name.as_deref(),
             Some("api \u{b7} billing \u{b7} v2")
@@ -216,25 +238,25 @@ mod tests {
 
     #[test]
     fn the_name_is_optional() {
-        let background = parse_backgrounded("backgrounded \u{b7} 4402670e\n").unwrap();
-        assert_eq!(background.short_id, "4402670e");
+        let background = parse_backgrounded("backgrounded \u{b7} 7d3c1f0a\n").unwrap();
+        assert_eq!(background.id, "7d3c1f0a");
         assert_eq!(background.name, None);
-        let empty = parse_backgrounded("backgrounded \u{b7} 4402670e \u{b7} \n").unwrap();
+        let empty = parse_backgrounded("backgrounded \u{b7} 7d3c1f0a \u{b7} \n").unwrap();
         assert_eq!(empty.name, None);
     }
 
     #[test]
     fn colors_and_hyperlinks_are_ignored() {
-        let output = "\u{1b}[1;32mbackgrounded\u{1b}[0m \u{b7} \u{1b}]8;;claude://4402670e\u{1b}\\4402670e\u{1b}]8;;\u{1b}\\ \u{b7} \u{1b}[2mfix\u{1b}[0m\n";
+        let output = "\u{1b}[1;32mbackgrounded\u{1b}[0m \u{b7} \u{1b}]8;;claude://7d3c1f0a\u{1b}\\7d3c1f0a\u{1b}]8;;\u{1b}\\ \u{b7} \u{1b}[2mfix\u{1b}[0m\n";
         let background = parse_backgrounded(output).unwrap();
-        assert_eq!(background.short_id, "4402670e");
+        assert_eq!(background.id, "7d3c1f0a");
         assert_eq!(background.name.as_deref(), Some("fix"));
     }
 
     #[test]
     fn lines_that_merely_start_with_the_word_are_skipped() {
         let output = "backgrounded sessions are listed by claude agents\nBackgrounded \u{b7} 0a1b2c3d \u{b7} x\n";
-        assert_eq!(parse_backgrounded(output).unwrap().short_id, "0a1b2c3d");
+        assert_eq!(parse_backgrounded(output).unwrap().id, "0a1b2c3d");
     }
 
     #[test]
@@ -247,7 +269,7 @@ mod tests {
             parse_backgrounded(""),
             Err(ParseError::NoBackgroundedLine)
         ));
-        for bad in ["--help", "a b", "x", "4402670e;rm"] {
+        for bad in ["--help", "a b", "x", "7d3c1f0a;rm"] {
             let output = format!("backgrounded \u{b7} {bad} \u{b7} name");
             assert!(
                 matches!(
@@ -265,12 +287,9 @@ mod tests {
             strings(&args(None, &spec())),
             [
                 "--bg",
-                "--name",
-                "alpha worker",
-                "--settings",
-                "/state/agents/ag_1/settings.json",
-                "--mcp-config",
-                "/state/agents/ag_1/mcp.json",
+                "--name=alpha worker",
+                "--settings=/state/agents/ag_1/settings.json",
+                "--mcp-config=/state/agents/ag_1/mcp.json",
                 "--strict-mcp-config",
                 "--",
                 "Fix the flaky test",
@@ -279,24 +298,43 @@ mod tests {
     }
 
     #[test]
-    fn bypassing_permissions_needs_an_explicit_request() {
+    fn every_value_travels_inside_its_option() {
+        let full = SpawnSpec {
+            model: Some("opus".into()),
+            permission_mode: Some(PermissionMode::AcceptEdits),
+            allowed_tools: vec!["Bash(cargo test *)".into(), "Edit".into()],
+            disallowed_tools: vec!["WebFetch".into()],
+            append_system_prompt: Some("-You are a volee worker.".into()),
+            ..spec()
+        };
+        assert_eq!(
+            strings(&args(Some("7d3c1f0a-2b4e-4c6d-9e8f-0a1b2c3d4e5f"), &full)),
+            [
+                "--bg",
+                "--resume=7d3c1f0a-2b4e-4c6d-9e8f-0a1b2c3d4e5f",
+                "--name=alpha worker",
+                "--model=opus",
+                "--settings=/state/agents/ag_1/settings.json",
+                "--mcp-config=/state/agents/ag_1/mcp.json",
+                "--strict-mcp-config",
+                "--permission-mode=acceptEdits",
+                "--allowedTools=Bash(cargo test *),Edit",
+                "--disallowedTools=WebFetch",
+                "--append-system-prompt=-You are a volee worker.",
+                "--",
+                "Fix the flaky test",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_permission_mode_is_passed_only_when_configured() {
         let defaults = args(None, &spec());
         assert!(
             !strings(&defaults)
                 .iter()
-                .any(|arg| arg.contains("ermission"))
+                .any(|arg| arg.contains("ermission") || arg.contains("dangerously"))
         );
-        let asked = SpawnSpec {
-            permission_mode: Some(PermissionMode::BypassPermissions),
-            ..spec()
-        };
-        let asked = args(None, &asked);
-        let asked = strings(&asked);
-        let at = asked
-            .iter()
-            .position(|arg| *arg == "--permission-mode")
-            .unwrap();
-        assert_eq!(asked[at + 1], "bypassPermissions");
     }
 
     #[test]
@@ -305,7 +343,11 @@ mod tests {
             name: "  ".into(),
             ..spec()
         };
-        assert!(!strings(&args(None, &unnamed)).contains(&"--name"));
+        assert!(
+            !strings(&args(None, &unnamed))
+                .iter()
+                .any(|arg| arg.starts_with("--name"))
+        );
     }
 
     #[test]
@@ -314,6 +356,13 @@ mod tests {
         assert_eq!(prompt_operand("purge"), "purge\n");
         assert_eq!(prompt_operand("fix the tests"), "fix the tests");
         assert_eq!(prompt_operand("line one\nline two"), "line one\nline two");
+    }
+
+    #[test]
+    fn a_prompt_cannot_become_an_option() {
+        assert_eq!(prompt_operand("-p"), "\n-p");
+        assert_eq!(prompt_operand("--help me"), "\n--help me");
+        assert_eq!(prompt_operand("--"), "\n--");
     }
 
     #[test]
