@@ -72,6 +72,8 @@ filter_unconventional = true
 split_commits = false
 # Turn the "(#123)" that GitHub appends to squash-merge titles into a link.
 commit_preprocessors = [
+  # A fix whose title starts with "drop" would be filed under Removed.
+  { pattern = '^fix\(cli\): drop bidirectional formatting characters from agent text', replace = 'fix(cli): keep bidirectional formatting characters out of agent text' },
   { pattern = '\(#([0-9]+)\)', replace = "([#${1}](https://github.com/volee-org/volee/pull/${1}))" },
 ]
 # Map Conventional Commits types to Keep a Changelog sections. The first
