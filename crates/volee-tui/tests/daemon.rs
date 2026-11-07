@@ -79,6 +79,7 @@ fn start() -> Running {
         idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
         volee_bin: None,
+        multiplexers: Vec::new(),
     };
     let task = tokio::spawn(Daemon::serve(listener, config));
     Running {

@@ -125,6 +125,23 @@ pub struct StatusInfo {
     /// or has not checked it yet.
     #[serde(default)]
     pub forge: Option<ForgeStatus>,
+    /// The terminal multiplexers whose panes the daemon finds agents in
+    /// (ADR 0015); none when none is installed.
+    #[serde(default)]
+    pub multiplexers: Vec<MultiplexerStatus>,
+}
+
+/// What the daemon knows about a terminal multiplexer on this machine.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultiplexerStatus {
+    /// Its name, such as `tuios`.
+    pub name: String,
+    /// Whether volee can use it now: installed, with a server running.
+    pub available: bool,
+    /// Its version, when known.
+    pub version: Option<String>,
+    /// Why it is unavailable, or a note.
+    pub detail: Option<String>,
 }
 
 method!(
@@ -377,10 +394,11 @@ method!(
 );
 
 /// The result of [`Attach`]: a command the client runs with its own
-/// terminal.
+/// terminal, or, for an agent in a multiplexer pane, how to bring that pane
+/// forward.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachCommand {
-    /// The program.
+    /// The program; empty when `focus` is given.
     pub program: String,
     /// Its arguments.
     pub args: Vec<String>,
@@ -392,11 +410,29 @@ pub struct AttachCommand {
     pub env_remove: Vec<String>,
     /// A sentence telling the person how to come back.
     pub hint: String,
+    /// For an agent whose session runs in a multiplexer pane volee found
+    /// (ADR 0015): the pane to bring forward instead of taking the agent
+    /// over. The client runs its steps itself, in its own environment, and
+    /// keeps its terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus: Option<PaneFocus>,
+}
+
+/// How to bring forward the multiplexer pane an agent runs in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneFocus {
+    /// The multiplexer, such as `tuios`.
+    pub multiplexer: String,
+    /// The multiplexer's session that holds the pane, said for people.
+    pub session: String,
+    /// The commands to run, in order: each is a program and its arguments.
+    pub steps: Vec<Vec<String>>,
 }
 
 method!(
-    /// How to take over an agent in the client's terminal. Refused for an
-    /// agent in a terminal of its own: switch to that terminal instead.
+    /// How to take over an agent in the client's terminal, or bring forward
+    /// the multiplexer pane it runs in. Refused for an agent in a terminal
+    /// volee cannot address: switch to that terminal instead.
     Attach,
     "agents.attach",
     AgentParams,

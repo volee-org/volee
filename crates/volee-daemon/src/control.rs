@@ -20,7 +20,10 @@ use volee_core::workspace::Location;
 use volee_core::{Agent, AgentId, Event, EventKind};
 use volee_git::DiffFormat;
 use volee_harness::{Harness, HarnessError};
-use volee_proto::methods::{AgentParams, AttachCommand, DiffParams, DiffText, Empty, PreviewText};
+use volee_mux::{Multiplexer, MuxError};
+use volee_proto::methods::{
+    AgentParams, AttachCommand, DiffParams, DiffText, Empty, PaneFocus, PreviewText,
+};
 
 use crate::error::DaemonError;
 use crate::launch::{blocking, git, harness};
@@ -159,12 +162,61 @@ fn harness_error(name: &str, error: HarnessError) -> DaemonError {
     }
 }
 
+/// The multiplexer pane an agent runs in, when volee found it in one
+/// (ADR 0015).
+struct Pane {
+    adapter: Arc<dyn Multiplexer>,
+    target: String,
+    name: String,
+}
+
+/// The pane `agent` runs in, if any of the daemon's multiplexers found it.
+/// An unknown agent has none: the harness's path says what is wrong.
+async fn pane(shared: &Arc<Shared>, agent: AgentId) -> Option<Pane> {
+    let state = shared.state.lock().await;
+    let record = state.registry().agent(agent)?;
+    let Location::Pane {
+        multiplexer,
+        target,
+    } = &record.location
+    else {
+        return None;
+    };
+    shared.panes.adapter(multiplexer).map(|adapter| Pane {
+        adapter,
+        target: target.clone(),
+        name: record.name.clone(),
+    })
+}
+
+/// A multiplexer failure about the pane of the agent `name`, said for
+/// people.
+fn pane_error(name: &str, adapter: &dyn Multiplexer, error: &MuxError) -> DaemonError {
+    let multiplexer = adapter.name();
+    DaemonError::Unavailable(format!(
+        "cannot reach the {multiplexer} pane of {name}: {error}"
+    ))
+}
+
 /// `agents.preview`: the agent's recent terminal output, raw, with its
-/// terminal escape sequences, for a terminal emulator to render.
+/// terminal escape sequences, for a terminal emulator to render. For an
+/// agent in a multiplexer pane, what the pane shows.
 pub(crate) async fn preview(
     shared: &Arc<Shared>,
     params: AgentParams,
 ) -> Result<PreviewText, DaemonError> {
+    if let Some(Pane {
+        adapter,
+        target,
+        name,
+    }) = pane(shared, params.agent).await
+    {
+        let reader = Arc::clone(&adapter);
+        let screen = blocking(move || reader.capture(&target))
+            .await?
+            .map_err(|error| pane_error(&name, adapter.as_ref(), &error))?;
+        return Ok(PreviewText { screen });
+    }
     let Target {
         harness,
         name,
@@ -180,11 +232,37 @@ pub(crate) async fn preview(
 }
 
 /// `agents.attach`: the command that takes the agent over in the client's
-/// terminal.
+/// terminal, or, for an agent in a multiplexer pane, the steps that bring
+/// that pane forward, which the client runs itself.
 pub(crate) async fn attach(
     shared: &Arc<Shared>,
     params: AgentParams,
 ) -> Result<AttachCommand, DaemonError> {
+    if let Some(Pane {
+        adapter,
+        target,
+        name,
+    }) = pane(shared, params.agent).await
+    {
+        let steps = adapter
+            .focus_steps(&target)
+            .map_err(|error| pane_error(&name, adapter.as_ref(), &error))?;
+        let session = volee_mux::split_target(&target)
+            .map_or(target.as_str(), |(session, _)| session)
+            .to_owned();
+        return Ok(AttachCommand {
+            program: String::new(),
+            args: Vec::new(),
+            cwd: None,
+            env_remove: Vec::new(),
+            hint: String::new(),
+            focus: Some(PaneFocus {
+                multiplexer: adapter.name().to_owned(),
+                session,
+                steps,
+            }),
+        });
+    }
     let Target {
         harness,
         name,
@@ -207,6 +285,7 @@ pub(crate) async fn attach(
             .map(|(key, _)| text(key))
             .collect(),
         hint: ATTACH_HINT.to_owned(),
+        focus: None,
     })
 }
 

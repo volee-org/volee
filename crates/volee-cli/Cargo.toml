@@ -30,6 +30,7 @@ volee-daemon.workspace = true
 volee-git.workspace = true
 volee-harness.workspace = true
 volee-mcp.workspace = true
+volee-mux.workspace = true
 volee-proto.workspace = true
 volee-store.workspace = true
 volee-tui.workspace = true

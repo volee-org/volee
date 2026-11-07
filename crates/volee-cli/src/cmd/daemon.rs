@@ -12,6 +12,7 @@ use volee_daemon::{
 };
 use volee_git::{GhCli, GitCli};
 use volee_harness::{ClaudeCode, Harness};
+use volee_mux::{Multiplexer, Tuios};
 use volee_proto::client::Client;
 use volee_proto::methods::{Empty, HarnessStatus, Shutdown, Status, StatusParams};
 use volee_proto::paths::Paths;
@@ -53,10 +54,23 @@ pub(crate) async fn run() -> Result<()> {
         idle_discovery_interval: DEFAULT_IDLE_DISCOVERY_INTERVAL,
         evidence,
         volee_bin,
+        multiplexers: multiplexers(),
     };
     Daemon::run(config)
         .await
         .context("the daemon stopped with an error")
+}
+
+/// The terminal multiplexers whose panes agents are looked for in
+/// (ADR 0015): tuios, when it is installed. None is required.
+fn multiplexers() -> Vec<Arc<dyn Multiplexer>> {
+    let path = std::env::var("PATH").ok();
+    let mut found: Vec<Arc<dyn Multiplexer>> = Vec::new();
+    if crate::tools::on_path("tuios", path.as_deref()) {
+        tracing::info!("looking for agents in tuios panes");
+        found.push(Arc::new(Tuios::new()));
+    }
+    found
 }
 
 /// Finds Claude Code and checks that its version has what volee needs.
@@ -159,6 +173,15 @@ pub(crate) async fn status() -> Result<()> {
         } else {
             let reason = forge.detail.as_deref().unwrap_or("unknown reason");
             println!("  forge    {} unavailable: {reason}", forge.program);
+        }
+    }
+    for multiplexer in &status.multiplexers {
+        let version = multiplexer.version.as_deref().unwrap_or("unknown version");
+        if multiplexer.available {
+            println!("  panes    {} {version}, available", multiplexer.name);
+        } else {
+            let reason = multiplexer.detail.as_deref().unwrap_or("unknown reason");
+            println!("  panes    {} unavailable: {reason}", multiplexer.name);
         }
     }
     Ok(())

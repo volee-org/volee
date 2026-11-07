@@ -24,11 +24,22 @@ async fn agent(client: &Client, input: &str) -> Result<(AgentId, String)> {
 }
 
 /// Takes the agent over in this terminal, and returns when the person comes
-/// back (`Ctrl+Z` in a Claude Code session). The agent keeps running.
+/// back (`Ctrl+Z` in a Claude Code session). The agent keeps running. An
+/// agent in a multiplexer pane is not taken over: its pane is brought
+/// forward instead (ADR 0015).
 pub(crate) async fn attach(input: &str) -> Result<()> {
     let client = connect_or_start().await?;
     let (agent, name) = agent(&client, input).await?;
     let command = client.call::<Attach>(AgentParams { agent }).await?;
+    if let Some(focus) = command.focus {
+        let multiplexer = text::one_line(&focus.multiplexer).into_owned();
+        let session = text::one_line(&focus.session).into_owned();
+        tokio::task::spawn_blocking(move || bring_forward(&focus.steps))
+            .await
+            .context("the focus task failed")??;
+        println!("{name} runs in a {multiplexer} pane: brought forward, in session {session}.");
+        return Ok(());
+    }
     println!("Taking over {name}. {}", command.hint);
     let program = command.program.clone();
     let mut process = Command::new(&command.program);
@@ -48,6 +59,30 @@ pub(crate) async fn attach(input: &str) -> Result<()> {
         bail!("{program} ended with {status}");
     }
     println!("Back from {name}.");
+    Ok(())
+}
+
+/// Runs the steps that bring a pane forward, in order, in this process's
+/// environment: from a pane, the multiplexer acts on this pane's client.
+fn bring_forward(steps: &[Vec<String>]) -> Result<()> {
+    for step in steps {
+        let Some((program, args)) = step.split_first() else {
+            continue;
+        };
+        let output = Command::new(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .with_context(|| format!("cannot run {program}"))?;
+        if !output.status.success() {
+            let said = String::from_utf8_lossy(&output.stderr);
+            let said = said.lines().next().unwrap_or_default().trim();
+            if said.is_empty() {
+                bail!("{program} ended with {}", output.status);
+            }
+            bail!("{program}: {said}");
+        }
+    }
     Ok(())
 }
 

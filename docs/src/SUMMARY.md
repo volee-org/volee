@@ -38,6 +38,7 @@
   - [0011. Safety and delivery evidence](adr/0011-safety-and-delivery-evidence.md)
   - [0012. Language, license and scope](adr/0012-language-license-and-scope.md)
   - [0013. Agent worktrees live in their repository](adr/0013-worktrees-live-in-their-repository.md)
+  - [0015. tuios is the first location adapter](adr/0015-tuios-location-adapter.md)
   - [Template](adr/template.md)
 
 # Project

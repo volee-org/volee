@@ -258,6 +258,55 @@ fn vanished(registry: &Registry, listing: &Listing, now: Timestamp, events: &mut
     }
 }
 
+/// Where the agents of some sessions run, after a terminal multiplexer looked
+/// for those sessions in its panes (ADR 0015).
+///
+/// `asked` are the sessions `multiplexer` was asked about, and `found` the
+/// pane address (`<session>:<pane>`) of those it found. An agent whose current
+/// session was found moves to that pane; one that was in a pane of this
+/// multiplexer and is no longer found goes back to a plain terminal. Other
+/// agents, background ones included, keep their location.
+pub fn relocate(
+    registry: &Registry,
+    multiplexer: &str,
+    asked: &[SessionKey],
+    found: &[(SessionKey, String)],
+    now: Timestamp,
+) -> Vec<Event> {
+    let mut events = Vec::new();
+    for key in asked {
+        let Some(agent) = registry.agent_for_session(key) else {
+            continue;
+        };
+        let current = agent.current_session().is_some_and(|link| &link.key == key);
+        if !current || agent.location == Location::Background {
+            continue;
+        }
+        let location = match found.iter().find(|(session, _)| session == key) {
+            Some((_, target)) => Location::Pane {
+                multiplexer: multiplexer.to_owned(),
+                target: target.clone(),
+            },
+            None => match &agent.location {
+                Location::Pane {
+                    multiplexer: own, ..
+                } if own == multiplexer => Location::Terminal,
+                _ => continue,
+            },
+        };
+        if agent.location != location {
+            events.push(Event::new(
+                now,
+                EventKind::LocationChanged {
+                    agent: agent.id,
+                    location,
+                },
+            ));
+        }
+    }
+    events
+}
+
 /// The agent volee is launching or resuming in `session`'s directory, if
 /// any: it is `launching`, and none of its own sessions is listed alive.
 fn awaiting_session<'a>(
@@ -325,6 +374,77 @@ mod tests {
         let events = reconcile(registry, listing, Timestamp::from_millis(millis), ids());
         apply_all(registry, &events);
         events
+    }
+
+    /// An interactive session, as Claude Code lists one run by hand.
+    fn interactive(id: &str) -> ListedSession {
+        ListedSession {
+            alive: true,
+            pid: Some(4_242),
+            ..ListedSession::new(SessionKey::claude(id), "/work/alpha", AgentState::Idle)
+        }
+    }
+
+    #[test]
+    fn agents_follow_their_session_into_a_pane_and_out_again() {
+        let mut registry = Registry::new();
+        sync(
+            &mut registry,
+            &listing(vec![
+                interactive("in-pane"),
+                interactive("elsewhere"),
+                listed("bg", AgentState::Working, true),
+            ]),
+            10,
+        );
+        let location = |registry: &Registry, id: &str| {
+            registry
+                .agent_for_session(&SessionKey::claude(id))
+                .unwrap()
+                .location
+                .clone()
+        };
+        assert_eq!(location(&registry, "in-pane"), Location::Terminal);
+        let asked = [
+            SessionKey::claude("in-pane"),
+            SessionKey::claude("elsewhere"),
+            SessionKey::claude("bg"),
+        ];
+        let found = [
+            (SessionKey::claude("in-pane"), "work:c434".to_owned()),
+            (SessionKey::claude("bg"), "work:9a".to_owned()),
+        ];
+        let events = relocate(
+            &registry,
+            "tuios",
+            &asked,
+            &found,
+            Timestamp::from_millis(20),
+        );
+        apply_all(&mut registry, &events);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(
+            location(&registry, "in-pane"),
+            Location::Pane {
+                multiplexer: "tuios".into(),
+                target: "work:c434".into(),
+            }
+        );
+        // A session outside every pane, and a background one, stay as they
+        // were.
+        assert_eq!(location(&registry, "elsewhere"), Location::Terminal);
+        assert_eq!(location(&registry, "bg"), Location::Background);
+
+        // Found again in the same pane: nothing to record. Another
+        // multiplexer that does not find it leaves it alone.
+        let at = Timestamp::from_millis(30);
+        let none: [Event; 0] = [];
+        assert_eq!(relocate(&registry, "tuios", &asked, &found, at), none);
+        assert_eq!(relocate(&registry, "tmux", &asked, &[], at), none);
+        // tuios no longer finds it: back to a plain terminal.
+        let events = relocate(&registry, "tuios", &asked, &[], Timestamp::from_millis(40));
+        apply_all(&mut registry, &events);
+        assert_eq!(location(&registry, "in-pane"), Location::Terminal);
     }
 
     #[test]

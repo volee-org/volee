@@ -64,6 +64,9 @@ pub struct Config {
     /// The volee program, which the hooks and MCP servers of launched agents
     /// run. Without it, the daemon cannot launch agents.
     pub volee_bin: Option<PathBuf>,
+    /// The terminal multiplexers whose panes interactive sessions are looked
+    /// for in (ADR 0015); none means agents in panes are only listed.
+    pub multiplexers: Vec<Arc<dyn volee_mux::Multiplexer>>,
 }
 
 impl std::fmt::Debug for Config {
@@ -91,6 +94,8 @@ pub(crate) struct Shared {
     pub(crate) refreshes: Refreshes,
     /// Agents being launched for each mission, counted against its limit.
     pub(crate) slots: crate::launch::Slots,
+    /// The multiplexers whose panes agents are looked for in.
+    pub(crate) panes: crate::panes::Panes,
     /// What the evidence refresher learned about the forge, once it checked.
     forge: std::sync::Mutex<Option<ForgeStatus>>,
     shutdown: watch::Sender<bool>,
@@ -155,8 +160,13 @@ impl Daemon {
             watchers: Watchers::new(),
             refreshes: Refreshes::new(),
             slots: crate::launch::Slots::default(),
+            panes: crate::panes::Panes::new(config.multiplexers),
             forge: std::sync::Mutex::new(None),
             shutdown,
+        });
+        tokio::spawn({
+            let shared = Arc::clone(&shared);
+            async move { crate::panes::check(&shared).await }
         });
         if let Some(dir) = config.spool {
             replay_spool(&shared, dir).await;

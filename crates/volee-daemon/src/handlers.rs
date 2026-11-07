@@ -119,6 +119,7 @@ async fn status(shared: &Arc<Shared>, params: StatusParams) -> Result<StatusInfo
         agents: state.registry().agents().count(),
         harnesses: shared.harnesses.clone(),
         forge: shared.forge_status(),
+        multiplexers: shared.panes.statuses(),
     })
 }
 
