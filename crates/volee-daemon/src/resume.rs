@@ -35,6 +35,14 @@ use crate::server::Shared;
 /// unless a new message arrives for it.
 const RETRY_AFTER: Duration = Duration::from_secs(600);
 
+/// The first words of a resume prompt. The conversation a resume continues
+/// may say that the volee MCP server disconnected (it stopped with the old
+/// session), and a model then believes its tools are gone. Measured: a
+/// resumed agent wrote that it could not answer, with its tools connected.
+const RESUMED: &str = "volee resumed this conversation in a new session to deliver the messages \
+below. Your volee MCP tools (send_message, read_messages and the others) are connected in this \
+session, even where the conversation says the volee server disconnected.";
+
 /// Starts the resumer when the daemon has a harness.
 pub(crate) fn spawn(shared: &Arc<Shared>) -> Option<JoinHandle<()>> {
     shared.harness.as_ref()?;
@@ -311,7 +319,7 @@ fn plan(
             cwd: root,
             name: agent.name.clone(),
             model,
-            prompt: rendered.text,
+            prompt: format!("{RESUMED}\n\n{}", rendered.text),
             settings_file,
             mcp_config_file,
             permission_mode: launch::permission_mode(shared),

@@ -57,6 +57,7 @@ pub use clock::{Clock, ManualClock, SystemClock};
 pub use daemon::DaemonSource;
 pub use demo::DemoSource;
 pub use keymap::{Keymap, KeymapError};
+pub use preview::screen_text;
 pub use source::{
     Changes, MissionRequest, NewMission, Outgoing, Source, SourceError, SpawnRequest, Subscription,
     Summary, TakeOver,

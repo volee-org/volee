@@ -5,11 +5,11 @@
 //! permission, one asked a question, one opened pull request #42), an
 //! analysis mission with two read-only workers (one runs two subagents), and
 //! two sessions volee did not launch, one of them a Codex CLI agent. Agents
-//! talk across missions and harnesses, questions wait for answers, and
-//! deliveries move (a pull request merges, another opens). States change
-//! every couple of seconds, messages fly every few seconds, and the whole
-//! story loops. Everything derives from the start time, so a fixed clock
-//! gives the same screen on every run.
+//! talk along the routes volee allows (ADR 0006), you relay across
+//! missions, questions wait for answers, and deliveries move (a pull request
+//! merges, another opens). States change every couple of seconds, messages
+//! fly every few seconds, and the whole story loops. Everything derives from
+//! the start time, so a fixed clock gives the same screen on every run.
 
 mod requests;
 mod scenario;
@@ -39,16 +39,19 @@ use crate::source::{
 /// asked a question, one opened pull request #42 and its checks pass. An
 /// analysis mission has two read-only workers, one of them with two
 /// subagents, and two sessions volee did not launch run on their own: one in
-/// the background, and one in a terminal that runs in Codex CLI and whose
-/// merged work is safe to tidy.
+/// the background, and one in a terminal that runs in Codex CLI, whose merged
+/// work volee keeps its hands off.
 ///
 /// The agents send each other contracts, questions, answers, notes and
-/// reports, inside missions and across them: the Codex agent asks a worker of
-/// the latency audit, a session started by hand asks a worker of Invoicing,
-/// and the two missions' workers and coordinators talk. volee's supervisor
-/// reports to the coordinators. States change every couple of seconds and
-/// messages fly every few seconds, in a loop; in the first loop, pull request
-/// #42 merges and a pull request opens on the website.
+/// reports, always along the routes the daemon enforces (ADR 0006): freely
+/// inside a mission, otherwise to their parent, their children, their
+/// mission's coordinator or requester, and you. So the two sessions volee did
+/// not launch, the Codex one included, ask you; you relay a latency-audit
+/// worker's question to Invoicing; and the audit's coordinator warns the
+/// lead, who warns Invoicing's coordinator. volee's supervisor reports to the
+/// coordinators. States change every couple of seconds and messages fly
+/// every few seconds, in a loop; in the first loop, pull request #42 merges
+/// and a pull request opens on the website.
 ///
 /// Everything derives from the start time: with a fixed clock, every run
 /// shows the same screen.
@@ -499,7 +502,13 @@ mod tests {
         }
         let answer = registry.thread_messages(question.thread);
         assert_eq!(answer.last().unwrap().in_reply_to, Some(question.id));
-        assert!(registry.unanswered_questions().is_empty(), "answered");
+        assert!(
+            !registry
+                .unanswered_questions()
+                .iter()
+                .any(|waiting| waiting.id == question.id),
+            "answered"
+        );
         let mission = registry
             .mission(registry.agent(tools).unwrap().mission.unwrap())
             .unwrap();
@@ -523,9 +532,12 @@ mod tests {
         let receipt = registry.message(question.id).unwrap().receipt(Party::Human);
         assert!(receipt.unwrap().read_at.is_some());
         let summary = demo.summarize(question.thread).await.unwrap();
-        assert_eq!(summary.messages, 1);
+        let count = registry.thread_messages(question.thread).len();
+        assert_eq!(summary.messages, count);
         assert!(
-            summary.text.contains("a question from invoice-tools"),
+            summary
+                .text
+                .starts_with(&format!("{count} messages in Inbox.")),
             "{}",
             summary.text
         );

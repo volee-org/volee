@@ -27,11 +27,11 @@ agent has one current session and keeps the lineage of the previous ones.
 
 | Role | Who | Typical work |
 | --- | --- | --- |
-| **Lead** | The agent you talk to, which launches others | Understands your request, starts missions and workers, reports back to you |
+| **Lead** | An agent you launch yourself, with `volee spawn` | Works on your request in its own worktree and reports back to you. Leads that start missions and workers come later. |
 | **Coordinator** | The agent of a mission | Splits the goal, writes tasks for workers, answers their questions, writes the final report |
 | **Worker** | An agent working in one repository, in its own worktree | Codes, tests, opens a pull request, or writes an analysis |
 | **Subagent** | A helper an agent starts by itself (for example a search) | Short tasks inside its parent's session |
-| **Independent** | A session volee did not launch | Anything you started by hand; volee shows it and can adopt it |
+| **Independent** | A session volee did not launch | Anything you started by hand; volee shows it, with a coarser state |
 
 ## Mission
 
@@ -52,3 +52,11 @@ and can point at a file and line, a commit or a pull request.
 What volee can prove about an agent's work: commits since it started, branch
 pushed, pull request opened or merged, checks passed, report delivered. Cleanup
 commands rely on evidence, never on the absence of a window or a process.
+
+volee keeps this evidence current by itself, for the sessions you started
+without volee too: it reads git in each agent's directory, fetches the
+repositories of the agents it launched (`git fetch --prune origin`, at most
+every five minutes; the [`[git] fetch`](configuration.md#git) setting decides
+which repositories, or none) and, when the GitHub CLI is signed in, asks it
+about each agent's branch at most once a minute. A fetch only updates your
+remote-tracking branches. See [Git](../architecture/git.md).

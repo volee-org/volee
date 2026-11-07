@@ -58,11 +58,13 @@ pub(crate) fn check() -> Result<()> {
     if let Some(model) = config.model_for(None) {
         println!("  default model     {model}");
     }
-    if let Some(mode) = config.agents.permission_mode {
-        println!("  permission mode   {mode}");
+    match config.agents.permission_mode {
+        Some(mode) => println!("  permission mode   {mode}"),
+        None => println!("  permission mode   manual (the default)"),
     }
     println!("  wake timeout      {} s", config.agents.wake_timeout);
     println!("  worktrees         inside each repository, in .claude/worktrees");
+    println!("  background fetch  {}", config.git.fetch);
     if config.repos.is_empty() {
         println!("  repositories      none (add [repos.<name>] tables)");
     }

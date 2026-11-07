@@ -73,8 +73,9 @@ memory in its `delivery-updated` events. Some consequences are worth knowing:
 
 ## When the daemon checks
 
-The daemon keeps every agent's workspace and evidence up to date by itself,
-so the interface and the mission supervisor never wait for git:
+The daemon keeps the workspace and evidence of every agent up to date by
+itself, sessions volee did not launch included, so the interface and the
+mission supervisor never wait for git:
 
 - **Workspaces.** When an agent registers, or its working directory changes,
   the daemon reads where the directory sits: the repository (named after its
@@ -86,10 +87,13 @@ so the interface and the mission supervisor never wait for git:
 - **Evidence.** It is read again the moment an agent finishes a turn, stops
   or fails, when the supervisor judges it, and every minute for live agents.
   The previous evidence's `unmerged_tip` is passed back, so merges are
-  proven. Each repository is fetched at most every five minutes, in batch
-  mode. A `delivery-updated` event is recorded only when the evidence
-  changed, or when it is the first check since the agent's state changed,
-  which the supervisor waits for.
+  proven. Before reading an agent's evidence, the daemon fetches its
+  repository, at most every five minutes and in batch mode, when the
+  [`[git] fetch`](../guide/configuration.md#git) setting allows it: by
+  default for agents volee launched, never for sessions it only discovered,
+  whose remotes belong to the person who started them. A `delivery-updated`
+  event is recorded only when the evidence changed, or when it is the first
+  check since the agent's state changed, which the supervisor waits for.
 - git and the forge never run under the daemon's state lock or on a request
   path: they run on background threads, for four agents at a time and one
   job per agent, and triggers that arrive meanwhile are merged into the next
@@ -98,20 +102,36 @@ so the interface and the mission supervisor never wait for git:
 ## Pull requests
 
 With the [GitHub CLI](https://cli.github.com) installed and signed in, the
-daemon looks up the most recent pull request opened from each agent's branch
-(`gh pr list --head <branch> --state all`), in the repository's directory so
-`gh` finds the GitHub repository from its remotes, and maps its state (draft,
-open, merged, closed) and its checks (passing, pending, failing). A branch is
-looked up at most once a minute, and again right after its agent stopped.
-When `gh` is missing or signed out, pull requests stay unknown and
-`volee daemon status` says why. volee never sees a token: `gh` uses your own
-sign-in.
+daemon looks up the pull request of each agent's branch, in the repository's
+directory so `gh` finds the GitHub repository from its remotes, and maps its
+state (draft, open, merged, closed) and its checks (passing, pending,
+failing). A branch is looked up at most once a minute, and again right after
+its agent stopped. When `gh` is missing or signed out, pull requests stay
+unknown and `volee daemon status` says why. volee never sees a token: `gh`
+uses your own sign-in.
+
+A branch name alone does not identify a pull request: the name may have been
+used before (an old pull request, merged long ago), and forks may have
+branches of the same name. `gh pr list --head <branch> --state all` returns
+the ten most recent pull requests with that name, and volee keeps the most
+recent one that is really the branch's:
+
+- its head repository is the one `origin` points to (`owner/name`, read from
+  `git remote get-url origin`); when `origin` is not a repository on a forge,
+  no pull request is the branch's;
+- its head commit is the tip of the agent's branch, exactly. A pull request
+  whose head is a later commit (someone pushed to it from elsewhere) counts
+  once the agent's branch has that commit too.
+
+The pull request records its head commit, and counts as delivery evidence
+only while the branch is still at that commit: commits made after it are not
+part of it, until the next look-up finds them in it.
 
 ## Worktrees volee creates
 
-- The worktree is created detached at `origin/<base>` (volee fetches first),
-  and the branch is created inside it, with no upstream until the agent pushes
-  it. A failure therefore never leaves a stray branch; when the worktree
+- The worktree is created detached at `origin/<base>`, as the last fetch left
+  it, and the branch is created inside it, with no upstream until the agent
+  pushes it. A failure therefore never leaves a stray branch; when the worktree
   exists but a later step failed (a hook, a checkout stopped at its timeout),
   volee says the worktree is there.
 - volee refuses to reuse an existing branch or directory, and checks both

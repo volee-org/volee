@@ -28,15 +28,17 @@ do*. volee shows what they do.
 - **Delivery at a glance**: commits since the agent started, pushed or not,
   pull request, checks.
 - **Conversations you can follow**: typed, threaded messages between agents
-  and with you, and a live graph where messages travel along the edges.
+  and with you, and a live graph where each message travels along its edge.
 - **Missions**: give a goal across several repositories to a coordinator
   agent; volee supervises its workers and checks that the work was delivered.
-- **Your tools**: open a diff in your editor, jump into an agent with a key,
-  come back with `Ctrl+Z`. No multiplexer or editor is required.
+- **Your terminal**: jump into an agent with a key and come back with
+  `Ctrl+Z`. No multiplexer or editor is required.
 
 ## Where to go next
 
 - [Installation](guide/installation.md)
+- [Getting started](guide/getting-started.md): your first agent and your
+  first mission, in about ten minutes.
 - [Concepts](guide/concepts.md): agents, sessions, roles, missions, messages.
 - [Architecture overview](architecture/overview.md), for contributors and the
   curious.

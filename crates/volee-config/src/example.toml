@@ -6,7 +6,8 @@
 # model = "opus"
 
 # Permission mode passed to Claude Code: "acceptEdits", "auto", "manual",
-# "dontAsk" or "plan". Unset: your own Claude Code default applies.
+# "dontAsk" or "plan". Unset: "manual", which asks before every tool that
+# needs permission (never your own Claude Code default).
 # permission_mode = "auto"
 
 # How long, in seconds, an idle agent stays reachable by messages before
@@ -21,7 +22,6 @@ wake_timeout = 3600
 # path = "~/code/billing"
 # base = "develop"         # the repository's default branch when unset
 # model = "sonnet"         # overrides [agents] model for this repository
-# setup = "bun install"    # first step the agent runs in a new worktree
 
 [messages]
 # Summaries of long threads, written by a model when you ask for one
@@ -29,6 +29,18 @@ wake_timeout = 3600
 # Claude Code with your account, usually for a few cents.
 # summaries = true
 # summary_model = "haiku"
+
+[missions]
+# The most agents one mission may launch besides its coordinator, counting
+# those that already stopped. A coordinator asking for more is refused.
+# max_workers = 8
+
+[git]
+# Which repositories the daemon fetches in the background (`git fetch --prune
+# origin`, at most every five minutes), so push states and merges reflect the
+# remote: "launched" (repositories of agents volee launched, the default),
+# "all" (also those of sessions volee only discovered) or "never".
+# fetch = "launched"
 
 [tui]
 # "catppuccin-mocha" (default), "catppuccin-macchiato", "catppuccin-frappe",

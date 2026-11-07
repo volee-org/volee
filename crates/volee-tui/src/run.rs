@@ -657,7 +657,11 @@ mod tests {
         assert_eq!(question.from, Party::Agent(tools));
         assert_eq!(answer.thread, question.thread);
         assert!(
-            model.registry.unanswered_questions().is_empty(),
+            !model
+                .registry
+                .unanswered_questions()
+                .iter()
+                .any(|waiting| waiting.id == question.id),
             "the question is answered"
         );
     }

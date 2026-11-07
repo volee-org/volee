@@ -22,7 +22,7 @@ use volee_core::time::Timestamp;
 use volee_core::{Event, EventKind, MissionId, Registry, ThreadId};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_git::GitCli;
-use volee_harness::Harness;
+use volee_harness::{Harness, PermissionMode};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     CreateMission, CreateMissionParams, EventsSince, SinceParams, Spawn, SpawnParams,
@@ -77,6 +77,11 @@ fn mission_elsewhere() -> Vec<Event> {
 }
 
 fn start() -> Running {
+    start_with("")
+}
+
+/// A daemon whose configuration also holds `extra`.
+fn start_with(extra: &str) -> Running {
     let dir = tempfile::tempdir().unwrap();
     // Canonical, so that paths compare equal to what git reports.
     let root = dir.path().canonicalize().unwrap();
@@ -88,7 +93,7 @@ fn start() -> Running {
     let listener = UnixListener::bind(&socket).unwrap();
     let harness = Arc::new(FakeHarness::default());
     let settings = volee_config::Config::parse(
-        &format!("[repos.alpha]\npath = \"{}\"\n", repo.display()),
+        &format!("[repos.alpha]\npath = \"{}\"\n{extra}", repo.display()),
         Path::new("config.toml"),
         Path::new("/home/nobody"),
     )
@@ -218,6 +223,26 @@ async fn a_worker_gets_its_own_worktree_and_session() {
     assert_eq!(
         mcp["mcpServers"]["volee"]["env"]["VOLEE_SOCKET"],
         socket.as_str()
+    );
+}
+
+#[tokio::test]
+async fn agents_launch_in_manual_mode_unless_another_is_configured() {
+    // Never the person's own Claude Code default, which may skip every check.
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    client.call::<Spawn>(worker("feat/invoices")).await.unwrap();
+    assert_eq!(
+        daemon.harness.launches()[0].permission_mode,
+        PermissionMode::Manual
+    );
+
+    let daemon = start_with("[agents]\npermission_mode = \"acceptEdits\"\n");
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    client.call::<Spawn>(worker("feat/invoices")).await.unwrap();
+    assert_eq!(
+        daemon.harness.launches()[0].permission_mode,
+        PermissionMode::AcceptEdits
     );
 }
 
@@ -392,5 +417,96 @@ async fn a_mission_worker_reports_to_its_coordinator() {
     assert_eq!(
         registry.mission(created.mission).unwrap().status,
         MissionStatus::Running
+    );
+}
+
+#[tokio::test]
+async fn a_directory_named_like_a_mission_repository_is_not_part_of_it() {
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let created = client.call::<CreateMission>(invoicing()).await.unwrap();
+    // Another repository, whose directory is also called `alpha`.
+    let other = daemon
+        .repo
+        .parent()
+        .unwrap()
+        .join("elsewhere")
+        .join("alpha");
+    repository(&other);
+    let error = rpc_error(
+        client
+            .call::<Spawn>(SpawnParams {
+                repo: other.display().to_string(),
+                parent: created.coordinator,
+                mission: Some(created.mission),
+                ..worker("feat/impostor")
+            })
+            .await
+            .unwrap_err(),
+    );
+    assert_eq!(error.code, rpc::REFUSED);
+    assert!(
+        error.message.contains("not part of mission"),
+        "{}",
+        error.message
+    );
+    assert!(!other.join(".claude/worktrees/feat-impostor").exists());
+
+    // The mission's own repository, named by its path, is part of it.
+    client
+        .call::<Spawn>(SpawnParams {
+            repo: daemon.repo.display().to_string(),
+            parent: created.coordinator,
+            mission: Some(created.mission),
+            ..worker("feat/by-path")
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_mission_launches_at_most_its_limit_even_all_at_once() {
+    let daemon = start_with("[missions]\nmax_workers = 2\n");
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let created = client.call::<CreateMission>(invoicing()).await.unwrap();
+    let launch = |n: usize| {
+        let socket = daemon.socket.clone();
+        let (parent, mission) = (created.coordinator, created.mission);
+        tokio::spawn(async move {
+            let client = Client::connect(&socket).await.unwrap();
+            client
+                .call::<Spawn>(SpawnParams {
+                    parent,
+                    mission: Some(mission),
+                    ..worker(&format!("feat/part-{n}"))
+                })
+                .await
+        })
+    };
+    // Three at once, as a coordinator calling its tools in parallel would.
+    let handles: Vec<_> = (0..3).map(launch).collect();
+    let mut launched = 0;
+    let mut refused = Vec::new();
+    for handle in handles {
+        match handle.await.unwrap() {
+            Ok(_) => launched += 1,
+            Err(error) => refused.push(rpc_error(error)),
+        }
+    }
+    assert_eq!(launched, 2, "{refused:?}");
+    assert_eq!(refused.len(), 1);
+    assert_eq!(refused[0].code, rpc::REFUSED);
+    assert!(
+        refused[0].message.contains("max_workers"),
+        "{}",
+        refused[0].message
+    );
+    // Later, too: every agent ever launched counts, not only running ones.
+    let late = rpc_error(launch(9).await.unwrap().unwrap_err());
+    assert_eq!(late.code, rpc::REFUSED);
+    assert_eq!(
+        registry(&daemon.socket).await.agents().count(),
+        3,
+        "two and the coordinator"
     );
 }

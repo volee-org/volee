@@ -21,6 +21,22 @@ variables that identify that session or pane (such as `CLAUDE_CODE_SESSION_ID`
 or `TMUX_PANE`), so the agents it launches never inherit them. Your settings,
 such as `ANTHROPIC_API_KEY` or `CLAUDE_CODE_USE_BEDROCK`, are kept.
 
+### What the daemon does in the background
+
+While it runs, the daemon keeps what volee shows current by itself. None of
+it waits for you, and none of it changes your work:
+
+| What | How often | What it runs |
+| --- | --- | --- |
+| Find sessions | Every two seconds while the [interface](interface.md) is open, every thirty seconds otherwise | `claude agents --json --all` |
+| Read each agent's work | When it finishes a turn or stops, and every minute while it runs | git queries in its directory, which never change the repository |
+| Fetch | At most every five minutes per repository, for the repositories of agents volee launched | `git fetch --prune origin`; the [`[git] fetch`](configuration.md#git) setting chooses which repositories, or none |
+| Look up pull requests | At most once a minute per branch, and right after its agent stops | `gh pr list`, with your own `gh` sign-in, when the GitHub CLI is installed and signed in |
+
+Pull request look-ups use your GitHub account's API allowance, a few
+requests a minute with several agents running. Without `gh`, or signed out,
+volee skips them and `volee daemon status` says why.
+
 ## Agents
 
 ```sh
@@ -57,14 +73,16 @@ for an agent, you can type its name, that short id, or its full id.
 ### Acting on an agent
 
 ```sh
-volee logs <agent>          # its recent terminal output
+volee logs <agent>          # its screen as it looks now
 volee diff <agent>          # its changes against the branch it started from, by file
 volee diff <agent> --full   # the same changes, as a full patch
 volee attach <agent>        # take it over in this terminal; Ctrl+Z comes back
 volee stop <agent>          # stop it; volee does not resume it until you message it
 ```
 
-`volee logs` prints the screen the harness recorded, with its colors.
+`volee logs` prints the agent's screen as it looks now, as plain text: the
+harness records every frame its interface drew, and volee replays them to
+keep only the last one.
 `volee diff` compares the agent's worktree, committed or not, with the merge
 base of its base branch, and lists the files it created; a very long diff is
 cut, and the rest is in the worktree. `volee attach` hands this terminal to
@@ -87,11 +105,14 @@ volee spawn . fix/flaky-test "Make the payment test stable." --base develop --mo
 ```
 
 `volee spawn <repository> <branch> <task>` creates the branch from the base
-(the repository's default branch unless `--base` says otherwise), checks it
-out in a new worktree at `.claude/worktrees/<branch>` inside the repository,
-and starts a Claude Code background session there with the task as its first
-prompt. The agent gets volee's hooks and MCP tools, so it appears at once in
-`volee ls` and can message other agents.
+(`--base`, else the repository's `base` in the configuration, else its
+default branch), checks it out in a new worktree at
+`.claude/worktrees/<name>` inside the repository (the branch with `/` and
+other unusual characters replaced by `-`), and starts a Claude Code
+background session there with the task as its first prompt. `--name` sets
+its display name, `<repository>-<name>` otherwise. The agent gets volee's
+hooks and MCP tools, so it appears at once in `volee ls` and can send you
+messages.
 
 Claude Code only starts background sessions in repositories you trust: run
 `claude` once in each repository and accept its trust prompt. volee says so
@@ -204,7 +225,8 @@ volee demo --theme terminal       # with another theme than the configured one
 the agents it knows until you quit. `volee demo` needs no daemon and touches
 nothing: it shows a fictional lead, two missions and their workers, and two
 sessions volee did not launch, whose states change and who write to each
-other every few seconds. Both take their theme, keys and `reduced_motion`
+other and to you every few seconds, along the routes the daemon allows.
+Both take their theme, keys and `reduced_motion`
 setting from the `[tui]` table of the configuration. The
 [interface guide](interface.md) describes the screen, what needs the daemon,
 and every key.
@@ -220,3 +242,9 @@ trying volee without touching your real state:
 | `VOLEE_STATE_DIR` | `$XDG_STATE_HOME/volee`, else `~/.local/state/volee` |
 | `VOLEE_DATA_DIR` | `$XDG_DATA_HOME/volee`, else `~/.local/share/volee` |
 | `VOLEE_SOCKET` | `$XDG_RUNTIME_DIR/volee.sock`, else `<state>/volee.sock` |
+
+Put a custom `VOLEE_SOCKET` in a directory only you can enter, as the
+defaults are: the daemon restricts the socket to you right after creating
+it, and a directory that others can enter would let them connect in
+between (the daemon logs a warning then). The daemon replaces a stale
+socket left by a crash, but never another kind of file.

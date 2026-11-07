@@ -16,9 +16,10 @@
 
 </div>
 
-> [!WARNING]
-> volee is in early development. The first release (0.1) is being built in the
-> open: see the [roadmap](https://volee-org.github.io/volee/project/roadmap.html).
+> [!NOTE]
+> volee 0.1 is a first release, built in the open. Expect rough edges and tell
+> us about them; the [roadmap](https://volee-org.github.io/volee/project/roadmap.html)
+> says what comes next.
 
 ## Why
 
@@ -33,7 +34,7 @@ one screen:
   urgency.
 - **What did they do?** Commits, diffs, push state, pull request and checks.
 - **Who talks to whom?** Messages between agents and with you, as threads and
-  as a live graph.
+  as a live graph where each message travels along its edge.
 
 It also runs **missions**: a goal across one or more repositories, split by a
 coordinator agent and delivered by worker agents, with delivery checked by
@@ -47,8 +48,7 @@ code, not by trust.
   SQLite. The interface, the command line and the agents all talk to it.
 - Agents message each other through an MCP server, which any MCP-capable
   harness can use.
-- No multiplexer, editor or git client is required; the ones you use are
-  optional integrations.
+- No multiplexer, editor or git client is required.
 
 Read the [architecture overview](https://volee-org.github.io/volee/architecture/overview.html)
 and the [design decisions](https://volee-org.github.io/volee/adr/README.html).
@@ -84,6 +84,10 @@ volee demo   # a simulated team
 ```
 
 ![volee demo](docs/src/images/demo.gif)
+
+Then launch your first agent with the
+[getting started guide](https://volee-org.github.io/volee/guide/getting-started.html):
+it takes about ten minutes.
 
 ## Contributing
 

@@ -54,8 +54,74 @@ pub struct Config {
     pub repos: BTreeMap<String, Repo>,
     /// Messaging settings.
     pub messages: Messages,
+    /// Mission settings.
+    pub missions: Missions,
+    /// What the daemon does with git in the background.
+    pub git: GitSettings,
     /// Interface settings.
     pub tui: Tui,
+}
+
+/// What the daemon does with git in the background.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GitSettings {
+    /// Which repositories the daemon fetches.
+    pub fetch: Fetch,
+}
+
+/// Which repositories the daemon fetches in the background (`git fetch
+/// --prune origin`, at most every five minutes), so that push states and
+/// merges reflect the remote.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Fetch {
+    /// The repositories of agents volee launched: their remote is part of
+    /// the work volee started.
+    #[default]
+    Launched,
+    /// Also the repositories of sessions volee discovered but did not
+    /// launch.
+    All,
+    /// None: evidence compares with what your own fetches brought.
+    Never,
+}
+
+impl Fetch {
+    /// Whether the repository of an agent may be fetched, given whether
+    /// volee launched the agent.
+    pub const fn allows(self, launched_by_volee: bool) -> bool {
+        match self {
+            Self::Launched => launched_by_volee,
+            Self::All => true,
+            Self::Never => false,
+        }
+    }
+}
+
+impl fmt::Display for Fetch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Launched => "launched",
+            Self::All => "all",
+            Self::Never => "never",
+        })
+    }
+}
+
+/// Mission settings.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Missions {
+    /// The most agents one mission may launch besides its coordinator, so
+    /// that a coordinator gone wrong cannot start sessions without end.
+    pub max_workers: usize,
+}
+
+impl Default for Missions {
+    fn default() -> Self {
+        Self { max_workers: 8 }
+    }
 }
 
 /// Messaging settings.
@@ -82,7 +148,7 @@ impl Messages {
 pub struct AgentDefaults {
     /// The model, unless a repository sets one.
     pub model: Option<String>,
-    /// The permission mode passed to the harness.
+    /// The permission mode passed to the harness; `manual` when unset.
     pub permission_mode: Option<PermissionMode>,
     /// How long an idle agent's hook waits for messages, in seconds.
     pub wake_timeout: u64,
@@ -145,9 +211,6 @@ pub struct Repo {
     /// The model for this repository's agents.
     #[serde(default)]
     pub model: Option<String>,
-    /// A first step agents run in a new worktree, such as `bun install`.
-    #[serde(default)]
-    pub setup: Option<String>,
 }
 
 /// Interface settings.
@@ -322,6 +385,11 @@ impl Config {
                     .map_err(|error| invalid(format!("tui.tools.{name}: {error}")))?;
             }
         }
+        if self.missions.max_workers == 0 {
+            return Err(invalid(
+                "missions.max_workers must be at least 1".to_owned(),
+            ));
+        }
         Ok(())
     }
 
@@ -374,6 +442,26 @@ mod tests {
     fn an_empty_file_is_the_defaults() {
         assert_eq!(parse("").unwrap(), Config::default());
         assert_eq!(Config::default().agents.wake_timeout, 3_600);
+        assert_eq!(Config::default().missions.max_workers, 8);
+        assert_eq!(Config::default().git.fetch, Fetch::Launched);
+    }
+
+    #[test]
+    fn background_fetches_follow_the_setting() {
+        let fetch = |text: &str| parse(text).unwrap().git.fetch;
+        assert_eq!(fetch("[git]\nfetch = \"all\""), Fetch::All);
+        assert_eq!(fetch("[git]\nfetch = \"never\""), Fetch::Never);
+        assert_eq!(fetch("[git]\nfetch = \"launched\""), Fetch::Launched);
+        // Repositories of agents volee launched, and only those, by default.
+        assert!(Fetch::Launched.allows(true));
+        assert!(!Fetch::Launched.allows(false));
+        assert!(Fetch::All.allows(false));
+        assert!(!Fetch::Never.allows(true));
+        let error = parse("[git]\nfetch = \"sometimes\"")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("sometimes"), "{error}");
+        assert!(parse("[git]\nfetch = true").is_err());
     }
 
     #[test]
@@ -384,7 +472,6 @@ mod tests {
             path = "~/code/billing"
             base = "develop"
             model = "sonnet"
-            setup = "bun install"
             "#,
         )
         .unwrap();

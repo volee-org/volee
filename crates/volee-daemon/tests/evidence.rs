@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use tokio::net::UnixListener;
 use tokio::task::JoinHandle;
 use ulid::Ulid;
+use volee_config::Fetch;
 use volee_core::delivery::{ChecksState, PrState, PullRequest, PushState};
 use volee_core::harness::HarnessKind;
 use volee_core::message::{Party, Thread};
@@ -25,7 +26,7 @@ use volee_core::time::Timestamp;
 use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, MissionId, Registry, ThreadId};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
-use volee_git::{Forge, ForgeStatus, GitCli, GitError};
+use volee_git::{BranchHead, Forge, ForgeStatus, GitCli, GitError};
 use volee_proto::client::Client;
 use volee_proto::methods::{
     EventsSince, HookIngest, HookParams, SinceParams, Status, StatusParams,
@@ -168,22 +169,43 @@ impl Sandbox {
         );
         (clone, worktree)
     }
+
+    /// A commit someone else pushed to `origin`'s `main` after the project
+    /// was cloned: only a fetch brings it to the clone.
+    fn pushed_by_a_teammate(&self) -> String {
+        let root = self.root.clone();
+        self.git(&root, &["clone", "--quiet", "origin.git", "teammate"]);
+        let teammate = self.path("teammate");
+        self.configure(&teammate);
+        let pushed = self.commit(&teammate, "NEWS.md", "News\n");
+        self.git(&teammate, &["push", "--quiet", "origin", "main"]);
+        pushed
+    }
 }
 
-/// A forge that answers what the test says, and counts lookups.
+/// A forge that answers what the test says, and records what it was asked.
 #[derive(Default)]
 struct FakeForge {
     pull_request: Mutex<Option<PullRequest>>,
+    /// The tips the daemon asked about, with the origin it named.
+    asked: Mutex<Vec<(String, Option<String>)>>,
 }
 
 impl FakeForge {
+    /// From now on, the branch has an open pull request at whatever tip the
+    /// daemon asks about, as a forge answers once the branch is pushed.
     fn open(&self, number: u64) {
         *self.pull_request.lock().unwrap() = Some(PullRequest {
             number,
             url: format!("https://example.com/pull/{number}"),
             state: PrState::Open,
             checks: ChecksState::Passing,
+            head: None,
         });
+    }
+
+    fn asked(&self) -> Vec<(String, Option<String>)> {
+        self.asked.lock().unwrap().clone()
     }
 }
 
@@ -197,18 +219,40 @@ impl Forge for FakeForge {
         }
     }
 
-    fn pull_request(&self, _repo: &Path, _branch: &str) -> Result<Option<PullRequest>, GitError> {
-        Ok(self.pull_request.lock().unwrap().clone())
+    fn pull_request(
+        &self,
+        _repo: &Path,
+        head: &BranchHead<'_>,
+    ) -> Result<Option<PullRequest>, GitError> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push((head.tip.to_owned(), head.origin.map(ToString::to_string)));
+        let found = self.pull_request.lock().unwrap().clone();
+        Ok(found.map(|pr| PullRequest {
+            head: Some(head.tip.to_owned()),
+            ..pr
+        }))
     }
 }
 
 fn registered(n: u128, role: Role, cwd: &Path, mission: Option<MissionId>) -> Event {
+    registered_by(n, role, cwd, mission, LaunchedBy::Human)
+}
+
+fn registered_by(
+    n: u128,
+    role: Role,
+    cwd: &Path,
+    mission: Option<MissionId>,
+    launched_by: LaunchedBy,
+) -> Event {
     at(EventKind::AgentRegistered {
         agent: agent(n),
         name: format!("agent-{n}"),
         role,
         harness: HarnessKind::ClaudeCode,
-        launched_by: LaunchedBy::Human,
+        launched_by,
         parent: None,
         mission,
         workspace: Workspace::at(cwd),
@@ -312,6 +356,38 @@ fn settings(clone: &Path) -> volee_config::Config {
         clone.display()
     );
     volee_config::Config::parse(&text, Path::new("config.toml"), Path::new("/nowhere")).unwrap()
+}
+
+/// Whether the daemon fetched the repository of one agent, launched by
+/// `launched_by`, before its first evidence, with `[git] fetch` set to
+/// `fetch`. The fetch, when allowed, runs before the evidence is read.
+async fn fetched_before_the_first_check(fetch: Fetch, launched_by: LaunchedBy) -> bool {
+    let sandbox = Sandbox::new();
+    let (clone, worktree) = sandbox.project();
+    let pushed = sandbox.pushed_by_a_teammate();
+    let mut settings = settings(&clone);
+    settings.git.fetch = fetch;
+    let evidence = EvidenceSources {
+        settings,
+        ..EvidenceSources::git(Arc::new(sandbox.cli()))
+    };
+    let log = vec![registered_by(1, Role::Lead, &worktree, None, launched_by)];
+    let daemon = start(log, Arc::new(ManualClock::at(10_000)), evidence);
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    eventually(&client, "a first check", |registry, _| {
+        registry.agent(agent(1))?.delivery.checked_at
+    })
+    .await;
+    sandbox.git(&clone, &["rev-parse", "origin/main"]) == pushed
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn only_the_repositories_the_person_allows_are_fetched() {
+    // By default, the repositories of agents volee launched, and only those.
+    assert!(fetched_before_the_first_check(Fetch::Launched, LaunchedBy::Human).await);
+    assert!(!fetched_before_the_first_check(Fetch::Launched, LaunchedBy::Outside).await);
+    assert!(fetched_before_the_first_check(Fetch::All, LaunchedBy::Outside).await);
+    assert!(!fetched_before_the_first_check(Fetch::Never, LaunchedBy::Human).await);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -439,6 +515,14 @@ async fn a_change_worker_is_judged_only_on_evidence_checked_after_it_stopped() {
     assert_eq!(delivery.commits, 1);
     assert_eq!(delivery.push, PushState::UpToDate);
     assert_eq!(delivery.pull_request.as_ref().map(|pr| pr.number), Some(7));
+    // The forge was asked about the branch's tip; the sandbox's `origin` is
+    // a directory, not a repository on a forge, so no origin was named.
+    let tip = delivery.tip.clone().unwrap();
+    assert_eq!(
+        delivery.pull_request.as_ref().unwrap().head,
+        Some(tip.clone())
+    );
+    assert!(forge.asked().contains(&(tip, None)), "{:?}", forge.asked());
     assert!(delivery.checked_at >= Some(Timestamp::from_millis(11_000)));
     assert_eq!(
         registry.mission(mission_id()).unwrap().status,

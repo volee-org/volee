@@ -14,7 +14,7 @@ use crate::command::{Completed, Request, Runner};
 use crate::parse::{self, StatusSummary};
 use crate::{
     DeliveryQuery, DeliveryReport, DiffFormat, DiffOutput, Git, GitError, Head, NewWorktree,
-    RemovalRefusal, RepoInfo, WorktreeInfo,
+    RemovalRefusal, RepoInfo, RepoSlug, WorktreeInfo,
 };
 
 /// The most untracked files [`Git::diff`] lists or shows. The others are
@@ -923,6 +923,18 @@ impl Git for GitCli {
             .timeout(self.fetch_timeout)
             .stdout()?;
         Ok(())
+    }
+
+    fn origin(&self, repo: &Path) -> Result<Option<RepoSlug>, GitError> {
+        let completed = self.git(repo).args(["remote", "get-url", "origin"]).run()?;
+        match completed.code {
+            Some(0) => Ok(RepoSlug::from_remote_url(&String::from_utf8_lossy(
+                &completed.stdout,
+            ))),
+            // "No such remote".
+            Some(2) => Ok(None),
+            _ => Err(completed.failure()),
+        }
     }
 }
 

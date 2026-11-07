@@ -337,23 +337,34 @@ mod tests {
     fn questions_come_first_then_threads_by_activity() {
         let registry = registry();
         let rows = rows(&registry);
-        let Row::Question(question) = rows[0] else {
-            panic!("no pinned question: {rows:?}");
-        };
-        let asked = registry.message(question).unwrap();
-        assert_eq!(asked.from, Party::Agent(agent_id(start(), INVOICE_TOOLS)));
-        let titles: Vec<&str> = rows[1..]
+        // Two questions wait, oldest first: the draft flag, then the
+        // token calls.
+        let askers: Vec<Party> = rows[..2]
+            .iter()
+            .map(|row| match row {
+                Row::Question(id) => registry.message(*id).unwrap().from,
+                Row::Thread(_) => panic!("a thread before the questions: {rows:?}"),
+            })
+            .collect();
+        assert_eq!(
+            askers,
+            [
+                Party::Agent(agent_id(start(), INVOICE_TOOLS)),
+                Party::Agent(agent_id(start(), crate::demo::TRACE_GATEWAY)),
+            ]
+        );
+        let titles: Vec<&str> = rows[2..]
             .iter()
             .map(|row| {
                 let thread = thread_of(&registry, *row).unwrap();
                 registry.thread(thread).unwrap().title.as_str()
             })
             .collect();
-        // volee's supervisor wrote in Invoicing 59 seconds ago, the
-        // question reached the inbox a minute ago, volee's alert seven
+        // The token question reached the inbox 30 seconds ago, volee's
+        // supervisor wrote in Invoicing a minute ago, volee's alert seven
         // minutes ago, the audit's contract before.
-        assert_eq!(titles, ["Invoicing", "Inbox", "volee", "Latency audit"]);
-        let times: Vec<Timestamp> = rows[1..]
+        assert_eq!(titles, ["Inbox", "Invoicing", "volee", "Latency audit"]);
+        let times: Vec<Timestamp> = rows[2..]
             .iter()
             .map(|row| last_activity(&registry, thread_of(&registry, *row).unwrap()))
             .collect();
@@ -366,15 +377,19 @@ mod tests {
         assert_eq!(
             counts(&registry),
             Counts {
-                questions: 1,
-                unread: 2
+                questions: 2,
+                unread: 5
             }
         );
         let Row::Question(question) = rows(&registry)[0] else {
             panic!("no question");
         };
+        // The inbox: four questions to the person, two of them answered
+        // but never marked read.
         let thread = registry.message(question).unwrap().thread;
-        assert_eq!(unread(&registry, Some(thread)), [question]);
+        let inbox = unread(&registry, Some(thread));
+        assert_eq!(inbox.len(), 4);
+        assert!(inbox.contains(&question));
     }
 
     /// The row of the thread with a title.
@@ -396,9 +411,12 @@ mod tests {
         let answer = reply(&registry, rows[0]).unwrap();
         assert_eq!(answer.to, tools);
         assert!(answer.question.is_some());
-        // The inbox thread: the same agent, still answering its question.
+        // The inbox thread: the last agent that asked there, answering its
+        // question.
         let inbox = reply(&registry, titled(&registry, &rows, "Inbox")).unwrap();
-        assert_eq!(inbox, answer);
+        assert_eq!(inbox.to, agent_id(start(), crate::demo::TRACE_GATEWAY));
+        assert_eq!(inbox.thread, answer.thread);
+        assert!(inbox.question.is_some() && inbox.question != answer.question);
         // A mission thread: the last agent that wrote there, not volee.
         let mission = reply(&registry, titled(&registry, &rows, "Invoicing")).unwrap();
         assert_eq!(mission.question, None);
@@ -433,9 +451,14 @@ mod tests {
             let Row::Question(question) = rows[0] else {
                 panic!("no question first");
             };
-            assert_eq!(
-                key(&mut model, KeyCode::Enter),
-                [Effect::MarkRead(question)]
+            // Reading the inbox marks its four unread messages read.
+            let effects = key(&mut model, KeyCode::Enter);
+            assert_eq!(effects.len(), 4);
+            assert!(effects.contains(&Effect::MarkRead(question)));
+            assert!(
+                effects
+                    .iter()
+                    .all(|effect| matches!(effect, Effect::MarkRead(_)))
             );
             assert!(view(&model).reading);
             press(&mut model, "k");
@@ -511,9 +534,18 @@ mod tests {
         #[test]
         fn volee_s_alerts_take_no_reply() {
             let mut model = model(120, 40);
-            press(&mut model, "ijjjr");
             let rows = rows(&model.registry);
-            assert_eq!(view(&model).selected, Some(rows[3]));
+            let alerts = rows
+                .iter()
+                .position(|row| {
+                    matches!(row, Row::Thread(thread)
+                        if model.registry.thread(*thread).is_some_and(|t| t.title == "volee"))
+                })
+                .unwrap();
+            press(&mut model, "i");
+            press(&mut model, &"j".repeat(alerts));
+            press(&mut model, "r");
+            assert_eq!(view(&model).selected, Some(rows[alerts]));
             assert_eq!(
                 model.notice.as_ref().unwrap().text,
                 "volee's alerts take no reply."

@@ -25,7 +25,6 @@ wake_timeout = 3600
 path = "~/code/billing"
 base = "develop"
 model = "sonnet"
-setup = "bun install"
 
 [tui]
 theme = "catppuccin-mocha"
@@ -42,13 +41,15 @@ git = "gitui"
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `model` | the harness default | Model for the agents volee launches, unless the repository sets one. |
-| `permission_mode` | the harness default | `acceptEdits`, `auto`, `manual`, `dontAsk` or `plan`, passed to Claude Code. volee never passes `bypassPermissions`. |
+| `permission_mode` | `manual` | `acceptEdits`, `auto`, `manual`, `dontAsk` or `plan`, passed to Claude Code with every launch and resume. `manual` asks before every tool that needs permission: a background agent then waits until you take it over and answer. volee never passes `bypassPermissions`, and never leaves the mode to your own Claude Code default. |
 | `wake_timeout` | `3600` | Seconds an idle agent stays reachable by the wake-up hook. Afterwards, a message resumes the session instead. |
 
 ## Worktrees
 
 volee creates each agent's worktree inside its repository, at
-`.claude/worktrees/<branch>`, where Claude Code keeps its own, and adds that
+`.claude/worktrees/<name>`, where Claude Code keeps its own. `<name>` is the
+branch with every character other than a letter, a digit, `.`, `_` or `-`
+replaced by `-`: `feat/invoices` becomes `feat-invoices`. volee adds that
 folder to the repository's local exclude file so `git status` stays clean.
 The location is not configurable: Claude Code only trusts a background
 session started from a repository you trust, and never a worktree elsewhere
@@ -66,7 +67,6 @@ and `.`.
 | `path` | yes | The main checkout. `~` is expanded. |
 | `base` | no | The branch work starts from. The repository's default branch when unset. |
 | `model` | no | Model for this repository's agents. |
-| `setup` | no | A first step agents run in a new worktree, such as `bun install`. |
 
 ## `[messages]`
 
@@ -78,6 +78,41 @@ and `.`.
 A summary runs `claude -p` with no tools, no MCP server, none of your hooks
 and no saved session, in a directory of volee's own: the model reads the
 thread and nothing else.
+
+## `[missions]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `max_workers` | `8` | The most agents one mission may launch besides its coordinator, counting those that already stopped. |
+
+A coordinator launches workers with its `spawn_worker` tool, without asking
+you, so this limit is what keeps a coordinator gone wrong from starting
+sessions without end. Launches that run at the same time all count. A
+coordinator that reaches the limit gets a refusal that tells it to ask you.
+Workers also stay in the repositories the mission names: volee compares their
+main checkouts, never their directory names.
+
+## `[git]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `fetch` | `"launched"` | Which repositories the daemon fetches in the background: `"launched"` (those of agents volee launched), `"all"` (also those of sessions volee only discovered) or `"never"`. |
+
+To tell whether an agent's commits are pushed, and whether its branch was
+merged, volee compares the branch with `origin`. The daemon therefore runs
+`git fetch --prune origin` in an agent's repository at most every five
+minutes, in batch mode: a fetch that needs a password fails instead of
+waiting, and only your remote-tracking branches change (`--prune` forgets the
+ones deleted on the remote; `FETCH_HEAD` is left alone).
+
+By default it fetches only the repositories of agents volee launched: their
+remote is part of the work volee started. A session you started yourself is
+yours, and so is its remote: volee reads its repository but leaves fetching
+to you, and compares with what your last fetch brought. Set `"all"` to have
+those repositories fetched too, or `"never"` to fetch only by hand (for
+example on a metered connection, or with remotes that need a hardware key).
+With fetches off, push states and merges are as current as your last fetch,
+and new agents start from `origin/<base>` as that fetch left it.
 
 ## `[tui]`
 

@@ -2,7 +2,7 @@
 source: crates/volee-tui/src/screen_tests.rs
 expression: draw(&model)
 ---
-" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline                                                                       ? 1 · ✉ 2 · ! 2 need you · ▸ 6 working · 12 agents  demo · simulated data "
+" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline                                                                       ? 2 · ✉ 5 · ! 2 need you · ▸ 6 working · 12 agents  demo · simulated data "
 "╭ Agents ──────────────────────────────╮╭ Hierarchy · cards ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮"
 "│▌v ! invoice-tools              1 min ││                                    ╭─ tower ───────────── lead ⠹ ─╮                                                ╭─ infra ──────── independent ─╮          │"
 "│    needs you · mcp-server › feat/in… ││                                    │ ▸ working · 24 min  ▁█▁█▁▁█▁ │                                                │ · idle · 25 min              │          │"

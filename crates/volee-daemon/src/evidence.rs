@@ -12,7 +12,9 @@
 //!   read again at once;
 //! - every [`refresh_interval`](EvidenceSources::refresh_interval), the
 //!   evidence of live agents is read again, and each repository is fetched
-//!   at most every [`fetch_interval`](EvidenceSources::fetch_interval).
+//!   at most every [`fetch_interval`](EvidenceSources::fetch_interval), when
+//!   the person's `[git] fetch` setting allows it for the agent (by default,
+//!   only for agents volee launched).
 //!
 //! git and the forge run on blocking threads, never under the state lock,
 //! for a few agents at a time and one job per agent; triggers that arrive
@@ -28,11 +30,12 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Semaphore, broadcast};
 use tokio::task::JoinHandle;
 use volee_core::delivery::{Delivery, PullRequest};
+use volee_core::role::LaunchedBy;
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
 use volee_core::workspace::Workspace;
 use volee_core::{Agent, AgentId, Event, EventKind};
-use volee_git::{DeliveryQuery, Forge, Git, GitError, RepoInfo};
+use volee_git::{BranchHead, DeliveryQuery, Forge, Git, GitError, RepoInfo};
 use volee_proto::methods::ForgeStatus;
 
 use crate::server::Shared;
@@ -442,9 +445,13 @@ impl Refresher {
     }
 
     async fn refresh_delivery(&self, agent: AgentId, forge_now: bool) {
-        let Some(((workspace, unmerged_tip), checked_at)) = self
+        let Some(((workspace, unmerged_tip, launched_by_volee), checked_at)) = self
             .read(agent, |found| {
-                (found.workspace.clone(), found.delivery.unmerged_tip.clone())
+                (
+                    found.workspace.clone(),
+                    found.delivery.unmerged_tip.clone(),
+                    found.launched_by != LaunchedBy::Outside,
+                )
             })
             .await
         else {
@@ -453,7 +460,11 @@ impl Refresher {
         let (Some(branch), Some(base)) = (workspace.branch.clone(), workspace.base.clone()) else {
             return;
         };
-        if let Some(root) = &workspace.repo_root {
+        // The person decides whose remotes volee may fetch (`[git] fetch`):
+        // by default, only those of the work volee started.
+        if let Some(root) = &workspace.repo_root
+            && self.settings.git.fetch.allows(launched_by_volee)
+        {
             self.fetch_if_due(root).await;
         }
         let dir = workspace.cwd.clone();
@@ -471,7 +482,11 @@ impl Refresher {
         else {
             return;
         };
-        let looked_up = self.pull_request(&workspace, &branch, forge_now).await;
+        let looked_up = match report.delivery.tip.as_deref() {
+            Some(tip) => self.pull_request(&workspace, &branch, tip, forge_now).await,
+            // No branch, so no pull request can be at its tip.
+            None => None,
+        };
 
         let mut state = self.shared.state.lock().await;
         let Some(current) = state.registry().agent(agent) else {
@@ -523,13 +538,16 @@ impl Refresher {
         }
     }
 
-    /// The pull request of `branch`, looked up unless it was within the
-    /// forge interval (or `forge_now`). `None` when it was not looked up or
-    /// the lookup failed: the previous one stays.
+    /// The pull request of `branch` at `tip`, opened from the repository's
+    /// `origin`, looked up unless it was within the forge interval (or
+    /// `forge_now`). `None` when it was not looked up or the lookup failed:
+    /// the previous one stays, and counts as evidence only while the branch
+    /// is still at its head.
     async fn pull_request(
         &self,
         workspace: &Workspace,
         branch: &str,
+        tip: &str,
         forge_now: bool,
     ) -> Option<Option<PullRequest>> {
         let forge = Arc::clone(self.forge.as_ref()?);
@@ -555,9 +573,23 @@ impl Refresher {
             }
             book.looked_up.insert(key, Instant::now());
         }
+        // Which repository the branch is pushed to: pull requests from any
+        // other (a fork with the same branch name) are not the branch's.
+        let origin_dir = workspace.cwd.clone();
+        let origin = self
+            .ask("origin", move |git| git.origin(&origin_dir))
+            .await?;
         let dir = workspace.cwd.clone();
-        let branch = branch.to_owned();
-        match tokio::task::spawn_blocking(move || forge.pull_request(&dir, &branch)).await {
+        let (branch, tip) = (branch.to_owned(), tip.to_owned());
+        let lookup = move || {
+            let head = BranchHead {
+                branch: &branch,
+                origin: origin.as_ref(),
+                tip: &tip,
+            };
+            forge.pull_request(&dir, &head)
+        };
+        match tokio::task::spawn_blocking(lookup).await {
             Ok(Ok(found)) => Some(found),
             Ok(Err(error)) => {
                 tracing::debug!(%error, "pull request lookup failed");
