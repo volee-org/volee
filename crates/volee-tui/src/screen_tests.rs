@@ -360,6 +360,102 @@ fn offline_after_the_daemon_left() {
 }
 
 #[test]
+fn messages_at_every_size() {
+    for (width, height) in [(80, 24), (120, 40), (200, 50)] {
+        let (mut model, demo) = demo_model(width, height, Theme::default());
+        type_text(&demo, &mut model, "i");
+        assert_snapshot!(format!("messages_at_{width}x{height}"), draw(&model));
+    }
+}
+
+#[test]
+fn messages_reading_a_mission_thread_with_its_summary() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    // The row after the pinned question: the Invoicing mission's thread,
+    // where volee's supervisor wrote last.
+    type_text(&demo, &mut model, "ij");
+    keys(&demo, &mut model, &[KeyCode::Enter]);
+    let effects = update(
+        &mut model,
+        Msg::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)),
+    );
+    for effect in effects {
+        if let Effect::Summarize(thread) = effect {
+            let result = futures_util::FutureExt::now_or_never(crate::source::Source::summarize(
+                &demo, thread,
+            ))
+            .unwrap();
+            update(&mut model, Msg::Summarized { thread, result });
+        }
+    }
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn tools_menu_offers_what_was_found() {
+    use crate::tools::{Tool, ToolKind};
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    model.settings.tools = vec![
+        Tool {
+            kind: ToolKind::Editor,
+            label: "nvim".into(),
+            command: vec!["nvim".into(), ".".into()],
+        },
+        Tool {
+            kind: ToolKind::Diff,
+            label: "nvim".into(),
+            command: vec!["nvim".into(), "-c".into(), "DiffviewOpen {base}".into()],
+        },
+        Tool {
+            kind: ToolKind::Ide,
+            label: "VS Code".into(),
+            command: vec!["code".into(), "{dir}".into()],
+        },
+    ];
+    type_text(&demo, &mut model, "'po");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn new_agent_dialog_with_a_refusal() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    model.settings.repos = demo.repos();
+    type_text(&demo, &mut model, "n");
+    keys(&demo, &mut model, &[KeyCode::Right, KeyCode::Tab]);
+    type_text(&demo, &mut model, "feat/invoice-export");
+    keys(&demo, &mut model, &[KeyCode::Tab]);
+    type_text(
+        &demo,
+        &mut model,
+        "Export invoices as CSV, one file per month.",
+    );
+    keys(&demo, &mut model, &[KeyCode::Enter]);
+    update(
+        &mut model,
+        Msg::Launched(Err(crate::source::SourceError::Failed(
+            "Claude Code does not trust /home/dev/code/dashboard: run `claude` there once and \
+             accept the trust prompt"
+                .into(),
+        ))),
+    );
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn new_mission_dialog_on_a_small_screen() {
+    let (mut model, demo) = demo_model(80, 24, Theme::default());
+    model.settings.repos = demo.repos();
+    type_text(&demo, &mut model, "N");
+    type_text(&demo, &mut model, "Invoice export");
+    keys(
+        &demo,
+        &mut model,
+        &[KeyCode::Tab, KeyCode::Tab, KeyCode::Char(' ')],
+    );
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
 fn themes_change_colors_only() {
     let (mocha, _) = demo_model(120, 40, Theme::default());
     for name in Theme::builtin_names() {

@@ -8,7 +8,9 @@ use ratatui::text::Span;
 use crate::app::{Model, Overlay, Pane, Tab};
 use crate::theme::StyleRole;
 use crate::views::{hierarchy, network, repos, timeline};
-use crate::widgets::{composer, detail, diff, help, hints, panel, rail, top_bar};
+use crate::widgets::{
+    composer, detail, diff, help, hints, inbox, launch, panel, rail, tools, top_bar,
+};
 
 /// Draws the whole screen from the model.
 pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
@@ -74,6 +76,9 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
             }
         }
         Some(Overlay::Diff(diff)) => diff::render(model, diff, area, buf),
+        Some(Overlay::Inbox(inbox)) => inbox::render(model, inbox, area, buf),
+        Some(Overlay::Tools(menu)) => tools::render(model, *menu, area, buf),
+        Some(Overlay::Launch(dialog)) => launch::render(model, dialog, area, buf),
         None => {}
     }
 }

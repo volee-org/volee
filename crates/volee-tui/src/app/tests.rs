@@ -373,6 +373,7 @@ fn m_writes_to_the_selected_agent_and_enter_sends() {
             kind: MessageKind::Question,
             body: "quick: is it a generated column?".into(),
             in_reply_to: None,
+            thread: None,
         })]
     );
     assert!(key(&mut model, KeyCode::Enter).is_empty(), "sent once");
@@ -423,6 +424,7 @@ fn an_agent_that_asked_you_something_gets_an_answer() {
         kind: MessageKind::Answer,
         body: "Yes\nfalse by default".into(),
         in_reply_to: Some(question),
+        thread: None,
     };
     assert_eq!(key(&mut model, KeyCode::Enter), [Effect::Send(sent)]);
     update(

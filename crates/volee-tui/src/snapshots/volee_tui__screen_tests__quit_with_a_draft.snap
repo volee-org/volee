@@ -2,7 +2,7 @@
 source: crates/volee-tui/src/screen_tests.rs
 expression: draw(&model)
 ---
-" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline                !2 ▸6 12 "
+" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline          ?2 ✉5 !2 ▸6 12 "
 "╭ Agents · tree ───────────────────╮╭ Detail ──────────────────────────────────╮"
 "│ t ▸ tower                 24 min ││ invoice-schema · worker                  │"
 "│ n ├─ · invoicing          14 min ││ ! needs you · for 2 min                  │"

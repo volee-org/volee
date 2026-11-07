@@ -68,6 +68,78 @@ pub(crate) fn clause(text: &str) -> &str {
     text.trim_end().trim_end_matches('.')
 }
 
+/// The rows of `text` in a field `width` cells wide, as byte ranges without
+/// the line breaks. Long lines break after the last space that fits, or
+/// anywhere when a word is longer than a row.
+pub(crate) fn wrap(text: &str, width: usize) -> Vec<(usize, usize)> {
+    let width = width.max(1);
+    let mut rows = Vec::new();
+    let mut line_start = 0;
+    for line in text.split('\n') {
+        let line_end = line_start + line.len();
+        let mut start = line_start;
+        loop {
+            let mut used = 0;
+            let mut fit = start;
+            let mut space = None;
+            for (index, c) in text[start..line_end].char_indices() {
+                let cells = c.width().unwrap_or(0);
+                if used + cells > width {
+                    break;
+                }
+                used += cells;
+                if c == ' ' {
+                    space = Some(start + index);
+                }
+                fit = start + index + c.len_utf8();
+            }
+            if fit >= line_end {
+                rows.push((start, line_end));
+                break;
+            }
+            if text[fit..].starts_with(' ') {
+                rows.push((start, fit));
+                start = fit + 1;
+            } else if let Some(space) = space.filter(|space| *space > start) {
+                rows.push((start, space));
+                start = space + 1;
+            } else {
+                // A character wider than the row still takes a row.
+                let fit = if fit == start {
+                    start + text[start..].chars().next().map_or(1, char::len_utf8)
+                } else {
+                    fit
+                };
+                rows.push((start, fit));
+                start = fit;
+            }
+        }
+        line_start = line_end + 1;
+    }
+    rows
+}
+
+/// The row and the column of the cursor among `rows`. At a soft break the
+/// cursor goes to the start of the next row.
+pub(crate) fn cursor_position(
+    rows: &[(usize, usize)],
+    text: &str,
+    cursor: usize,
+) -> (usize, usize) {
+    let mut found = None;
+    for (row, (start, end)) in rows.iter().enumerate() {
+        if *start <= cursor && cursor < *end {
+            found = Some((row, *start));
+            break;
+        }
+        if cursor == *end {
+            found = Some((row, *start));
+        }
+    }
+    let (row, start) = found.unwrap_or((rows.len().saturating_sub(1), cursor));
+    (row, width(&text[start..cursor.max(start)]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

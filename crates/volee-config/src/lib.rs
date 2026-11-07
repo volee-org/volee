@@ -221,9 +221,111 @@ pub struct Tui {
     pub theme: Option<String>,
     /// Key overrides, by action name. Interpreted by the interface.
     pub keys: BTreeMap<String, String>,
+    /// Programs the interface offers to open an agent's worktree with.
+    pub tools: Tools,
     /// No travelling animations: message pulses become short highlights
     /// and spinners stop.
     pub reduced_motion: bool,
+}
+
+/// Programs the interface offers to open an agent's worktree with, never
+/// required. Each is a command line run in the worktree, where `{dir}`
+/// stands for the worktree and `{base}` for the branch the agent started
+/// from. An empty string turns a tool off; an unset one is looked for on
+/// the machine.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Tools {
+    /// An editor that runs in the terminal; `$VISUAL`, then `$EDITOR`, when
+    /// unset.
+    pub editor: Option<String>,
+    /// A diff viewer that runs in the terminal; Neovim with diffview when
+    /// unset and both are installed.
+    pub diff: Option<String>,
+    /// A git interface that runs in the terminal; lazygit when unset and
+    /// installed.
+    pub git: Option<String>,
+    /// An editor with a window of its own, started in the background; VS
+    /// Code (`code`) when unset and installed.
+    pub ide: Option<String>,
+}
+
+impl Tools {
+    /// Every tool with its name, as written in the configuration.
+    pub fn entries(&self) -> [(&'static str, Option<&str>); 4] {
+        [
+            ("editor", self.editor.as_deref()),
+            ("diff", self.diff.as_deref()),
+            ("git", self.git.as_deref()),
+            ("ide", self.ide.as_deref()),
+        ]
+    }
+}
+
+/// Splits a command line into words the way a shell would for simple
+/// commands: spaces separate words, single quotes keep everything, double
+/// quotes keep everything but `\"` and `\\`, and a backslash outside quotes
+/// keeps the next character. No variables, globs or pipes.
+pub fn split_command(line: &str) -> Result<Vec<String>, String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut in_word = false;
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                in_word = true;
+                loop {
+                    match chars.next() {
+                        Some('\'') => break,
+                        Some(c) => word.push(c),
+                        None => return Err(format!("a single quote is not closed in `{line}`")),
+                    }
+                }
+            }
+            '"' => {
+                in_word = true;
+                loop {
+                    match chars.next() {
+                        Some('"') => break,
+                        Some('\\') => match chars.next() {
+                            Some(c @ ('"' | '\\')) => word.push(c),
+                            Some(c) => {
+                                word.push('\\');
+                                word.push(c);
+                            }
+                            None => {
+                                return Err(format!("a double quote is not closed in `{line}`"));
+                            }
+                        },
+                        Some(c) => word.push(c),
+                        None => return Err(format!("a double quote is not closed in `{line}`")),
+                    }
+                }
+            }
+            '\\' => {
+                in_word = true;
+                match chars.next() {
+                    Some(c) => word.push(c),
+                    None => return Err(format!("`{line}` ends with a backslash")),
+                }
+            }
+            c if c.is_whitespace() => {
+                if in_word {
+                    words.push(std::mem::take(&mut word));
+                    in_word = false;
+                }
+            }
+            c => {
+                in_word = true;
+                word.push(c);
+            }
+        }
+    }
+    if in_word {
+        words.push(word);
+    }
+    Ok(words)
 }
 
 impl Config {
@@ -276,6 +378,12 @@ impl Config {
             return Err(invalid(
                 "agents.wake_timeout must be at least 1 second".to_owned(),
             ));
+        }
+        for (name, line) in self.tui.tools.entries() {
+            if let Some(line) = line {
+                split_command(line)
+                    .map_err(|error| invalid(format!("tui.tools.{name}: {error}")))?;
+            }
         }
         if self.missions.max_workers == 0 {
             return Err(invalid(
@@ -439,6 +547,60 @@ mod tests {
         // (ADR 0013), so the old `[worktrees]` table is an error, not a no-op.
         let error = parse("[worktrees]\nroot = \"~/wt\"\n").unwrap_err();
         assert!(error.to_string().contains("worktrees"), "{error}");
+    }
+
+    #[test]
+    fn tools_are_command_lines_checked_when_loaded() {
+        let config = parse(
+            r#"
+            [tui.tools]
+            editor = "hx"
+            diff = "nvim -c 'DiffviewOpen {base}'"
+            git = ""
+            "#,
+        )
+        .unwrap();
+        let tools = &config.tui.tools;
+        assert_eq!(tools.editor.as_deref(), Some("hx"));
+        assert_eq!(
+            tools.git.as_deref(),
+            Some(""),
+            "an empty tool is turned off"
+        );
+        assert_eq!(tools.ide, None);
+        let error = parse(
+            "[tui.tools]
+diff = \"nvim -c 'DiffviewOpen\"\n",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("tui.tools.diff"), "{error}");
+        let error = parse(
+            "[tui.tools]
+pager = \"less\"\n",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("pager"), "{error}");
+    }
+
+    #[test]
+    fn command_lines_split_like_a_shell() {
+        let split = |line: &str| split_command(line).unwrap();
+        assert_eq!(
+            split("nvim -c 'DiffviewOpen {base}'"),
+            ["nvim", "-c", "DiffviewOpen {base}"]
+        );
+        assert_eq!(
+            split(r#"code  --new-window "{dir}""#),
+            ["code", "--new-window", "{dir}"]
+        );
+        assert_eq!(
+            split(r#"say "a \"b\" \\ c" d\ e ''"#),
+            ["say", r#"a "b" \ c"#, "d e", ""]
+        );
+        assert_eq!(split("   "), Vec::<String>::new());
+        assert!(split_command("nvim 'open").is_err());
+        assert!(split_command("nvim \"open").is_err());
+        assert!(split_command("nvim \\").is_err());
     }
 
     #[test]

@@ -30,7 +30,9 @@ mod daemon;
 mod demo;
 mod editor;
 mod history;
+mod inbox;
 pub mod keymap;
+mod launch;
 mod layout;
 mod letters;
 mod preview;
@@ -39,12 +41,15 @@ mod run;
 pub mod source;
 mod text;
 pub mod theme;
+mod tools;
 mod view;
 mod views;
 mod widgets;
 
 #[cfg(test)]
 mod screen_tests;
+#[cfg(test)]
+mod test_support;
 
 use std::sync::Arc;
 
@@ -53,8 +58,12 @@ pub use daemon::DaemonSource;
 pub use demo::DemoSource;
 pub use keymap::{Keymap, KeymapError};
 pub use preview::screen_text;
-pub use source::{Changes, Outgoing, Source, SourceError, Subscription, TakeOver};
+pub use source::{
+    Changes, MissionRequest, NewMission, Outgoing, Source, SourceError, SpawnRequest, Subscription,
+    Summary, TakeOver,
+};
 pub use theme::{ColorDepth, Theme, ThemeError};
+pub use tools::{Tool, ToolKind};
 
 use crate::app::{Model, Motion, Msg};
 use crate::run::{TerminalScreen, event_loop};
@@ -72,6 +81,10 @@ pub struct Options {
     /// A few words shown at the right of the top bar, such as
     /// `demo · simulated data`.
     pub banner: Option<String>,
+    /// Programs to open an agent's worktree with; none is required.
+    pub tools: Vec<Tool>,
+    /// Repositories agents and missions can be launched in, by name.
+    pub repos: Vec<String>,
     /// No travelling animations: message pulses on the network become
     /// short highlights and spinners stop.
     pub reduced_motion: bool,
@@ -84,6 +97,8 @@ impl Default for Options {
             keymap: Keymap::default(),
             clock: Arc::new(SystemClock),
             banner: None,
+            tools: Vec::new(),
+            repos: Vec::new(),
             reduced_motion: false,
         }
     }
@@ -117,6 +132,8 @@ pub async fn run(source: impl Source, options: Options) -> Result<(), TuiError> 
         size,
         options.clock.now(),
     );
+    model.settings.tools = options.tools;
+    model.settings.repos = options.repos;
     if options.reduced_motion {
         model.motion = Motion::Reduced;
     }

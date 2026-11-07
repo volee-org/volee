@@ -65,7 +65,9 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
 ```
 
 - **Top bar.** The views, numbered (press the number to switch), and
-  counters: how many agents need you, how many work, how many there are.
+  counters: questions waiting for your answer (`?`) and unread messages
+  (`✉`) when there are any, then how many agents need you, how many work,
+  how many there are.
 - **Agents.** Every agent, the most urgent first: those that need you, then
   failed, working, launching, done, idle, stopped and lost. Each row shows
   the agent's jump letter, its state, its name, how long it has been in that
@@ -77,8 +79,9 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   selected agent is the same in every view and in the list.
 - **Detail.** Facts about the selected agent: role, state and since when,
   its mission and the mission supervisor's verdict on its work, repository
-  and branch, worktree, where it runs and with which model, delivery
-  evidence, last activity and session.
+  and branch, worktree, where it runs and with which model, whether it is
+  held (you stopped it, or its mission is over: volee will not resume it on
+  its own), delivery evidence, last activity and session.
 - **Preview.** The selected agent's terminal screen, kept up to date while
   it works. The bottom of the screen, where the latest output is, stays in
   view; scroll it with `j` and `k` when the panel has the keyboard.
@@ -294,6 +297,28 @@ started outside volee cannot receive messages yet; the composer says so.
 `✎ draft to <agent>`, and `m` brings it back, addressed to the agent
 selected then. Quitting with a draft asks first.
 
+## Messages
+
+`i` opens your messages. Questions agents asked you and that you have not
+answered come first, pinned until an answer refers to them; then every
+thread you take part in, the latest activity first: mission threads,
+threads with agents, and volee's own alerts. A `●` marks threads with
+unread messages; the top bar counts both.
+
+The selected thread shows on the right. `Enter` reads it: the keyboard
+moves into the thread (`j` and `k` scroll it) and its messages are marked
+read; `Esc` comes back to the list, then closes the window.
+
+`r` replies in the selected thread: to a pinned question, the composer
+opens as its answer, linked to it, so the question stops waiting;
+elsewhere it writes to the last agent that spoke there (or the mission's
+coordinator). Sending or closing the composer comes back to the messages.
+volee's alerts take no reply.
+
+`s` asks for a summary of the thread, written by a model. Summaries are
+off unless you turn them on (`summaries = true` under `[messages]` in the
+[configuration](configuration.md)); until then, the window says so.
+
 ## Changes
 
 `d` shows the selected agent's changes against the branch it started
@@ -301,6 +326,33 @@ from: first a summary (`git diff --stat`), then the full patch with `f`. `j`
 and `k` scroll, `r` loads them again, and `Esc` or `d` closes the window. A
 very long patch stops at a line that says so; the rest is in the agent's
 worktree.
+
+## Your own tools
+
+`o` opens the selected agent's worktree in another program, from the
+agents or from the Changes window: `e` your editor, `d` your diff viewer,
+`g` your git interface, `w` an editor with a window of its own. None is
+required: volee offers what it finds (`$VISUAL` or `$EDITOR`, Neovim with
+diffview.nvim, lazygit, VS Code) and what `[tui.tools]` names in the
+[configuration](configuration.md#tuitools), and says how to add the
+others. Terminal programs take over the terminal and the interface comes
+back when they exit; VS Code opens its own window and volee stays.
+
+## Launching agents and missions
+
+`n` launches an agent in a new worktree: choose the repository (from
+`[repos]` in the configuration, or type the path of a checkout when there
+is none), name the new branch, write the task (its first prompt) and,
+optionally, the model. `N` creates a mission: a title, its kind (`change`
+delivers branches and pull requests, `analysis` reports), its repositories
+and its goal; volee launches its coordinator.
+
+`Tab` moves between fields, `←` and `→` choose, `space` picks a
+repository, `Alt+Enter` or `Ctrl+J` starts a new line in the task or the
+goal, and `Enter` launches. When volee refuses (a repository Claude Code
+does not trust yet, a branch that already exists...), the dialog stays
+open and says why, so you can fix it and launch again. The new agent is
+selected as soon as it appears.
 
 ## Taking over an agent
 
@@ -338,6 +390,10 @@ take-over = "ctrl-a"
 | `m` | write a message to the selected agent | `message` |
 | `d` | show the selected agent's changes | `diff` |
 | `a` | take over the selected agent in this terminal | `take-over` |
+| `i` | your messages, questions waiting for you first | `messages` |
+| `o` | open the selected agent's worktree in your editor, diff viewer or git tool | `open-with` |
+| `n` | launch an agent in a new worktree | `new-agent` |
+| `N` | create a mission, which launches its coordinator | `new-mission` |
 | `tab` | focus the next panel | `next-pane` |
 | `shift-tab` | focus the previous panel | `previous-pane` |
 | `1` | show the hierarchy | `show-hierarchy` |
@@ -456,6 +512,7 @@ take-over = "ctrl-a"
 | `G`, `end` | bottom | `last` |
 | `f` | switch between the summary and the full patch | `toggle-full` |
 | `r` | load the changes again | `refresh` |
+| `o` | open the worktree in your editor, diff viewer or git tool | `open-with` |
 | `esc`, `d`, `q` | close the changes | `back` |
 | `ctrl-c` | quit volee | `quit` |
 
@@ -466,6 +523,42 @@ take-over = "ctrl-a"
 | `y` | yes | `confirm` |
 | `n`, `esc` | no | `back` |
 | `ctrl-c` | quit volee without asking again | `quit` |
+
+### Messages
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `j`, `↓` | next row, or further down the thread you read | `down` |
+| `k`, `↑` | previous row, or further up the thread you read | `up` |
+| `g`, `home` | first row, or the start of the thread | `first` |
+| `G`, `end` | last row, or the end of the thread | `last` |
+| `enter` | read the thread, which marks its messages read | `apply` |
+| `r` | reply: the answer to the question, else a note to the agent | `reply` |
+| `s` | summarize the thread with a model, when summaries are on | `summarize` |
+| `esc`, `q`, `i` | leave the thread, then close the messages | `back` |
+| `ctrl-c` | quit volee | `quit` |
+
+### Open with
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `e` | your editor ($VISUAL, $EDITOR or [tui.tools] editor) | `open-editor` |
+| `d` | your diff viewer (Neovim with diffview, or [tui.tools] diff) | `open-diff` |
+| `g` | your git tool (lazygit, or [tui.tools] git) | `open-git` |
+| `w` | an editor with its own window (VS Code, or [tui.tools] ide) | `open-ide` |
+| `esc`, `q`, `o` | close the menu | `back` |
+| `ctrl-c` | quit volee | `quit` |
+
+### Launch dialogs
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `tab` | next field | `next-field` |
+| `shift-tab` | previous field | `previous-field` |
+| `enter` | launch | `apply` |
+| `alt-enter`, `ctrl-j` | start a new line in the task or the goal | `new-line` |
+| `esc` | cancel | `back` |
+| `ctrl-c` | quit volee | `quit` |
 
 ### Help
 

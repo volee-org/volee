@@ -9,6 +9,7 @@ mod connect;
 mod resolve;
 mod table;
 mod text;
+mod tools;
 
 use std::process::ExitCode;
 
