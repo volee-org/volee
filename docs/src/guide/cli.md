@@ -135,7 +135,9 @@ its work landed: its branch is merged into its base branch, its pull request
 is merged, or, for analysis work, its report was delivered. The worktree
 must also be clean, the agent must not be running, and volee must have
 checked the agent's work since its last change. It only touches agents volee
-launched, in the worktrees it created under `.claude/worktrees/`. It never
+launched, in the worktrees it created under `.claude/worktrees/`. Files git
+ignores (a copied `.env`, local data) are not work git can see, so they go
+with the worktree: copy out anything you want to keep first. It never
 deletes a branch and has no way to force a removal: when something is
 missing, it says what, for example:
 

@@ -6,10 +6,12 @@ This walk-through takes about ten minutes. It assumes volee is installed (see
 ## 1. Check that volee finds Claude Code
 
 ```sh
+volee daemon start
 volee daemon status
 ```
 
-The daemon starts on its own the first time a command needs it. Its status
+Other commands start the daemon on their own when they need it; here it is
+started by hand, because `volee daemon status` only reports. The status
 names the Claude Code version it found, and whether `gh` is there to read
 pull requests. If Claude Code is missing or too old, the line says why.
 
