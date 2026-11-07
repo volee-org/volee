@@ -10,6 +10,12 @@
 //! - **Focus**: `tuios focus-window -s <session> <window>` (which also shows
 //!   the pane's workspace), then `tuios switch-session <session>`, which,
 //!   run from a pane, switches the client showing that pane's session.
+//! - **Server**: every command names its tuios server with `--server`: the
+//!   one `TUIOS_SERVER` names in the daemon's environment, or the default
+//!   server, which `--server ""` selects. tuios picks a server from that
+//!   flag, else from `TUIOS_SERVER`; `TUIOS_SOCKET` only says which server a
+//!   pane belongs to. So the focus steps, which a client runs in its own
+//!   environment, reach the server where the daemon found the pane.
 //!
 //! Only reads and focus: nothing is typed into a pane, and no pane is
 //! created, closed or moved.
@@ -51,15 +57,18 @@ const NOT_IN_A_PANE: &str = "window_not_found";
 pub struct Tuios<R = SystemRunner> {
     runner: R,
     program: PathBuf,
+    /// The tuios server every command names: empty for the default one.
+    server: String,
     /// Sessions found outside every pane, with the process they ran then:
     /// a process never moves into a pane, so they are not asked about again.
     outside: Mutex<HashSet<(SessionKey, u32)>>,
 }
 
 impl Tuios {
-    /// tuios as `tuios` on the `PATH`.
+    /// tuios as `tuios` on the `PATH`, on the server `TUIOS_SERVER` names, as
+    /// `tuios` itself reads it, or else on the default server.
     pub fn new() -> Self {
-        Self::with_runner(SystemRunner)
+        Self::with_runner(SystemRunner).on_server(std::env::var("TUIOS_SERVER").unwrap_or_default())
     }
 }
 
@@ -101,13 +110,32 @@ struct Captured {
 }
 
 impl<R: CommandRunner> Tuios<R> {
-    /// tuios run by `runner`; tests pass a fake.
+    /// tuios run by `runner`, on the default server; tests pass a fake.
     pub fn with_runner(runner: R) -> Self {
         Self {
             runner,
             program: PathBuf::from(PROGRAM),
+            server: String::new(),
             outside: Mutex::default(),
         }
+    }
+
+    /// The same, on the tuios server named `name`; an empty name is the
+    /// default server.
+    #[must_use]
+    pub fn on_server(mut self, name: impl Into<String>) -> Self {
+        self.server = name.into();
+        self
+    }
+
+    /// A `tuios` command line for the client: the program, the server, then
+    /// `args`.
+    fn command(&self, args: &[&str]) -> Vec<String> {
+        [PROGRAM, "--server", &self.server]
+            .into_iter()
+            .chain(args.iter().copied())
+            .map(str::to_owned)
+            .collect()
     }
 
     /// Runs `tuios call <verb> <params>` and reads its answer.
@@ -117,7 +145,7 @@ impl<R: CommandRunner> Tuios<R> {
         params: &Value,
     ) -> Result<T, MuxError> {
         let invocation = Invocation::new(&self.program, TIMEOUT)
-            .args(["call", verb])
+            .args(["--server", self.server.as_str(), "call", verb])
             .arg(params.to_string());
         let output = self
             .runner
@@ -249,25 +277,25 @@ impl<R: CommandRunner> Multiplexer for Tuios<R> {
 
     fn focus_steps(&self, target: &str) -> Result<Vec<Vec<String>>, MuxError> {
         let (session, window) = split_target(target)?;
-        let step = |args: &[&str]| -> Vec<String> {
-            std::iter::once(PROGRAM)
-                .chain(args.iter().copied())
-                .map(str::to_owned)
-                .collect()
-        };
         Ok(vec![
-            step(&["focus-window", "-s", session, window]),
-            step(&["switch-session", session]),
+            self.command(&["focus-window", "-s", session, window]),
+            self.command(&["switch-session", session]),
         ])
     }
 
     fn attach_command(&self, target: &str) -> Option<Vec<String>> {
         let (session, _) = split_target(target).ok()?;
-        Some(vec![
-            PROGRAM.to_owned(),
-            "attach".to_owned(),
-            session.to_owned(),
-        ])
+        // A person runs it in a new terminal, which names no server: the
+        // default server needs no flag.
+        if self.server.is_empty() {
+            Some(vec![
+                PROGRAM.to_owned(),
+                "attach".to_owned(),
+                session.to_owned(),
+            ])
+        } else {
+            Some(self.command(&["attach", session]))
+        }
     }
 }
 
@@ -364,7 +392,14 @@ mod tests {
         );
         assert_eq!(
             args(&tuios.runner),
-            [["tuios", "call", "list-agents", r#"{"all_sessions":true}"#]]
+            [[
+                "tuios",
+                "--server",
+                "",
+                "call",
+                "list-agents",
+                r#"{"all_sessions":true}"#
+            ]]
         );
     }
 
@@ -394,9 +429,16 @@ mod tests {
         assert_eq!(calls[1], ["ps", "-axo", "pid=,ppid="]);
         assert_eq!(
             calls[2],
-            ["tuios", "call", "resolve-pane", r#"{"pids":[951,950,900]}"#]
+            [
+                "tuios",
+                "--server",
+                "",
+                "call",
+                "resolve-pane",
+                r#"{"pids":[951,950,900]}"#
+            ]
         );
-        assert_eq!(calls[3][3], r#"{"pids":[980]}"#);
+        assert_eq!(calls[3][5], r#"{"pids":[980]}"#);
 
         // The next round asks again about the session in a pane (it may have
         // moved), and no longer about the one outside every pane.
@@ -485,8 +527,11 @@ mod tests {
             "\x1b[0m\x1b[1;1H\x1b[1mClaude Code\x1b[m\x1b[0m\x1b[2;1H> \x1b[0m\x1b[2;11H"
         );
         let calls = args(&tuios.runner);
-        assert_eq!(calls[0][..3], ["tuios", "call", "capture-pane"]);
-        let params: Value = serde_json::from_str(&calls[0][3]).unwrap();
+        assert_eq!(
+            calls[0][..5],
+            ["tuios", "--server", "", "call", "capture-pane"]
+        );
+        let params: Value = serde_json::from_str(&calls[0][5]).unwrap();
         assert_eq!(
             params,
             json!({ "session": "work", "window": "c434b5b6", "styled": true })
@@ -505,17 +550,64 @@ mod tests {
     #[test]
     fn focus_shows_the_pane_then_its_session() {
         let tuios = Tuios::with_runner(FakeRunner::new());
+        // The steps name the default server, so a client in a pane of
+        // another server (whose TUIOS_SERVER names it) still reaches the
+        // pane the daemon found.
         assert_eq!(
             tuios.focus_steps("work:0a1b2c3d").unwrap(),
             [
-                vec!["tuios", "focus-window", "-s", "work", "0a1b2c3d"],
-                vec!["tuios", "switch-session", "work"],
+                vec![
+                    "tuios",
+                    "--server",
+                    "",
+                    "focus-window",
+                    "-s",
+                    "work",
+                    "0a1b2c3d"
+                ],
+                vec!["tuios", "--server", "", "switch-session", "work"],
             ]
         );
         assert!(tuios.runner.calls().is_empty(), "the client runs the steps");
         assert_eq!(
             tuios.attach_command("work:0a1b2c3d"),
             Some(vec!["tuios".into(), "attach".into(), "work".into()])
+        );
+    }
+
+    #[test]
+    fn every_command_names_a_named_server() {
+        let runner = FakeRunner::new().with_reply(Ok(reply(r#"{"content":"hi"}"#)));
+        let tuios = Tuios::with_runner(runner).on_server("lab");
+        tuios.capture("work:0a1b2c3d").unwrap();
+        assert_eq!(
+            args(&tuios.runner)[0][..4],
+            ["tuios", "--server", "lab", "call"]
+        );
+        assert_eq!(
+            tuios.focus_steps("work:0a1b2c3d").unwrap(),
+            [
+                vec![
+                    "tuios",
+                    "--server",
+                    "lab",
+                    "focus-window",
+                    "-s",
+                    "work",
+                    "0a1b2c3d"
+                ],
+                vec!["tuios", "--server", "lab", "switch-session", "work"],
+            ]
+        );
+        assert_eq!(
+            tuios.attach_command("work:0a1b2c3d"),
+            Some(vec![
+                "tuios".into(),
+                "--server".into(),
+                "lab".into(),
+                "attach".into(),
+                "work".into()
+            ])
         );
     }
 }

@@ -388,6 +388,12 @@ attached), volee says the agent is in front in its session and how to see
 it: `tuios attach <session>`. Nothing is typed into the pane, and no pane is
 opened, closed or moved.
 
+volee uses the default tuios server, or the one `TUIOS_SERVER` names when
+you run `volee daemon run` yourself. The commands that bring a pane forward
+name that server, so they reach the pane even when volee runs in a pane of
+another tuios server; the command volee shows then names it too, such as
+`tuios --server lab attach work`.
+
 tuios's own Claude Code hooks (`tuios integration install claude-code`)
 tell volee which session runs in which pane; without them, volee follows
 the session's process to its pane. Nothing is required: without tuios,

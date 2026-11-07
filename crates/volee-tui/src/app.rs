@@ -1163,7 +1163,7 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
                 // shows (none is attached, or another one would have to
                 // switch): say where it is and how to see it.
                 Err(failure) if failure.done > 0 && !focus.attach.is_empty() => {
-                    let attach = printable(&focus.attach.join(" "));
+                    let attach = printable(&text::command_line(&focus.attach));
                     model.notify(
                         format!(
                             "{name} is in front in {multiplexer} session {session}: run `{attach}` \

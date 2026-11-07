@@ -105,12 +105,14 @@ pub trait Multiplexer: fmt::Debug + Send + Sync {
 
     /// The commands that bring the pane at `target` forward, in order: each
     /// is a program and its arguments. The client runs them in its own
-    /// environment, so that the multiplexer acts on the person's own client.
+    /// environment, so that the multiplexer acts on the person's own client;
+    /// they name the multiplexer server the adapter reads, so they reach the
+    /// pane even when that environment names another server.
     fn focus_steps(&self, target: &str) -> Result<Vec<Vec<String>>, MuxError>;
 
-    /// The command a person runs to see the session that holds the pane at
-    /// `target`, when no client of the multiplexer shows it; none when the
-    /// multiplexer has no such command.
+    /// The command a person runs in a new terminal to see the session that
+    /// holds the pane at `target`, when no client of the multiplexer shows
+    /// it; none when the multiplexer has no such command.
     fn attach_command(&self, _target: &str) -> Option<Vec<String>> {
         None
     }
