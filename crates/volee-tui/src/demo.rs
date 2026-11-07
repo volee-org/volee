@@ -4,9 +4,12 @@
 //! "Invoicing" with a coordinator and three workers (one waits for a
 //! permission, one asked a question, one opened pull request #42), an
 //! analysis mission with two read-only workers (one runs two subagents), and
-//! two sessions volee did not launch. States change every couple of seconds
-//! and the whole story loops. Everything derives from the start time, so a
-//! fixed clock gives the same screen on every run.
+//! two sessions volee did not launch, one of them a Codex CLI agent. Agents
+//! talk across missions and harnesses, questions wait for answers, and
+//! deliveries move (a pull request merges, another opens). States change
+//! every couple of seconds, messages fly every few seconds, and the whole
+//! story loops. Everything derives from the start time, so a fixed clock
+//! gives the same screen on every run.
 
 mod requests;
 mod scenario;
@@ -35,10 +38,17 @@ use crate::source::{
 /// three workers: one waits for a permission to run `bun run db:migrate`, one
 /// asked a question, one opened pull request #42 and its checks pass. An
 /// analysis mission has two read-only workers, one of them with two
-/// subagents, and two sessions volee did not launch run on their own (one in
-/// the background, one in a terminal). The agents send each other a
-/// contract, a question and a report, and states change every couple of
-/// seconds in a loop.
+/// subagents, and two sessions volee did not launch run on their own: one in
+/// the background, and one in a terminal that runs in Codex CLI and whose
+/// merged work is safe to tidy.
+///
+/// The agents send each other contracts, questions, answers, notes and
+/// reports, inside missions and across them: the Codex agent asks a worker of
+/// the latency audit, a session started by hand asks a worker of Invoicing,
+/// and the two missions' workers and coordinators talk. volee's supervisor
+/// reports to the coordinators. States change every couple of seconds and
+/// messages fly every few seconds, in a loop; in the first loop, pull request
+/// #42 merges and a pull request opens on the website.
 ///
 /// Everything derives from the start time: with a fixed clock, every run
 /// shows the same screen.

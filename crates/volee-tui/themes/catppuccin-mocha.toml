@@ -62,7 +62,9 @@ letter = "peach"
 "role.subagent" = "flamingo"
 "role.independent" = "teal"
 edge = "surface2"
-"edge.pulse" = "yellow"
+"edge.pulse" = { fg = "pink", modifiers = ["bold"] }
+"edge.message" = "overlay2"
+"edge.question" = { fg = "yellow", modifiers = ["bold"] }
 "diff.added" = "green"
 "diff.removed" = "red"
 "badge.pr" = "mauve"

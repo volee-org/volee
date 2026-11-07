@@ -349,9 +349,10 @@ mod tests {
                 registry.thread(thread).unwrap().title.as_str()
             })
             .collect();
-        // The inbox moved a minute ago, a report came in Invoicing six
-        // minutes ago, volee's alert seven, the audit's contract before.
-        assert_eq!(titles, ["Inbox", "Invoicing", "volee", "Latency audit"]);
+        // volee's supervisor wrote in Invoicing 59 seconds ago, the
+        // question reached the inbox a minute ago, volee's alert seven
+        // minutes ago, the audit's contract before.
+        assert_eq!(titles, ["Invoicing", "Inbox", "volee", "Latency audit"]);
         let times: Vec<Timestamp> = rows[1..]
             .iter()
             .map(|row| last_activity(&registry, thread_of(&registry, *row).unwrap()))
@@ -376,6 +377,17 @@ mod tests {
         assert_eq!(unread(&registry, Some(thread)), [question]);
     }
 
+    /// The row of the thread with a title.
+    fn titled(registry: &Registry, rows: &[Row], title: &str) -> Row {
+        *rows
+            .iter()
+            .find(|row| {
+                matches!(row, Row::Thread(thread)
+                    if registry.thread(*thread).is_some_and(|t| t.title == title))
+            })
+            .unwrap_or_else(|| panic!("no thread {title}"))
+    }
+
     #[test]
     fn replies_go_to_the_asker_or_the_last_agent_and_not_to_volee() {
         let registry = registry();
@@ -385,14 +397,14 @@ mod tests {
         assert_eq!(answer.to, tools);
         assert!(answer.question.is_some());
         // The inbox thread: the same agent, still answering its question.
-        let inbox = reply(&registry, rows[1]).unwrap();
+        let inbox = reply(&registry, titled(&registry, &rows, "Inbox")).unwrap();
         assert_eq!(inbox, answer);
-        // A mission thread: the last agent that wrote there.
-        let mission = reply(&registry, rows[2]).unwrap();
+        // A mission thread: the last agent that wrote there, not volee.
+        let mission = reply(&registry, titled(&registry, &rows, "Invoicing")).unwrap();
         assert_eq!(mission.question, None);
         assert_eq!(registry.agent(mission.to).unwrap().name, "invoice-page");
         // volee's alerts take no reply.
-        assert_eq!(reply(&registry, rows[3]), None);
+        assert_eq!(reply(&registry, titled(&registry, &rows, "volee")), None);
     }
 
     mod keys {

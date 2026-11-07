@@ -10,8 +10,8 @@ use crate::connect::{connect_or_start, paths};
 use crate::tools;
 
 /// Starts the daemon when it does not run, then shows its agents until the
-/// person quits. The theme and the key overrides come from the
-/// configuration.
+/// person quits. The theme, the key overrides and reduced motion come from
+/// the configuration.
 pub(crate) async fn run() -> Result<()> {
     let options = options(None)?;
     let client = connect_or_start().await?;
@@ -22,7 +22,7 @@ pub(crate) async fn run() -> Result<()> {
     Ok(())
 }
 
-/// The interface's colors, keys, repositories and tools from the
+/// The interface's colors, keys, motion, repositories and tools from the
 /// configuration file and the machine; `theme` replaces the configured
 /// theme.
 pub(crate) fn options(theme: Option<&str>) -> Result<Options> {
@@ -59,5 +59,6 @@ pub(crate) fn options(theme: Option<&str>) -> Result<Options> {
     options.tools =
         tools::resolve(&config.tui.tools, &machine).with_context(|| file.display().to_string())?;
     options.repos = config.repos.keys().cloned().collect();
+    options.reduced_motion = config.tui.reduced_motion;
     Ok(options)
 }

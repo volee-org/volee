@@ -10,7 +10,7 @@ expression: draw(&model)
 "│ v │  ├─ ! invoice-tools    1 min ││ mission  Invoicing (change)              │"
 "│ p │  └─ ✓ invoice-page     6 min ││ verdict  needs you                       │"
 "│ l └─ · latency-audit      12 min ││ repo     billing › feat/invoices from m… │"
-"│ g    ├─ ▸ trace-gateway   11 min ││ worktree …orktrees/billing/feat-invoices │"
+"│ g    ├─ ▸ trace-gateway   11 min ││ worktree …claude/worktrees/feat-invoices │"
 "│ e    │  ├─ ▸ explore-hand… 6 min ││ runs in  background · sonnet             │"
 "│ x    │  └─ ▸ explore-traces 39 s ││ delivery 2 commits · not pushed · uncom… │"
 "│ r    └─ ▸ trace-search    11 min ││ last     Write migrations/0042_invoices… │"

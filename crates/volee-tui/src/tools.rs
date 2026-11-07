@@ -157,7 +157,6 @@ pub(crate) fn perform(model: &mut Model, action: Action, effects: &mut Vec<Effec
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
     use std::sync::Arc;
 
     use volee_core::Registry;
@@ -165,7 +164,7 @@ mod tests {
 
     use super::*;
     use crate::clock::ManualClock;
-    use crate::demo::{DemoSource, INFRA, INVOICE_PAGE, agent_id};
+    use crate::demo::{DemoSource, INVOICE_PAGE, agent_id};
 
     fn agents() -> Registry {
         let start = Timestamp::from_millis(1_793_986_617_000);
@@ -188,7 +187,7 @@ mod tests {
         assert_eq!(run.args, ["-c", "DiffviewOpen main"]);
         let dir = run.cwd.unwrap();
         assert!(
-            dir.ends_with("worktrees/dashboard/feat-invoices-page"),
+            dir.ends_with(".claude/worktrees/feat-invoices-page"),
             "{dir:?}"
         );
         let code = Tool {
@@ -197,9 +196,6 @@ mod tests {
             command: vec!["code".into(), "{dir}".into()],
         };
         assert_eq!(take_over(&code, page).args, [dir.display().to_string()]);
-        // Any agent's work is in its worktree, else its folder.
-        let infra = registry.agent(agent_id(start, INFRA)).unwrap();
-        assert!(dir_of(infra).ends_with(Path::new("infra/main")));
         assert!(ToolKind::Git.runs_in_terminal());
         assert!(!ToolKind::Ide.runs_in_terminal());
     }

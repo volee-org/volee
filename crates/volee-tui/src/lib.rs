@@ -2,8 +2,10 @@
 //!
 //! One screen shows every agent on the machine: a top bar with the views and
 //! the counters, the list of agents sorted by urgency, the current view (the
-//! hierarchy of who launched whom, as a tree of cards), the selected agent's
-//! facts and its terminal screen, and the keys that apply.
+//! hierarchy of who launched whom, the network of who talks to whom, the
+//! repositories with their worktrees and delivery evidence, or the timeline
+//! of what happened when), the selected agent's facts and its terminal
+//! screen, and the keys that apply.
 //!
 //! The interface follows the Elm architecture (ADR 0009): a model, messages,
 //! a pure update that returns effects, and a pure view. It keeps its own
@@ -27,12 +29,14 @@ mod clock;
 mod daemon;
 mod demo;
 mod editor;
+mod history;
 mod inbox;
 pub mod keymap;
 mod launch;
 mod layout;
 mod letters;
 mod preview;
+mod pulses;
 mod run;
 pub mod source;
 mod text;
@@ -60,7 +64,7 @@ pub use source::{
 pub use theme::{ColorDepth, Theme, ThemeError};
 pub use tools::{Tool, ToolKind};
 
-use crate::app::{Model, Msg};
+use crate::app::{Model, Motion, Msg};
 use crate::run::{TerminalScreen, event_loop};
 
 /// How the interface looks and behaves.
@@ -80,6 +84,9 @@ pub struct Options {
     pub tools: Vec<Tool>,
     /// Repositories agents and missions can be launched in, by name.
     pub repos: Vec<String>,
+    /// No travelling animations: message pulses on the network become
+    /// short highlights and spinners stop.
+    pub reduced_motion: bool,
 }
 
 impl Default for Options {
@@ -91,6 +98,7 @@ impl Default for Options {
             banner: None,
             tools: Vec::new(),
             repos: Vec::new(),
+            reduced_motion: false,
         }
     }
 }
@@ -125,6 +133,9 @@ pub async fn run(source: impl Source, options: Options) -> Result<(), TuiError> 
     );
     model.settings.tools = options.tools;
     model.settings.repos = options.repos;
+    if options.reduced_motion {
+        model.motion = Motion::Reduced;
+    }
     let result = event_loop(
         &mut screen,
         Arc::new(source),

@@ -202,10 +202,12 @@ volee demo --theme terminal       # with another theme than the configured one
 
 `volee` with no command starts the daemon when it does not run, then shows
 the agents it knows until you quit. `volee demo` needs no daemon and touches
-nothing: it shows a fictional lead, two missions and their workers, whose
-states change every few seconds. Both take their theme and keys from the
-`[tui]` table of the configuration. The [interface guide](interface.md)
-describes the screen, what needs the daemon, and every key.
+nothing: it shows a fictional lead, two missions and their workers, and two
+sessions volee did not launch, whose states change and who write to each
+other every few seconds. Both take their theme, keys and `reduced_motion`
+setting from the `[tui]` table of the configuration. The
+[interface guide](interface.md) describes the screen, what needs the daemon,
+and every key.
 
 ## Isolated runs
 

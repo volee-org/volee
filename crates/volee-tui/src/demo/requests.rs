@@ -130,7 +130,7 @@ pub(crate) fn spawn(
     let now = ids.at;
     let agent = AgentId::from_ulid(ids.ulid());
     let slug = branch.replace('/', "-");
-    let worktree = PathBuf::from(format!("{HOME}/code/{repo}/.volee/worktrees/{slug}"));
+    let worktree = PathBuf::from(format!("{HOME}/code/{repo}/.claude/worktrees/{slug}"));
     let mut events = vec![Event::new(
         now,
         EventKind::AgentRegistered {

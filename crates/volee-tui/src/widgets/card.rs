@@ -23,7 +23,7 @@ use volee_core::{Agent, AgentState};
 use super::canvas::Canvas;
 use super::{state_glyph, truncated};
 use crate::activity::{self, BUCKETS};
-use crate::app::Model;
+use crate::app::{Model, Motion};
 use crate::text;
 use crate::theme::StyleRole;
 use crate::views::hierarchy::{SceneNode, Zoom};
@@ -191,9 +191,24 @@ fn frame(
     }
 }
 
-/// The spinner of a working agent, as an extra to its state.
+/// Draws an agent alone as a compact card (its name and its state) with
+/// its top left at (`x`, `y`): the network view's most detailed level.
+pub(crate) fn draw_compact(
+    canvas: &mut Canvas<'_>,
+    x: i32,
+    y: i32,
+    agent: &Agent,
+    context: &CardContext<'_>,
+) {
+    let look = Look::of(agent, context);
+    compact(canvas, x, y, COMPACT_WIDTH, agent, &look, context);
+}
+
+/// The spinner of a working agent, as an extra to its state; none when the
+/// person asked for reduced motion.
 fn spinner(agent: &Agent, context: &CardContext<'_>) -> Option<Span<'static>> {
-    matches!(agent.state, AgentState::Working | AgentState::Launching).then(|| {
+    let moving = matches!(agent.state, AgentState::Working | AgentState::Launching);
+    (moving && context.model.motion == Motion::Full).then(|| {
         Span::styled(
             context.spinner.to_string(),
             context.model.theme.state(&agent.state),
