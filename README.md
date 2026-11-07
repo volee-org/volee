@@ -48,7 +48,8 @@ code, not by trust.
   SQLite. The interface, the command line and the agents all talk to it.
 - Agents message each other through an MCP server, which any MCP-capable
   harness can use.
-- No multiplexer, editor or git client is required.
+- No multiplexer, editor or git client is required: the ones you use (Neovim,
+  lazygit, VS Code...) open an agent's worktree with a key.
 
 Read the [architecture overview](https://volee-org.github.io/volee/architecture/overview.html)
 and the [design decisions](https://volee-org.github.io/volee/adr/README.html).
