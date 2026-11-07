@@ -20,7 +20,7 @@ use volee_core::role::Role;
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
 use volee_core::{Event, EventKind, MissionId, Registry, ThreadId};
-use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
+use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_git::GitCli;
 use volee_harness::Harness;
 use volee_proto::client::{Client, ClientError};
@@ -105,8 +105,11 @@ fn start() -> Running {
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
         // Discovery is not under test: list rarely.
         discovery_interval: std::time::Duration::from_secs(3_600),
-        git: Some(Arc::new(git)),
-        settings,
+        evidence: EvidenceSources {
+            git: Some(Arc::new(git)),
+            settings,
+            ..EvidenceSources::default()
+        },
         volee_bin: Some(PathBuf::from("/opt/volee/bin/volee")),
     };
     tokio::spawn(Daemon::serve(listener, config));

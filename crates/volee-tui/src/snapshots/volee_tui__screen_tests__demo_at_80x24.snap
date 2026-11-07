@@ -1,0 +1,28 @@
+---
+source: crates/volee-tui/src/screen_tests.rs
+expression: draw(&model)
+---
+" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline                !2 ▸6 12 "
+"╭ Agents · tree ───────────────────╮╭ Detail ──────────────────────────────────╮"
+"│▌t ▸ tower                 24 min ││ tower · lead                             │"
+"│ n ├─ · invoicing          14 min ││ ▸ working · for 24 min                   │"
+"│ s │  ├─ ! invoice-schema   2 min ││ repo     platform › main                 │"
+"│ v │  ├─ ! invoice-tools    1 min ││ worktree /home/dev/code/platform         │"
+"│ p │  └─ ✓ invoice-page     6 min ││ runs in  background · opus               │"
+"│ l └─ · latency-audit      12 min ││ delivery nothing yet                     │"
+"│ g    ├─ ▸ trace-gateway   11 min ││ last     Read missions/invoicing/plan.m… │"
+"│ e    │  ├─ ▸ explore-hand… 6 min ││ session  5eed0a00 · claude-code          │"
+"│ x    │  └─ ▸ explore-traces 39 s ││                                          │"
+"│ r    └─ ▸ trace-search    11 min ││                                          │"
+"│ i · infra                 25 min │╰──────────────────────────────────────────╯"
+"│ b ▸ broken-links          18 min │╭ Preview · tower ─────────────────────────╮"
+"│                                  ││                                          │"
+"│                                  ││ ✻ Read missions/invoicing/plan.md… (esc t│"
+"│                                  ││                                          │"
+"│                                  ││ ╭────────────────────────────────────────│"
+"│                                  ││ │ >                                      │"
+"│                                  ││ ╰────────────────────────────────────────│"
+"│                                  ││   ? for shortcuts                        │"
+"│                                  ││                                          │"
+"╰──────────────────────────────────╯╰──────────────────────────────────────────╯"
+" h/j/k/l move   enter subtree   ' jump   - previous   / filter           ? help "

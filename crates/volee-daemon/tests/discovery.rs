@@ -16,7 +16,7 @@ use volee_core::harness::SessionKey;
 use volee_core::reconcile::ListedSession;
 use volee_core::state::AgentState;
 use volee_core::{Event, Registry};
-use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
+use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_harness::Harness;
 use volee_proto::client::Client;
 use volee_proto::methods::{EventsSince, SinceParams};
@@ -51,8 +51,7 @@ fn start() -> Running {
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
         discovery_interval: Duration::from_millis(10),
-        git: None,
-        settings: volee_config::Config::default(),
+        evidence: EvidenceSources::default(),
         volee_bin: None,
     };
     tokio::spawn(Daemon::serve(listener, config));

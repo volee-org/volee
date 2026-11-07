@@ -6,6 +6,8 @@
 
 - [Installation](guide/installation.md)
 - [Concepts](guide/concepts.md)
+- [The interface](guide/interface.md)
+- [Themes](guide/themes.md)
 - [Command line](guide/cli.md)
 - [Configuration](guide/configuration.md)
 

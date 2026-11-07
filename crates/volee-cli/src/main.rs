@@ -70,6 +70,13 @@ enum Command {
         #[arg(long)]
         agent: AgentId,
     },
+    /// Open the interface on a simulated team of agents, to try volee.
+    Demo {
+        /// The theme, instead of the one in the configuration: a built-in
+        /// one or a file in ~/.config/volee/themes.
+        #[arg(long)]
+        theme: Option<String>,
+    },
     /// Called by the hooks of agents volee launched. Not for people.
     #[command(hide = true)]
     Hook {
@@ -275,6 +282,7 @@ fn async_main(command: Command) -> ExitCode {
                 .await
             }
             Command::Mcp { agent } => cmd::mcp::run(agent).await,
+            Command::Demo { theme } => cmd::demo::run(theme.as_deref()).await,
             Command::Hook { .. } | Command::Config(_) => {
                 unreachable!("these commands run without the async runtime")
             }
@@ -324,11 +332,21 @@ fn report(result: anyhow::Result<()>) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::Cli;
-    use clap::CommandFactory;
+    use super::{Cli, Command};
+    use clap::{CommandFactory, Parser};
 
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn demo_takes_an_optional_theme() {
+        let cli = Cli::try_parse_from(["volee", "demo", "--theme", "terminal"]).unwrap();
+        assert!(
+            matches!(cli.command, Some(Command::Demo { theme: Some(ref t) }) if t == "terminal")
+        );
+        let cli = Cli::try_parse_from(["volee", "demo"]).unwrap();
+        assert!(matches!(cli.command, Some(Command::Demo { theme: None })));
     }
 }

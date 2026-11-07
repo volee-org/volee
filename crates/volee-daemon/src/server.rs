@@ -14,13 +14,14 @@ use tokio::task::JoinSet;
 use volee_git::Git;
 use volee_harness::Harness;
 use volee_proto::methods::{
-    EVENTS_APPENDED, EventBatch, HarnessStatus, Method, SeqEvent, Subscribe,
+    EVENTS_APPENDED, EventBatch, ForgeStatus, HarnessStatus, Method, SeqEvent, Subscribe,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc::{self, Id, Notification, Outcome, Request, Response, RpcError, Version2};
 
 use crate::clock::Clock;
 use crate::error::DaemonError;
+use crate::evidence::EvidenceSources;
 use crate::handlers::{dispatch, parse};
 use crate::log::EventLog;
 use crate::state::State;
@@ -43,10 +44,9 @@ pub struct Config {
     pub harness: Option<Arc<dyn Harness>>,
     /// How often the harness is listed.
     pub discovery_interval: Duration,
-    /// git, for worktrees and delivery evidence.
-    pub git: Option<Arc<dyn Git>>,
-    /// The user's configuration file, as loaded at start.
-    pub settings: volee_config::Config,
+    /// Where workspaces and delivery evidence are read from:
+    /// [`EvidenceSources::default()`] reads nothing.
+    pub evidence: EvidenceSources,
     /// The volee program, which the hooks and MCP servers of launched agents
     /// run. Without it, the daemon cannot launch agents.
     pub volee_bin: Option<PathBuf>,
@@ -57,6 +57,7 @@ impl std::fmt::Debug for Config {
         f.debug_struct("Config")
             .field("paths", &self.paths)
             .field("clock", &self.clock)
+            .field("evidence", &self.evidence)
             .finish_non_exhaustive()
     }
 }
@@ -70,12 +71,30 @@ pub(crate) struct Shared {
     pub(crate) settings: volee_config::Config,
     pub(crate) volee_bin: Option<PathBuf>,
     pub(crate) paths: Paths,
+    /// What the evidence refresher learned about the forge, once it checked.
+    forge: std::sync::Mutex<Option<ForgeStatus>>,
     shutdown: watch::Sender<bool>,
 }
 
 impl Shared {
     pub(crate) fn request_shutdown(&self) {
         let _ = self.shutdown.send(true);
+    }
+
+    pub(crate) fn forge_status(&self) -> Option<ForgeStatus> {
+        // A plain value that is never left half-written: a poisoned lock
+        // still holds a valid one.
+        self.forge
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub(crate) fn set_forge_status(&self, status: ForgeStatus) {
+        *self
+            .forge
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(status);
     }
 }
 
@@ -109,10 +128,11 @@ impl Daemon {
             state: Mutex::new(state),
             harnesses: config.harnesses,
             harness: config.harness.clone(),
-            git: config.git,
-            settings: config.settings,
+            git: config.evidence.git.clone(),
+            settings: config.evidence.settings.clone(),
             volee_bin: config.volee_bin,
             paths: config.paths,
+            forge: std::sync::Mutex::new(None),
             shutdown,
         });
         if let Some(dir) = config.spool {
@@ -126,6 +146,7 @@ impl Daemon {
                 stop.clone(),
             ));
         }
+        let refresher = crate::evidence::spawn(&shared, config.evidence);
         tracing::info!(socket = ?listener.local_addr().ok(), "volee daemon ready");
         let mut connections = JoinSet::new();
         loop {
@@ -142,6 +163,9 @@ impl Daemon {
         }
         tracing::info!("volee daemon stopping");
         connections.abort_all();
+        if let Some(refresher) = refresher {
+            refresher.abort();
+        }
         Ok(())
     }
 }

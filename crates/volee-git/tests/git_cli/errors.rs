@@ -58,7 +58,9 @@ fn everything_a_timed_out_command_started_is_stopped() {
             pid_file.display()
         ),
     );
-    let cli = sandbox.cli_with(GitCli::with_program(&program).timeout(Duration::from_millis(500)));
+    // Long enough for the script to start its child and write its id even
+    // on a loaded machine; the test is about what happens after.
+    let cli = sandbox.cli_with(GitCli::with_program(&program).timeout(Duration::from_secs(3)));
 
     let error = cli.repo_info(&sandbox.dir("anywhere")).unwrap_err();
     assert!(matches!(&error, GitError::TimedOut { .. }), "{error:?}");
@@ -82,13 +84,15 @@ fn a_command_that_ignores_sigterm_is_killed() {
             pid_file.display()
         ),
     );
-    let cli = sandbox.cli_with(GitCli::with_program(&program).timeout(Duration::from_millis(300)));
+    // Long enough for the script to ignore SIGTERM and write its child's id
+    // even on a loaded machine; the test is about what happens after.
+    let cli = sandbox.cli_with(GitCli::with_program(&program).timeout(Duration::from_secs(3)));
 
     let started = Instant::now();
     let error = cli.repo_info(&sandbox.dir("anywhere")).unwrap_err();
     assert!(matches!(&error, GitError::TimedOut { .. }), "{error:?}");
     // The timeout, the grace period for SIGTERM, and some slack.
-    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(started.elapsed() < Duration::from_secs(20));
     let pid = std::fs::read_to_string(&pid_file).unwrap();
     assert!(is_gone_soon(pid.trim()));
 }

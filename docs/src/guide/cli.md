@@ -114,6 +114,18 @@ and says which; `--force` closes it anyway. Aborting tells every agent of the
 mission to stop. Neither deletes anything: branches, worktrees and pull
 requests stay where they are.
 
+## The interface
+
+```sh
+volee demo                        # the interface, on a simulated team of agents
+volee demo --theme terminal       # with another theme than the configured one
+```
+
+`volee demo` needs no daemon and touches nothing: it shows a fictional lead,
+two missions and their workers, whose states change every few seconds. Its
+theme and keys come from the `[tui]` table of the configuration. The
+[interface guide](interface.md) describes the screen and every key.
+
 ## Isolated runs
 
 Every path can be moved with an environment variable, which is handy for
