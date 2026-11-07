@@ -487,8 +487,18 @@ fn write_agent_files(
         DaemonError::Unavailable("this daemon does not know where the volee program is".into())
     })?;
     let rewake = Duration::from_secs(shared.settings.agents.wake_timeout);
-    let settings = harness.agent_settings(volee_bin, agent, rewake)?;
-    let mcp = harness.mcp_config(volee_bin, agent)?;
+    let env = daemon_env(&shared.paths);
+    let mut settings = harness.agent_settings(volee_bin, agent, rewake)?;
+    merge_env(&mut settings, &env);
+    let mut mcp = harness.mcp_config(volee_bin, agent)?;
+    if let Some(servers) = mcp
+        .get_mut("mcpServers")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for server in servers.values_mut() {
+            merge_env(server, &env);
+        }
+    }
     let dir = shared.paths.agent_dir(agent);
     create_private_dir(&dir)?;
     let settings_file = dir.join("settings.json");
@@ -496,6 +506,41 @@ fn write_agent_files(
     write_json(&settings_file, &settings)?;
     write_json(&mcp_file, &mcp)?;
     Ok((settings_file, mcp_file))
+}
+
+/// The daemon's own paths, which an agent's hooks and MCP server need to reach
+/// this daemon. A background session runs under Claude Code's supervisor, not
+/// as a child of the daemon, so it never inherits the daemon's environment:
+/// without these, a daemon with custom paths would never hear from its agents.
+fn daemon_env(paths: &volee_proto::paths::Paths) -> serde_json::Map<String, serde_json::Value> {
+    [
+        ("VOLEE_SOCKET", &paths.socket),
+        ("VOLEE_STATE_DIR", &paths.state_dir),
+        ("VOLEE_CONFIG_DIR", &paths.config_dir),
+        ("VOLEE_DATA_DIR", &paths.data_dir),
+    ]
+    .into_iter()
+    .filter_map(|(name, path)| {
+        path.to_str()
+            .map(|path| (name.to_owned(), serde_json::Value::String(path.to_owned())))
+    })
+    .collect()
+}
+
+/// Adds `env` to the `env` object of a settings file or of an MCP server,
+/// keeping what is already there.
+fn merge_env(target: &mut serde_json::Value, env: &serde_json::Map<String, serde_json::Value>) {
+    let Some(object) = target.as_object_mut() else {
+        return;
+    };
+    let entry = object
+        .entry("env")
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    if let Some(existing) = entry.as_object_mut() {
+        for (name, value) in env {
+            existing.insert(name.clone(), value.clone());
+        }
+    }
 }
 
 fn create_private_dir(dir: &Path) -> Result<(), DaemonError> {

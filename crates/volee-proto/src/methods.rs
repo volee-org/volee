@@ -77,6 +77,20 @@ pub struct HarnessStatus {
     pub detail: Option<String>,
 }
 
+/// What the daemon knows about the forge client it asks for pull requests,
+/// such as the GitHub CLI.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForgeStatus {
+    /// The program, such as `gh`.
+    pub program: String,
+    /// Whether volee can use it: installed and signed in.
+    pub available: bool,
+    /// Its version, when known.
+    pub version: Option<String>,
+    /// Why it is unavailable, or a note.
+    pub detail: Option<String>,
+}
+
 /// The result of [`Status`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusInfo {
@@ -94,6 +108,10 @@ pub struct StatusInfo {
     pub agents: usize,
     /// Harnesses found on this machine.
     pub harnesses: Vec<HarnessStatus>,
+    /// The forge client for pull requests; `None` when the daemon has none,
+    /// or has not checked it yet.
+    #[serde(default)]
+    pub forge: Option<ForgeStatus>,
 }
 
 method!(

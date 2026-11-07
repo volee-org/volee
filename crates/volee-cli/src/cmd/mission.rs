@@ -48,10 +48,21 @@ pub(crate) async fn new(request: NewMission) -> Result<()> {
         .await?;
     let short = created.mission.short();
     println!(
-        "Created mission {short} \"{}\" ({}). Follow it with `volee mission show {short}`.",
+        "Created mission {short} \"{}\" ({}).",
         request.title.trim(),
         request.kind.label()
     );
+    match created.coordinator {
+        Some(coordinator) => println!(
+            "Its coordinator ({}) is planning; it launches the workers. Follow it with `volee \
+             mission show {short}`.",
+            coordinator.short()
+        ),
+        None => println!(
+            "No coordinator could start: `volee mission show {short}` says why. The mission stays \
+             in planning."
+        ),
+    }
     Ok(())
 }
 

@@ -11,11 +11,11 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::sync::Arc;
 
-use volee_core::harness::SessionKey;
+use volee_core::harness::{SessionKey, SessionOrigin};
 use volee_core::reconcile::{ListedSession, Listing};
 use volee_core::role::LaunchedBy;
 use volee_core::workspace::Location;
-use volee_core::{Agent, AgentId, Registry};
+use volee_core::{Agent, AgentId, Event, EventKind, Registry};
 use volee_git::DiffFormat;
 use volee_harness::{Harness, HarnessError};
 use volee_proto::methods::{AgentParams, AttachCommand, DiffParams, DiffText, Empty, PreviewText};
@@ -23,6 +23,7 @@ use volee_proto::methods::{AgentParams, AttachCommand, DiffParams, DiffText, Emp
 use crate::error::DaemonError;
 use crate::launch::{blocking, git, harness};
 use crate::server::Shared;
+use crate::state::State;
 
 /// The most diff text one request returns, in bytes. Past it, the text is
 /// cut at a line break and flagged as truncated.
@@ -133,6 +134,35 @@ impl Sessions {
             (Some(_), _) => Err(NoSession::NotListedYet),
         }
     }
+}
+
+/// Brings the daemon's view of the harness sessions in line with a new
+/// listing. A session volee launched may be listed before its first hook
+/// links it: it is linked to its agent now, by its handle, rather than left
+/// to become an independent agent. Then the listing is recorded.
+pub(crate) fn apply_listing(state: &mut State, listing: &Listing) {
+    let now = state.now();
+    let links: Vec<Event> = state
+        .sessions()
+        .unlinked_launches(state.registry(), listing)
+        .into_iter()
+        .map(|(agent, session)| {
+            Event::new(
+                now,
+                EventKind::SessionLinked {
+                    agent,
+                    session,
+                    origin: SessionOrigin::Started,
+                },
+            )
+        })
+        .collect();
+    if !links.is_empty()
+        && let Err(error) = state.commit(links)
+    {
+        tracing::error!(%error, "cannot link launched sessions");
+    }
+    state.sessions_mut().record(listing);
 }
 
 /// Whether `session` is the one the launch that printed `handle` started.
@@ -343,12 +373,11 @@ mod tests {
     use std::path::Path;
 
     use ulid::Ulid;
-    use volee_core::harness::{HarnessKind, SessionOrigin};
+    use volee_core::harness::HarnessKind;
     use volee_core::role::Role;
     use volee_core::state::AgentState;
     use volee_core::time::Timestamp;
     use volee_core::workspace::Workspace;
-    use volee_core::{Event, EventKind};
 
     use super::*;
 

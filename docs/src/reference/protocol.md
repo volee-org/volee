@@ -29,14 +29,26 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `messages.read` | `message`, `by` | none |
 | `hooks.ingest` | `agent`, `event`, `payload` | `stdout`: what the hook prints, if anything |
 | `hooks.wait` | `agent`, `timeout_ms` | `text`: messages that wake the agent, or `null` |
-| `missions.create` | `title`, `kind` (`change` or `analysis`), `goal`, `repos`, optional `requested_by` | `mission`, `thread` |
+| `agents.spawn` | `repo`, `branch`, `task`, `role`, optional `base`, `parent`, `mission`, `model`, `name` | `agent`, `worktree` |
+| `missions.create` | `title`, `kind` (`change` or `analysis`), `goal`, `repos`, optional `requested_by` | `mission`, `thread`, `coordinator` |
 | `missions.abort` | `mission`, optional `reason` | none |
 | `missions.close` | `mission`, optional `report`, `force`, `by` | none |
 
-More methods (`agents.spawn`, `agents.tidy`) arrive with the harness and git
-integration.
+One more method, `agents.tidy`, arrives with cleanup.
 
-### Agents
+### Launching
+
+`agents.spawn` creates the branch and its worktree with git, writes the
+agent's hook settings and MCP configuration (readable only by you), records
+the agent, then starts the session from the repository's main checkout with
+`--worktree` ([ADR 0013](../adr/0013-worktrees-live-in-their-repository.md)).
+A failed start marks the agent `failed` and keeps the worktree. It refuses
+coordinators (missions launch them) and, for a mission, repositories the
+mission does not list. `missions.create` launches the coordinator when Claude
+Code is available; when it cannot, it tells the human in the mission's thread
+and `coordinator` is null.
+
+### Acting on agents
 
 `agents.preview`, `agents.attach` and `agents.stop` act on the agent's
 current harness session, as the last listing showed it; an agent volee just

@@ -5,6 +5,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::state::AgentState;
+use crate::time::Timestamp;
 
 /// Lines and files changed against the merge base with the base branch.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,9 +116,30 @@ pub struct Delivery {
     /// merged, even if the branch moved or was deleted afterwards.
     #[serde(default)]
     pub unmerged_tip: Option<String>,
+    /// When the daemon started reading this evidence from git and the forge;
+    /// `None` when it was never checked (no git source configured).
+    #[serde(default)]
+    pub checked_at: Option<Timestamp>,
 }
 
 impl Delivery {
+    /// Whether this evidence was checked before `at`, typically before the
+    /// agent's current state began: it may not show what the agent did last.
+    /// Evidence that was never checked is not stale; it is all there is.
+    pub fn is_stale_at(&self, at: Timestamp) -> bool {
+        self.checked_at.is_some_and(|checked| checked < at)
+    }
+
+    /// The same evidence without the time it was checked, to tell whether a
+    /// new check found anything new.
+    #[must_use]
+    pub fn without_check_time(&self) -> Self {
+        Self {
+            checked_at: None,
+            ..self.clone()
+        }
+    }
+
     /// Whether the work has landed: merged, merged through a pull request, or
     /// reported.
     pub fn is_delivered(&self) -> bool {
@@ -336,5 +358,17 @@ mod tests {
         };
         let json = serde_json::to_string(&recorded).unwrap();
         assert_eq!(serde_json::from_str::<Delivery>(&json).unwrap(), recorded);
+    }
+
+    #[test]
+    fn evidence_checked_before_a_moment_is_stale_then() {
+        let checked = Delivery {
+            checked_at: Some(Timestamp::from_millis(1_000)),
+            ..Delivery::default()
+        };
+        assert!(checked.is_stale_at(Timestamp::from_millis(1_001)));
+        assert!(!checked.is_stale_at(Timestamp::from_millis(1_000)));
+        assert!(!Delivery::default().is_stale_at(Timestamp::from_millis(1_001)));
+        assert_eq!(checked.without_check_time(), Delivery::default());
     }
 }

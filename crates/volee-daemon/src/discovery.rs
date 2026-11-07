@@ -12,9 +12,7 @@ use std::time::Duration;
 
 use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
-use volee_core::harness::SessionOrigin;
 use volee_core::reconcile::reconcile;
-use volee_core::{Event, EventKind};
 use volee_harness::Harness;
 
 use crate::server::Shared;
@@ -62,30 +60,7 @@ pub(crate) async fn run(
         };
         let mut state = shared.state.lock().await;
         let now = state.now();
-        // A session volee launched may be listed before its first hook links
-        // it: link it now, by its handle, rather than let it become an
-        // independent agent.
-        let links: Vec<Event> = state
-            .sessions()
-            .unlinked_launches(state.registry(), &listing)
-            .into_iter()
-            .map(|(agent, session)| {
-                Event::new(
-                    now,
-                    EventKind::SessionLinked {
-                        agent,
-                        session,
-                        origin: SessionOrigin::Started,
-                    },
-                )
-            })
-            .collect();
-        if !links.is_empty()
-            && let Err(error) = state.commit(links)
-        {
-            tracing::error!(%error, "cannot link launched sessions");
-        }
-        state.sessions_mut().record(&listing);
+        crate::control::apply_listing(&mut state, &listing);
         let events = reconcile(state.registry(), &listing, now, || state.new_agent_id());
         if events.is_empty() {
             continue;

@@ -72,6 +72,20 @@ task is done, blocked or failed. A `done` report is a `report` message;
 | `summary` | string | What was done, what is left, what to check. |
 | `refs` | list | Commits, pull requests or files that prove the work. |
 
+### `spawn_worker`
+
+For a mission's coordinator: launches a worker on a new branch, in its own
+worktree of one of the mission's repositories. volee tells the coordinator
+when the worker stops, with the evidence it checked.
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `repo` | string | A repository, as the mission lists it. |
+| `branch` | string | A new branch, such as `feat/invoices`. |
+| `task` | string | The whole task: the worker knows only what it says. |
+| `name` | string, optional | A short display name. |
+| `base` | string, optional | The branch to start from; the repository's default branch otherwise. |
+
 ### `close_mission`
 
 For a mission's coordinator: closes the mission once every worker delivered

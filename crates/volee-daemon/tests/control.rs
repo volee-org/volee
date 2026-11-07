@@ -19,7 +19,7 @@ use volee_core::reconcile::ListedSession;
 use volee_core::role::{LaunchedBy, Role};
 use volee_core::state::AgentState;
 use volee_core::{AgentId, Event, Registry};
-use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
+use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_git::GitCli;
 use volee_harness::Harness;
 use volee_proto::client::{Client, ClientError};
@@ -70,8 +70,11 @@ fn start_with(every: Duration, tools: bool) -> Running {
         spool: None,
         harness: tools.then(|| Arc::clone(&harness) as Arc<dyn Harness>),
         discovery_interval: every,
-        git: tools.then(|| Arc::new(git) as Arc<dyn volee_git::Git>),
-        settings,
+        evidence: EvidenceSources {
+            git: tools.then(|| Arc::new(git) as Arc<dyn volee_git::Git>),
+            settings,
+            ..EvidenceSources::default()
+        },
         volee_bin: Some(PathBuf::from("/opt/volee/bin/volee")),
     };
     tokio::spawn(Daemon::serve(listener, config));

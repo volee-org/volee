@@ -20,7 +20,7 @@ use volee_core::role::Role;
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
 use volee_core::{Event, EventKind, MissionId, Registry, ThreadId};
-use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
+use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_git::GitCli;
 use volee_harness::Harness;
 use volee_proto::client::{Client, ClientError};
@@ -105,8 +105,11 @@ fn start() -> Running {
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
         // Discovery is not under test: list rarely.
         discovery_interval: std::time::Duration::from_secs(3_600),
-        git: Some(Arc::new(git)),
-        settings,
+        evidence: EvidenceSources {
+            git: Some(Arc::new(git)),
+            settings,
+            ..EvidenceSources::default()
+        },
         volee_bin: Some(PathBuf::from("/opt/volee/bin/volee")),
     };
     tokio::spawn(Daemon::serve(listener, config));
@@ -204,6 +207,17 @@ async fn a_worker_gets_its_own_worktree_and_session() {
     }
     let settings = std::fs::read_to_string(&spec.settings_file).unwrap();
     assert!(settings.contains(&spawned.agent.to_string()));
+    // The session runs under Claude Code's supervisor: it learns where this
+    // daemon is from its settings and its MCP configuration.
+    let socket = daemon.paths.socket.display().to_string();
+    let settings: serde_json::Value = serde_json::from_str(&settings).unwrap();
+    assert_eq!(settings["env"]["VOLEE_SOCKET"], socket.as_str());
+    let mcp: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&spec.mcp_config_file).unwrap()).unwrap();
+    assert_eq!(
+        mcp["mcpServers"]["volee"]["env"]["VOLEE_SOCKET"],
+        socket.as_str()
+    );
 }
 
 #[tokio::test]

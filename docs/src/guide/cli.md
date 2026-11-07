@@ -72,6 +72,24 @@ started yourself. A session running in a terminal of its own (an interactive
 it. `volee stop` only stops the agents volee launched: stop the others where
 they were started.
 
+## Launching agents
+
+```sh
+volee spawn billing feat/invoices "Add invoices to the billing module."
+volee spawn . fix/flaky-test "Make the payment test stable." --base develop --model sonnet
+```
+
+`volee spawn <repository> <branch> <task>` creates the branch from the base
+(the repository's default branch unless `--base` says otherwise), checks it
+out in a new worktree at `.claude/worktrees/<branch>` inside the repository,
+and starts a Claude Code background session there with the task as its first
+prompt. The agent gets volee's hooks and MCP tools, so it appears at once in
+`volee ls` and can message other agents.
+
+Claude Code only starts background sessions in repositories you trust: run
+`claude` once in each repository and accept its trust prompt. volee says so
+when it is missing, and starts nothing.
+
 ## Messages
 
 ```sh
@@ -102,6 +120,11 @@ A repository is a name from the [configuration](configuration.md) or a
 directory. A mission is named by its title, its short id (`ms_x7k2pq`) or its
 id.
 
+Creating a mission starts its coordinator: a Claude Code session in the main
+checkout of the mission's first repository, with Claude Code's editing tools
+turned off. It plans the work and launches one worker per task with the MCP
+tool `spawn_worker`, each in its own worktree.
+
 volee checks each worker when it stops. A change worker has delivered when
 its commits are pushed with an open pull request, or merged; an analysis
 worker has delivered when it sent its report. The coordinator hears about
@@ -112,6 +135,18 @@ report, which it sends before calling `close_mission`.
 and says which; `--force` closes it anyway. Aborting tells every agent of the
 mission to stop. Neither deletes anything: branches, worktrees and pull
 requests stay where they are.
+
+## The interface
+
+```sh
+volee demo                        # the interface, on a simulated team of agents
+volee demo --theme terminal       # with another theme than the configured one
+```
+
+`volee demo` needs no daemon and touches nothing: it shows a fictional lead,
+two missions and their workers, whose states change every few seconds. Its
+theme and keys come from the `[tui]` table of the configuration. The
+[interface guide](interface.md) describes the screen and every key.
 
 ## Isolated runs
 
