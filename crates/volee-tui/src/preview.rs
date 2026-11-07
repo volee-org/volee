@@ -257,6 +257,21 @@ mod tests {
     }
 
     #[test]
+    fn a_captured_pane_is_drawn_where_its_rows_were() {
+        // A multiplexer capture as volee-mux redraws it (ADR 0015): each
+        // row placed with a cursor move, then the cursor after the last row
+        // with text, as far right as the widest row.
+        let wide = "x".repeat(300);
+        let output = format!(
+            "\x1b[0m\x1b[1;1H{wide}\x1b[0m\x1b[2;1H\x1b[1mClaude Code\x1b[m\
+             \x1b[0m\x1b[3;1H> \x1b[0m\x1b[4;1H   \x1b[0m\x1b[3;300H"
+        );
+        assert_eq!(screen_size(&output), (ROWS, 300));
+        let text = screen_text(&output);
+        assert_eq!(text, format!("{wide}\nClaude Code\n>"), "no row wraps");
+    }
+
+    #[test]
     fn a_larger_terminal_is_replayed_at_its_own_size() {
         // A counter right-aligned on a wide screen, below row 50, then the
         // cursor parked on the prompt.

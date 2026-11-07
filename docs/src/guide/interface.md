@@ -33,9 +33,9 @@ Everything on the screen comes from the daemon, and so do the actions:
 | What | What the daemon uses |
 | --- | --- |
 | The agents, their states and messages | Its own records, kept up to date as sessions come and go. |
-| The preview of an agent's screen | Claude Code, which replays the session's output (`claude logs`). |
+| The preview of an agent's screen | Claude Code, which replays the session's output (`claude logs`); tuios, for a session in one of its panes (`capture-pane`). |
 | An agent's changes (`d`) | git, in the agent's worktree or folder. |
-| Taking over an agent (`a`) | Claude Code, which attaches the session (`claude attach`). |
+| Taking over an agent (`a`) | Claude Code, which attaches the session (`claude attach`); tuios, which brings forward the pane of a session in one of its panes. |
 | Writing to an agent (`m`) | Its own records and the agent's hooks. |
 
 When the daemon cannot do something, because Claude Code or git is
@@ -372,6 +372,27 @@ the agent's session, after printing how to come back. Leave the session
 with `Ctrl+Z` and volee comes back, on the same agent. Agents running in
 another terminal cannot be attached from here; volee tells you where they
 are instead.
+
+### Agents in tuios panes
+
+A Claude Code session you started by hand in a
+[tuios](https://github.com/Gaurav-Gosain/tuios) pane is found in that pane
+when tuios is installed and its server runs: the daemon asks tuios each
+time it looks for sessions, and the Detail panel says where it runs
+(`tuios · work`: tuios, and the session that holds the pane). Its preview
+is the pane's screen, and `a` brings the pane forward instead of taking the
+agent over: tuios focuses it, shows its workspace and, when volee runs in a
+tuios pane itself, switches your tuios window to the pane's session. volee
+stays where it was. Nothing is typed into the pane, and no pane is opened,
+closed or moved.
+
+tuios's own Claude Code hooks (`tuios integration install claude-code`)
+tell volee which session runs in which pane; without them, volee follows
+the session's process to its pane. Nothing is required: without tuios,
+these sessions are listed as before, and `volee daemon status` says
+whether volee found tuios
+([ADR 0015](../adr/0015-tuios-location-adapter.md)). tmux and Zellij are
+not supported yet.
 
 ## Keys
 

@@ -78,6 +78,7 @@ fn start_with(every: Duration, tools: bool) -> Running {
             ..EvidenceSources::default()
         },
         volee_bin: Some(PathBuf::from("/opt/volee/bin/volee")),
+        multiplexers: Vec::new(),
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -182,6 +183,7 @@ async fn a_launched_agent_can_be_previewed_taken_over_and_stopped_at_once() {
             cwd: None,
             env_remove: vec!["CLAUDECODE".into()],
             hint: "Press Ctrl+Z to come back; the agent keeps running.".into(),
+            focus: None,
         }
     );
 

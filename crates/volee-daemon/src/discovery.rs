@@ -166,12 +166,14 @@ impl Backoff {
 }
 
 /// What a listing did.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Listed {
     /// The harness answered and its listing was applied.
     succeeded: bool,
     /// It linked a session or changed the registry.
     changed: bool,
+    /// Its live interactive sessions, which may run in a multiplexer pane.
+    hosted: Vec<volee_mux::Hosted>,
 }
 
 /// Lists `harness` at once, then again after each wait the cadence gives,
@@ -228,6 +230,9 @@ pub(crate) async fn run(
             .progress
             .send_modify(|progress| progress.started += 1);
         let listed = list(&shared, &harness, &mut failing).await;
+        if listed.succeeded {
+            crate::panes::locate(&shared, &listed.hosted).await;
+        }
         shared.refreshes.progress.send_modify(|progress| {
             progress.finished = progress.started;
             progress.succeeded = listed.succeeded;
@@ -272,6 +277,7 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
     listing
         .sessions
         .retain(|session| !session.cwd.starts_with(&shared.paths.state_dir));
+    let hosted = crate::panes::hosted(&listing.sessions);
     let mut state = shared.state.lock().await;
     let now = state.now();
     let claimed = claim_expected(&mut state, &listing, now);
@@ -288,6 +294,7 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
         return Listed {
             succeeded: true,
             changed: linked,
+            hosted,
         };
     }
     let count = events.len();
@@ -297,6 +304,7 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
             Listed {
                 succeeded: true,
                 changed: true,
+                hosted,
             }
         }
         Err(error) => {
@@ -304,6 +312,7 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
             Listed {
                 succeeded: false,
                 changed: linked,
+                hosted: Vec::new(),
             }
         }
     }

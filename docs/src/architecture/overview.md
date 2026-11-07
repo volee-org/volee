@@ -134,7 +134,8 @@ requests; **analysis** missions deliver reports.
 | `volee-store` | SQLite storage, migrations, event log and projections. | core |
 | `volee-git` | Git queries behind a trait (CLI implementation). | core |
 | `volee-harness` | Harness adapters. Claude Code first: spawn, discover, hooks, logs, attach, wake. | core |
-| `volee-daemon` | The daemon: reconcilers, message router, mission supervisor. | core, config, proto, store, git, harness |
+| `volee-mux` | Location adapters ([ADR 0015](../adr/0015-tuios-location-adapter.md)): the multiplexer panes agents run in. tuios first: find, capture, focus. | core, harness |
+| `volee-daemon` | The daemon: reconcilers, message router, mission supervisor. | core, config, proto, store, git, harness, mux |
 | `volee-mcp` | MCP server exposed to agents. | core, proto |
 | `volee-tui` | The ratatui interface. | core, proto |
 | `volee-cli` | The `volee` binary and its subcommands. | all |

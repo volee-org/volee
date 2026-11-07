@@ -77,6 +77,7 @@ fn start_cadence(watched: Duration, longest: Duration, idle: Duration) -> Runnin
         idle_discovery_interval: idle,
         evidence: EvidenceSources::default(),
         volee_bin: None,
+        multiplexers: Vec::new(),
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -390,6 +391,7 @@ async fn without_a_harness_a_refresh_answers_at_once() {
         idle_discovery_interval: HOUR,
         evidence: EvidenceSources::default(),
         volee_bin: None,
+        multiplexers: Vec::new(),
     };
     tokio::spawn(Daemon::serve(listener, config));
     let asked = tokio::time::Instant::now();

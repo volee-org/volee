@@ -103,6 +103,7 @@ pub(crate) fn take_over(tool: &Tool, agent: &Agent) -> TakeOver {
         cwd: Some(dir),
         env_remove: Vec::new(),
         hint: None,
+        focus: None,
     }
 }
 

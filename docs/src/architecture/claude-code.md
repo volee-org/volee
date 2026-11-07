@@ -26,7 +26,9 @@ which lets the tests replay recorded output instead of running `claude`.
 
 `<id>` is the id of a background session, kept exactly as `claude agents`
 lists it (the session's *handle*). Interactive sessions have no id: volee
-shows them but cannot stop, delete, preview or attach them.
+shows them but cannot stop or delete them, and previews and takes over only
+the ones that run in a tuios pane, through tuios
+([ADR 0015](../adr/0015-tuios-location-adapter.md)).
 
 Every launch passes the agent's settings file (`--settings`: volee's hooks,
 and a rule that allows volee's own MCP tools) and its MCP configuration

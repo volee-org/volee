@@ -314,6 +314,7 @@ fn start(events: Vec<Event>, clock: Arc<ManualClock>, evidence: EvidenceSources)
         idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence,
         volee_bin: None,
+        multiplexers: Vec::new(),
     };
     Running {
         socket,

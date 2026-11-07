@@ -332,6 +332,7 @@ impl DemoSource {
             env_remove: Vec::new(),
             // The stand-in says it itself.
             hint: None,
+            focus: None,
         })
     }
 

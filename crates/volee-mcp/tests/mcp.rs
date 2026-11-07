@@ -90,6 +90,7 @@ fn start_with(events: Vec<Event>) -> Fixture {
             idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
             evidence: EvidenceSources::default(),
             volee_bin: None,
+            multiplexers: Vec::new(),
         },
     ));
     Fixture { socket, _dir: dir }

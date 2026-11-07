@@ -27,7 +27,8 @@ use crate::letters::Letters;
 use crate::preview::PreviewScreen;
 use crate::pulses::Pulses;
 use crate::source::{
-    Changes, MissionRequest, NewMission, Outgoing, SourceError, SpawnRequest, Summary, TakeOver,
+    Changes, MissionRequest, NewMission, Outgoing, PaneFocus, SourceError, SpawnRequest, Summary,
+    TakeOver,
 };
 use crate::text;
 use crate::theme::Theme;
@@ -329,6 +330,15 @@ pub(crate) enum Msg {
         /// How it ended.
         result: Result<(), String>,
     },
+    /// The pane an agent runs in was brought forward, or could not be.
+    PaneFocused {
+        /// The agent.
+        agent: AgentId,
+        /// The pane.
+        focus: PaneFocus,
+        /// How it went.
+        result: Result<(), String>,
+    },
     /// The source marked a message read, or could not.
     MarkedRead(Result<(), SourceError>),
     /// A thread's summary arrived, or why there is none.
@@ -373,6 +383,14 @@ pub(crate) enum Effect {
         agent: AgentId,
         /// What to run.
         take_over: TakeOver,
+    },
+    /// Bring forward the multiplexer pane an agent runs in, keeping the
+    /// terminal.
+    FocusPane {
+        /// The agent.
+        agent: AgentId,
+        /// The pane, and the steps that bring it forward.
+        focus: PaneFocus,
     },
     /// Send a message through the source.
     Send(Outgoing),
@@ -1119,6 +1137,30 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
                 model.request_preview(selected, &mut effects);
             }
         }
+        Msg::PaneFocused {
+            agent,
+            focus,
+            result,
+        } => {
+            let name = model.name_of(agent);
+            // Names that came from the multiplexer: shown without controls.
+            let printable =
+                |text: &str| -> String { text.chars().filter(|c| !c.is_control()).collect() };
+            let (multiplexer, session) = (printable(&focus.multiplexer), printable(&focus.session));
+            match result {
+                Ok(()) => model.notify(
+                    format!("{name} is in front: {multiplexer} pane, session {session}."),
+                    false,
+                ),
+                Err(error) => {
+                    let reason = text::clause(&error);
+                    model.notify(
+                        format!("Could not bring {name} forward in {multiplexer}: {reason}."),
+                        true,
+                    );
+                }
+            }
+        }
     }
     model.relayout();
     // The layout pass may have moved the selection (the agent left, or the
@@ -1181,6 +1223,9 @@ fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool 
         Msg::TakeOverReady { agent, result } => {
             model.pending_take_over = None;
             match result {
+                Ok(TakeOver {
+                    focus: Some(focus), ..
+                }) => effects.push(Effect::FocusPane { agent, focus }),
                 Ok(mut take_over) => {
                     // Said in the terminal as the agent's session starts.
                     let name = model.name_of(agent);

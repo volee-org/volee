@@ -18,7 +18,8 @@ deliberately out of scope. Dates are targets, not promises.
 
 ## Later
 
-- Location adapters for tmux, Zellij and tuios (jump to a pane-hosted agent).
+- Location adapters for tmux and Zellij (jump to a pane-hosted agent); tuios
+  has one ([ADR 0015](../adr/0015-tuios-location-adapter.md)).
 - Other harnesses: Codex CLI, Gemini CLI (discovery and messaging first).
   Agents of any MCP-capable harness can already
   [join](../guide/other-harnesses.md) through `volee mcp --join`; discovering
