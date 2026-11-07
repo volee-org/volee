@@ -76,6 +76,19 @@ A summary runs `claude -p` with no tools, no MCP server, none of your hooks
 and no saved session, in a directory of volee's own: the model reads the
 thread and nothing else.
 
+## `[missions]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `max_workers` | `8` | The most agents one mission may launch besides its coordinator, counting those that already stopped. |
+
+A coordinator launches workers with its `spawn_worker` tool, without asking
+you, so this limit is what keeps a coordinator gone wrong from starting
+sessions without end. Launches that run at the same time all count. A
+coordinator that reaches the limit gets a refusal that tells it to ask you.
+Workers also stay in the repositories the mission names: volee compares their
+main checkouts, never their directory names.
+
 ## `[tui]`
 
 | Key | Default | Meaning |
