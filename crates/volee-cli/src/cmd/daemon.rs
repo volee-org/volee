@@ -3,10 +3,12 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use volee_core::harness::HarnessKind;
 use volee_core::time::Elapsed;
-use volee_daemon::{Clock, Config, Daemon, SqliteLog, SystemClock};
+use volee_daemon::{Clock, Config, DEFAULT_DISCOVERY_INTERVAL, Daemon, SqliteLog, SystemClock};
+use volee_harness::{ClaudeCode, Harness};
 use volee_proto::client::Client;
-use volee_proto::methods::{Empty, Shutdown, Status, StatusParams};
+use volee_proto::methods::{Empty, HarnessStatus, Shutdown, Status, StatusParams};
 
 use crate::connect::{paths, spawn_daemon, wait_for_daemon};
 
@@ -18,16 +20,55 @@ pub(crate) async fn run() -> Result<()> {
         .with_context(|| format!("cannot create {}", paths.state_dir.display()))?;
     let log = SqliteLog::open(&paths.database())
         .with_context(|| format!("cannot open {}", paths.database().display()))?;
+    let (harness, status) = detect_claude_code().await;
+    if harness.is_some() {
+        tracing::info!(version = ?status.version, "using Claude Code");
+    } else {
+        tracing::warn!(detail = ?status.detail, "Claude Code is not available");
+    }
     let config = Config {
         spool: Some(paths.spool_dir()),
         paths,
         log: Box::new(log),
         clock: Arc::new(SystemClock),
-        harnesses: vec![],
+        harnesses: vec![status],
+        harness,
+        discovery_interval: DEFAULT_DISCOVERY_INTERVAL,
     };
     Daemon::run(config)
         .await
         .context("the daemon stopped with an error")
+}
+
+/// Finds Claude Code and checks that its version has what volee needs.
+async fn detect_claude_code() -> (Option<Arc<dyn Harness>>, HarnessStatus) {
+    let claude = ClaudeCode::default();
+    let probed = tokio::task::spawn_blocking(move || {
+        let capabilities = claude.capabilities();
+        (claude, capabilities)
+    })
+    .await;
+    let mut status = HarnessStatus {
+        kind: HarnessKind::ClaudeCode,
+        available: false,
+        version: None,
+        detail: None,
+    };
+    match probed {
+        Ok((claude, Ok(capabilities))) => {
+            status.available = true;
+            status.version = Some(capabilities.version.to_string());
+            (Some(Arc::new(claude)), status)
+        }
+        Ok((_, Err(error))) => {
+            status.detail = Some(error.to_string());
+            (None, status)
+        }
+        Err(error) => {
+            status.detail = Some(format!("checking Claude Code failed: {error}"));
+            (None, status)
+        }
+    }
 }
 
 /// Starts the daemon in the background unless it already runs.

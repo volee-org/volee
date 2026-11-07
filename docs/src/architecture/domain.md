@@ -77,6 +77,12 @@ group.
   agent becomes `stopped` (it ran in a terminal) or `lost` (it ran in the
   background). It never becomes `done` because it disappeared.
 
+The daemon runs it every two seconds (module `discovery` of `volee-daemon`)
+against `claude agents --json --all`. The listing runs outside the state
+lock, so a slow `claude` never blocks requests; a failing listing changes
+nothing and is logged once, then again when it works. When Claude Code is
+missing or too old, `volee daemon status` says why and discovery stays off.
+
 ## The mission supervisor
 
 `supervisor::supervise` is the program half of a mission (ADR 0007). The
