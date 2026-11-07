@@ -55,9 +55,31 @@ pub(crate) fn truncate_start(text: &str, max: usize) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
+/// `text` with a capital first letter, to start a sentence.
+pub(crate) fn sentence(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
+/// `text` without its final period, to go inside a longer sentence.
+pub(crate) fn clause(text: &str) -> &str {
+    text.trim_end().trim_end_matches('.')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn messages_fit_into_sentences() {
+        assert_eq!(sentence("lost the daemon"), "Lost the daemon");
+        assert_eq!(sentence("élan"), "Élan");
+        assert_eq!(sentence(""), "");
+        assert_eq!(clause("it runs elsewhere. "), "it runs elsewhere");
+        assert_eq!(clause("no period"), "no period");
+    }
 
     #[test]
     fn short_text_is_kept() {

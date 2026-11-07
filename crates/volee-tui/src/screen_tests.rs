@@ -41,7 +41,7 @@ fn demo_model(width: u16, height: u16, theme: Theme) -> (Model, DemoSource) {
 fn serve(demo: &DemoSource, model: &mut Model, effects: Vec<Effect>) {
     for effect in effects {
         if let Effect::LoadPreview(agent) = effect {
-            let result = demo.screen_at(agent, start()).map_err(|e| e.to_string());
+            let result = demo.screen_at(agent, start());
             update(model, Msg::PreviewLoaded { agent, result });
         }
     }
@@ -149,6 +149,73 @@ fn jump_prompt() {
 fn coming_views() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     type_text(&demo, &mut model, "2");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn composer_answering_a_question() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    type_text(&demo, &mut model, "'vm");
+    type_text(
+        &demo,
+        &mut model,
+        "Yes: accept draft, false by default, and issue the final invoice when the draft is \
+         confirmed.",
+    );
+    update(
+        &mut model,
+        Msg::Paste("\n\nKeep the PDF for finals only.".into()),
+    );
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn composer_for_a_session_started_outside_volee() {
+    let (mut model, demo) = demo_model(80, 24, Theme::default());
+    type_text(&demo, &mut model, "'im");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn quit_with_a_draft() {
+    let (mut model, demo) = demo_model(80, 24, Theme::default());
+    type_text(&demo, &mut model, "'sm");
+    type_text(&demo, &mut model, "Is total_cents stored?");
+    keys(&demo, &mut model, &[KeyCode::Esc, KeyCode::Char('q')]);
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn changes_window() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    type_text(&demo, &mut model, "'pd");
+    let page = agent_id(start(), crate::demo::INVOICE_PAGE);
+    for full in [false, true] {
+        if full {
+            type_text(&demo, &mut model, "f");
+        }
+        let result =
+            futures_util::FutureExt::now_or_never(crate::source::Source::diff(&demo, page, full))
+                .unwrap();
+        update(
+            &mut model,
+            Msg::DiffLoaded {
+                agent: page,
+                full,
+                result,
+            },
+        );
+        assert_snapshot!(format!("changes_window_full_{full}"), draw(&model));
+    }
+}
+
+#[test]
+fn offline_after_the_daemon_left() {
+    let (mut model, _) = demo_model(120, 40, Theme::default());
+    update(
+        &mut model,
+        Msg::SourceClosed(Some("lost the connection to the volee daemon".into())),
+    );
     assert_snapshot!(draw(&model));
 }
 

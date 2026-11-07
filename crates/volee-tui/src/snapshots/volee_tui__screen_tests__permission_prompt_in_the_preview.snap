@@ -41,4 +41,4 @@ expression: draw(&model)
 "│ delivery 2 commits · not push… ││ ╰──────────────────────────────────────────────────────────────────────────╯       │"
 "│ last     Write migrations/004… ││                                                                                    │"
 "╰────────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────╯"
-" h/j/k/l move   enter subtree   ' jump   - previous   / filter   a take over   tab panel   q quit                ? help "
+" h/j/k/l move   enter subtree   ' jump   / filter   m message   d diff   a take over   tab panel   q quit        ? help "

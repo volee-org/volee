@@ -10,6 +10,8 @@
 //! - [`paths`]: where the socket, the database and the logs live.
 //! - [`client`]: an async client for the interface, the CLI and the MCP
 //!   server.
+//! - [`replica`]: the daemon's events as a gap-free feed, and a registry
+//!   kept up to date from it.
 //! - [`blocking`]: a minimal synchronous client for hook commands, which must
 //!   start and answer in milliseconds.
 
@@ -17,6 +19,7 @@ pub mod blocking;
 pub mod client;
 pub mod methods;
 pub mod paths;
+pub mod replica;
 pub mod rpc;
 
 /// The protocol version. A client and a daemon with different versions

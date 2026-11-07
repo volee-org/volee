@@ -51,4 +51,4 @@ expression: draw(&model)
 "│ session  5eed0a03 · claude-code      ││   ? for shortcuts                                                                                                                                            │"
 "│                                      ││                                                                                                                                                              │"
 "╰──────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯"
-" esc back   h/j/k/l move   enter subtree   +/_ zoom   ' jump   - previous   / filter   a take over   tab panel   q quit                                                                          ? help "
+" esc back   h/j/k/l move   enter subtree   +/_ zoom   ' jump   / filter   m message   d diff   a take over   tab panel   q quit                                                                  ? help "

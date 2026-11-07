@@ -87,7 +87,7 @@ fn draw_entry(model: &Model, entry: &RailEntry, area: Rect, buf: &mut Buffer) {
         buf.set_style(area, theme.style(StyleRole::Selection));
         buf.set_string(area.x, area.y, "▌", theme.style(StyleRole::BorderFocused));
     }
-    let letter_style = if model.jump_pending {
+    let letter_style = if model.prompt == Some(crate::app::Prompt::Jump) {
         theme
             .style(StyleRole::Letter)
             .add_modifier(Modifier::REVERSED | Modifier::BOLD)

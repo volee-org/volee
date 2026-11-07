@@ -121,7 +121,15 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
         )
         .unwrap_or(0)
     };
-    let banner = model.banner.as_deref().map(|banner| format!("{banner} "));
+    // Once the source stopped, saying so matters more than the banner.
+    let (banner, banner_style) = if model.offline.is_some() {
+        (Some(" offline ".to_owned()), StyleRole::NoticeError)
+    } else {
+        (
+            model.banner.as_deref().map(|banner| format!("{banner} ")),
+            StyleRole::Placeholder,
+        )
+    };
     let banner_width = banner
         .as_deref()
         .map_or(0, |banner| u16::try_from(text::width(banner)).unwrap_or(0));
@@ -129,20 +137,15 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
     let (spans, show_banner) = if width_of(&full) + banner_width + 3 <= room {
         (full, true)
     } else if width_of(&full) < room {
-        (full, false)
+        (full, model.offline.is_some())
     } else {
-        (short, false)
+        (short, model.offline.is_some())
     };
     let mut x = area.width;
     if show_banner && let Some(banner) = &banner {
-        x -= banner_width;
-        buf.set_string(
-            area.x + x,
-            area.y,
-            banner,
-            theme.style(StyleRole::Placeholder),
-        );
-        x -= 2;
+        x = x.saturating_sub(banner_width);
+        buf.set_string(area.x + x, area.y, banner, theme.style(banner_style));
+        x = x.saturating_sub(2);
     } else {
         x -= 1;
     }

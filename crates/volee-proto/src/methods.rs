@@ -55,6 +55,19 @@ pub struct SeqEvent {
 /// params are a [`SeqEvent`].
 pub const EVENTS_APPENDED: &str = "events.appended";
 
+/// The name of the notification that tells a subscriber it fell too far
+/// behind and no longer receives events. Its params are a [`Lagged`]. The
+/// subscriber can subscribe again with `after` set to the last sequence
+/// number it applied.
+pub const EVENTS_LAGGED: &str = "events.lagged";
+
+/// The params of [`EVENTS_LAGGED`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Lagged {
+    /// How many events the subscriber missed.
+    pub skipped: u64,
+}
+
 // ---- daemon ---------------------------------------------------------------
 
 /// Parameters of [`Status`].

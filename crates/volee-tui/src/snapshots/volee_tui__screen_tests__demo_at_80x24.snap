@@ -25,4 +25,4 @@ expression: draw(&model)
 "│                                  ││   ? for shortcuts                        │"
 "│                                  ││                                          │"
 "╰──────────────────────────────────╯╰──────────────────────────────────────────╯"
-" h/j/k/l move   enter subtree   ' jump   - previous   / filter           ? help "
+" h/j/k/l move   enter subtree   ' jump   / filter   m message   d diff   ? help "
