@@ -16,10 +16,10 @@ use volee_core::ids::{MessageId, MissionId, ThreadId};
 use volee_core::message::Party;
 use volee_core::time::Timestamp;
 use volee_core::{AgentId, Event, EventKind, Registry};
+use volee_harness::hooks::format_messages_for_agent;
 use volee_proto::methods::SeqEvent;
 
 use crate::clock::Clock;
-use crate::delivery::render_for_agent;
 use crate::error::DaemonError;
 use crate::log::EventLog;
 
@@ -119,6 +119,11 @@ impl State {
         ThreadId::from_ulid(self.new_ulid())
     }
 
+    /// A new agent identifier.
+    pub(crate) fn new_agent_id(&self) -> AgentId {
+        AgentId::from_ulid(self.new_ulid())
+    }
+
     /// A new mission identifier.
     pub(crate) fn new_mission_id(&self) -> MissionId {
         MissionId::from_ulid(self.new_ulid())
@@ -179,14 +184,28 @@ impl State {
     /// Renders an agent's pending messages and marks them delivered. Returns
     /// `None` when nothing is pending.
     pub(crate) fn take_pending(&mut self, agent: AgentId) -> Result<Option<String>, DaemonError> {
+        let Some((text, receipts)) = self.render_pending(agent) else {
+            return Ok(None);
+        };
+        self.commit_only(receipts)?;
+        Ok(Some(text))
+    }
+
+    /// The text that hands `agent` its pending messages, and the receipts of
+    /// the messages it shows. Messages past the text's size limit stay
+    /// pending; the text tells the agent to read them with `read_messages`.
+    fn render_pending(&self, agent: AgentId) -> Option<(String, Vec<Event>)> {
         let pending = self.registry.pending_for(agent);
         if pending.is_empty() {
-            return Ok(None);
+            return None;
         }
-        let text = render_for_agent(&self.registry, &pending);
+        let rendered = format_messages_for_agent(pending.iter().copied(), |id| {
+            self.registry.agent(id).map(|sender| sender.name.clone())
+        });
         let now = self.now();
-        let receipts: Vec<Event> = pending
+        let receipts = pending
             .iter()
+            .take(rendered.shown)
             .map(|message| {
                 Event::new(
                     now,
@@ -197,8 +216,7 @@ impl State {
                 )
             })
             .collect();
-        self.commit_only(receipts)?;
-        Ok(Some(text))
+        Some((rendered.text, receipts))
     }
 
     /// Registers the single waiter of an idle agent. A previous waiter of the
@@ -238,21 +256,9 @@ impl State {
             if waiter.sender.is_closed() {
                 continue;
             }
-            let pending = self.registry.pending_for(agent);
-            let text = render_for_agent(&self.registry, &pending);
-            let now = self.now();
-            let receipts: Vec<Event> = pending
-                .iter()
-                .map(|message| {
-                    Event::new(
-                        now,
-                        EventKind::MessageDelivered {
-                            message: message.id,
-                            to: Party::Agent(agent),
-                        },
-                    )
-                })
-                .collect();
+            let Some((text, receipts)) = self.render_pending(agent) else {
+                continue;
+            };
             if waiter.sender.send(text).is_ok() {
                 committed.extend(self.commit_only(receipts)?);
             }

@@ -9,7 +9,7 @@
 //! Start it with [`Daemon::run`]; build its dependencies with [`Config`].
 
 mod clock;
-mod delivery;
+mod discovery;
 mod error;
 mod evidence;
 mod handlers;
@@ -20,6 +20,7 @@ mod sqlite;
 mod state;
 
 pub use clock::{Clock, ManualClock, SystemClock};
+pub use discovery::DEFAULT_INTERVAL as DEFAULT_DISCOVERY_INTERVAL;
 pub use error::DaemonError;
 pub use evidence::EvidenceSources;
 pub use log::{EventLog, LogError, MemoryLog};

@@ -149,6 +149,8 @@ fn start(events: Vec<Event>) -> Running {
         clock: Arc::new(ManualClock::at(10_000)),
         harnesses: vec![],
         spool: None,
+        harness: None,
+        discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
     };
     let task = tokio::spawn(Daemon::serve(listener, config));

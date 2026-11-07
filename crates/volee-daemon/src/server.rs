@@ -4,12 +4,14 @@ use std::fs::{self, File, TryLockError};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, broadcast, mpsc, watch};
 use tokio::task::JoinSet;
+use volee_harness::Harness;
 use volee_proto::methods::{
     EVENTS_APPENDED, EventBatch, ForgeStatus, HarnessStatus, Method, SeqEvent, Subscribe,
 };
@@ -36,6 +38,11 @@ pub struct Config {
     /// The spool written by hooks while the daemon was down; drained and
     /// replayed at start.
     pub spool: Option<PathBuf>,
+    /// The harness whose sessions the daemon discovers, when one is
+    /// installed.
+    pub harness: Option<Arc<dyn Harness>>,
+    /// How often the harness is listed.
+    pub discovery_interval: Duration,
     /// Where workspaces and delivery evidence are read from:
     /// [`EvidenceSources::default()`] reads nothing.
     pub evidence: EvidenceSources,
@@ -116,6 +123,14 @@ impl Daemon {
         });
         if let Some(dir) = config.spool {
             replay_spool(&shared, dir).await;
+        }
+        if let Some(harness) = config.harness {
+            tokio::spawn(crate::discovery::run(
+                Arc::clone(&shared),
+                harness,
+                config.discovery_interval,
+                stop.clone(),
+            ));
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
         tracing::info!(socket = ?listener.local_addr().ok(), "volee daemon ready");

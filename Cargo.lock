@@ -1280,6 +1280,7 @@ dependencies = [
  "volee-core",
  "volee-daemon",
  "volee-git",
+ "volee-harness",
  "volee-mcp",
  "volee-proto",
  "volee-store",
@@ -1319,6 +1320,7 @@ dependencies = [
  "volee-config",
  "volee-core",
  "volee-git",
+ "volee-harness",
  "volee-proto",
  "volee-store",
 ]

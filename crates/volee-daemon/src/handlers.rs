@@ -9,9 +9,10 @@ use serde_json::Value;
 use volee_core::harness::{SessionKey, SessionOrigin};
 use volee_core::ids::ThreadId;
 use volee_core::message::{Message, Party, Receipt, Thread};
-use volee_core::state::{AgentState, InputRequest};
+use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
-use volee_core::{Agent, AgentId, Event, EventKind};
+use volee_core::{Agent, AgentId, Event, EventKind, Registry};
+use volee_harness::hooks::{HookPayload, HookSignal, SessionSource, interpret, stop_block_output};
 use volee_proto::PROTOCOL_VERSION;
 use volee_proto::methods::{
     AbortMission, AgentParams, CloseMission, CreateMission, Empty, EventBatch, EventsSince, Forget,
@@ -21,7 +22,6 @@ use volee_proto::methods::{
 };
 use volee_proto::rpc::{self, RpcError};
 
-use crate::delivery::{sender_label, stop_block_output};
 use crate::error::DaemonError;
 use crate::server::Shared;
 use crate::state::State;
@@ -304,13 +304,15 @@ pub(crate) async fn replay_hook(
         .map(|_| ())
 }
 
-/// Turns a hook payload into events. This first version understands the
-/// fields every Claude Code hook carries; the harness adapter refines it.
+/// Turns a hook payload into events, with the Claude Code adapter's reading
+/// of what each hook means.
 async fn hook_ingest(
     shared: &Arc<Shared>,
     params: HookParams,
     delivery: Delivery,
 ) -> Result<HookReply, DaemonError> {
+    let payload = hook_payload(&params)?;
+    let signal = interpret(&payload);
     let mut state = shared.state.lock().await;
     let agent = params.agent;
     let current = state
@@ -319,42 +321,36 @@ async fn hook_ingest(
         .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {agent}")))?
         .clone();
     let now = state.now();
-    let field = |name: &str| params.payload.get(name).and_then(Value::as_str);
     let mut events = Vec::new();
     let mut reply = HookReply::default();
-    let mut next_state: Option<(AgentState, Option<String>)> = None;
+    let mut next_state = signal.implied_state().map(|state| (state, None));
 
-    match params.event.as_str() {
-        "session-start" => {
-            events.extend(session_start_events(&current, &params.payload, now));
+    match signal {
+        HookSignal::SessionStarted {
+            session_id,
+            source,
+            model,
+            ..
+        } => {
+            events.extend(session_start_events(
+                &current,
+                &session_id,
+                source.as_ref(),
+                model.as_deref(),
+                now,
+            ));
             next_state = Some((AgentState::Idle, None));
         }
-        "user-prompt-submit" => next_state = Some((AgentState::Working, None)),
-        "pre-tool-use" => {
-            if let Some(tool) = field("tool_name") {
-                events.push(Event::new(
-                    now,
-                    EventKind::ActivityRecorded {
-                        agent,
-                        summary: tool.to_owned(),
-                    },
-                ));
-            }
-            next_state = Some((AgentState::Working, None));
+        HookSignal::ToolStarted { summary, .. } => {
+            events.push(Event::new(
+                now,
+                EventKind::ActivityRecorded { agent, summary },
+            ));
         }
-        "notification" => match field("notification_type") {
-            Some("permission_prompt") => {
-                next_state = Some((
-                    AgentState::NeedsInput {
-                        request: InputRequest::Permission { tool: None },
-                    },
-                    field("message").map(str::to_owned),
-                ));
-            }
-            Some("idle_prompt") => next_state = Some((AgentState::Idle, None)),
-            _ => {}
-        },
-        "stop" => {
+        HookSignal::NeedsInput { request, detail } => {
+            next_state = Some((AgentState::NeedsInput { request }, detail));
+        }
+        HookSignal::Stopped { last_message } => {
             let pending = if delivery == Delivery::Live {
                 state.take_pending(agent)?
             } else {
@@ -364,14 +360,18 @@ async fn hook_ingest(
                 reply.stdout = Some(stop_block_output(&text));
                 next_state = Some((AgentState::Working, None));
             } else {
-                let detail = field("last_assistant_message").map(|text| summarize(text, 200));
+                let detail = last_message.as_deref().map(|text| summarize(text, 200));
                 next_state = Some((AgentState::Done, detail));
             }
         }
-        "session-end" => {
-            next_state = Some((AgentState::Stopped, field("reason").map(str::to_owned)));
+        HookSignal::SessionEnded { reason } => {
+            next_state = next_state.map(|(state, _)| (state, reason));
         }
-        _ => {}
+        HookSignal::PromptSubmitted
+        | HookSignal::ToolFinished { .. }
+        | HookSignal::SubagentStarted { .. }
+        | HookSignal::SubagentStopped { .. }
+        | HookSignal::Ignored => {}
     }
 
     if let Some((state_value, detail)) = next_state
@@ -390,17 +390,56 @@ async fn hook_ingest(
     Ok(reply)
 }
 
+/// The hook's payload as Claude Code sent it. The event name and the session
+/// id come from the command line when the payload lacks them, as hand-written
+/// or replayed payloads may.
+fn hook_payload(params: &HookParams) -> Result<HookPayload, DaemonError> {
+    let mut payload = params.payload.clone();
+    if !payload.is_object() {
+        payload = Value::Object(serde_json::Map::new());
+    }
+    if let Value::Object(fields) = &mut payload {
+        fields
+            .entry("hook_event_name")
+            .or_insert_with(|| Value::String(pascal_case(&params.event)));
+        fields
+            .entry("session_id")
+            .or_insert_with(|| Value::String(String::new()));
+    }
+    serde_json::from_value(payload).map_err(|error| {
+        DaemonError::InvalidParams(format!("not a Claude Code hook payload: {error}"))
+    })
+}
+
+/// `pre-tool-use` as Claude Code names it: `PreToolUse`.
+fn pascal_case(event: &str) -> String {
+    event
+        .split('-')
+        .map(|word| {
+            let mut chars = word.chars();
+            chars.next().map_or_else(String::new, |first| {
+                first.to_uppercase().chain(chars).collect()
+            })
+        })
+        .collect()
+}
+
 /// Links the session announced by a `session-start` hook to its agent and
 /// records the model, unless they are already known.
-fn session_start_events(current: &Agent, payload: &Value, now: Timestamp) -> Vec<Event> {
-    let field = |name: &str| payload.get(name).and_then(Value::as_str);
+fn session_start_events(
+    current: &Agent,
+    session_id: &str,
+    source: Option<&SessionSource>,
+    model: Option<&str>,
+    now: Timestamp,
+) -> Vec<Event> {
     let mut events = Vec::new();
-    if let Some(session_id) = field("session_id") {
+    if !session_id.is_empty() {
         let key = SessionKey::claude(session_id);
         if !current.owns_session(&key) {
-            let origin = match field("source") {
-                Some("resume" | "compact") => SessionOrigin::Resumed,
-                Some("fork") => SessionOrigin::Forked,
+            let origin = match source {
+                Some(SessionSource::Resume | SessionSource::Compact) => SessionOrigin::Resumed,
+                Some(SessionSource::Fork) => SessionOrigin::Forked,
                 _ => SessionOrigin::Started,
             };
             events.push(Event::new(
@@ -413,7 +452,7 @@ fn session_start_events(current: &Agent, payload: &Value, now: Timestamp) -> Vec
             ));
         }
     }
-    if let Some(model) = field("model")
+    if let Some(model) = model
         && current.model.as_deref() != Some(model)
     {
         events.push(Event::new(
@@ -425,6 +464,18 @@ fn session_start_events(current: &Agent, payload: &Value, now: Timestamp) -> Vec
         ));
     }
     events
+}
+
+/// A party as thread titles name it.
+fn sender_label(registry: &Registry, party: Party) -> String {
+    match party {
+        Party::Human => "the human".to_owned(),
+        Party::System => "volee".to_owned(),
+        Party::Agent(id) => registry.agent(id).map_or_else(
+            || id.to_string(),
+            |agent| format!("{} ({})", agent.name, agent.role),
+        ),
+    }
 }
 
 /// The first line of `text`, cut to `max` characters.

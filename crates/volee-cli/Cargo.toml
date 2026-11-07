@@ -28,6 +28,7 @@ volee-config.workspace = true
 volee-core.workspace = true
 volee-daemon.workspace = true
 volee-git.workspace = true
+volee-harness.workspace = true
 volee-mcp.workspace = true
 volee-proto.workspace = true
 volee-store.workspace = true
