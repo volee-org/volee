@@ -91,8 +91,11 @@ dist plan                       # optional: must announce v0.2.0
 
 `cargo set-version` changes the workspace version, the version of every
 internal crate in `[workspace.dependencies]` and `Cargo.lock`.
-`git diff --stat` must list `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md`, and
-nothing else.
+Then point the install instructions at the new version: the "latest release"
+sentence and the `cargo install --tag` line of `README.md` and
+`docs/src/guide/installation.md`. `git diff --stat` must list `Cargo.toml`,
+`Cargo.lock`, `CHANGELOG.md`, `README.md` and
+`docs/src/guide/installation.md`, and nothing else.
 
 Read the new section of `CHANGELOG.md`. Each entry is the title of a pull
 request merged since the last release (pull requests are squash-merged, so the

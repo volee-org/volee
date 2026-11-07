@@ -16,7 +16,7 @@
 
 ## With the installer
 
-The first release of volee is **v0.1.0**. Every release on
+The latest release of volee is **v0.2.0**. Every release on
 [GitHub](https://github.com/volee-org/volee/releases) comes with prebuilt
 binaries and an installer script. To install the latest release:
 
@@ -54,10 +54,10 @@ source.
 Install with Cargo (Rust 1.89 or later):
 
 ```sh
-cargo install --locked --git https://github.com/volee-org/volee --tag v0.1.0 volee-cli
+cargo install --locked --git https://github.com/volee-org/volee --tag v0.2.0 volee-cli
 ```
 
-Replace `v0.1.0` with the release you want, or leave `--tag` out to build the
+Replace `v0.2.0` with the release you want, or leave `--tag` out to build the
 latest commit of `main`. The `volee` command goes into `~/.cargo/bin`.
 
 ## Check the installation
