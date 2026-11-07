@@ -31,7 +31,7 @@ use crate::server::Shared;
 
 /// The directory, inside a repository, where volee puts its worktrees: the
 /// one Claude Code looks into for `--worktree`.
-const IN_REPO_WORKTREES: &str = ".claude/worktrees";
+pub(crate) const IN_REPO_WORKTREES: &str = ".claude/worktrees";
 
 /// A repository resolved for a launch.
 #[derive(Clone, Debug)]
@@ -46,7 +46,7 @@ pub(crate) struct Target {
 
 /// What a launch needs to know about the mission it serves.
 #[derive(Clone, Debug)]
-struct MissionContext {
+pub(crate) struct MissionContext {
     id: MissionId,
     title: String,
     kind: MissionKind,
@@ -233,7 +233,7 @@ fn coordinator_prompt(mission: &Mission) -> String {
 
 /// How a coordinator works, appended to its system prompt so that it
 /// survives compaction.
-fn coordinator_instructions(mission: &Mission) -> String {
+pub(crate) fn coordinator_instructions(mission: &Mission) -> String {
     let delivery = match mission.kind {
         MissionKind::Change => {
             "This is a change mission: each worker commits on its own branch, pushes it and \
@@ -347,6 +347,11 @@ async fn start_session(
     match started {
         Ok(spawned) => {
             tracing::info!(%agent, handle = %spawned.handle, "agent launched");
+            shared
+                .state
+                .lock()
+                .await
+                .expect_session(spawned.handle, agent, spawned.origin);
             Ok(())
         }
         Err(error) => {
@@ -363,6 +368,47 @@ async fn start_session(
             Err(error.into())
         }
     }
+}
+
+/// What volee tells an agent it launched, rebuilt from the registry: a
+/// resumed session needs its instructions again, since they travel on the
+/// command line and not in the conversation.
+pub(crate) fn instructions_for(
+    registry: &volee_core::Registry,
+    agent: &volee_core::Agent,
+) -> String {
+    let mission = agent.mission.and_then(|id| registry.mission(id));
+    if agent.role == Role::Coordinator
+        && let Some(mission) = mission
+    {
+        return coordinator_instructions(mission);
+    }
+    let workspace = &agent.workspace;
+    let target = Target {
+        name: workspace.repo.clone().unwrap_or_else(|| workspace.label()),
+        root: workspace
+            .repo_root
+            .clone()
+            .unwrap_or_else(|| workspace.cwd.clone()),
+        base: workspace.base.clone().unwrap_or_else(|| "main".to_owned()),
+    };
+    let context = mission.map(|mission| MissionContext {
+        id: mission.id,
+        title: mission.title.clone(),
+        kind: mission.kind,
+        repos: mission.repos.clone(),
+    });
+    let branch = workspace.branch.clone().unwrap_or_default();
+    worker_instructions(agent.role, context.as_ref(), &target, &branch)
+}
+
+/// The name under `.claude/worktrees/` of a worktree volee created in
+/// `root`, which `--worktree` takes.
+pub(crate) fn worktree_name(root: &Path, worktree: &Path) -> Option<String> {
+    let rest = worktree.strip_prefix(root.join(IN_REPO_WORKTREES)).ok()?;
+    let mut parts = rest.components();
+    let name = parts.next()?.as_os_str().to_str()?.to_owned();
+    parts.next().is_none().then_some(name)
 }
 
 /// The repository a launch names: a configured name, or a directory inside
@@ -470,7 +516,7 @@ fn exclude_worktrees(root: &Path) {
 
 /// Writes the agent's hook settings and MCP configuration, readable only by
 /// the user.
-fn write_agent_files(
+pub(crate) fn write_agent_files(
     shared: &Shared,
     harness: &Arc<dyn Harness>,
     agent: AgentId,
@@ -568,7 +614,7 @@ fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), DaemonError>
         })
 }
 
-fn permission_mode(shared: &Shared) -> Option<PermissionMode> {
+pub(crate) fn permission_mode(shared: &Shared) -> Option<PermissionMode> {
     use volee_config::PermissionMode as Configured;
     shared
         .settings
@@ -585,7 +631,7 @@ fn permission_mode(shared: &Shared) -> Option<PermissionMode> {
 
 /// What volee tells an agent it launched, appended to its system prompt so
 /// that it survives compaction.
-fn worker_instructions(
+pub(crate) fn worker_instructions(
     role: Role,
     mission: Option<&MissionContext>,
     target: &Target,
@@ -644,7 +690,7 @@ fn git(shared: &Shared) -> Result<Arc<dyn Git>, DaemonError> {
 }
 
 /// Runs blocking work (git, the harness) on the blocking thread pool.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, DaemonError> {
     tokio::task::spawn_blocking(work)
@@ -655,6 +701,28 @@ async fn blocking<T: Send + 'static>(
 #[cfg(test)]
 mod tests {
     use super::slug;
+
+    #[test]
+    fn worktree_names_come_from_volee_worktrees_only() {
+        use std::path::Path;
+        let root = Path::new("/work/alpha");
+        assert_eq!(
+            super::worktree_name(
+                root,
+                Path::new("/work/alpha/.claude/worktrees/feat-invoices")
+            ),
+            Some("feat-invoices".to_owned())
+        );
+        assert_eq!(super::worktree_name(root, Path::new("/work/alpha")), None);
+        assert_eq!(
+            super::worktree_name(root, Path::new("/elsewhere/.claude/worktrees/x")),
+            None
+        );
+        assert_eq!(
+            super::worktree_name(root, Path::new("/work/alpha/.claude/worktrees/a/b")),
+            None
+        );
+    }
 
     #[test]
     fn branches_become_directory_names() {

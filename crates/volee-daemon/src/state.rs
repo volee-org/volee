@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use tokio::sync::{broadcast, oneshot};
 use ulid::Ulid;
+use volee_core::harness::SessionOrigin;
 use volee_core::ids::{MessageId, MissionId, ThreadId};
 use volee_core::message::Party;
 use volee_core::time::Timestamp;
@@ -42,6 +43,9 @@ pub(crate) struct State {
     started_at: Timestamp,
     /// The last identifier handed out, so that the next one sorts after it.
     last_id: Cell<Ulid>,
+    /// Sessions the daemon started or resumed and no event linked yet, by
+    /// the harness's handle, with the agent they belong to.
+    expected: HashMap<String, (AgentId, SessionOrigin)>,
 }
 
 impl std::fmt::Debug for State {
@@ -71,6 +75,7 @@ impl State {
             waiters: HashMap::new(),
             next_token: 0,
             last_id: Cell::new(Ulid::nil()),
+            expected: HashMap::new(),
             clock,
             started_at,
         })
@@ -117,6 +122,17 @@ impl State {
     /// A new thread identifier.
     pub(crate) fn new_thread_id(&self) -> ThreadId {
         ThreadId::from_ulid(self.new_ulid())
+    }
+
+    /// Remembers that the session the harness calls `handle` belongs to
+    /// `agent`, until a hook or a listing links it.
+    pub(crate) fn expect_session(&mut self, handle: String, agent: AgentId, origin: SessionOrigin) {
+        self.expected.insert(handle, (agent, origin));
+    }
+
+    /// The agent waiting for the session the harness calls `handle`.
+    pub(crate) fn take_expected(&mut self, handle: &str) -> Option<(AgentId, SessionOrigin)> {
+        self.expected.remove(handle)
     }
 
     /// A new agent identifier.
