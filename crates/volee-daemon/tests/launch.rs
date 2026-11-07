@@ -262,6 +262,13 @@ async fn a_failed_launch_marks_the_agent_failed_and_keeps_the_worktree() {
         "{}",
         error.message
     );
+    // It says what stays, and how to launch on that branch again.
+    assert!(
+        error.message.contains("kept the worktree")
+            && error.message.contains("git branch -d feat/broken"),
+        "{}",
+        error.message
+    );
     assert!(daemon.repo.join(".claude/worktrees/feat-broken").is_dir());
     let registry = registry(&daemon.socket).await;
     let agent = registry.agents().next().unwrap();
