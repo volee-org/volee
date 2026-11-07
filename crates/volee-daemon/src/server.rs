@@ -13,7 +13,7 @@ use tokio::sync::{Mutex, broadcast, mpsc, watch};
 use tokio::task::JoinSet;
 use volee_harness::Harness;
 use volee_proto::methods::{
-    EVENTS_APPENDED, EventBatch, HarnessStatus, Method, SeqEvent, Subscribe,
+    EVENTS_APPENDED, EVENTS_LAGGED, EventBatch, HarnessStatus, Lagged, Method, SeqEvent, Subscribe,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc::{self, Id, Notification, Outcome, Request, Response, RpcError, Version2};
@@ -334,8 +334,8 @@ async fn subscribe(
                     tracing::warn!(skipped, "a subscriber lagged behind and was dropped");
                     let lagged = Notification {
                         jsonrpc: Version2,
-                        method: "events.lagged".to_owned(),
-                        params: serde_json::json!({ "skipped": skipped }),
+                        method: EVENTS_LAGGED.to_owned(),
+                        params: serde_json::to_value(Lagged { skipped }).unwrap_or_default(),
                     };
                     if let Ok(line) = serde_json::to_string(&lagged) {
                         let _ = outgoing.send(line + "\n");

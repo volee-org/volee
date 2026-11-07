@@ -9,14 +9,13 @@ use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use volee_core::message::{MessageKind, Party, Reference};
-use volee_core::registry::ApplyError;
 use volee_core::{AgentId, AgentState, Registry};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     CloseMission, CloseParams, MarkRead, MarkReadParams, SendMessage, SendParams,
 };
+use volee_proto::replica::{Replica, ReplicaError};
 
-use crate::replica::Replica;
 use crate::view::{AgentView, MessageView, WhoAmI, party_name};
 
 /// What the server tells the model about itself when it connects.
@@ -33,12 +32,9 @@ pub enum McpError {
     /// Talking to the daemon failed.
     #[error(transparent)]
     Client(#[from] ClientError),
-    /// The daemon's events did not replay.
-    #[error("the daemon sent events that do not fit together: {0}")]
-    Registry(#[from] ApplyError),
-    /// The client's notifications were already taken.
-    #[error("this daemon connection already has a subscriber")]
-    AlreadySubscribed,
+    /// The replica of the daemon's registry could not start.
+    #[error(transparent)]
+    Replica(#[from] ReplicaError),
     /// The agent this server speaks for is unknown to the daemon.
     #[error("volee does not know agent {0}; start `volee mcp` with the id of an agent it knows")]
     UnknownAgent(AgentId),

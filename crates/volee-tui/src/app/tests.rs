@@ -15,6 +15,7 @@ use crate::demo::{
     DemoSource, EXPLORE_HANDLERS, INFRA, INVOICE_PAGE, INVOICE_SCHEMA, INVOICE_TOOLS, INVOICING,
     LATENCY_AUDIT, TOWER, TRACE_GATEWAY,
 };
+use crate::source::{Outgoing, SourceError, TakeOver};
 use crate::views::hierarchy::Zoom;
 
 fn start() -> Timestamp {
@@ -143,13 +144,13 @@ fn a_quote_and_a_letter_jump_to_an_agent() {
     assert_eq!(model.letters.of(id(TOWER)), Some('t'));
     press(&mut model, "'t");
     assert_eq!(model.selected, Some(id(TOWER)));
-    assert!(!model.jump_pending);
+    assert_eq!(model.prompt, None);
     press(&mut model, "'z");
     assert_eq!(model.selected, Some(id(TOWER)));
     assert!(model.notice.as_ref().unwrap().text.contains("letter z"));
     press(&mut model, "'");
     key(&mut model, KeyCode::Esc);
-    assert!(!model.jump_pending);
+    assert_eq!(model.prompt, None);
     assert_eq!(model.selected, Some(id(TOWER)), "escape cancels the jump");
 }
 
@@ -274,46 +275,324 @@ fn numbers_switch_tabs_and_the_keys_follow_the_panel() {
 }
 
 #[test]
-fn a_takes_over_the_selected_agent() {
+fn a_asks_the_source_then_takes_over_the_selected_agent() {
     let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
     press(&mut model, "'s");
+    assert_eq!(press(&mut model, "a"), [Effect::PrepareTakeOver(schema)]);
+    assert!(press(&mut model, "a").is_empty(), "one take over at a time");
+    let take_over = TakeOver {
+        program: "claude".into(),
+        args: vec!["attach".into(), "7f3k2m9q".into()],
+        cwd: None,
+        hint: Some("Ctrl+Z comes back to volee.".into()),
+    };
+    let effects = update(
+        &mut model,
+        Msg::TakeOverReady {
+            agent: schema,
+            result: Ok(take_over.clone()),
+        },
+    );
     assert_eq!(
-        press(&mut model, "a"),
-        [Effect::TakeOver(id(INVOICE_SCHEMA))]
+        effects,
+        [Effect::TakeOver {
+            agent: schema,
+            take_over
+        }]
     );
     let effects = update(
         &mut model,
         Msg::Resumed {
-            agent: id(INVOICE_SCHEMA),
+            agent: schema,
             result: Ok(()),
         },
     );
-    assert_eq!(
-        model.selected,
-        Some(id(INVOICE_SCHEMA)),
-        "back on the same row"
-    );
-    assert_eq!(effects, [Effect::LoadPreview(id(INVOICE_SCHEMA))]);
+    assert_eq!(model.selected, Some(schema), "back on the same row");
+    assert_eq!(effects, [Effect::LoadPreview(schema)]);
     assert_eq!(
         model.notice.as_ref().unwrap().text,
         "Back from invoice-schema."
     );
-    update(&mut model, Msg::TakeOverUnavailable(id(INFRA)));
+
+    update(
+        &mut model,
+        Msg::TakeOverReady {
+            agent: id(INFRA),
+            result: Err(SourceError::Unsupported(
+                "it runs in another terminal; switch to it there".into(),
+            )),
+        },
+    );
     let notice = model.notice.as_ref().unwrap();
     assert!(notice.error);
     assert_eq!(
         notice.text,
         "Cannot take over infra: it runs in another terminal; switch to it there."
     );
-    update(&mut model, Msg::TakeOverUnavailable(id(EXPLORE_HANDLERS)));
+    assert_eq!(
+        press(&mut model, "a"),
+        [Effect::PrepareTakeOver(schema)],
+        "the next take over can start"
+    );
+}
+
+#[test]
+fn m_writes_to_the_selected_agent_and_enter_sends() {
+    let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    press(&mut model, "'s");
+    assert!(press(&mut model, "m").is_empty(), "the composer opens");
+    assert_eq!(model.overlay, Some(Overlay::Composer));
+    assert_eq!(model.contexts(), [Context::Composer]);
+    // Keys that do something elsewhere are text here.
+    press(&mut model, "quick: is it a generated column?");
+    key(&mut model, KeyCode::Tab);
+    let draft = model.draft.as_ref().unwrap();
+    assert_eq!(draft.kind, MessageKind::Question);
+    assert_eq!(draft.field.text(), "quick: is it a generated column?");
+    key(&mut model, KeyCode::BackTab);
+    key(&mut model, KeyCode::BackTab);
+    assert_eq!(model.draft.as_ref().unwrap().kind, MessageKind::Alert);
+    key(&mut model, KeyCode::Tab);
+    key(&mut model, KeyCode::Tab);
+    assert_eq!(
+        key(&mut model, KeyCode::Enter),
+        [Effect::Send(Outgoing {
+            to: schema,
+            kind: MessageKind::Question,
+            body: "quick: is it a generated column?".into(),
+            in_reply_to: None,
+        })]
+    );
+    assert!(key(&mut model, KeyCode::Enter).is_empty(), "sent once");
+    press(&mut model, "x");
+    assert_eq!(
+        model.draft.as_ref().unwrap().field.text(),
+        "quick: is it a generated column?",
+        "no edits while sending"
+    );
+    update(
+        &mut model,
+        Msg::MessageSent {
+            to: schema,
+            result: Ok(()),
+        },
+    );
+    assert_eq!(model.overlay, None);
+    assert_eq!(model.draft, None);
+    assert_eq!(
+        model.notice.as_ref().unwrap().text,
+        "Message sent to invoice-schema."
+    );
+}
+
+#[test]
+fn an_agent_that_asked_you_something_gets_an_answer() {
+    let mut model = model(120, 40);
+    let tools = id(INVOICE_TOOLS);
+    press(&mut model, "'v");
+    assert_eq!(model.selected, Some(tools));
+    press(&mut model, "m");
+    let draft = model.draft.as_ref().unwrap();
+    assert_eq!(draft.kind, MessageKind::Answer);
+    let question = draft.question.unwrap();
     assert!(
         model
-            .notice
-            .as_ref()
+            .registry
+            .message(question)
             .unwrap()
-            .text
-            .ends_with("inside its parent's session.")
+            .body
+            .starts_with("Should create_invoice accept a draft flag")
     );
+    press(&mut model, "Yes");
+    ctrl(&mut model, 'j');
+    update(&mut model, Msg::Paste("false by default\r\n".into()));
+    let sent = Outgoing {
+        to: tools,
+        kind: MessageKind::Answer,
+        body: "Yes\nfalse by default".into(),
+        in_reply_to: Some(question),
+    };
+    assert_eq!(key(&mut model, KeyCode::Enter), [Effect::Send(sent)]);
+    update(
+        &mut model,
+        Msg::MessageSent {
+            to: tools,
+            result: Err(SourceError::Failed("the daemon is busy.".into())),
+        },
+    );
+    assert_eq!(model.overlay, Some(Overlay::Composer), "still open");
+    assert!(!model.draft.as_ref().unwrap().sending);
+    let notice = model.notice.as_ref().unwrap();
+    assert!(notice.error);
+    assert_eq!(
+        notice.text,
+        "Could not send to invoice-tools: the daemon is busy."
+    );
+    // Another kind is not an answer: it does not reply to the question.
+    key(&mut model, KeyCode::Tab);
+    let Some(Effect::Send(note)) = key(&mut model, KeyCode::Enter).pop() else {
+        panic!("nothing sent");
+    };
+    assert_eq!(note.kind, MessageKind::Contract);
+    assert_eq!(note.in_reply_to, None);
+}
+
+#[test]
+fn quitting_asks_first_when_a_draft_would_be_lost() {
+    let mut model = model(120, 40);
+    press(&mut model, "'s");
+    press(&mut model, "m");
+    press(&mut model, "half a thought");
+    key(&mut model, KeyCode::Esc);
+    assert_eq!(model.overlay, None);
+    assert!(model.draft.is_some(), "escape keeps the draft");
+    assert!(press(&mut model, "q").is_empty(), "q asks first");
+    assert_eq!(model.prompt, Some(Prompt::Quit));
+    assert_eq!(model.contexts(), [Context::Confirm]);
+    assert!(
+        press(&mut model, "x").is_empty(),
+        "other keys wait for an answer"
+    );
+    assert!(press(&mut model, "n").is_empty(), "n stays");
+    assert_eq!(model.prompt, None);
+
+    // The draft follows the selection when the composer opens again.
+    press(&mut model, "'p");
+    press(&mut model, "m");
+    let draft = model.draft.as_ref().unwrap();
+    assert_eq!(draft.to, id(INVOICE_PAGE));
+    assert_eq!(draft.field.text(), "half a thought");
+    assert!(ctrl(&mut model, 'c').is_empty(), "ctrl-c asks too");
+    assert_eq!(press(&mut model, "y"), [Effect::Quit]);
+
+    // An empty draft is not worth a question.
+    let mut model = model_at(120, 40);
+    press(&mut model, "m");
+    press(&mut model, "  ");
+    key(&mut model, KeyCode::Esc);
+    assert_eq!(model.draft, None);
+    assert_eq!(press(&mut model, "q"), [Effect::Quit]);
+}
+
+#[test]
+fn d_shows_the_changes_and_f_switches_to_the_patch() {
+    let mut model = model(120, 40);
+    let page = id(INVOICE_PAGE);
+    press(&mut model, "'p");
+    assert_eq!(
+        press(&mut model, "d"),
+        [Effect::LoadDiff {
+            agent: page,
+            full: false
+        }]
+    );
+    assert_eq!(model.contexts(), [Context::Diff]);
+    update(
+        &mut model,
+        Msg::DiffLoaded {
+            agent: page,
+            full: false,
+            result: Ok("line\n".repeat(80)),
+        },
+    );
+    let scroll = |model: &Model| match &model.overlay {
+        Some(Overlay::Diff(diff)) => diff.scroll,
+        other => panic!("no changes window: {other:?}"),
+    };
+    press(&mut model, "jjj");
+    assert_eq!(scroll(&model), 3);
+    press(&mut model, "G");
+    // 40 rows: a window of 36 rows, 34 inside, for 80 lines.
+    assert_eq!(scroll(&model), 46);
+    press(&mut model, "jj");
+    assert_eq!(scroll(&model), 46, "not past the end");
+    assert_eq!(
+        press(&mut model, "f"),
+        [Effect::LoadDiff {
+            agent: page,
+            full: true
+        }]
+    );
+    assert_eq!(scroll(&model), 0);
+    // A late answer for the summary does not replace the patch.
+    update(
+        &mut model,
+        Msg::DiffLoaded {
+            agent: page,
+            full: false,
+            result: Ok("summary".into()),
+        },
+    );
+    let Some(Overlay::Diff(diff)) = &model.overlay else {
+        panic!("closed");
+    };
+    assert_eq!(diff.text, None);
+    update(
+        &mut model,
+        Msg::DiffLoaded {
+            agent: page,
+            full: true,
+            result: Err(SourceError::Unsupported(
+                "this volee daemon cannot show changes yet".into(),
+            )),
+        },
+    );
+    let Some(Overlay::Diff(diff)) = &model.overlay else {
+        panic!("closed");
+    };
+    assert_eq!(
+        diff.error.as_deref(),
+        Some("this volee daemon cannot show changes yet")
+    );
+    press(&mut model, "d");
+    assert_eq!(model.overlay, None);
+}
+
+#[test]
+fn unsupported_previews_and_a_closed_source_stop_the_refresh() {
+    let mut model = model(120, 40);
+    let tower = id(TOWER);
+    press(&mut model, "'t");
+    update(
+        &mut model,
+        Msg::PreviewLoaded {
+            agent: tower,
+            result: Err(SourceError::Unsupported(
+                "this volee daemon cannot show agent screens yet".into(),
+            )),
+        },
+    );
+    assert_eq!(
+        model.preview.error.as_deref(),
+        Some("this volee daemon cannot show agent screens yet")
+    );
+    let effects = update(&mut model, Msg::Tick(start().plus_millis(5_000)));
+    assert!(effects.is_empty(), "not asked again on its own");
+
+    let mut model = model_at(120, 40);
+    press(&mut model, "'t");
+    update(
+        &mut model,
+        Msg::SourceClosed(Some("lost the connection to the volee daemon".into())),
+    );
+    let notice = model.notice.as_ref().unwrap();
+    assert!(notice.error);
+    assert_eq!(
+        notice.text,
+        "Lost the connection to the volee daemon: what you see is no longer updated."
+    );
+    assert!(model.offline.is_some());
+    update(
+        &mut model,
+        Msg::PreviewLoaded {
+            agent: tower,
+            result: Ok(String::new()),
+        },
+    );
+    let effects = update(&mut model, Msg::Tick(start().plus_millis(5_000)));
+    assert!(effects.is_empty(), "offline: {effects:?}");
 }
 
 #[test]

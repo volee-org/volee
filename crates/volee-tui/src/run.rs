@@ -7,6 +7,7 @@
 //! drawn only when the model changed.
 
 use std::collections::VecDeque;
+use std::future::Future;
 use std::io::{self, Stdout, stdout};
 use std::process::{Command, ExitStatus};
 use std::sync::{Arc, Once};
@@ -20,6 +21,7 @@ use ratatui::crossterm::event::{
     Event as TerminalEvent, EventStream, MouseEventKind,
 };
 use ratatui::crossterm::execute;
+use ratatui::crossterm::style::{Attribute, Print, SetAttribute};
 use ratatui::crossterm::terminal::{EnterAlternateScreen, enable_raw_mode};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -27,7 +29,7 @@ use volee_core::Event;
 
 use crate::app::{Effect, Model, Msg, update};
 use crate::clock::Clock;
-use crate::source::Source;
+use crate::source::{Source, SourceError, TakeOver};
 use crate::view::view;
 
 /// Time between two frames while something moves.
@@ -62,16 +64,16 @@ pub(crate) trait Screen {
     /// The next input. Must be cancel safe.
     async fn input(&mut self) -> Input;
 
-    /// Suspends the interface, runs `command` in this terminal, and comes
-    /// back to the same state.
-    async fn take_over(&mut self, command: Command) -> io::Result<ExitStatus>;
+    /// Suspends the interface, runs the take over in this terminal, and
+    /// comes back to the same state.
+    async fn take_over(&mut self, take_over: &TakeOver) -> io::Result<ExitStatus>;
 }
 
 /// Runs the loop until the person quits or the terminal goes away.
 pub(crate) async fn event_loop<S: Screen, Src: Source>(
     screen: &mut S,
     source: Arc<Src>,
-    mut updates: mpsc::Receiver<Event>,
+    mut updates: mpsc::Receiver<Result<Event, SourceError>>,
     model: &mut Model,
     clock: &dyn Clock,
     first: Msg,
@@ -85,36 +87,20 @@ pub(crate) async fn event_loop<S: Screen, Src: Source>(
             for effect in update(model, msg) {
                 match effect {
                     Effect::Quit => return Ok(()),
-                    Effect::LoadPreview(agent) => {
-                        let source = Arc::clone(&source);
-                        let results = results.clone();
-                        tokio::spawn(async move {
-                            let result = source.preview(agent).await.map_err(|e| e.to_string());
-                            // The loop may be gone; then nobody needs the preview.
-                            let _ = results.send(Msg::PreviewLoaded { agent, result });
-                        });
-                    }
-                    Effect::TakeOver(agent) => {
-                        let msg = match source.attach_command(agent) {
-                            None => Msg::TakeOverUnavailable(agent),
-                            Some(command) => {
-                                let outcome = screen.take_over(command).await;
-                                Msg::Resumed {
-                                    agent,
-                                    result: match outcome {
-                                        Ok(status) if status.success() => Ok(()),
-                                        Ok(status) => Err(format!("it ended with {status}")),
-                                        Err(error) => Err(error.to_string()),
-                                    },
-                                }
-                            }
+                    Effect::TakeOver { agent, take_over } => {
+                        let outcome = screen.take_over(&take_over).await;
+                        let result = match outcome {
+                            Ok(status) if status.success() => Ok(()),
+                            Ok(status) => Err(format!("it ended with {status}")),
+                            Err(error) => Err(error.to_string()),
                         };
                         // The terminal may have been resized meanwhile. Both
-                        // messages come before any input typed after `a`.
+                        // messages come before any input typed meanwhile.
                         let (width, height) = screen.size()?;
-                        queue.push_front(msg);
+                        queue.push_front(Msg::Resumed { agent, result });
                         queue.push_front(Msg::Resize { width, height });
                     }
+                    request => run_request(request, &source, &results),
                 }
             }
         }
@@ -144,17 +130,28 @@ pub(crate) async fn event_loop<S: Screen, Src: Source>(
                     }
                 }
             }
-            event = updates.recv(), if source_open => {
-                if let Some(event) = event {
-                    // Fold what is already waiting into the same update.
-                    let mut events = vec![event];
-                    while let Ok(event) = updates.try_recv() {
-                        events.push(event);
+            item = updates.recv(), if source_open => {
+                // Fold what is already waiting into the same update.
+                let mut events = Vec::new();
+                let mut next = item;
+                let ended = loop {
+                    match next {
+                        Some(Ok(event)) => events.push(event),
+                        Some(Err(error)) => break Some(Some(error.to_string())),
+                        None => break Some(None),
                     }
+                    match updates.try_recv() {
+                        Ok(item) => next = Some(item),
+                        // Empty, or closed: the next receive tells.
+                        Err(_) => break None,
+                    }
+                };
+                if !events.is_empty() {
                     queue.push_back(Msg::Events(events));
-                } else {
+                }
+                if let Some(reason) = ended {
                     source_open = false;
-                    queue.push_back(Msg::SourceClosed);
+                    queue.push_back(Msg::SourceClosed(reason));
                 }
             }
             Some(answer) = answers.recv() => queue.push_back(answer),
@@ -164,6 +161,49 @@ pub(crate) async fn event_loop<S: Screen, Src: Source>(
             }
         }
     }
+}
+
+/// Runs a request to the source in a task; its answer comes back as a
+/// message, so a slow source never blocks drawing.
+fn run_request<Src: Source>(
+    effect: Effect,
+    source: &Arc<Src>,
+    results: &mpsc::UnboundedSender<Msg>,
+) {
+    let source = Arc::clone(source);
+    match effect {
+        Effect::LoadPreview(agent) => spawn(results, async move {
+            let result = source.preview(agent).await;
+            Msg::PreviewLoaded { agent, result }
+        }),
+        Effect::LoadDiff { agent, full } => spawn(results, async move {
+            let result = source.diff(agent, full).await;
+            Msg::DiffLoaded {
+                agent,
+                full,
+                result,
+            }
+        }),
+        Effect::PrepareTakeOver(agent) => spawn(results, async move {
+            let result = source.attach(agent).await;
+            Msg::TakeOverReady { agent, result }
+        }),
+        Effect::Send(message) => spawn(results, async move {
+            let to = message.to;
+            let result = source.send_message(message).await;
+            Msg::MessageSent { to, result }
+        }),
+        // The loop runs these itself.
+        Effect::Quit | Effect::TakeOver { .. } => {}
+    }
+}
+
+fn spawn(results: &mpsc::UnboundedSender<Msg>, task: impl Future<Output = Msg> + Send + 'static) {
+    let results = results.clone();
+    tokio::spawn(async move {
+        // The loop may be gone; then nobody needs the answer.
+        let _ = results.send(task.await);
+    });
 }
 
 /// The message of a terminal event; mouse moves are ignored.
@@ -270,24 +310,40 @@ impl Screen for TerminalScreen {
         }
     }
 
-    async fn take_over(&mut self, command: Command) -> io::Result<ExitStatus> {
-        with_suspended(self, command).await
+    async fn take_over(&mut self, take_over: &TakeOver) -> io::Result<ExitStatus> {
+        let mut command = Command::new(&take_over.program);
+        command.args(&take_over.args);
+        if let Some(cwd) = &take_over.cwd {
+            command.current_dir(cwd);
+        }
+        with_suspended(self, command, take_over.hint.as_deref()).await
     }
 }
 
 /// Suspends the interface around a child that owns the terminal: stops
 /// reading input, leaves the alternate screen, raw mode, mouse capture and
-/// bracketed paste, runs the child with this terminal's input and output
-/// while Ctrl+C is ignored by volee, then restores everything, reads input
-/// again and redraws from scratch. The model is untouched, so the same agent
-/// is still selected.
+/// bracketed paste, prints the hint, runs the child with this terminal's
+/// input and output while Ctrl+C is ignored by volee, then restores
+/// everything, reads input again and redraws from scratch. The model is
+/// untouched, so the same agent is still selected.
 async fn with_suspended(
     screen: &mut TerminalScreen,
     mut command: Command,
+    hint: Option<&str>,
 ) -> io::Result<ExitStatus> {
     // Dropping the reader stops its thread: the child owns the input now.
     screen.events = None;
     screen.leave()?;
+    if let Some(hint) = hint {
+        execute!(
+            stdout(),
+            Print("\n"),
+            SetAttribute(Attribute::Dim),
+            Print(format!("volee: {hint}")),
+            SetAttribute(Attribute::Reset),
+            Print("\n\n"),
+        )?;
+    }
     // Ctrl+C in the child also reaches volee, whose registered signal
     // handlers keep it alive; those signals are discarded below.
     let status = tokio::task::spawn_blocking(move || command.status())
@@ -362,6 +418,7 @@ mod tests {
 
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use volee_core::message::{MessageKind, Party};
     use volee_core::time::Timestamp;
 
     use super::*;
@@ -395,10 +452,12 @@ mod tests {
             self.inputs.recv().await.unwrap_or(Input::Closed)
         }
 
-        fn take_over(&mut self, command: Command) -> impl Future<Output = io::Result<ExitStatus>> {
+        fn take_over(
+            &mut self,
+            take_over: &TakeOver,
+        ) -> impl Future<Output = io::Result<ExitStatus>> {
             use std::os::unix::process::ExitStatusExt;
-            self.taken_over
-                .push(command.get_program().to_string_lossy().into_owned());
+            self.taken_over.push(take_over.program.clone());
             std::future::ready(Ok(ExitStatus::from_raw(0)))
         }
     }
@@ -410,23 +469,49 @@ mod tests {
         )))
     }
 
+    fn enter() -> Input {
+        Input::Event(TerminalEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        )))
+    }
+
+    fn screen(width: u16, height: u16) -> (FakeScreen, mpsc::UnboundedSender<Input>) {
+        let (send, inputs) = mpsc::unbounded_channel();
+        let screen = FakeScreen {
+            terminal: Terminal::new(TestBackend::new(width, height)).unwrap(),
+            inputs,
+            frames: 0,
+            taken_over: Vec::new(),
+        };
+        (screen, send)
+    }
+
+    /// Sends inputs, one batch per second, so the answers of the source
+    /// arrive in between.
+    fn type_later(send: mpsc::UnboundedSender<Input>, batches: Vec<Vec<Input>>) {
+        tokio::spawn(async move {
+            for batch in batches {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                for input in batch {
+                    send.send(input).unwrap();
+                }
+            }
+        });
+    }
+
     #[tokio::test(start_paused = true)]
     async fn the_loop_draws_reacts_and_quits() {
         let start = Timestamp::from_millis(1_793_986_617_000);
         let clock = ManualClock::new(start);
         let source = DemoSource::new(Arc::new(clock.clone()));
         let Subscription { snapshot, updates } = source.subscribe().await.unwrap();
-        let (send, inputs) = mpsc::unbounded_channel();
-        let mut screen = FakeScreen {
-            terminal: Terminal::new(TestBackend::new(120, 40)).unwrap(),
-            inputs,
-            frames: 0,
-            taken_over: Vec::new(),
-        };
+        let (mut screen, send) = screen(120, 40);
         let mut model = Model::new(Theme::default(), Keymap::default(), None, (120, 40), start);
-        for input in [key('j'), key('a'), key('?'), key('?'), key('q')] {
-            send.send(input).unwrap();
-        }
+        type_later(
+            send,
+            vec![vec![key('j'), key('a')], vec![key('?'), key('?'), key('q')]],
+        );
         event_loop(
             &mut screen,
             Arc::new(source),
@@ -449,18 +534,53 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn the_loop_sends_messages_through_the_source() {
+        let start = Timestamp::from_millis(1_793_986_617_000);
+        let clock = ManualClock::new(start);
+        let source = DemoSource::new(Arc::new(clock.clone()));
+        let Subscription { snapshot, updates } = source.subscribe().await.unwrap();
+        let (mut screen, send) = screen(120, 40);
+        let mut model = Model::new(Theme::default(), Keymap::default(), None, (120, 40), start);
+        let tools = crate::demo::agent_id(start, crate::demo::INVOICE_TOOLS);
+        let answer = [
+            key('\''),
+            key('v'),
+            key('m'),
+            key('Y'),
+            key('e'),
+            key('s'),
+            enter(),
+        ];
+        type_later(send, vec![answer.into(), vec![key('q')]]);
+        event_loop(
+            &mut screen,
+            Arc::new(source),
+            updates,
+            &mut model,
+            &clock,
+            Msg::Events(snapshot),
+        )
+        .await
+        .unwrap();
+        assert_eq!(model.draft, None, "sent");
+        let thread = model
+            .registry
+            .thread_between(Party::Human, Party::Agent(tools))
+            .unwrap();
+        let messages = model.registry.thread_messages(thread.id);
+        let answer = messages.last().unwrap();
+        assert_eq!(answer.body, "Yes");
+        assert_eq!(answer.kind, MessageKind::Answer);
+        assert!(answer.in_reply_to.is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn the_loop_applies_source_events_and_stops_with_the_terminal() {
         let start = Timestamp::from_millis(1_793_986_617_000);
         let clock = ManualClock::new(start);
         let source = DemoSource::new(Arc::new(clock.clone()));
         let Subscription { snapshot, updates } = source.subscribe().await.unwrap();
-        let (send, inputs) = mpsc::unbounded_channel();
-        let mut screen = FakeScreen {
-            terminal: Terminal::new(TestBackend::new(80, 24)).unwrap(),
-            inputs,
-            frames: 0,
-            taken_over: Vec::new(),
-        };
+        let (mut screen, send) = screen(80, 24);
         let mut model = Model::new(Theme::default(), Keymap::default(), None, (80, 24), start);
         let tower = crate::demo::agent_id(start, crate::demo::TOWER);
         tokio::spawn(async move {
@@ -484,5 +604,34 @@ mod tests {
             Some("Read missions/latency-audit/goal.md")
         );
         assert!(screen.frames >= 2, "{}", screen.frames);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_source_that_stops_says_why() {
+        let start = Timestamp::from_millis(1_793_986_617_000);
+        let clock = ManualClock::new(start);
+        let source = DemoSource::new(Arc::new(clock.clone()));
+        let (sender, updates) = mpsc::channel(4);
+        let (mut screen, send) = screen(80, 24);
+        let mut model = Model::new(Theme::default(), Keymap::default(), None, (80, 24), start);
+        tokio::spawn(async move {
+            sender
+                .send(Err(SourceError::Disconnected("lost the daemon".into())))
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            send.send(Input::Closed).unwrap();
+        });
+        event_loop(
+            &mut screen,
+            Arc::new(source),
+            updates,
+            &mut model,
+            &clock,
+            Msg::Events(Vec::new()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(model.offline.as_deref(), Some("lost the daemon"));
     }
 }

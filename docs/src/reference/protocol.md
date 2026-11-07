@@ -58,8 +58,15 @@ the backlog and then pushes every new event as a notification:
 ```
 
 Notifications arrive in log order without gaps. A subscriber that falls more
-than 4,096 events behind receives `events.lagged` and is dropped; it can
-resubscribe with `after` set to the last sequence number it applied.
+than 4,096 events behind receives `events.lagged` (with the number of events
+it `skipped`) and is dropped; it can resubscribe with `after` set to the last
+sequence number it applied.
+
+Rust clients get all of this from `volee_proto::replica`: `subscribe` returns
+the backlog and a feed of the events that follow, which drops repeats and
+picks up again after a lag on request, and `Replica` keeps a `Registry` up
+to date from a feed. The MCP server reads a `Replica`; the interface follows
+a feed, because it also needs the events themselves.
 
 ## Errors
 

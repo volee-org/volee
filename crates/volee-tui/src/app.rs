@@ -11,16 +11,19 @@ use ratatui::crossterm::event::{
 };
 use ratatui::layout::{Position, Rect};
 use volee_core::event::{Event, EventKind};
+use volee_core::message::{MessageKind, Party};
 use volee_core::role::Role;
 use volee_core::time::Timestamp;
-use volee_core::workspace::Location;
-use volee_core::{Agent, AgentId, Registry};
+use volee_core::{Agent, AgentId, MessageId, Registry};
 
 use crate::activity::ActivityLog;
+use crate::editor::TextField;
 use crate::keymap::{Action, Context, KeyCombo, Keymap};
 use crate::layout::{Mode, ScreenLayout};
 use crate::letters::Letters;
 use crate::preview::PreviewScreen;
+use crate::source::{Outgoing, SourceError, TakeOver};
+use crate::text;
 use crate::theme::Theme;
 use crate::views::hierarchy::{self, Direction, Scene, SceneKey, ZoomChoice};
 
@@ -66,13 +69,68 @@ pub(crate) enum Pane {
 }
 
 /// A window over the screen.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Overlay {
     /// The keys, scrolled by some lines.
     Help {
         /// Lines scrolled.
         scroll: u16,
     },
+    /// The message composer, editing [`Model::draft`].
+    Composer,
+    /// The changes of an agent.
+    Diff(DiffView),
+}
+
+/// A question asked on the bottom line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Prompt {
+    /// `'` was pressed and the letter of an agent is expected.
+    Jump,
+    /// Quitting would lose the draft: quit anyway?
+    Quit,
+}
+
+/// The kinds of message the person can send, in the composer's order.
+pub(crate) const MESSAGE_KINDS: [MessageKind; 5] = [
+    MessageKind::Note,
+    MessageKind::Question,
+    MessageKind::Answer,
+    MessageKind::Contract,
+    MessageKind::Alert,
+];
+
+/// A message being written to an agent. It survives closing the composer,
+/// so quitting asks first when it would be lost.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Draft {
+    /// The recipient.
+    pub(crate) to: AgentId,
+    /// What the message is for.
+    pub(crate) kind: MessageKind,
+    /// The text and the cursor.
+    pub(crate) field: TextField,
+    /// The agent's question to the person that an answer replies to.
+    pub(crate) question: Option<MessageId>,
+    /// The source is sending it.
+    pub(crate) sending: bool,
+}
+
+/// The changes window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DiffView {
+    /// Whose changes.
+    pub(crate) agent: AgentId,
+    /// The full patch rather than the summary.
+    pub(crate) full: bool,
+    /// The text, once loaded.
+    pub(crate) text: Option<String>,
+    /// Why it could not be loaded.
+    pub(crate) error: Option<String>,
+    /// A request is under way.
+    pub(crate) loading: bool,
+    /// Lines scrolled.
+    pub(crate) scroll: u16,
 }
 
 /// The filter prompt and its text.
@@ -122,6 +180,8 @@ pub(crate) struct PreviewState {
     pub(crate) loading: bool,
     /// When the last request left.
     pub(crate) requested_at: Option<Timestamp>,
+    /// The source cannot show this agent's screen: no refresh on its own.
+    pub(crate) unsupported: bool,
     /// Rows scrolled up from the bottom of the screen.
     pub(crate) scroll: u16,
 }
@@ -176,17 +236,38 @@ pub(crate) enum Msg {
     Tick(Timestamp),
     /// New events from the source, in order.
     Events(Vec<Event>),
-    /// The source stopped sending events.
-    SourceClosed,
+    /// The source stopped sending events, and why when it said.
+    SourceClosed(Option<String>),
     /// A preview arrived.
     PreviewLoaded {
         /// Whose.
         agent: AgentId,
         /// The raw screen, or why it failed.
-        result: Result<String, String>,
+        result: Result<String, SourceError>,
     },
-    /// The source cannot take over this agent from here.
-    TakeOverUnavailable(AgentId),
+    /// Changes arrived.
+    DiffLoaded {
+        /// Whose.
+        agent: AgentId,
+        /// The full patch rather than the summary.
+        full: bool,
+        /// The text, or why it failed.
+        result: Result<String, SourceError>,
+    },
+    /// The source said how to take over an agent, or why it cannot.
+    TakeOverReady {
+        /// The agent.
+        agent: AgentId,
+        /// The command, or why there is none.
+        result: Result<TakeOver, SourceError>,
+    },
+    /// The source sent a message, or could not.
+    MessageSent {
+        /// The recipient.
+        to: AgentId,
+        /// How it went.
+        result: Result<(), SourceError>,
+    },
     /// The interface is back after a take over.
     Resumed {
         /// The agent that was taken over.
@@ -197,14 +278,30 @@ pub(crate) enum Msg {
 }
 
 /// What the run loop must do after an update.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Effect {
     /// Leave volee.
     Quit,
     /// Fetch the screen of an agent.
     LoadPreview(AgentId),
-    /// Suspend the interface and take over an agent in this terminal.
-    TakeOver(AgentId),
+    /// Fetch the changes of an agent.
+    LoadDiff {
+        /// Whose.
+        agent: AgentId,
+        /// The full patch rather than the summary.
+        full: bool,
+    },
+    /// Ask the source how to take over an agent.
+    PrepareTakeOver(AgentId),
+    /// Suspend the interface and run the take over in this terminal.
+    TakeOver {
+        /// The agent.
+        agent: AgentId,
+        /// What to run.
+        take_over: TakeOver,
+    },
+    /// Send a message through the source.
+    Send(Outgoing),
 }
 
 /// The spinner of working agents.
@@ -246,14 +343,20 @@ pub(crate) struct Model {
     pub(crate) zoom: ZoomChoice,
     /// The filter.
     pub(crate) filter: Filter,
-    /// `'` was pressed and a letter is expected.
-    pub(crate) jump_pending: bool,
+    /// The question on the bottom line, if any.
+    pub(crate) prompt: Option<Prompt>,
     /// The window on top, if any.
     pub(crate) overlay: Option<Overlay>,
     /// The message at the bottom, if any.
     pub(crate) notice: Option<Notice>,
     /// The preview of the selected agent.
     pub(crate) preview: PreviewState,
+    /// The message being written, if any.
+    pub(crate) draft: Option<Draft>,
+    /// The agent whose take over the source is preparing.
+    pub(crate) pending_take_over: Option<AgentId>,
+    /// Why the source stopped, once it has: the screen no longer updates.
+    pub(crate) offline: Option<String>,
 
     /// The terminal size.
     pub(crate) size: (u16, u16),
@@ -304,10 +407,13 @@ impl Model {
             subtree: Vec::new(),
             zoom: ZoomChoice::default(),
             filter: Filter::default(),
-            jump_pending: false,
+            prompt: None,
             overlay: None,
             notice: None,
             preview: PreviewState::default(),
+            draft: None,
+            pending_take_over: None,
+            offline: None,
             size,
             layout: ScreenLayout::default(),
             rail: Vec::new(),
@@ -369,8 +475,14 @@ impl Model {
 
     /// The key contexts that apply now, the most specific first.
     pub(crate) fn contexts(&self) -> Vec<Context> {
-        if matches!(self.overlay, Some(Overlay::Help { .. })) {
-            return vec![Context::Help];
+        if self.prompt == Some(Prompt::Quit) {
+            return vec![Context::Confirm];
+        }
+        match self.overlay {
+            Some(Overlay::Help { .. }) => return vec![Context::Help],
+            Some(Overlay::Composer) => return vec![Context::Composer],
+            Some(Overlay::Diff(_)) => return vec![Context::Diff],
+            None => {}
         }
         if self.filter.editing {
             return vec![Context::Filter];
@@ -386,7 +498,7 @@ impl Model {
 
     /// Whether Escape has something to close or leave.
     pub(crate) fn can_go_back(&self) -> bool {
-        self.jump_pending
+        self.prompt.is_some()
             || self.overlay.is_some()
             || self.filter.editing
             || !self.subtree.is_empty()
@@ -412,7 +524,7 @@ impl Model {
         });
     }
 
-    fn name_of(&self, agent: AgentId) -> String {
+    pub(crate) fn name_of(&self, agent: AgentId) -> String {
         self.registry
             .agent(agent)
             .map_or_else(|| agent.short(), |agent| agent.name.clone())
@@ -742,53 +854,25 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             }
         }
         Msg::Mouse(mouse) => dirty = on_mouse(model, mouse, &mut effects),
-        Msg::Paste(text) => {
-            if model.filter.editing {
-                model
-                    .filter
-                    .text
-                    .extend(text.chars().filter(|c| !c.is_control()));
-            } else {
-                dirty = false;
-            }
-        }
+        Msg::Paste(text) => dirty = on_paste(model, &text),
         Msg::Resize { width, height } => model.size = (width, height),
         Msg::Tick(now) => dirty = on_tick(model, now, &mut effects),
         Msg::Events(events) => model.apply(events),
-        Msg::SourceClosed => {
+        Msg::SourceClosed(reason) => {
+            let reason = reason.unwrap_or_else(|| "the source stopped".to_owned());
             model.notify(
-                "The source stopped: what you see is no longer updated.",
+                format!(
+                    "{}: what you see is no longer updated.",
+                    text::sentence(&reason)
+                ),
                 true,
             );
+            model.offline = Some(reason);
         }
-        Msg::PreviewLoaded { agent, result } => {
-            if model.preview.agent == Some(agent) {
-                model.preview.loading = false;
-                match result {
-                    Ok(text) => {
-                        model.preview.screen =
-                            Some(PreviewScreen::parse(&text, model.theme.color_depth()));
-                        model.preview.error = None;
-                    }
-                    Err(error) => model.preview.error = Some(error),
-                }
-            } else {
-                dirty = false;
-            }
-        }
-        Msg::TakeOverUnavailable(agent) => {
-            let name = model.name_of(agent);
-            let record = model.registry.agent(agent);
-            let reason = match record.map(|agent| (agent.role, &agent.location)) {
-                Some((Role::Subagent, _)) => "it runs inside its parent's session",
-                Some((_, Location::Terminal)) => "it runs in another terminal; switch to it there",
-                Some((_, Location::Pane { .. })) => {
-                    "it runs in a multiplexer pane; switch to it there"
-                }
-                _ => "its harness cannot attach it from here",
-            };
-            model.notify(format!("Cannot take over {name}: {reason}."), true);
-        }
+        answer @ (Msg::PreviewLoaded { .. }
+        | Msg::DiffLoaded { .. }
+        | Msg::TakeOverReady { .. }
+        | Msg::MessageSent { .. }) => dirty = on_answer(model, answer, &mut effects),
         Msg::Resumed { agent, result } => {
             let name = model.name_of(agent);
             match result {
@@ -812,6 +896,96 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     effects
 }
 
+/// An answer of the source to a request; returns whether anything changed.
+fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool {
+    match answer {
+        Msg::PreviewLoaded { agent, result } => {
+            if model.preview.agent == Some(agent) {
+                model.preview.loading = false;
+                match result {
+                    Ok(text) => {
+                        model.preview.screen =
+                            Some(PreviewScreen::parse(&text, model.theme.color_depth()));
+                        model.preview.error = None;
+                        model.preview.unsupported = false;
+                    }
+                    Err(error) => {
+                        model.preview.unsupported = matches!(error, SourceError::Unsupported(_));
+                        model.preview.error = Some(error.to_string());
+                    }
+                }
+            } else {
+                return false;
+            }
+        }
+        Msg::DiffLoaded {
+            agent,
+            full,
+            result,
+        } => {
+            if let Some(Overlay::Diff(diff)) = &mut model.overlay
+                && diff.agent == agent
+                && diff.full == full
+            {
+                diff.loading = false;
+                match result {
+                    Ok(text) => {
+                        diff.text = Some(text);
+                        diff.error = None;
+                    }
+                    Err(error) => {
+                        diff.text = None;
+                        diff.error = Some(error.to_string());
+                    }
+                }
+            } else {
+                return false;
+            }
+        }
+        Msg::TakeOverReady { agent, result } => {
+            model.pending_take_over = None;
+            match result {
+                Ok(take_over) => effects.push(Effect::TakeOver { agent, take_over }),
+                Err(error) => {
+                    let name = model.name_of(agent);
+                    let reason = error.to_string();
+                    let reason = text::clause(&reason);
+                    model.notify(format!("Cannot take over {name}: {reason}."), true);
+                }
+            }
+        }
+        Msg::MessageSent { to, result } => {
+            let name = model.name_of(to);
+            match result {
+                Ok(()) => {
+                    if model
+                        .draft
+                        .as_ref()
+                        .is_some_and(|draft| draft.to == to && draft.sending)
+                    {
+                        model.draft = None;
+                        if model.overlay == Some(Overlay::Composer) {
+                            model.overlay = None;
+                        }
+                    }
+                    model.notify(format!("Message sent to {name}."), false);
+                }
+                Err(error) => {
+                    if let Some(draft) = model.draft.as_mut().filter(|draft| draft.to == to) {
+                        draft.sending = false;
+                    }
+                    let reason = error.to_string();
+                    let reason = text::clause(&reason);
+                    model.notify(format!("Could not send to {name}: {reason}."), true);
+                }
+            }
+        }
+        // The other messages are not answers.
+        _ => return false,
+    }
+    true
+}
+
 fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool {
     let frame_before = model.spinner();
     let second_before = model.now.as_millis().div_euclid(1_000);
@@ -833,8 +1007,9 @@ fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool
         .preview
         .requested_at
         .is_none_or(|at| at.millis_until(now) >= PREVIEW_REFRESH_MILLIS);
+    let wanted = !model.preview.loading && !model.preview.unsupported && model.offline.is_none();
     if busy
-        && !model.preview.loading
+        && wanted
         && due
         && let Some(selected) = model.selected
     {
@@ -844,13 +1019,31 @@ fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool
 }
 
 fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
-    if model.jump_pending {
-        model.jump_pending = false;
-        if let Some(letter) = key.typed_char().filter(char::is_ascii_alphabetic) {
-            match model.letters.agent(letter) {
-                Some(agent) => model.select(agent, effects),
-                None => model.notify(format!("No agent has the letter {letter}."), false),
+    match model.prompt {
+        Some(Prompt::Jump) => {
+            model.prompt = None;
+            if let Some(letter) = key.typed_char().filter(char::is_ascii_alphabetic) {
+                match model.letters.agent(letter) {
+                    Some(agent) => model.select(agent, effects),
+                    None => model.notify(format!("No agent has the letter {letter}."), false),
+                }
             }
+            return;
+        }
+        Some(Prompt::Quit) => {
+            match model.keymap.action(&[Context::Confirm], key) {
+                Some(Action::Confirm | Action::Quit) => effects.push(Effect::Quit),
+                Some(Action::Back) => model.prompt = None,
+                _ => {}
+            }
+            return;
+        }
+        None => {}
+    }
+    if model.overlay == Some(Overlay::Composer) {
+        match model.keymap.action(&[Context::Composer], key) {
+            Some(action) => compose(model, action, effects),
+            None => edit_draft(model, key),
         }
         return;
     }
@@ -858,7 +1051,7 @@ fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
         match model.keymap.action(&[Context::Filter], key) {
             Some(Action::Apply) => model.filter.editing = false,
             Some(Action::Back) => model.filter = Filter::default(),
-            Some(Action::Quit) => effects.push(Effect::Quit),
+            Some(Action::Quit) => request_quit(model, effects),
             _ => edit_filter(model, key),
         }
         return;
@@ -888,11 +1081,11 @@ fn edit_filter(model: &mut Model, key: KeyCombo) {
 
 fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Vec<Effect>) {
     match action {
-        Action::Quit => effects.push(Effect::Quit),
+        Action::Quit => request_quit(model, effects),
         Action::Help => {
             model.overlay = match model.overlay {
                 Some(Overlay::Help { .. }) => None,
-                None => Some(Overlay::Help { scroll: 0 }),
+                _ => Some(Overlay::Help { scroll: 0 }),
             };
         }
         Action::Back => back(model),
@@ -913,7 +1106,7 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
         Action::ShowNetwork => model.tab = Tab::Network,
         Action::ShowRepos => model.tab = Tab::Repos,
         Action::ShowTimeline => model.tab = Tab::Timeline,
-        Action::Jump => model.jump_pending = true,
+        Action::Jump => model.prompt = Some(Prompt::Jump),
         Action::JumpBack => {
             if let Some(previous) = model.previous
                 && model.registry.agent(previous).is_some()
@@ -923,8 +1116,23 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
         }
         Action::Filter => model.filter.editing = true,
         Action::TakeOver => {
+            if let Some(agent) = model.selected
+                && model.pending_take_over.is_none()
+            {
+                model.pending_take_over = Some(agent);
+                effects.push(Effect::PrepareTakeOver(agent));
+            }
+        }
+        Action::Message => open_composer(model),
+        Action::Diff => {
             if let Some(agent) = model.selected {
-                effects.push(Effect::TakeOver(agent));
+                open_diff(model, agent, false, effects);
+            }
+        }
+        Action::ToggleFull => {
+            if let Some(Overlay::Diff(diff)) = &model.overlay {
+                let (agent, full) = (diff.agent, !diff.full);
+                open_diff(model, agent, full, effects);
             }
         }
         Action::Down | Action::Up | Action::Left | Action::Right | Action::First | Action::Last => {
@@ -949,13 +1157,190 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
         }
         Action::ZoomAuto => model.zoom = ZoomChoice::Auto,
         Action::Refresh => {
-            if let Some(agent) = model.selected {
+            if let Some(Overlay::Diff(diff)) = &model.overlay {
+                let (agent, full) = (diff.agent, diff.full);
+                open_diff(model, agent, full, effects);
+            } else if let Some(agent) = model.selected {
                 model.request_preview(agent, effects);
             }
         }
-        // Apply only means something in the filter prompt.
+        // The other actions belong to prompts and the composer, handled
+        // before the keymap's contexts.
         _ => {}
     }
+}
+
+/// Quits, unless a draft would be lost: then asks first.
+fn request_quit(model: &mut Model, effects: &mut Vec<Effect>) {
+    if model
+        .draft
+        .as_ref()
+        .is_some_and(|draft| !draft.field.is_blank())
+    {
+        model.prompt = Some(Prompt::Quit);
+    } else {
+        effects.push(Effect::Quit);
+    }
+}
+
+/// Opens the changes window on an agent and asks for its changes.
+fn open_diff(model: &mut Model, agent: AgentId, full: bool, effects: &mut Vec<Effect>) {
+    model.overlay = Some(Overlay::Diff(DiffView {
+        agent,
+        full,
+        text: None,
+        error: None,
+        loading: true,
+        scroll: 0,
+    }));
+    effects.push(Effect::LoadDiff { agent, full });
+}
+
+/// Opens the composer on the selected agent, keeping the draft. A draft
+/// written to another agent moves to this one. When the agent waits for an
+/// answer from the person, the message starts as that answer.
+fn open_composer(model: &mut Model) {
+    let Some(agent) = model.selected else {
+        model.notify("Select an agent to write to first.", false);
+        return;
+    };
+    let question = model
+        .registry
+        .unanswered_questions()
+        .into_iter()
+        .rfind(|message| message.from == Party::Agent(agent))
+        .map(|message| message.id);
+    let kind = if question.is_some() {
+        MessageKind::Answer
+    } else {
+        MessageKind::Note
+    };
+    match &mut model.draft {
+        Some(draft) if draft.to == agent => {}
+        Some(draft) => {
+            draft.to = agent;
+            draft.kind = kind;
+            draft.question = question;
+        }
+        None => {
+            model.draft = Some(Draft {
+                to: agent,
+                kind,
+                field: TextField::default(),
+                question,
+                sending: false,
+            });
+        }
+    }
+    model.overlay = Some(Overlay::Composer);
+}
+
+/// The composer's own keys.
+fn compose(model: &mut Model, action: Action, effects: &mut Vec<Effect>) {
+    match action {
+        Action::Send => send_draft(model, effects),
+        Action::NewLine => edit(model, |field| field.insert("\n")),
+        Action::NextKind | Action::PreviousKind => {
+            if let Some(draft) = model.draft.as_mut().filter(|draft| !draft.sending) {
+                let index = MESSAGE_KINDS
+                    .iter()
+                    .position(|kind| *kind == draft.kind)
+                    .unwrap_or(0);
+                let count = MESSAGE_KINDS.len();
+                let next = if action == Action::NextKind {
+                    (index + 1) % count
+                } else {
+                    (index + count - 1) % count
+                };
+                draft.kind = MESSAGE_KINDS[next];
+            }
+        }
+        Action::Back => {
+            model.overlay = None;
+            if model
+                .draft
+                .as_ref()
+                .is_some_and(|draft| draft.field.is_blank() && !draft.sending)
+            {
+                model.draft = None;
+            }
+        }
+        Action::Quit => request_quit(model, effects),
+        _ => {}
+    }
+}
+
+fn send_draft(model: &mut Model, effects: &mut Vec<Effect>) {
+    let Some(draft) = model.draft.as_mut().filter(|draft| !draft.sending) else {
+        return;
+    };
+    let body = draft.field.text().trim().to_owned();
+    if body.is_empty() {
+        model.notify("Write something first.", false);
+        return;
+    }
+    draft.sending = true;
+    effects.push(Effect::Send(Outgoing {
+        to: draft.to,
+        kind: draft.kind,
+        body,
+        in_reply_to: draft.question.filter(|_| draft.kind == MessageKind::Answer),
+    }));
+}
+
+/// Changes the draft's text, unless it is being sent.
+fn edit(model: &mut Model, change: impl FnOnce(&mut TextField)) {
+    if let Some(draft) = model.draft.as_mut().filter(|draft| !draft.sending) {
+        change(&mut draft.field);
+    }
+}
+
+/// Keys the composer does not bind edit the text.
+fn edit_draft(model: &mut Model, key: KeyCombo) {
+    use ratatui::crossterm::event::KeyCode;
+    let control = key.ctrl_held();
+    match key.code() {
+        KeyCode::Backspace | KeyCode::Char('w') if control => {
+            edit(model, TextField::delete_word);
+        }
+        KeyCode::Char('u') if control => edit(model, TextField::delete_to_line_start),
+        KeyCode::Char('a') if control => edit(model, TextField::home),
+        KeyCode::Char('e') if control => edit(model, TextField::end),
+        KeyCode::Backspace => edit(model, TextField::backspace),
+        KeyCode::Delete => edit(model, TextField::delete),
+        KeyCode::Left => edit(model, TextField::left),
+        KeyCode::Right => edit(model, TextField::right),
+        KeyCode::Up => edit(model, TextField::up),
+        KeyCode::Down => edit(model, TextField::down),
+        KeyCode::Home => edit(model, TextField::home),
+        KeyCode::End => edit(model, TextField::end),
+        _ => {
+            if let Some(c) = key.typed_char() {
+                edit(model, |field| field.insert(c.encode_utf8(&mut [0; 4])));
+            }
+        }
+    }
+}
+
+/// Pasted text goes to the composer or the filter prompt, whichever has
+/// the keyboard; returns whether anything changed.
+fn on_paste(model: &mut Model, text: &str) -> bool {
+    if model.prompt.is_some() {
+        return false;
+    }
+    if model.overlay == Some(Overlay::Composer) {
+        let text = crate::editor::clean_paste(text);
+        edit(model, |field| field.insert(&text));
+        return true;
+    }
+    if model.filter.editing && model.overlay.is_none() {
+        model
+            .filter
+            .text
+            .extend(text.chars().filter(|c| !c.is_control()));
+        return true;
+    }
+    false
 }
 
 /// Escape: closes or leaves the innermost thing, and never quits.
@@ -978,11 +1363,16 @@ fn back(model: &mut Model) {
 fn navigate(model: &mut Model, context: Context, action: Action, effects: &mut Vec<Effect>) {
     match context {
         Context::Help => {
+            let most = crate::widgets::help::max_scroll(model);
             if let Some(Overlay::Help { scroll }) = &mut model.overlay {
-                *scroll = match action {
-                    Action::Down => scroll.saturating_add(1),
-                    _ => scroll.saturating_sub(1),
-                };
+                *scroll = scrolled(*scroll, action, most);
+            }
+        }
+        Context::Diff => {
+            let size = model.size;
+            if let Some(Overlay::Diff(diff)) = &mut model.overlay {
+                let most = crate::widgets::diff::max_scroll(diff, size);
+                diff.scroll = scrolled(diff.scroll, action, most);
             }
         }
         Context::Detail => {
@@ -1046,17 +1436,43 @@ fn navigate(model: &mut Model, context: Context, action: Action, effects: &mut V
     }
 }
 
+/// A window's scroll after a key, between 0 and `most` lines.
+fn scrolled(scroll: u16, action: Action, most: u16) -> u16 {
+    let scroll = match action {
+        Action::Down => scroll.saturating_add(1),
+        Action::Up => scroll.saturating_sub(1),
+        Action::First => 0,
+        Action::Last => most,
+        _ => scroll,
+    };
+    scroll.min(most)
+}
+
 /// Handles the mouse; returns whether anything changed.
 fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> bool {
     let (column, row) = (mouse.column, mouse.row);
+    if model.prompt.is_some() {
+        return false;
+    }
     if model.overlay.is_some() {
-        if let Some(Overlay::Help { scroll }) = &mut model.overlay {
-            match mouse.kind {
-                MouseEventKind::ScrollDown => *scroll = scroll.saturating_add(2),
-                MouseEventKind::ScrollUp => *scroll = scroll.saturating_sub(2),
-                MouseEventKind::Down(_) => model.overlay = None,
-                _ => return false,
+        let action = match mouse.kind {
+            MouseEventKind::ScrollDown => Action::Down,
+            MouseEventKind::ScrollUp => Action::Up,
+            // A click outside the composer could lose a sentence: only the
+            // keys close it.
+            MouseEventKind::Down(_) if model.overlay != Some(Overlay::Composer) => {
+                model.overlay = None;
+                return true;
             }
+            _ => return false,
+        };
+        let context = match model.overlay {
+            Some(Overlay::Help { .. }) => Context::Help,
+            Some(Overlay::Diff(_)) => Context::Diff,
+            _ => return false,
+        };
+        for _ in 0..2 {
+            navigate(model, context, action, effects);
         }
         return true;
     }

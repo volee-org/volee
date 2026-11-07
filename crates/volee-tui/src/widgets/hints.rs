@@ -6,7 +6,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Span;
 
 use super::put_spans;
-use crate::app::Model;
+use crate::app::{Model, Prompt};
 use crate::keymap::{Action, Context};
 use crate::text;
 use crate::theme::StyleRole;
@@ -25,14 +25,8 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
     let width = area.width.saturating_sub(1);
     let x = area.x + 1;
 
-    if model.jump_pending {
-        let spans = [
-            Span::styled("jump to", theme.style(StyleRole::Input)),
-            Span::styled(": press the letter of an agent   ", words),
-            Span::styled("esc", key),
-            Span::styled(" cancel", words),
-        ];
-        put_spans(buf, x, area.y, &spans, width);
+    if let Some(prompt) = model.prompt {
+        render_prompt(model, prompt, Rect::new(x, area.y, width, 1), buf);
         return;
     }
     if model.filter.editing {
@@ -62,8 +56,19 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
     }
     let contexts = model.contexts();
     let mut groups = groups(model, &contexts);
+    // A draft waits while the composer is closed: say so first.
+    if model.overlay.is_none()
+        && let Some(draft) = &model.draft
+    {
+        let mark = vec![Span::styled(
+            format!("✎ draft to {}", model.name_of(draft.to)),
+            theme.style(StyleRole::Input),
+        )];
+        groups.insert(0, (Action::Message, mark));
+    }
+    // Windows and prompts show their own way out.
     if model.can_go_back()
-        && !contexts.contains(&Context::Help)
+        && contexts.contains(&Context::Global)
         && let Some(esc) = model.keymap.first_key(Context::Global, Action::Back)
     {
         let back = vec![
@@ -100,6 +105,41 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
             help_width,
         );
     }
+}
+
+/// The question of a prompt and its answers.
+fn render_prompt(model: &Model, prompt: Prompt, area: Rect, buf: &mut Buffer) {
+    let theme = &model.theme;
+    let key = theme.style(StyleRole::HintKey);
+    let words = theme.style(StyleRole::HintText);
+    let spans = match prompt {
+        Prompt::Jump => vec![
+            Span::styled("jump to", theme.style(StyleRole::Input)),
+            Span::styled(": press the letter of an agent   ", words),
+            Span::styled("esc", key),
+            Span::styled(" cancel", words),
+        ],
+        Prompt::Quit => {
+            let to = model
+                .draft
+                .as_ref()
+                .map(|draft| model.name_of(draft.to))
+                .unwrap_or_default();
+            let mut spans = vec![
+                Span::styled(
+                    format!("Quit and lose the draft to {to}?"),
+                    theme.style(StyleRole::Input),
+                ),
+                Span::raw(SEPARATOR),
+            ];
+            let answers = groups(model, &[Context::Confirm])
+                .into_iter()
+                .map(|(_, group)| group);
+            spans.extend(join(answers, usize::from(area.width)));
+            spans
+        }
+    };
+    put_spans(buf, area.x, area.y, &spans, area.width);
 }
 
 /// One group of spans per hint (`j/k` and ` move`), with its action.

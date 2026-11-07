@@ -1,0 +1,28 @@
+---
+source: crates/volee-tui/src/screen_tests.rs
+expression: draw(&model)
+---
+" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline                !2 ▸6 12 "
+"╭ Agents · tree ───────────────────╮╭ Detail ──────────────────────────────────╮"
+"│ t ▸ tower                 24 min ││ invoice-schema · worker                  │"
+"│ n ├─ · invoicing          14 min ││ ! needs you · for 2 min                  │"
+"│▌s │  ├─ ! invoice-schema   2 min ││ Bash: bun run db:migrate                 │"
+"│ v │  ├─ ! invoice-tools    1 min ││ mission  Invoicing (change)              │"
+"│ p │  └─ ✓ invoice-page     6 min ││ verdict  needs you                       │"
+"│ l └─ · latency-audit      12 min ││ repo     billing › feat/invoices from m… │"
+"│ g    ├─ ▸ trace-gateway   11 min ││ worktree …orktrees/billing/feat-invoices │"
+"│ e    │  ├─ ▸ explore-hand… 6 min ││ runs in  background · sonnet             │"
+"│ x    │  └─ ▸ explore-traces 39 s ││ delivery 2 commits · not pushed · uncom… │"
+"│ r    └─ ▸ trace-search    11 min ││ last     Write migrations/0042_invoices… │"
+"│ i · infra                 25 min │╰──────────────────────────────────────────╯"
+"│ b ▸ broken-links          18 min │╭ Preview · invoice-schema ────────────────╮"
+"│                                  ││ │   Apply the pending migrations to the l│"
+"│                                  ││ │                                        │"
+"│                                  ││ │ Do you want to proceed?                │"
+"│                                  ││ │ ❯ 1. Yes                               │"
+"│                                  ││ │   2. Yes, and don't ask again for bun r│"
+"│                                  ││ │   3. No, and tell Claude what to do dif│"
+"│                                  ││ ╰────────────────────────────────────────│"
+"│                                  ││                                          │"
+"╰──────────────────────────────────╯╰──────────────────────────────────────────╯"
+" Quit and lose the draft to invoice-schema?   y yes   n no                      "

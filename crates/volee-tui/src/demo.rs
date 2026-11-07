@@ -11,19 +11,18 @@
 mod scenario;
 mod screens;
 
-use std::process::Command;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use tokio::sync::mpsc;
 use ulid::Ulid;
 use volee_core::event::{Event, EventKind};
-use volee_core::message::{Message, MessageKind, Party, Receipt, Thread};
+use volee_core::message::{Message, Party, Receipt, Thread};
 use volee_core::time::Timestamp;
 use volee_core::{AgentId, MessageId, Registry, ThreadId};
 
 use crate::clock::Clock;
-use crate::source::{Source, SourceError, Subscription};
+use crate::source::{Outgoing, Source, SourceError, Subscription, TakeOver};
 
 /// A [`Source`] with a simulated team of agents, for `volee demo`,
 /// screenshots and tests.
@@ -46,10 +45,13 @@ pub struct DemoSource {
     state: Arc<Mutex<Outbox>>,
 }
 
+/// Where the demo sends its events.
+type Updates = mpsc::Sender<Result<Event, SourceError>>;
+
 /// What the demo needs to post the person's messages.
 #[derive(Debug, Default)]
 struct Outbox {
-    sender: Option<mpsc::Sender<Event>>,
+    sender: Option<Updates>,
     threads: Vec<(AgentId, ThreadId)>,
     sent: u128,
 }
@@ -112,7 +114,7 @@ impl Source for DemoSource {
             for event in scenario::beats(start).skip_while(|event| event.at <= now) {
                 let wait = Duration::from_millis(now.millis_until(event.at));
                 tokio::time::sleep_until(origin + wait).await;
-                if sender.send(event).await.is_err() {
+                if sender.send(Ok(event)).await.is_err() {
                     break;
                 }
             }
@@ -132,47 +134,61 @@ impl Source for DemoSource {
         std::future::ready(self.diff_at(agent, full, self.clock.now()))
     }
 
-    async fn send_message(
-        &self,
-        to: AgentId,
-        kind: MessageKind,
-        body: String,
-    ) -> Result<(), SourceError> {
+    async fn send_message(&self, message: Outgoing) -> Result<(), SourceError> {
+        let to = message.to;
         let member = scenario::member_of(self.start, to).ok_or(SourceError::UnknownAgent(to))?;
         let now = self.clock.now();
-        let (sender, events) = self.message_events(member, to, kind, body, now)?;
+        let (sender, events) = self.message_events(member, message, now)?;
         for event in events {
             sender
-                .send(event)
+                .send(Ok(event))
                 .await
                 .map_err(|_| SourceError::Disconnected("the interface stopped".to_owned()))?;
         }
         Ok(())
     }
 
-    fn attach_command(&self, agent: AgentId) -> Option<Command> {
-        let member = scenario::member_of(self.start, agent)?;
-        let cast = &scenario::CAST[member];
-        if !cast.background || cast.role == volee_core::role::Role::Subagent {
-            return None;
-        }
-        // A harmless stand-in for `claude attach`: it explains what would
-        // happen and waits for Enter, so the demo shows the round trip.
-        let script = "printf '\\n  volee demo: here volee would run claude attach %s\\n  \
-                      and show the session of %s in this terminal.\\n\\n  \
-                      Press Enter to come back to volee. ' \"$1\" \"$2\"; read -r _";
-        let mut command = Command::new("sh");
-        command
-            .arg("-c")
-            .arg(script)
-            .arg("volee-demo")
-            .arg(scenario::session_of(member).short())
-            .arg(cast.name);
-        Some(command)
+    fn attach(&self, agent: AgentId) -> impl Future<Output = Result<TakeOver, SourceError>> + Send {
+        std::future::ready(self.take_over(agent))
     }
 }
 
 impl DemoSource {
+    /// A harmless stand-in for `claude attach`: it says what would happen
+    /// and waits for Enter, so the demo shows the round trip. Only the
+    /// background sessions can be taken over, as with Claude Code.
+    fn take_over(&self, agent: AgentId) -> Result<TakeOver, SourceError> {
+        let member =
+            scenario::member_of(self.start, agent).ok_or(SourceError::UnknownAgent(agent))?;
+        let cast = &scenario::CAST[member];
+        if cast.role == volee_core::role::Role::Subagent {
+            return Err(SourceError::Unsupported(
+                "it runs inside its parent's session".to_owned(),
+            ));
+        }
+        if !cast.background {
+            return Err(SourceError::Unsupported(
+                "it runs in another terminal; switch to it there".to_owned(),
+            ));
+        }
+        let script = "printf '\\n  volee demo: here volee would run claude attach %s\\n  \
+                      and show the session of %s in this terminal.\\n\\n  \
+                      Press Enter to come back to volee. ' \"$1\" \"$2\"; read -r _";
+        Ok(TakeOver {
+            program: "sh".to_owned(),
+            args: vec![
+                "-c".to_owned(),
+                script.to_owned(),
+                "volee-demo".to_owned(),
+                scenario::session_of(member).short().to_owned(),
+                cast.name.to_owned(),
+            ],
+            cwd: None,
+            // The stand-in says it itself.
+            hint: None,
+        })
+    }
+
     /// The changes of an agent at `at`: a summary, or a small patch.
     fn diff_at(&self, agent: AgentId, full: bool, at: Timestamp) -> Result<String, SourceError> {
         let registry = Registry::from_events(&self.events_until(at))
@@ -208,11 +224,15 @@ impl DemoSource {
     fn message_events(
         &self,
         member: usize,
-        to: AgentId,
-        kind: MessageKind,
-        body: String,
+        message: Outgoing,
         now: Timestamp,
-    ) -> Result<(mpsc::Sender<Event>, Vec<Event>), SourceError> {
+    ) -> Result<(Updates, Vec<Event>), SourceError> {
+        let Outgoing {
+            to,
+            kind,
+            body,
+            in_reply_to,
+        } = message;
         let mut outbox = self.outbox();
         let sender = outbox
             .sender
@@ -256,7 +276,7 @@ impl DemoSource {
                     kind,
                     body,
                     refs: Vec::new(),
-                    in_reply_to: None,
+                    in_reply_to,
                     at: now,
                     receipts: vec![Receipt {
                         to: Party::Agent(to),
@@ -278,8 +298,19 @@ pub(crate) use scenario::{
 
 #[cfg(test)]
 mod tests {
+    use volee_core::message::MessageKind;
+
     use super::*;
     use crate::clock::ManualClock;
+
+    fn to(agent: AgentId, kind: MessageKind, body: &str) -> Outgoing {
+        Outgoing {
+            to: agent,
+            kind,
+            body: body.to_owned(),
+            in_reply_to: None,
+        }
+    }
 
     fn start() -> Timestamp {
         Timestamp::from_millis(1_793_986_617_000)
@@ -298,9 +329,9 @@ mod tests {
             mut updates,
         } = demo.subscribe().await.unwrap();
         assert_eq!(snapshot, demo.events_until(start()));
-        let first = updates.recv().await.unwrap();
+        let first = updates.recv().await.unwrap().unwrap();
         assert_eq!(first.at, start().plus_millis(2_000));
-        let second = updates.recv().await.unwrap();
+        let second = updates.recv().await.unwrap().unwrap();
         assert!(second.at > first.at);
         let mut registry = Registry::from_events(&snapshot).unwrap();
         registry.apply(&first).unwrap();
@@ -330,7 +361,7 @@ mod tests {
         let (demo, _clock) = demo();
         let tools = agent_id(start(), INVOICE_TOOLS);
         assert!(matches!(
-            demo.send_message(tools, MessageKind::Answer, "Yes".into())
+            demo.send_message(to(tools, MessageKind::Answer, "Yes"))
                 .await,
             Err(SourceError::Disconnected(_))
         ));
@@ -338,33 +369,50 @@ mod tests {
             snapshot,
             mut updates,
         } = demo.subscribe().await.unwrap();
-        demo.send_message(tools, MessageKind::Answer, "Yes, false by default.".into())
-            .await
-            .unwrap();
-        demo.send_message(tools, MessageKind::Note, "Thanks".into())
+        let question = MessageId::from_ulid(Ulid::from_parts(1, 1));
+        demo.send_message(Outgoing {
+            in_reply_to: Some(question),
+            ..to(tools, MessageKind::Answer, "Yes, false by default.")
+        })
+        .await
+        .unwrap();
+        demo.send_message(to(tools, MessageKind::Note, "Thanks"))
             .await
             .unwrap();
         let mut registry = Registry::from_events(&snapshot).unwrap();
         for _ in 0..3 {
-            registry.apply(&updates.recv().await.unwrap()).unwrap();
+            registry
+                .apply(&updates.recv().await.unwrap().unwrap())
+                .unwrap();
         }
         let thread = registry
             .thread_between(Party::Human, Party::Agent(tools))
             .unwrap();
-        assert_eq!(registry.thread_messages(thread.id).len(), 2);
+        let messages = registry.thread_messages(thread.id);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].in_reply_to, Some(question));
     }
 
-    #[test]
-    fn only_background_sessions_can_be_taken_over() {
+    #[tokio::test]
+    async fn only_background_sessions_can_be_taken_over() {
         let (demo, _clock) = demo();
-        let command = demo
-            .attach_command(agent_id(start(), INVOICE_PAGE))
-            .unwrap();
-        assert_eq!(command.get_program(), "sh");
-        assert!(demo.attach_command(agent_id(start(), INFRA)).is_none());
-        assert!(
-            demo.attach_command(agent_id(start(), EXPLORE_TRACES))
-                .is_none()
+        let take_over = demo.attach(agent_id(start(), INVOICE_PAGE)).await.unwrap();
+        assert_eq!(take_over.program, "sh");
+        assert_eq!(
+            take_over.args.last().map(String::as_str),
+            Some("invoice-page")
+        );
+        assert_eq!(
+            demo.attach(agent_id(start(), INFRA)).await,
+            Err(SourceError::Unsupported(
+                "it runs in another terminal; switch to it there".into()
+            ))
+        );
+        assert_eq!(
+            demo.attach(agent_id(start(), EXPLORE_TRACES)).await,
+            Err(SourceError::Unsupported(
+                "it runs inside its parent's session".into()
+            ))
         );
     }
 

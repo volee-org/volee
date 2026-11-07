@@ -10,6 +10,38 @@ volee demo
 
 ![volee demo: the hierarchy of a lead agent, two missions and their workers](../images/demo.gif)
 
+## Starting volee
+
+```sh
+volee
+```
+
+`volee` with no command connects to the [daemon](cli.md#the-daemon),
+starting it in the background when it does not run yet, and shows every
+agent it knows: the Claude Code sessions it finds on the machine, wherever
+they were started, and the agents volee launched itself. New sessions show
+up within a couple of seconds; nothing needs to be configured first.
+
+Everything on the screen comes from the daemon, and so do the actions:
+
+| What | Needs from the daemon |
+| --- | --- |
+| The agents, their states and messages | Its event stream, which every daemon has. |
+| Writing to an agent (`m`) | The `messages.send` method, which every daemon has. |
+| The preview of an agent's screen | The `agents.preview` method. |
+| An agent's changes (`d`) | The `agents.diff` method. |
+| Taking over an agent (`a`) | The `agents.attach` method. |
+
+When the daemon cannot do something, because it does not have the method
+yet or because a program it needs (Claude Code, git) is missing, volee says
+so in a sentence where the result would be, such as "No preview: this volee
+daemon cannot show agent screens yet", and goes on working. If the daemon
+stops while volee runs, the top bar shows `offline` and the screen stops
+changing; start `volee` again to reconnect.
+
+The theme and the keys come from the `[tui]` table of the
+[configuration](configuration.md), as for the demo.
+
 ## Layout
 
 ```text
@@ -26,7 +58,7 @@ volee demo
 │ invoice-tools        ││ ⏺ Before I go on, one question:                                       │
 │ ! needs you · 1 min  ││   Should create_invoice accept a draft flag?                          │
 ╰──────────────────────╯╰───────────────────────────────────────────────────────────────────────╯
- h/j/k/l move   enter subtree   ' jump   - previous   / filter   a take over   q quit     ? help
+ h/j/k/l move   enter subtree   ' jump   / filter   m message   a take over   q quit     ? help
 ```
 
 - **Top bar.** The views, numbered (press the number to switch), and
@@ -115,17 +147,43 @@ for each card; `Esc` goes back to the whole hierarchy.
 `Esc` closes or leaves one thing at a time (the help, the subtree, the
 filter, then the panel), and never quits volee.
 
+## Writing to an agent
+
+`m` opens the composer on the selected agent. Write your message (Markdown
+is fine), choose its kind with `Tab` (`note`, `question`, `answer`,
+`contract` or `alert`) and send it with `Enter`. `Alt+Enter` or `Ctrl+J`
+starts a new line, and pasting several lines keeps them.
+
+When the agent asked you a question that you have not answered, the
+composer opens as the answer to it and shows the question; volee then links
+the two, so the question stops waiting. A message reaches an agent volee
+launched at the end of its turn, and wakes it when it is idle. Sessions
+started outside volee cannot receive messages yet; the composer says so.
+
+`Esc` closes the composer and keeps what you wrote: the hint line shows
+`✎ draft to <agent>`, and `m` brings it back, addressed to the agent
+selected then. Quitting with a draft asks first.
+
+## Changes
+
+`d` shows the selected agent's changes against its base branch: first a
+summary (`git diff --stat`), then the full patch with `f`. `j` and `k`
+scroll, `r` loads them again, and `Esc` or `d` closes the window.
+
 ## Taking over an agent
 
-`a` takes over the selected agent in this terminal: volee steps aside and
-runs `claude attach` on its session. Leave the session with `Ctrl+Z` and
-volee comes back, on the same agent. Agents running in another terminal
-cannot be attached from here; volee tells you where they are instead.
+`a` takes over the selected agent in this terminal: volee asks the daemon
+how, steps aside and runs the command it gives, such as `claude attach` on
+the agent's session, after printing how to come back. Leave the session
+with `Ctrl+Z` and volee comes back, on the same agent. Agents running in
+another terminal cannot be attached from here; volee tells you where they
+are instead.
 
 ## Keys
 
-`q` quits at once. The tables below are generated from the keymap, like the
-help and the hints.
+`q` quits at once, unless a message you started would be lost: then volee
+asks first. The tables below are generated from the keymap, like the help
+and the hints.
 
 To move an action to other keys, name it in the `[tui.keys]` table of the
 [configuration](configuration.md). An override replaces every key of the
@@ -145,6 +203,8 @@ take-over = "ctrl-a"
 | `'` | jump to an agent: press ' then its letter | `jump` |
 | `-` | back to the agent selected before | `jump-back` |
 | `/` | filter agents by name, repository, branch or mission | `filter` |
+| `m` | write a message to the selected agent | `message` |
+| `d` | show the selected agent's changes | `diff` |
 | `a` | take over the selected agent in this terminal | `take-over` |
 | `tab` | focus the next panel | `next-pane` |
 | `shift-tab` | focus the previous panel | `previous-pane` |
@@ -154,7 +214,7 @@ take-over = "ctrl-a"
 | `4` | show the timeline | `show-timeline` |
 | `?` | show or hide the keys | `help` |
 | `esc` | close, cancel or go back (never quits) | `back` |
-| `q`, `ctrl-c` | quit volee | `quit` |
+| `q`, `ctrl-c` | quit volee (asks first when a draft would be lost) | `quit` |
 
 ### Agents list
 
@@ -198,6 +258,38 @@ take-over = "ctrl-a"
 | `enter` | keep the filter and close the prompt | `apply` |
 | `esc` | clear the filter and close the prompt | `back` |
 | `ctrl-c` | quit volee | `quit` |
+
+### Message composer
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `enter` | send the message | `send` |
+| `alt-enter`, `ctrl-j` | start a new line | `new-line` |
+| `tab` | next kind of message | `next-kind` |
+| `shift-tab` | previous kind of message | `previous-kind` |
+| `esc` | close the composer and keep the draft | `back` |
+| `ctrl-c` | quit volee (asks first) | `quit` |
+
+### Changes
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `j`, `↓` | scroll down | `down` |
+| `k`, `↑` | scroll up | `up` |
+| `g`, `home` | top | `first` |
+| `G`, `end` | bottom | `last` |
+| `f` | switch between the summary and the full patch | `toggle-full` |
+| `r` | load the changes again | `refresh` |
+| `esc`, `d`, `q` | close the changes | `back` |
+| `ctrl-c` | quit volee | `quit` |
+
+### Questions
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `y` | yes | `confirm` |
+| `n`, `esc` | no | `back` |
+| `ctrl-c` | quit volee without asking again | `quit` |
 
 ### Help
 
