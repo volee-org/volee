@@ -17,16 +17,14 @@
 //! subscription, and sends every change through the daemon, which applies
 //! the routing rule.
 
-mod replica;
 mod server;
 mod view;
 
-pub use replica::Replica;
 pub use server::{McpError, VoleeMcp};
 
 /// The argument types of the tools, for callers that invoke tools directly.
 pub mod tools {
     pub use crate::server::{
-        KindArg, ListArgs, OutcomeArg, ReadArgs, RefArg, ReportArgs, SendArgs,
+        KindArg, ListArgs, OutcomeArg, ReadArgs, RefArg, ReportArgs, SendArgs, SpawnArgs,
     };
 }

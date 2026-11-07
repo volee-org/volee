@@ -50,12 +50,30 @@ pub enum ConfigError {
 pub struct Config {
     /// Defaults for the agents volee launches.
     pub agents: AgentDefaults,
-    /// Where worktrees go.
-    pub worktrees: Worktrees,
     /// Repositories volee may launch agents in, by name.
     pub repos: BTreeMap<String, Repo>,
+    /// Messaging settings.
+    pub messages: Messages,
     /// Interface settings.
     pub tui: Tui,
+}
+
+/// Messaging settings.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Messages {
+    /// Whether volee may summarize threads with a model. Off unless the
+    /// person turns it on: each summary runs the harness with their account.
+    pub summaries: bool,
+    /// The model for summaries; `haiku` when unset.
+    pub summary_model: Option<String>,
+}
+
+impl Messages {
+    /// The model summaries use.
+    pub fn summary_model(&self) -> &str {
+        self.summary_model.as_deref().unwrap_or("haiku")
+    }
 }
 
 /// Defaults for the agents volee launches.
@@ -113,15 +131,6 @@ impl fmt::Display for PermissionMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_flag())
     }
-}
-
-/// Where worktrees go.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Worktrees {
-    /// The directory under which volee creates worktrees, one folder per
-    /// repository. The data directory when unset.
-    pub root: Option<PathBuf>,
 }
 
 /// A repository volee may launch agents in.
@@ -186,9 +195,6 @@ impl Config {
             path: path.to_owned(),
             message,
         };
-        if let Some(root) = &self.worktrees.root {
-            self.worktrees.root = Some(expand(root, home));
-        }
         for (name, repo) in &mut self.repos {
             if !is_valid_name(name) {
                 return Err(invalid(format!(
@@ -216,14 +222,6 @@ impl Config {
         repo.and_then(|name| self.repos.get(name))
             .and_then(|repo| repo.model.as_deref())
             .or(self.agents.model.as_deref())
-    }
-
-    /// The worktree root: the configured one, else `data_dir/worktrees`.
-    pub fn worktree_root(&self, data_dir: &Path) -> PathBuf {
-        self.worktrees
-            .root
-            .clone()
-            .unwrap_or_else(|| data_dir.join("worktrees"))
     }
 
     /// The repository whose main checkout is `path`, if one is configured.
@@ -349,14 +347,11 @@ mod tests {
     }
 
     #[test]
-    fn the_worktree_root_defaults_to_the_data_directory() {
-        let data = Path::new("/home/ada/.local/share/volee");
-        assert_eq!(
-            Config::default().worktree_root(data),
-            data.join("worktrees")
-        );
-        let config = parse("[worktrees]\nroot = \"~/wt\"\n").unwrap();
-        assert_eq!(config.worktree_root(data), PathBuf::from("/home/ada/wt"));
+    fn worktrees_cannot_be_moved_out_of_the_repository() {
+        // Claude Code never trusts a worktree started outside its repository
+        // (ADR 0013), so the old `[worktrees]` table is an error, not a no-op.
+        let error = parse("[worktrees]\nroot = \"~/wt\"\n").unwrap_err();
+        assert!(error.to_string().contains("worktrees"), "{error}");
     }
 
     #[test]

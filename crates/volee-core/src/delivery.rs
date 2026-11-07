@@ -1,9 +1,12 @@
 //! Delivery evidence and the cleanup rule (ADR 0011).
 
 use std::fmt;
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent::Agent;
+use crate::role::LaunchedBy;
 use crate::state::AgentState;
 use crate::time::Timestamp;
 
@@ -187,27 +190,59 @@ impl Delivery {
     }
 }
 
-/// Why volee refuses to tidy an agent's worktree.
+/// Why volee refuses to tidy an agent's worktree. Each reason reads as a
+/// sentence for the person who asked.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "reason")]
 pub enum TidyRefusal {
-    /// The agent is still working or waits for a human.
+    /// The agent is still running a turn, starting, or waiting for a person.
     Busy,
     /// The worktree has uncommitted changes.
     UncommittedChanges,
     /// Nothing proves the work landed.
     NotDelivered,
+    /// volee did not launch the agent, so its worktree is not volee's.
+    NotLaunchedByVolee,
+    /// The agent does not work in a worktree volee created
+    /// (`<repository>/.claude/worktrees/<name>`).
+    NotAVoleeWorktree,
+    /// The delivery evidence was never checked.
+    EvidenceNotChecked,
+    /// The delivery evidence was checked before the agent's last change, so
+    /// it may not show what the agent did last.
+    EvidenceStale,
+    /// The harness kept the agent's session instead of deleting it.
+    KeptByHarness {
+        /// The harness's explanation.
+        detail: String,
+    },
+    /// git refused to remove the worktree.
+    RefusedByGit {
+        /// git's explanation, as volee-git reports it.
+        detail: String,
+    },
 }
 
 impl fmt::Display for TidyRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Busy => "the agent is still busy",
-            Self::UncommittedChanges => "the worktree has uncommitted changes",
-            Self::NotDelivered => {
-                "no evidence that the work landed (merge, merged pull request or report)"
+        match self {
+            Self::Busy => f.write_str("it is still running (working, starting or waiting for you)"),
+            Self::UncommittedChanges => f.write_str("its worktree has uncommitted changes"),
+            Self::NotDelivered => f.write_str(
+                "its work has not landed: not merged into its base branch, no merged pull \
+                 request, no report",
+            ),
+            Self::NotLaunchedByVolee => f.write_str("volee did not launch it"),
+            Self::NotAVoleeWorktree => {
+                f.write_str("it does not work in a worktree volee created (.claude/worktrees)")
             }
-        })
+            Self::EvidenceNotChecked => f.write_str("volee has not checked its work yet"),
+            Self::EvidenceStale => f.write_str(
+                "volee has not checked its work since its last change; try again in a minute",
+            ),
+            Self::KeptByHarness { detail } => write!(f, "Claude Code kept its session: {detail}"),
+            Self::RefusedByGit { detail } => write!(f, "git kept its worktree: {detail}"),
+        }
     }
 }
 
@@ -243,6 +278,75 @@ pub fn tidy_verdict(state: &AgentState, delivery: &Delivery) -> TidyVerdict {
     } else {
         TidyVerdict::Refused { reasons }
     }
+}
+
+/// Where volee creates the worktrees of the agents it launches, inside their
+/// repository ([ADR 0013](https://volee-org.github.io/volee/adr/0013-worktrees-live-in-their-repository.html)).
+pub const VOLEE_WORKTREES: &str = ".claude/worktrees";
+
+/// Decides whether volee may remove `agent`'s worktree, and which one
+/// (ADR 0011).
+///
+/// volee removes only a worktree it created (inside
+/// `<repository>/.claude/worktrees/`) for an agent it launched, and only
+/// when delivery evidence checked since the agent's last change satisfies
+/// [`tidy_verdict`]. Stale or missing evidence proves nothing, so only the
+/// agent's state is judged then. Every reason to keep the worktree is
+/// reported at once. The branch is never part of the decision: it is always
+/// kept.
+pub fn tidy_check(agent: &Agent) -> Result<PathBuf, Vec<TidyRefusal>> {
+    let mut reasons = Vec::new();
+    if agent.launched_by == LaunchedBy::Outside {
+        reasons.push(TidyRefusal::NotLaunchedByVolee);
+    }
+    let worktree = agent
+        .workspace
+        .worktree
+        .as_ref()
+        .filter(|worktree| is_volee_worktree(worktree, agent.workspace.repo_root.as_deref()));
+    if worktree.is_none() {
+        reasons.push(TidyRefusal::NotAVoleeWorktree);
+    }
+    let evidence = match agent.delivery.checked_at {
+        None => Some(TidyRefusal::EvidenceNotChecked),
+        Some(_) if agent.delivery.is_stale_at(agent.state_since) => {
+            Some(TidyRefusal::EvidenceStale)
+        }
+        Some(_) => None,
+    };
+    match evidence {
+        Some(refusal) => {
+            if agent.state.is_busy() {
+                reasons.push(TidyRefusal::Busy);
+            }
+            reasons.push(refusal);
+        }
+        None => {
+            if let TidyVerdict::Refused { reasons: more } =
+                tidy_verdict(&agent.state, &agent.delivery)
+            {
+                reasons.extend(more);
+            }
+        }
+    }
+    match worktree {
+        Some(worktree) if reasons.is_empty() => Ok(worktree.clone()),
+        _ => Err(reasons),
+    }
+}
+
+/// Whether `worktree` is strictly inside `<repo_root>/.claude/worktrees/`,
+/// written without `.` or `..` that could lead out of it.
+fn is_volee_worktree(worktree: &Path, repo_root: Option<&Path>) -> bool {
+    let Some(root) = repo_root else {
+        return false;
+    };
+    let dir = root.join(VOLEE_WORKTREES);
+    worktree != dir
+        && worktree.starts_with(&dir)
+        && worktree
+            .components()
+            .all(|part| !matches!(part, Component::CurDir | Component::ParentDir))
 }
 
 #[cfg(test)]
@@ -370,5 +474,141 @@ mod tests {
         assert!(!checked.is_stale_at(Timestamp::from_millis(1_000)));
         assert!(!Delivery::default().is_stale_at(Timestamp::from_millis(1_001)));
         assert_eq!(checked.without_check_time(), Delivery::default());
+    }
+
+    /// An agent volee launched in its own worktree, done, whose branch was
+    /// merged, with evidence checked after its last change.
+    fn tidy_candidate() -> Agent {
+        use crate::harness::HarnessKind;
+        use crate::ids::AgentId;
+        use crate::role::Role;
+        use crate::workspace::{Location, Workspace};
+
+        let worktree = "/work/alpha/.claude/worktrees/feat-x";
+        Agent {
+            id: AgentId::from_ulid(ulid::Ulid::from_parts(1, 1)),
+            name: "alpha-feat-x".into(),
+            role: Role::Worker,
+            harness: HarnessKind::ClaudeCode,
+            launched_by: LaunchedBy::Human,
+            parent: None,
+            mission: None,
+            sessions: vec![],
+            workspace: Workspace {
+                repo: Some("alpha".into()),
+                repo_root: Some("/work/alpha".into()),
+                worktree: Some(worktree.into()),
+                branch: Some("feat/x".into()),
+                base: Some("main".into()),
+                ..Workspace::at(worktree)
+            },
+            location: Location::Background,
+            state: AgentState::Done,
+            state_since: Timestamp::from_millis(1_000),
+            detail: None,
+            last_activity: None,
+            model: None,
+            delivery: Delivery {
+                merged_into_base: true,
+                checked_at: Some(Timestamp::from_millis(2_000)),
+                ..Delivery::default()
+            },
+            created_at: Timestamp::from_millis(0),
+            updated_at: Timestamp::from_millis(2_000),
+        }
+    }
+
+    #[test]
+    fn a_delivered_volee_worktree_may_be_tidied() {
+        assert_eq!(
+            tidy_check(&tidy_candidate()),
+            Ok(PathBuf::from("/work/alpha/.claude/worktrees/feat-x"))
+        );
+    }
+
+    #[test]
+    fn only_worktrees_volee_created_for_agents_it_launched() {
+        let mut found = tidy_candidate();
+        found.launched_by = LaunchedBy::Outside;
+        assert_eq!(
+            tidy_check(&found),
+            Err(vec![TidyRefusal::NotLaunchedByVolee])
+        );
+        for worktree in [
+            None,
+            Some("/elsewhere/feat-x"),
+            Some("/work/alpha/.claude/worktrees"),
+            Some("/work/alpha/.claude/worktrees/../../../etc"),
+            Some("/work/alpha/src"),
+        ] {
+            let mut agent = tidy_candidate();
+            agent.workspace.worktree = worktree.map(PathBuf::from);
+            assert_eq!(
+                tidy_check(&agent),
+                Err(vec![TidyRefusal::NotAVoleeWorktree]),
+                "{worktree:?}"
+            );
+        }
+        let mut rootless = tidy_candidate();
+        rootless.workspace.repo_root = None;
+        assert_eq!(
+            tidy_check(&rootless),
+            Err(vec![TidyRefusal::NotAVoleeWorktree])
+        );
+    }
+
+    #[test]
+    fn stale_or_missing_evidence_proves_nothing() {
+        let mut stale = tidy_candidate();
+        stale.state_since = Timestamp::from_millis(3_000);
+        assert_eq!(tidy_check(&stale), Err(vec![TidyRefusal::EvidenceStale]));
+        let mut never = tidy_candidate();
+        never.delivery = Delivery::default();
+        assert_eq!(
+            tidy_check(&never),
+            Err(vec![TidyRefusal::EvidenceNotChecked])
+        );
+        never.state = AgentState::Working;
+        assert_eq!(
+            tidy_check(&never),
+            Err(vec![TidyRefusal::Busy, TidyRefusal::EvidenceNotChecked])
+        );
+    }
+
+    #[test]
+    fn every_reason_to_keep_a_worktree_is_given_at_once() {
+        let mut agent = tidy_candidate();
+        agent.state = AgentState::Working;
+        agent.state_since = Timestamp::from_millis(1_500);
+        agent.delivery = Delivery {
+            dirty: true,
+            checked_at: Some(Timestamp::from_millis(2_000)),
+            ..Delivery::default()
+        };
+        assert_eq!(
+            tidy_check(&agent),
+            Err(vec![
+                TidyRefusal::Busy,
+                TidyRefusal::UncommittedChanges,
+                TidyRefusal::NotDelivered
+            ])
+        );
+    }
+
+    #[test]
+    fn refusals_read_as_sentences() {
+        assert_eq!(
+            TidyRefusal::KeptByHarness {
+                detail: "2 unpushed commits".into()
+            }
+            .to_string(),
+            "Claude Code kept its session: 2 unpushed commits"
+        );
+        let json = serde_json::to_value(TidyRefusal::RefusedByGit {
+            detail: "it is locked".into(),
+        })
+        .unwrap();
+        assert_eq!(json["reason"], "refused-by-git");
+        assert_eq!(json["detail"], "it is locked");
     }
 }

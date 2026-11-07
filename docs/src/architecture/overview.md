@@ -57,13 +57,13 @@ flowchart LR
     M[volee mcp<br/>stdio server]
     H[volee hook]
   end
-  A1 -- hooks --> H --> D
-  A2 -- hooks --> H
-  A1 -- MCP tools --> M --> D
-  A2 -- MCP tools --> M
-  D -- claude agents --json --> A3
-  D -- git, gh --> R[(repositories<br/>and worktrees)]
-  T <-- JSON-RPC over a Unix socket --> D
+  A1 -->|hooks| H --> D
+  A2 -->|hooks| H
+  A1 -->|MCP tools| M --> D
+  A2 -->|MCP tools| M
+  D -->|"claude agents --json"| A3
+  D -->|"git, gh"| R[(repositories<br/>and worktrees)]
+  T <-->|JSON-RPC over a Unix socket| D
   C <--> D
 ```
 

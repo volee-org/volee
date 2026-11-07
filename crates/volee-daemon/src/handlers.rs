@@ -1,6 +1,7 @@
 //! Request handlers: one function per method.
 
 mod missions;
+mod threads;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,13 +16,14 @@ use volee_core::{Agent, AgentId, Event, EventKind, Registry};
 use volee_harness::hooks::{HookPayload, HookSignal, SessionSource, interpret, stop_block_output};
 use volee_proto::PROTOCOL_VERSION;
 use volee_proto::methods::{
-    AbortMission, AgentParams, CloseMission, CreateMission, Empty, EventBatch, EventsSince, Forget,
-    HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams, Method, SendMessage,
-    SendParams, Sent, Shutdown, SinceParams, Status, StatusInfo, StatusParams, WaitParams,
-    WaitReply,
+    AbortMission, AgentParams, Attach, CloseMission, CreateMission, Diff, Empty, EventBatch,
+    EventsSince, Forget, HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams,
+    Method, Preview, SendMessage, SendParams, Sent, Shutdown, SinceParams, Spawn, Status,
+    StatusInfo, StatusParams, Stop, Summarize, Tidy, WaitParams, WaitReply,
 };
 use volee_proto::rpc::{self, RpcError};
 
+use crate::control;
 use crate::error::DaemonError;
 use crate::server::Shared;
 use crate::state::State;
@@ -50,6 +52,13 @@ pub(crate) async fn dispatch(
             respond(hook_ingest(shared, parse::<HookIngest>(params)?, Delivery::Live).await)
         }
         HookWait::NAME => respond(hook_wait(shared, parse::<HookWait>(params)?).await),
+        Spawn::NAME => respond(crate::launch::spawn(shared, parse::<Spawn>(params)?).await),
+        Preview::NAME => respond(control::preview(shared, parse::<Preview>(params)?).await),
+        Diff::NAME => respond(control::diff(shared, parse::<Diff>(params)?).await),
+        Attach::NAME => respond(control::attach(shared, parse::<Attach>(params)?).await),
+        Stop::NAME => respond(control::stop(shared, parse::<Stop>(params)?).await),
+        Tidy::NAME => respond(crate::tidy::tidy(shared, parse::<Tidy>(params)?).await),
+        Summarize::NAME => respond(threads::summarize(shared, parse::<Summarize>(params)?).await),
         CreateMission::NAME => {
             respond(missions::create(shared, parse::<CreateMission>(params)?).await)
         }

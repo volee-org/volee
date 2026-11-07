@@ -10,7 +10,7 @@ deliberately out of scope. Dates are targets, not promises.
 | Bootstrap | Workspace, CI, documentation site, contributor guides, agent rules | Done |
 | Foundation | Domain model, SQLite event store, daemon with JSON-RPC over a Unix socket, `volee ls`, discovery of every Claude Code session | In progress: discovery comes with the Claude Code adapter |
 | Launch and observe | `volee spawn` (worktree + `claude --bg` + per-agent hooks), hook ingestion, git delivery state, `volee diff` | In progress |
-| Interface | Hierarchy view, preview, take over with `claude attach`, keymap and help, themes, semantic zoom | In progress: the interface runs on `volee demo`; the daemon client comes next |
+| Interface | Hierarchy view, preview, take over with `claude attach`, message composer, changes, keymap and help, themes, semantic zoom | In progress: `volee` runs on the daemon's agents, with previews, changes, take over and messages |
 | Messaging | MCP server for agents, typed threads, delivery to working, idle and stopped agents, inbox, message pulses on the graph | In progress: MCP server, threads and delivery are done |
 | Missions | Supervisor plus coordinator agent, change and analysis missions, delivery evidence, `volee tidy` | In progress: lifecycle, supervisor and `volee mission` are done |
 | More views | Network, repositories and worktrees, timeline | Done: the three views run on `volee demo`, message pulses included |

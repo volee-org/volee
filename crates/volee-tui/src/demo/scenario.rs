@@ -392,13 +392,14 @@ fn workspace(index: usize) -> Workspace {
             start_commit: None,
         },
         (Some(repo), Some(branch)) => {
-            // volee makes the worktrees of the agents it launches; the infra
-            // session works in a worktree its person made by hand.
+            // Worktrees live in their repository, under .claude/worktrees
+            // (ADR 0013); the infra session works in one its person made by
+            // hand, next to the repository.
             let worktree = if index == INFRA {
                 PathBuf::from(format!("{HOME}/code/{repo}-lb"))
             } else {
                 PathBuf::from(format!(
-                    "{HOME}/.local/share/volee/worktrees/{repo}/{}",
+                    "{HOME}/code/{repo}/.claude/worktrees/{}",
                     branch.replace('/', "-")
                 ))
             };
@@ -462,8 +463,13 @@ impl Script {
         );
     }
 
-    fn delivery(&mut self, seconds: i64, member: usize, delivery: Delivery) {
+    /// New delivery evidence, checked from git and the forge as it is
+    /// recorded.
+    fn delivery(&mut self, seconds: i64, member: usize, mut delivery: Delivery) {
         let agent = self.id(member);
+        delivery
+            .checked_at
+            .get_or_insert(self.start.plus_millis(seconds * 1_000));
         self.at(seconds, EventKind::DeliveryUpdated { agent, delivery });
     }
 

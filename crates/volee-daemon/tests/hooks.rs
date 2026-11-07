@@ -59,6 +59,7 @@ fn start() -> Running {
         harness: None,
         discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
+        volee_bin: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running { socket, _dir: dir }

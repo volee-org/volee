@@ -9,14 +9,15 @@ use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use volee_core::message::{MessageKind, Party, Reference};
-use volee_core::registry::ApplyError;
+use volee_core::role::Role;
 use volee_core::{AgentId, AgentState, Registry};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    CloseMission, CloseParams, MarkRead, MarkReadParams, SendMessage, SendParams,
+    CloseMission, CloseParams, MarkRead, MarkReadParams, SendMessage, SendParams, Spawn,
+    SpawnParams,
 };
+use volee_proto::replica::{Replica, ReplicaError};
 
-use crate::replica::Replica;
 use crate::view::{AgentView, MessageView, WhoAmI, party_name};
 
 /// What the server tells the model about itself when it connects.
@@ -33,12 +34,9 @@ pub enum McpError {
     /// Talking to the daemon failed.
     #[error(transparent)]
     Client(#[from] ClientError),
-    /// The daemon's events did not replay.
-    #[error("the daemon sent events that do not fit together: {0}")]
-    Registry(#[from] ApplyError),
-    /// The client's notifications were already taken.
-    #[error("this daemon connection already has a subscriber")]
-    AlreadySubscribed,
+    /// The replica of the daemon's registry could not start.
+    #[error(transparent)]
+    Replica(#[from] ReplicaError),
     /// The agent this server speaks for is unknown to the daemon.
     #[error("volee does not know agent {0}; start `volee mcp` with the id of an agent it knows")]
     UnknownAgent(AgentId),
@@ -181,6 +179,25 @@ pub enum OutcomeArg {
     Blocked,
     /// The task failed.
     Failed,
+}
+
+/// Parameters of `spawn_worker`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SpawnArgs {
+    /// The repository, as the mission lists it.
+    pub repo: String,
+    /// A new branch for the worker, such as `feat/invoices`.
+    pub branch: String,
+    /// The worker's task. It knows only what you write: the context, what to
+    /// change or find, the acceptance criteria and how to check the work.
+    pub task: String,
+    /// A short display name, such as `billing-invoices`.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The branch to start from; the repository's default branch when
+    /// absent.
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 /// Parameters of `report`.
@@ -448,6 +465,61 @@ impl VoleeMcp {
             thread: None,
         })
         .await
+    }
+
+    /// Launches a worker for the mission this agent coordinates.
+    #[tool(
+        description = "For a mission's coordinator: launch a worker, a new agent on a new branch \
+                       in its own git worktree of one of the mission's repositories, with its \
+                       task. volee tells you when the worker stops, with the evidence it checked."
+    )]
+    pub async fn spawn_worker(
+        &self,
+        Parameters(args): Parameters<SpawnArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mission = {
+            let registry = self.inner.replica.read().await;
+            let Some(me) = registry.agent(self.inner.me) else {
+                return Err(ErrorData::internal_error(
+                    "this agent was forgotten by volee",
+                    None,
+                ));
+            };
+            let Some(mission) = me.mission.and_then(|id| registry.mission(id)) else {
+                return Ok(refuse(
+                    "you are not part of a mission: only a mission's coordinator launches workers",
+                ));
+            };
+            if mission.coordinator != Some(me.id) {
+                return Ok(refuse(
+                    "only the mission's coordinator launches workers; ask it with send_message",
+                ));
+            }
+            mission.id
+        };
+        let spawned = self
+            .inner
+            .client
+            .call::<Spawn>(SpawnParams {
+                repo: args.repo,
+                branch: args.branch,
+                base: args.base,
+                task: args.task,
+                role: Role::Worker,
+                parent: Some(self.inner.me),
+                mission: Some(mission),
+                model: None,
+                name: args.name,
+            })
+            .await;
+        match spawned {
+            Ok(spawned) => Ok(text(&format!(
+                "Launched worker {} in {}. It reports to you; volee tells you when it stops.",
+                spawned.agent, spawned.worktree
+            ))),
+            Err(ClientError::Rpc(error)) => Ok(refuse(&error.message)),
+            Err(error) => Err(ErrorData::internal_error(error.to_string(), None)),
+        }
     }
 
     /// Closes the mission this agent coordinates.

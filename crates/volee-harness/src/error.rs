@@ -16,6 +16,14 @@ pub enum HarnessError {
         /// The program volee tried to run.
         program: PathBuf,
     },
+    /// The harness cannot do what was asked.
+    #[error("{harness:?} cannot {what}")]
+    Unsupported {
+        /// The harness.
+        harness: HarnessKind,
+        /// What it cannot do, as a verb phrase.
+        what: &'static str,
+    },
     /// The program could not run to completion.
     #[error(transparent)]
     Run(#[from] RunError),
@@ -138,6 +146,12 @@ pub enum RequestError {
         what: &'static str,
         /// The path.
         path: PathBuf,
+    },
+    /// A worktree name is not a single, plain path component.
+    #[error("`{name}` is not a valid worktree name")]
+    InvalidWorktreeName {
+        /// The name.
+        name: String,
     },
     /// A tool rule is empty or starts with `-`, which the harness would read
     /// as an option.

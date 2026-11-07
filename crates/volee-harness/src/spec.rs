@@ -97,6 +97,13 @@ pub struct SpawnSpec {
     pub disallowed_tools: Vec<String>,
     /// Text appended to the harness's system prompt.
     pub append_system_prompt: Option<String>,
+    /// A worktree to run in, by name, under `<cwd>/.claude/worktrees/`
+    /// (`--worktree=<name>`). Claude Code reuses the worktree when it exists
+    /// (volee creates it first, on the agent's branch) and creates it
+    /// otherwise. With a worktree, `cwd` is the repository's main checkout:
+    /// Claude Code checks its trust there, and never trusts a fresh worktree
+    /// started directly.
+    pub worktree: Option<String>,
 }
 
 impl SpawnSpec {
@@ -110,6 +117,11 @@ impl SpawnSpec {
         check_path("working directory", &self.cwd, false)?;
         check_path("settings file", &self.settings_file, true)?;
         check_path("MCP configuration file", &self.mcp_config_file, true)?;
+        if let Some(name) = &self.worktree
+            && !is_worktree_name(name)
+        {
+            return Err(RequestError::InvalidWorktreeName { name: name.clone() });
+        }
         if let Some(rule) = self
             .allowed_tools
             .iter()
@@ -120,6 +132,16 @@ impl SpawnSpec {
         }
         Ok(())
     }
+}
+
+/// A worktree name is one path component made of letters, digits, `.`, `_`
+/// and `-`, that cannot be read as an option or climb out of the directory.
+fn is_worktree_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with(['-', '.'])
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 fn check_path(what: &'static str, path: &Path, utf8: bool) -> Result<(), RequestError> {
@@ -136,6 +158,22 @@ fn check_path(what: &'static str, path: &Path, utf8: bool) -> Result<(), Request
         });
     }
     Ok(())
+}
+
+/// One question to the harness's model, answered with no tools, no MCP
+/// server, no hooks and no saved session ([`crate::Harness::complete`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Completion {
+    /// Where the harness runs: a directory of volee's own, so that nothing of
+    /// the person's projects is read and discovery never takes the run for an
+    /// agent. Absolute.
+    pub cwd: PathBuf,
+    /// The model, or the harness's default.
+    pub model: Option<String>,
+    /// What the model is asked to be.
+    pub system_prompt: String,
+    /// The question, with the material to work on.
+    pub prompt: String,
 }
 
 /// A background session the harness started.
@@ -179,12 +217,35 @@ mod tests {
             allowed_tools: vec![],
             disallowed_tools: vec![],
             append_system_prompt: None,
+            worktree: None,
         }
     }
 
     #[test]
     fn a_complete_spec_is_valid() {
         assert_eq!(spec().validate(), Ok(()));
+    }
+
+    #[test]
+    fn a_worktree_is_one_plain_path_component() {
+        for name in ["feat-invoices", "v1.2", "fix_typo"] {
+            let with = SpawnSpec {
+                worktree: Some(name.into()),
+                ..spec()
+            };
+            assert_eq!(with.validate(), Ok(()), "{name}");
+        }
+        for name in ["", "a/b", "../up", ".hidden", "-x", "two words"] {
+            let with = SpawnSpec {
+                worktree: Some(name.into()),
+                ..spec()
+            };
+            assert_eq!(
+                with.validate(),
+                Err(RequestError::InvalidWorktreeName { name: name.into() }),
+                "{name}"
+            );
+        }
     }
 
     #[test]

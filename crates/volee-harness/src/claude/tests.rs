@@ -41,6 +41,7 @@ fn spec() -> SpawnSpec {
         allowed_tools: vec![],
         disallowed_tools: vec![],
         append_system_prompt: None,
+        worktree: None,
     }
 }
 
@@ -595,6 +596,7 @@ fn configuration_overrides_apply_to_every_command() {
     let timeouts = Timeouts {
         query: Duration::from_secs(3),
         launch: Duration::from_secs(9),
+        completion: Duration::from_secs(30),
     };
     let claude = claude(vec![
         Ok(Output::success("[]")),

@@ -11,9 +11,11 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, broadcast, mpsc, watch};
 use tokio::task::JoinSet;
+use volee_git::Git;
 use volee_harness::Harness;
 use volee_proto::methods::{
-    EVENTS_APPENDED, EventBatch, ForgeStatus, HarnessStatus, Method, SeqEvent, Subscribe,
+    EVENTS_APPENDED, EVENTS_LAGGED, EventBatch, ForgeStatus, HarnessStatus, Lagged, Method,
+    SeqEvent, Subscribe,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc::{self, Id, Notification, Outcome, Request, Response, RpcError, Version2};
@@ -46,6 +48,9 @@ pub struct Config {
     /// Where workspaces and delivery evidence are read from:
     /// [`EvidenceSources::default()`] reads nothing.
     pub evidence: EvidenceSources,
+    /// The volee program, which the hooks and MCP servers of launched agents
+    /// run. Without it, the daemon cannot launch agents.
+    pub volee_bin: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for Config {
@@ -62,6 +67,11 @@ impl std::fmt::Debug for Config {
 pub(crate) struct Shared {
     pub(crate) state: Mutex<State>,
     pub(crate) harnesses: Vec<HarnessStatus>,
+    pub(crate) harness: Option<Arc<dyn Harness>>,
+    pub(crate) git: Option<Arc<dyn Git>>,
+    pub(crate) settings: volee_config::Config,
+    pub(crate) volee_bin: Option<PathBuf>,
+    pub(crate) paths: Paths,
     /// What the evidence refresher learned about the forge, once it checked.
     forge: std::sync::Mutex<Option<ForgeStatus>>,
     shutdown: watch::Sender<bool>,
@@ -118,6 +128,11 @@ impl Daemon {
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
             harnesses: config.harnesses,
+            harness: config.harness.clone(),
+            git: config.evidence.git.clone(),
+            settings: config.evidence.settings.clone(),
+            volee_bin: config.volee_bin,
+            paths: config.paths,
             forge: std::sync::Mutex::new(None),
             shutdown,
         });
@@ -133,6 +148,7 @@ impl Daemon {
             ));
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
+        let resumer = crate::resume::spawn(&shared);
         tracing::info!(socket = ?listener.local_addr().ok(), "volee daemon ready");
         let mut connections = JoinSet::new();
         loop {
@@ -149,8 +165,8 @@ impl Daemon {
         }
         tracing::info!("volee daemon stopping");
         connections.abort_all();
-        if let Some(refresher) = refresher {
-            refresher.abort();
+        for task in [refresher, resumer].into_iter().flatten() {
+            task.abort();
         }
         Ok(())
     }
@@ -362,8 +378,8 @@ async fn subscribe(
                     tracing::warn!(skipped, "a subscriber lagged behind and was dropped");
                     let lagged = Notification {
                         jsonrpc: Version2,
-                        method: "events.lagged".to_owned(),
-                        params: serde_json::json!({ "skipped": skipped }),
+                        method: EVENTS_LAGGED.to_owned(),
+                        params: serde_json::to_value(Lagged { skipped }).unwrap_or_default(),
                     };
                     if let Ok(line) = serde_json::to_string(&lagged) {
                         let _ = outgoing.send(line + "\n");

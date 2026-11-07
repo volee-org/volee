@@ -4,10 +4,11 @@
 //! with the branch each one has checked out, then the agents in them, their
 //! subagents under them. Every agent shows its delivery evidence: commits
 //! ahead of its base, changes, push state, pull request and checks, and the
-//! mission supervisor's verdict for mission workers. A worktree whose work
-//! landed (merged, merged through a pull request, or reported) and that has
-//! no uncommitted changes is marked safe to tidy, by the same rule as the
-//! cleanup command (ADR 0011). Nothing here removes anything.
+//! mission supervisor's verdict for mission workers. A worktree that
+//! `volee tidy` would remove (its work landed, it is clean, the evidence is
+//! fresh, and volee launched the agent in a worktree it created) is marked
+//! safe to tidy, by the very rule of that command (ADR 0011); other
+//! worktrees say why they are kept. Nothing here removes anything.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -16,9 +17,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::Span;
-use volee_core::delivery::{
-    ChecksState, Delivery, PrState, PushState, TidyRefusal, TidyVerdict, tidy_verdict,
-};
+use volee_core::delivery::{ChecksState, Delivery, PrState, PushState, TidyRefusal, tidy_check};
 use volee_core::mission::Verdict;
 use volee_core::role::Role;
 use volee_core::{Agent, AgentId, Registry};
@@ -234,7 +233,7 @@ impl ReposState {
         self.order
             .iter()
             .filter_map(|agent| registry.agent(*agent))
-            .filter(|agent| tidy_of(agent) == Some(TidyVerdict::Allowed))
+            .filter(|agent| tidy_of(agent) == Some(Ok(())))
             .count()
     }
 }
@@ -380,11 +379,12 @@ fn lines(
     lines
 }
 
-/// The cleanup rule's verdict on an agent's worktree; `None` when there is
-/// nothing to tidy: the main checkout, a subagent, no repository.
-pub(crate) fn tidy_of(agent: &Agent) -> Option<TidyVerdict> {
+/// What `volee tidy` would do with an agent's worktree: remove it, or keep
+/// it for these reasons; `None` when there is no worktree to talk about:
+/// the main checkout, a subagent, no repository.
+pub(crate) fn tidy_of(agent: &Agent) -> Option<Result<(), Vec<TidyRefusal>>> {
     (agent.role != Role::Subagent && agent.workspace.worktree.is_some())
-        .then(|| tidy_verdict(&agent.state, &agent.delivery))
+        .then(|| tidy_check(agent).map(|_| ()))
 }
 
 /// The name of a detail level in the title.
@@ -723,9 +723,7 @@ fn agent_line(model: &Model, agent: &Agent, sub: bool) -> (Vec<Span<'static>>, V
         return (left, Vec::new());
     }
     let mut right = verdict_spans(model, agent, density == Zoom::Cards).unwrap_or_default();
-    if density != Zoom::Cards
-        && let Some(TidyVerdict::Allowed) = tidy_of(agent)
-    {
+    if density != Zoom::Cards && tidy_of(agent) == Some(Ok(())) {
         if !right.is_empty() {
             right.push(Span::raw("  "));
         }
@@ -763,25 +761,32 @@ fn verdict_spans(model: &Model, agent: &Agent, word: bool) -> Option<Vec<Span<'s
 fn tidy_spans(agent: &Agent, theme: &Theme, reasons: bool) -> Vec<Span<'static>> {
     match tidy_of(agent) {
         None => Vec::new(),
-        Some(TidyVerdict::Allowed) => vec![Span::styled(
+        Some(Ok(())) => vec![Span::styled(
             "✓ safe to tidy",
             theme.style(StyleRole::StateDone),
         )],
-        Some(TidyVerdict::Refused { reasons: why }) => {
+        Some(Err(why)) => {
             let dim = theme.style(StyleRole::TextDim);
             if !reasons {
                 return vec![Span::styled("keep", dim)];
             }
-            let words: Vec<&str> = why
-                .iter()
-                .map(|reason| match reason {
-                    TidyRefusal::Busy => "busy",
-                    TidyRefusal::UncommittedChanges => "uncommitted",
-                    TidyRefusal::NotDelivered => "not merged",
-                })
-                .collect();
+            let words: Vec<&str> = why.iter().map(reason_words).collect();
             vec![Span::styled(format!("keep: {}", words.join(", ")), dim)]
         }
+    }
+}
+
+/// A reason to keep a worktree, in two or three words.
+const fn reason_words(reason: &TidyRefusal) -> &'static str {
+    match reason {
+        TidyRefusal::Busy => "busy",
+        TidyRefusal::UncommittedChanges => "uncommitted",
+        TidyRefusal::NotDelivered => "not landed",
+        TidyRefusal::NotLaunchedByVolee => "not launched by volee",
+        TidyRefusal::NotAVoleeWorktree => "not volee's worktree",
+        TidyRefusal::EvidenceNotChecked => "not checked yet",
+        TidyRefusal::EvidenceStale => "checked before its last change",
+        TidyRefusal::KeptByHarness { .. } | TidyRefusal::RefusedByGit { .. } => "kept",
     }
 }
 
@@ -894,7 +899,8 @@ mod tests {
     use super::*;
     use crate::clock::ManualClock;
     use crate::demo::{
-        DemoSource, EXPLORE_HANDLERS, INFRA, INVOICE_SCHEMA, INVOICING, TRACE_GATEWAY, agent_id,
+        DemoSource, EXPLORE_HANDLERS, INFRA, INVOICE_PAGE, INVOICE_SCHEMA, INVOICING,
+        TRACE_GATEWAY, agent_id,
     };
 
     fn start() -> Timestamp {
@@ -966,13 +972,28 @@ mod tests {
     }
 
     #[test]
-    fn only_delivered_clean_worktrees_are_safe_to_tidy() {
+    fn safe_to_tidy_follows_the_rule_of_volee_tidy() {
         let registry = registry();
+        // Merged work in a worktree made by hand, for a session volee did
+        // not launch: volee keeps its hands off.
         let infra = registry.agent(id(INFRA)).unwrap();
-        assert_eq!(tidy_of(infra), Some(TidyVerdict::Allowed));
+        assert_eq!(
+            tidy_of(infra),
+            Some(Err(vec![
+                TidyRefusal::NotLaunchedByVolee,
+                TidyRefusal::NotAVoleeWorktree
+            ]))
+        );
         let schema = registry.agent(id(INVOICE_SCHEMA)).unwrap();
-        assert!(matches!(tidy_of(schema), Some(TidyVerdict::Refused { .. })));
+        assert!(
+            matches!(tidy_of(schema), Some(Err(reasons)) if reasons.contains(&TidyRefusal::Busy))
+        );
         let coordinator = registry.agent(id(INVOICING)).unwrap();
         assert_eq!(tidy_of(coordinator), None);
+        // Pull request #42 merges 26 seconds in: its worktree may go.
+        let demo = DemoSource::new(Arc::new(ManualClock::new(start())));
+        let later = Registry::from_events(&demo.events_until(start().plus_millis(27_000))).unwrap();
+        let page = later.agent(id(INVOICE_PAGE)).unwrap();
+        assert_eq!(tidy_of(page), Some(Ok(())));
     }
 }

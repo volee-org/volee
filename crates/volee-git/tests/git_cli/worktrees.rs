@@ -337,6 +337,52 @@ fn remove_worktree_never_forces() {
 }
 
 #[test]
+fn unlock_worktree_lifts_a_lock_and_nothing_else() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let cli = sandbox.cli();
+    let path = sandbox.path("wt/feat");
+    cli.add_worktree(&repo, &path, "feat", "main").unwrap();
+    sandbox.git(
+        &repo,
+        &[
+            "worktree",
+            "lock",
+            "--reason",
+            "claude session",
+            path_str(&path),
+        ],
+    );
+
+    cli.unlock_worktree(&repo, &path).unwrap();
+    let worktrees = cli.worktrees(&repo).unwrap();
+    assert_eq!(worktrees[1].locked, None);
+    assert!(
+        path.join("README.md").is_file(),
+        "unlocking deletes nothing"
+    );
+    // Unlocking an unlocked worktree changes nothing.
+    cli.unlock_worktree(&repo, &path).unwrap();
+    cli.remove_worktree(&repo, &path).unwrap();
+    assert!(!path.exists());
+}
+
+#[test]
+fn unlock_worktree_refuses_what_is_not_a_linked_worktree() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let cli = sandbox.cli();
+    assert_refused(
+        cli.unlock_worktree(&repo, &repo),
+        &RemovalRefusal::MainCheckout,
+    );
+    assert_refused(
+        cli.unlock_worktree(&repo, &sandbox.dir("elsewhere")),
+        &RemovalRefusal::NotAWorktree,
+    );
+}
+
+#[test]
 fn remove_worktree_sees_untracked_files_that_status_would_hide() {
     let sandbox = Sandbox::new();
     let repo = sandbox.repo("volee");

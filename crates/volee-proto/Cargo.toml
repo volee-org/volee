@@ -20,6 +20,7 @@ volee-core.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+ulid.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 
 [lints]

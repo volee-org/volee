@@ -21,9 +21,6 @@ model = "opus"
 permission_mode = "auto"
 wake_timeout = 3600
 
-[worktrees]
-root = "~/.local/share/volee/worktrees"
-
 [repos.billing]
 path = "~/code/billing"
 base = "develop"
@@ -45,11 +42,15 @@ take-over = "ctrl-a"
 | `permission_mode` | the harness default | `acceptEdits`, `auto`, `manual`, `dontAsk` or `plan`, passed to Claude Code. volee never passes `bypassPermissions`. |
 | `wake_timeout` | `3600` | Seconds an idle agent stays reachable by the wake-up hook. Afterwards, a message resumes the session instead. |
 
-## `[worktrees]`
+## Worktrees
 
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `root` | `~/.local/share/volee/worktrees` | Where volee creates worktrees, one folder per repository. |
+volee creates each agent's worktree inside its repository, at
+`.claude/worktrees/<branch>`, where Claude Code keeps its own, and adds that
+folder to the repository's local exclude file so `git status` stays clean.
+The location is not configurable: Claude Code only trusts a background
+session started from a repository you trust, and never a worktree elsewhere
+(see [ADR 0013](../adr/0013-worktrees-live-in-their-repository.md)). Run
+`claude` once in each repository you list below and accept its trust prompt.
 
 ## `[repos.<name>]`
 
@@ -63,6 +64,17 @@ and `.`.
 | `base` | no | The branch work starts from. The repository's default branch when unset. |
 | `model` | no | Model for this repository's agents. |
 | `setup` | no | A first step agents run in a new worktree, such as `bun install`. |
+
+## `[messages]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `summaries` | `false` | Lets volee summarize a thread with a model when you ask (`volee summary`). Each summary runs Claude Code with your account, usually for a few cents. |
+| `summary_model` | `haiku` | The model summaries use. |
+
+A summary runs `claude -p` with no tools, no MCP server, none of your hooks
+and no saved session, in a directory of volee's own: the model reads the
+thread and nothing else.
 
 ## `[tui]`
 

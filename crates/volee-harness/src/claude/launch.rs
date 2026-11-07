@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 
 use crate::error::ParseError;
-use crate::spec::SpawnSpec;
+use crate::spec::{Completion, SpawnSpec};
 
 /// The separator Claude Code prints between the fields of the `backgrounded`
 /// line (a middle dot).
@@ -98,8 +98,35 @@ pub(crate) fn args(resume: Option<&str>, spec: &SpawnSpec) -> Vec<OsString> {
     if let Some(text) = &spec.append_system_prompt {
         args.push(option("--append-system-prompt", text));
     }
+    if let Some(name) = &spec.worktree {
+        args.push(option("--worktree", name));
+    }
     args.push("--".into());
     args.push(prompt_operand(&spec.prompt).into());
+    args
+}
+
+/// The arguments of `claude -p` for a one-off answer: text output, no saved
+/// session, no tools, no MCP server, no skills or commands, and only the
+/// settings local to the directory it runs in (so not the person's hooks),
+/// with the question last, after `--`.
+pub(crate) fn completion_args(request: &Completion) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec![
+        "-p".into(),
+        option("--output-format", "text"),
+        "--no-session-persistence".into(),
+        option("--tools", ""),
+        "--strict-mcp-config".into(),
+        option("--mcp-config", r#"{"mcpServers":{}}"#),
+        "--disable-slash-commands".into(),
+        option("--setting-sources", "local"),
+    ];
+    if let Some(model) = &request.model {
+        args.push(option("--model", model));
+    }
+    args.push(option("--system-prompt", &request.system_prompt));
+    args.push("--".into());
+    args.push(prompt_operand(&request.prompt).into());
     args
 }
 
@@ -188,11 +215,25 @@ mod tests {
             allowed_tools: vec![],
             disallowed_tools: vec![],
             append_system_prompt: None,
+            worktree: None,
         }
     }
 
     fn strings(args: &[OsString]) -> Vec<&str> {
         args.iter().map(|arg| arg.to_str().unwrap()).collect()
+    }
+
+    #[test]
+    fn a_worktree_is_named_before_the_prompt() {
+        let spec = SpawnSpec {
+            cwd: "/work/alpha".into(),
+            worktree: Some("feat-invoices".into()),
+            ..spec()
+        };
+        let args = args(None, &spec);
+        let args = strings(&args);
+        let at = args.iter().position(|arg| *arg == "--").unwrap();
+        assert!(args[..at].contains(&"--worktree=feat-invoices"), "{args:?}");
     }
 
     #[test]
@@ -353,5 +394,36 @@ mod tests {
         assert!(matches!(strip_escapes("plain"), Cow::Borrowed("plain")));
         assert_eq!(strip_escapes("a\u{1b}[31mb\u{1b}7c"), "abc");
         assert_eq!(strip_escapes("\u{1b}]0;title\u{7}text"), "text");
+    }
+
+    #[test]
+    fn a_completion_has_no_tools_no_servers_no_hooks_and_no_saved_session() {
+        let request = Completion {
+            cwd: "/state/summaries".into(),
+            model: Some("haiku".into()),
+            system_prompt: "Summarize.".into(),
+            prompt: "--- a thread that starts with dashes".into(),
+        };
+        let args = completion_args(&request);
+        let args = strings(&args);
+        for expected in [
+            "-p",
+            "--output-format=text",
+            "--no-session-persistence",
+            "--tools=",
+            "--strict-mcp-config",
+            "--disable-slash-commands",
+            "--setting-sources=local",
+            "--model=haiku",
+            "--system-prompt=Summarize.",
+        ] {
+            assert!(args.contains(&expected), "{expected} in {args:?}");
+        }
+        let at = args.iter().position(|arg| *arg == "--").unwrap();
+        assert_eq!(args.len(), at + 2, "the question comes last");
+        assert!(
+            !args[at + 1].starts_with('-'),
+            "it cannot read as an option"
+        );
     }
 }
