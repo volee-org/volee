@@ -74,6 +74,7 @@ These follow from the design and are not vulnerabilities:
   volee tool (`mcp__volee`) without a permission prompt, so that a background
   agent never stalls on asking to send a message or a report. A mission's
   coordinator can therefore launch workers, and close its mission once
-  volee sees every worker delivered, without asking you. The workers it
-  launches get the same permission mode and tools as any agent volee
-  launches.
+  volee sees every worker delivered, without asking you. It launches at
+  most `[missions] max_workers` agents (8 by default), only in the
+  repositories the mission names. The workers it launches get the same
+  permission mode and tools as any agent volee launches.
