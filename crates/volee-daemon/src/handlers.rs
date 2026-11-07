@@ -19,8 +19,9 @@ use volee_proto::PROTOCOL_VERSION;
 use volee_proto::methods::{
     AbortMission, AgentParams, Attach, CloseMission, CreateMission, Diff, Empty, EventBatch,
     EventsSince, Forget, HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams,
-    Method, Preview, RefreshDiscovery, SendMessage, SendParams, Sent, Shutdown, SinceParams, Spawn,
-    Status, StatusInfo, StatusParams, Stop, Summarize, Tidy, WaitParams, WaitReply,
+    Method, Preview, RecordActivity, RefreshDiscovery, SendMessage, SendParams, Sent, Shutdown,
+    SinceParams, Spawn, Status, StatusInfo, StatusParams, Stop, Summarize, Tidy, WaitParams,
+    WaitReply,
 };
 use volee_proto::rpc::{self, RpcError};
 
@@ -62,6 +63,9 @@ pub(crate) async fn dispatch(
         Attach::NAME => respond(control::attach(shared, parse::<Attach>(params)?).await),
         Stop::NAME => respond(control::stop(shared, parse::<Stop>(params)?).await),
         Tidy::NAME => respond(crate::tidy::tidy(shared, parse::<Tidy>(params)?).await),
+        RecordActivity::NAME => {
+            respond(crate::join::activity(shared, parse::<RecordActivity>(params)?).await)
+        }
         Summarize::NAME => respond(threads::summarize(shared, parse::<Summarize>(params)?).await),
         CreateMission::NAME => {
             respond(missions::create(shared, parse::<CreateMission>(params)?).await)
@@ -95,7 +99,9 @@ pub(crate) fn parse<M: Method>(params: Value) -> Result<M::Params, RpcError> {
     })
 }
 
-fn respond<T: serde::Serialize>(result: Result<T, DaemonError>) -> Result<Value, RpcError> {
+pub(crate) fn respond<T: serde::Serialize>(
+    result: Result<T, DaemonError>,
+) -> Result<Value, RpcError> {
     let output = result.map_err(RpcError::from)?;
     serde_json::to_value(output)
         .map_err(|error| RpcError::new(rpc::INTERNAL_ERROR, error.to_string()))

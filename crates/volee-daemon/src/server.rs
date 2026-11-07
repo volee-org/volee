@@ -12,10 +12,11 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, broadcast, mpsc, watch};
 use tokio::task::JoinSet;
+use volee_core::AgentId;
 use volee_git::Git;
 use volee_harness::Harness;
 use volee_proto::methods::{
-    EVENTS_APPENDED, EVENTS_LAGGED, EventBatch, ForgeStatus, HarnessStatus, Lagged, Method,
+    EVENTS_APPENDED, EVENTS_LAGGED, EventBatch, ForgeStatus, HarnessStatus, Join, Lagged, Method,
     SeqEvent, Subscribe,
 };
 use volee_proto::paths::Paths;
@@ -25,7 +26,7 @@ use crate::clock::Clock;
 use crate::discovery::{Cadence, Refreshes};
 use crate::error::DaemonError;
 use crate::evidence::EvidenceSources;
-use crate::handlers::{dispatch, parse};
+use crate::handlers::{dispatch, parse, respond};
 use crate::log::EventLog;
 use crate::state::State;
 use crate::watchers::Watchers;
@@ -91,6 +92,8 @@ pub(crate) struct Shared {
     pub(crate) refreshes: Refreshes,
     /// Agents being launched for each mission, counted against its limit.
     pub(crate) slots: crate::launch::Slots,
+    /// The connections that joined for agents of other harnesses (ADR 0014).
+    pub(crate) presence: crate::join::Presence,
     /// What the evidence refresher learned about the forge, once it checked.
     forge: std::sync::Mutex<Option<ForgeStatus>>,
     shutdown: watch::Sender<bool>,
@@ -143,6 +146,13 @@ impl Daemon {
         if caught_up > 0 {
             tracing::info!(events = caught_up, "missions caught up");
         }
+        // No connection is open yet: agents that joined through MCP are
+        // stopped until their server joins again.
+        match crate::join::settle_at_start(&mut state) {
+            Ok(0) => {}
+            Ok(count) => tracing::info!(count, "joined agents wait for their MCP server"),
+            Err(error) => tracing::warn!(%error, "cannot stop the joined agents"),
+        }
         let (shutdown, mut stop) = watch::channel(false);
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
@@ -155,6 +165,7 @@ impl Daemon {
             watchers: Watchers::new(),
             refreshes: Refreshes::new(),
             slots: crate::launch::Slots::default(),
+            presence: crate::join::Presence::default(),
             forge: std::sync::Mutex::new(None),
             shutdown,
         });
@@ -370,6 +381,9 @@ async fn serve_connection(stream: UnixStream, shared: Arc<Shared>) {
     // Requests of a connection die with it: a hook that disconnects must not
     // keep a waiter alive and "deliver" a message nobody reads.
     let mut tasks = JoinSet::new();
+    // Agents of other harnesses that joined on this connection: alive until
+    // it closes (ADR 0014).
+    let mut joined = Vec::new();
     let mut lines = BufReader::new(read).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         if line.trim().is_empty() {
@@ -392,6 +406,10 @@ async fn serve_connection(stream: UnixStream, shared: Arc<Shared>) {
             subscribe(&shared, request, &outgoing, &mut tasks).await;
             continue;
         }
+        if request.method == Join::NAME {
+            joined.extend(join(&shared, request, &outgoing).await);
+            continue;
+        }
         let shared = Arc::clone(&shared);
         let outgoing = outgoing.clone();
         tasks.spawn(async move {
@@ -404,6 +422,26 @@ async fn serve_connection(stream: UnixStream, shared: Arc<Shared>) {
     tasks.abort_all();
     drop(outgoing);
     let _ = writer.await;
+    crate::join::left(&shared, &joined).await;
+}
+
+/// Joins an agent of another harness for this connection and answers;
+/// returns the agent, which stays alive until the connection closes.
+async fn join(
+    shared: &Arc<Shared>,
+    request: Request,
+    outgoing: &mpsc::UnboundedSender<String>,
+) -> Option<AgentId> {
+    let joined = match parse::<Join>(request.params) {
+        Ok(params) => crate::join::join(shared, params).await,
+        Err(error) => {
+            send(outgoing, &response(request.id, Err(error)));
+            return None;
+        }
+    };
+    let agent = joined.as_ref().ok().map(|joined| joined.agent);
+    send(outgoing, &response(request.id, respond(joined)));
+    agent
 }
 
 /// Answers with the backlog, then forwards every new event. The backlog and

@@ -174,8 +174,11 @@ Two cases are never resumed on their own:
   it runs again, which only you can decide, with `claude --resume` in its
   worktree.
 
-Agents you did not launch through volee cannot receive messages yet.
-`volee msg send` says, after sending, which of these cases applies.
+Claude Code sessions you did not launch through volee cannot receive
+messages yet. Agents of other harnesses that [joined](other-harnesses.md)
+through volee's MCP server read their messages themselves, when they call
+`read_messages`; a message sent while one is stopped waits for its next
+start. `volee msg send` says, after sending, which of these cases applies.
 
 ## Summaries
 

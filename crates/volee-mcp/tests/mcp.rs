@@ -27,7 +27,7 @@ use volee_mcp::VoleeMcp;
 use volee_mcp::tools::{ListArgs, OutcomeArg, ReportArgs, SpawnArgs};
 use volee_proto::client::Client;
 use volee_proto::methods::{
-    EventsSince, HookIngest, HookParams, SendMessage, SendParams, SinceParams,
+    EventsSince, HookIngest, HookParams, JoinParams, SendMessage, SendParams, SinceParams,
 };
 use volee_proto::paths::Paths;
 
@@ -275,6 +275,96 @@ async fn report_reaches_the_parent_and_the_human() {
     assert!(report.is_for(Party::Human));
     assert!(report.body.starts_with("**Done.**"));
     assert_eq!(report.refs.len(), 1);
+}
+
+#[tokio::test]
+async fn an_agent_of_another_harness_joins_asks_the_human_and_reads_the_answer() {
+    use rmcp::ServerHandler;
+
+    let fixture = start();
+    let client = Client::connect(&fixture.socket).await.unwrap();
+    let joined = VoleeMcp::join(
+        JoinParams {
+            name: "infra".into(),
+            harness: "codex".into(),
+            cwd: "/work/infra".into(),
+            mission: None,
+        },
+        client,
+    )
+    .await
+    .unwrap();
+    let me = joined.agent();
+    let snapshot = registry(&fixture).await;
+    let infra = snapshot.agent(me).unwrap();
+    assert_eq!(infra.harness, HarnessKind::Other("codex".into()));
+    assert_eq!(infra.state, volee_core::AgentState::Idle);
+
+    // No hooks: the server tells the model to read its messages.
+    let instructions = joined.get_info().instructions.unwrap_or_default();
+    assert!(
+        instructions.contains("call read_messages"),
+        "{instructions}"
+    );
+    assert!(!instructions.contains("arrive on their own"));
+
+    // It asks the person a question; its tool call is its activity.
+    let asked = joined
+        .send_message(Parameters(
+            serde_json::from_value(serde_json::json!({
+                "to": ["human"],
+                "kind": "question",
+                "body": "Which region does the staging cluster run in?"
+            }))
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+    assert!(!failed(&asked), "{}", body(&asked));
+    let snapshot = registry(&fixture).await;
+    let activity = snapshot.agent(me).unwrap().last_activity.clone().unwrap();
+    assert_eq!(activity.summary, "wrote to human");
+    let question = snapshot
+        .messages_from(Party::Agent(me))
+        .into_iter()
+        .next()
+        .unwrap()
+        .id;
+
+    // The person answers; the agent reads the answer when it asks for it.
+    let human = Client::connect(&fixture.socket).await.unwrap();
+    human
+        .call::<SendMessage>(SendParams {
+            from: Party::Human,
+            to: vec![Party::Agent(me)],
+            kind: MessageKind::Answer,
+            body: "eu-west-3.".into(),
+            refs: vec![],
+            in_reply_to: Some(question),
+            thread: None,
+        })
+        .await
+        .unwrap();
+    settle().await;
+    let answer = joined
+        .read_messages(Parameters(
+            serde_json::from_value(serde_json::json!({})).unwrap(),
+        ))
+        .await
+        .unwrap();
+    assert!(body(&answer).contains("eu-west-3."), "{}", body(&answer));
+
+    // Its harness stops: so does the agent.
+    drop(joined);
+    let mut stopped = false;
+    for _ in 0..200 {
+        if registry(&fixture).await.agent(me).unwrap().state == volee_core::AgentState::Stopped {
+            stopped = true;
+            break;
+        }
+        settle().await;
+    }
+    assert!(stopped, "the agent is stopped once its server is gone");
 }
 
 #[tokio::test]
