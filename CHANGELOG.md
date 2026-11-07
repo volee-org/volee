@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 It is generated from the commit history with [git-cliff](https://git-cliff.org):
 see [RELEASING.md](RELEASING.md).
 
+## [0.2.0] - 2026-11-07
+
+### Added
+
+- **cli**: Let people forget an agent that no longer runs ([#60](https://github.com/volee-org/volee/pull/60))
+- **mcp**: Let agents of other harnesses join volee ([#68](https://github.com/volee-org/volee/pull/68))
+- **mux**: Show and reach Claude Code sessions in tuios panes ([#69](https://github.com/volee-org/volee/pull/69))
+- **daemon**: Run a failed launch again without a git step ([#70](https://github.com/volee-org/volee/pull/70))
+
+### Fixed
+
+- **tui**: Agree the top bar counters with their number ([#67](https://github.com/volee-org/volee/pull/67))
+- **tui**: Make the zoom keys work from the agents list ([#71](https://github.com/volee-org/volee/pull/71))
+- **daemon**: Forget the panes of a multiplexer the daemon no longer uses ([#72](https://github.com/volee-org/volee/pull/72))
+- **daemon**: Refuse a mission without Claude Code before recording it ([#73](https://github.com/volee-org/volee/pull/73))
+- **tui**: Name direct threads from your side and say how to see a tuios pane ([#74](https://github.com/volee-org/volee/pull/74))
+
 ## [0.1.0] - 2026-11-07
 
 ### Added
@@ -70,4 +87,5 @@ see [RELEASING.md](RELEASING.md).
 - Mark the interface, messaging and views milestones done ([#52](https://github.com/volee-org/volee/pull/52))
 - Start the daemon in the first step of the guide, and say what tidy removes ([#56](https://github.com/volee-org/volee/pull/56))
 
+[0.2.0]: https://github.com/volee-org/volee/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/volee-org/volee/releases/tag/v0.1.0
