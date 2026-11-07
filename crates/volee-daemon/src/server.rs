@@ -81,6 +81,8 @@ pub(crate) struct Shared {
     pub(crate) paths: Paths,
     /// The interactive subscriptions open now, which set discovery's pace.
     pub(crate) watchers: Watchers,
+    /// Agents being launched for each mission, counted against its limit.
+    pub(crate) slots: crate::launch::Slots,
     /// What the evidence refresher learned about the forge, once it checked.
     forge: std::sync::Mutex<Option<ForgeStatus>>,
     shutdown: watch::Sender<bool>,
@@ -143,6 +145,7 @@ impl Daemon {
             volee_bin: config.volee_bin,
             paths: config.paths,
             watchers: Watchers::new(),
+            slots: crate::launch::Slots::default(),
             forge: std::sync::Mutex::new(None),
             shutdown,
         });

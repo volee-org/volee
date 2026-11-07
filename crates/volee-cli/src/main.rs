@@ -8,6 +8,7 @@ mod cmd;
 mod connect;
 mod resolve;
 mod table;
+mod text;
 
 use std::process::ExitCode;
 
@@ -369,11 +370,12 @@ fn report(result: anyhow::Result<()>) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             // A refusal from the daemon is meant for people: its code is not.
+            // Both texts may quote names and messages that agents wrote.
             match error.downcast_ref::<volee_proto::client::ClientError>() {
                 Some(volee_proto::client::ClientError::Rpc(refusal)) => {
-                    eprintln!("volee: {}", refusal.message);
+                    eprintln!("volee: {}", text::printable(&refusal.message));
                 }
-                _ => eprintln!("volee: {error:#}"),
+                _ => eprintln!("volee: {}", text::printable(&format!("{error:#}"))),
             }
             ExitCode::FAILURE
         }

@@ -30,6 +30,34 @@ pub struct Activity {
     pub summary: String,
 }
 
+/// Why volee does not resume an agent on its own when a message arrives after
+/// its session ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "reason")]
+pub enum Hold {
+    /// The human stopped it. The next message the human sends it lifts the
+    /// hold; messages from agents and from volee do not.
+    StoppedByHuman {
+        /// When the human asked.
+        at: Timestamp,
+    },
+    /// Its mission is over. Nothing lifts this hold.
+    MissionOver {
+        /// When the mission ended.
+        at: Timestamp,
+    },
+}
+
+impl Hold {
+    /// One line for people.
+    pub const fn describe(self) -> &'static str {
+        match self {
+            Self::StoppedByHuman { .. } => "stopped by the human",
+            Self::MissionOver { .. } => "its mission is over",
+        }
+    }
+}
+
 /// A unit of work done by one or more harness sessions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Agent {
@@ -65,6 +93,9 @@ pub struct Agent {
     pub model: Option<String>,
     /// What can be proven about its work.
     pub delivery: Delivery,
+    /// Why volee will not resume it on its own, if it will not.
+    #[serde(default)]
+    pub hold: Option<Hold>,
     /// When volee first registered it.
     pub created_at: Timestamp,
     /// When anything about it last changed.

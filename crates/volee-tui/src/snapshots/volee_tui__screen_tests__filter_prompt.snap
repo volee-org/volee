@@ -34,7 +34,7 @@ expression: draw(&model)
 "│ ▸ working · for 39 s           ││   ⎿  418 matches                                                                   │"
 "│ mission  Latency audit (analy… ││                                                                                    │"
 "│ repo     gateway › audit/p95-… ││ ✻ Grep "auth" traces/… (esc to interrupt)                                          │"
-"│ worktree …ay/audit-p95-latency ││                                                                                    │"
+"│ worktree …es/audit-p95-latency ││                                                                                    │"
 "│ runs in  background · haiku    ││ ╭──────────────────────────────────────────────────────────────────────────╮       │"
 "│ delivery nothing yet           ││ │ >                                                                        │       │"
 "│ last     Grep "auth" traces/ … ││ ╰──────────────────────────────────────────────────────────────────────────╯       │"

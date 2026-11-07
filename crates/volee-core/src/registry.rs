@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::agent::{Activity, Agent, SessionLink};
+use crate::agent::{Activity, Agent, Hold, SessionLink};
 use crate::event::{Event, EventKind};
 use crate::harness::SessionKey;
 use crate::ids::{AgentId, MessageId, MissionId, ThreadId};
@@ -140,6 +140,7 @@ impl Registry {
                         last_activity: None,
                         model: None,
                         delivery: crate::delivery::Delivery::default(),
+                        hold: None,
                         created_at: at,
                         updated_at: at,
                     },
@@ -220,6 +221,15 @@ impl Registry {
                     self.ignored_sessions.insert(link.key);
                 }
             }
+            EventKind::StopRequested { agent } => {
+                let record = self.agent_mut(*agent)?;
+                // A finished mission's hold is the stronger one: nothing
+                // lifts it, so a later stop does not replace it.
+                if !matches!(record.hold, Some(Hold::MissionOver { .. })) {
+                    record.hold = Some(Hold::StoppedByHuman { at });
+                }
+                record.updated_at = at;
+            }
             EventKind::ThreadOpened { thread } => {
                 if self.threads.contains_key(&thread.id) {
                     return Err(ApplyError::DuplicateThread(thread.id));
@@ -232,6 +242,19 @@ impl Registry {
                 }
                 if self.messages.contains_key(&message.id) {
                     return Err(ApplyError::DuplicateMessage(message.id));
+                }
+                if message.from == Party::Human {
+                    // Writing to an agent it stopped is how the human lets
+                    // volee resume it.
+                    for receipt in &message.receipts {
+                        if let Party::Agent(id) = receipt.to
+                            && let Some(agent) = self.agents.get_mut(&id)
+                            && matches!(agent.hold, Some(Hold::StoppedByHuman { .. }))
+                        {
+                            agent.hold = None;
+                            agent.updated_at = at;
+                        }
+                    }
                 }
                 self.messages.insert(message.id, message.clone());
             }
@@ -296,8 +319,16 @@ impl Registry {
                 if report.is_some() {
                     record.report = *report;
                 }
-                if status.is_over() {
-                    record.ended_at.get_or_insert(at);
+                if status.is_over() && record.ended_at.is_none() {
+                    record.ended_at = Some(at);
+                    // A finished mission's agents are never resumed on their
+                    // own: a stray message must not restart a paid session.
+                    for agent in self.agents.values_mut() {
+                        if agent.mission == Some(*mission) {
+                            agent.hold = Some(Hold::MissionOver { at });
+                            agent.updated_at = at;
+                        }
+                    }
                 }
             }
         }
@@ -405,6 +436,11 @@ impl Registry {
     /// A message by identifier.
     pub fn message(&self, id: MessageId) -> Option<&Message> {
         self.messages.get(&id)
+    }
+
+    /// Every message, oldest first.
+    pub fn messages(&self) -> impl Iterator<Item = &Message> {
+        self.messages.values()
     }
 
     /// The messages of a thread, oldest first.

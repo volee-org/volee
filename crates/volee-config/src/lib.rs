@@ -54,8 +54,25 @@ pub struct Config {
     pub repos: BTreeMap<String, Repo>,
     /// Messaging settings.
     pub messages: Messages,
+    /// Mission settings.
+    pub missions: Missions,
     /// Interface settings.
     pub tui: Tui,
+}
+
+/// Mission settings.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Missions {
+    /// The most agents one mission may launch besides its coordinator, so
+    /// that a coordinator gone wrong cannot start sessions without end.
+    pub max_workers: usize,
+}
+
+impl Default for Missions {
+    fn default() -> Self {
+        Self { max_workers: 8 }
+    }
 }
 
 /// Messaging settings.
@@ -145,9 +162,6 @@ pub struct Repo {
     /// The model for this repository's agents.
     #[serde(default)]
     pub model: Option<String>,
-    /// A first step agents run in a new worktree, such as `bun install`.
-    #[serde(default)]
-    pub setup: Option<String>,
 }
 
 /// Interface settings.
@@ -158,6 +172,9 @@ pub struct Tui {
     pub theme: Option<String>,
     /// Key overrides, by action name. Interpreted by the interface.
     pub keys: BTreeMap<String, String>,
+    /// No travelling animations: message pulses become short highlights
+    /// and spinners stop.
+    pub reduced_motion: bool,
 }
 
 impl Config {
@@ -209,6 +226,11 @@ impl Config {
         if self.agents.wake_timeout == 0 {
             return Err(invalid(
                 "agents.wake_timeout must be at least 1 second".to_owned(),
+            ));
+        }
+        if self.missions.max_workers == 0 {
+            return Err(invalid(
+                "missions.max_workers must be at least 1".to_owned(),
             ));
         }
         Ok(())
@@ -263,6 +285,7 @@ mod tests {
     fn an_empty_file_is_the_defaults() {
         assert_eq!(parse("").unwrap(), Config::default());
         assert_eq!(Config::default().agents.wake_timeout, 3_600);
+        assert_eq!(Config::default().missions.max_workers, 8);
     }
 
     #[test]
@@ -273,7 +296,6 @@ mod tests {
             path = "~/code/billing"
             base = "develop"
             model = "sonnet"
-            setup = "bun install"
             "#,
         )
         .unwrap();
@@ -322,6 +344,13 @@ mod tests {
         );
         assert_eq!(PermissionMode::DontAsk.as_flag(), "dontAsk");
         assert!(parse("[agents]\npermission_mode = \"bypassPermissions\"\n").is_err());
+    }
+
+    #[test]
+    fn the_interface_can_stop_its_animations() {
+        assert!(!Config::default().tui.reduced_motion);
+        let config = parse("[tui]\nreduced_motion = true\n").unwrap();
+        assert!(config.tui.reduced_motion);
     }
 
     #[test]

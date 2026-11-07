@@ -9,8 +9,8 @@ use volee_tui::{ColorDepth, DaemonSource, Keymap, Options, Theme};
 use crate::connect::{connect_or_start, paths};
 
 /// Starts the daemon when it does not run, then shows its agents until the
-/// person quits. The theme and the key overrides come from the
-/// configuration.
+/// person quits. The theme, the key overrides and reduced motion come from
+/// the configuration.
 pub(crate) async fn run() -> Result<()> {
     let options = options(None)?;
     let client = connect_or_start().await?;
@@ -21,8 +21,8 @@ pub(crate) async fn run() -> Result<()> {
     Ok(())
 }
 
-/// The interface's colors and keys from the configuration file; `theme`
-/// replaces the configured theme.
+/// The interface's colors, keys and motion from the configuration file;
+/// `theme` replaces the configured theme.
 pub(crate) fn options(theme: Option<&str>) -> Result<Options> {
     let paths = paths()?;
     let home = std::env::var_os("HOME")
@@ -45,5 +45,6 @@ pub(crate) fn options(theme: Option<&str>) -> Result<Options> {
     let mut options = Options::default();
     options.theme = theme;
     options.keymap = keymap;
+    options.reduced_motion = config.tui.reduced_motion;
     Ok(options)
 }

@@ -10,15 +10,17 @@ use volee_proto::client::Client;
 use volee_proto::methods::{AgentParams, Attach, Diff, DiffParams, Preview, Stop};
 
 use crate::connect::connect_or_start;
-use crate::resolve;
+use crate::{resolve, text};
 
-/// The agent `input` names, with its display name.
+/// The agent `input` names, with its display name, safe to print: an agent
+/// that a coordinator launched got its name from a model.
 async fn agent(client: &Client, input: &str) -> Result<(AgentId, String)> {
     let registry = resolve::registry(client).await?;
     let id = resolve::agent(&registry, input)?;
-    let name = registry
-        .agent(id)
-        .map_or_else(|| id.short(), |agent| agent.name.clone());
+    let name = registry.agent(id).map_or_else(
+        || id.short(),
+        |agent| text::one_line(&agent.name).into_owned(),
+    );
     Ok((id, name))
 }
 
@@ -84,11 +86,15 @@ pub(crate) async fn diff(input: &str, full: bool) -> Result<()> {
     Ok(())
 }
 
-/// Stops an agent volee launched. Its conversation is kept.
+/// Stops an agent volee launched. Its conversation is kept, and volee does
+/// not resume it until the human writes to it.
 pub(crate) async fn stop(input: &str) -> Result<()> {
     let client = connect_or_start().await?;
     let (agent, name) = agent(&client, input).await?;
     client.call::<Stop>(AgentParams { agent }).await?;
-    println!("Stopped {name}. Its conversation is kept and can be resumed.");
+    println!(
+        "Stopped {name}. Its conversation is kept, and volee does not resume it until you send \
+         it a message (`volee msg send {name} ...`)."
+    );
     Ok(())
 }

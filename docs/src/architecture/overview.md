@@ -72,9 +72,9 @@ Everything ships as **one binary**, `volee`, with subcommands:
 | Command | Role |
 | --- | --- |
 | `volee` | Opens the TUI. Starts the daemon if needed. |
-| `volee daemon` | Runs the daemon in the foreground (other commands start it when needed). |
-| `volee spawn`, `volee mission ...` | Launch workers and missions. |
-| `volee ls`, `volee msg ...`, `volee diff` | Scriptable views and messaging. |
+| `volee daemon run` | Runs the daemon in the foreground (other commands start it in the background when needed). |
+| `volee spawn`, `volee mission ...` | Launch agents and missions. |
+| `volee ls`, `volee msg send`, `volee diff`, `volee tidy` | Scriptable views, messaging and cleanup. |
 | `volee hook <event>` | Called by Claude Code hooks of the agents volee launched. |
 | `volee mcp` | MCP server over stdio, used by agents to talk to each other. |
 
@@ -104,7 +104,7 @@ Claude Code 2.1.319 (see [ADR 0006](../adr/0006-messaging.md)):
 | --- | --- | --- |
 | Working | A `Stop` hook that returns `decision: "block"` with the pending messages | The agent reads them at the end of its turn and continues. |
 | Idle, process alive | An `asyncRewake` `Stop` hook that waits for a message, then exits with status 2 | The idle agent wakes up with the message, same session. |
-| Stopped (idle sessions are reaped after about an hour) | `claude --bg --resume <session>` with the message | The conversation continues in a new session that volee links to the same agent. |
+| Stopped (idle sessions are reaped after about an hour) | `claude --bg --resume <session>` with the message | The conversation continues in a new session that volee links to the same agent. Never for an agent you stopped (until you write to it) or whose mission is over. |
 
 Agents send messages through the `volee` MCP server (`send_message`,
 `read_messages`, `list_agents`...), which works for any harness that speaks
@@ -129,11 +129,12 @@ requests; **analysis** missions deliver reports.
 | Crate | Responsibility | Depends on |
 | --- | --- | --- |
 | `volee-core` | Domain model and pure logic: agents, roles, states, messages, missions, delivery verdicts. No IO. | none |
+| `volee-config` | The configuration file: parsing, defaults and checks. | none |
 | `volee-proto` | IPC messages and JSON-RPC framing shared by the daemon and its clients. | core |
 | `volee-store` | SQLite storage, migrations, event log and projections. | core |
 | `volee-git` | Git queries behind a trait (CLI implementation). | core |
 | `volee-harness` | Harness adapters. Claude Code first: spawn, discover, hooks, logs, attach, wake. | core |
-| `volee-daemon` | The daemon: reconcilers, message router, mission supervisor. | core, proto, store, git, harness |
+| `volee-daemon` | The daemon: reconcilers, message router, mission supervisor. | core, config, proto, store, git, harness |
 | `volee-mcp` | MCP server exposed to agents. | core, proto |
 | `volee-tui` | The ratatui interface. | core, proto |
 | `volee-cli` | The `volee` binary and its subcommands. | all |
@@ -148,12 +149,12 @@ volee follows the XDG base directory layout on every platform:
 
 | Path | Content |
 | --- | --- |
-| `~/.config/volee/config.toml` | Repositories, defaults, theme, keymap, external tools |
+| `~/.config/volee/config.toml` | Agent defaults, repositories, summaries, theme, keymap |
 | `~/.config/volee/themes/*.toml` | Your themes |
 | `~/.local/state/volee/volee.db` | Registry, events, messages, missions (SQLite, WAL) |
 | `~/.local/state/volee/logs/` | Daemon logs |
 | `~/.local/state/volee/agents/<id>/` | Per-agent hook settings and MCP config |
-| `~/.local/share/volee/worktrees/<repo>/<branch>` | Worktrees created by volee |
+| `<repository>/.claude/worktrees/<name>` | Worktrees created by volee, inside each repository ([ADR 0013](../adr/0013-worktrees-live-in-their-repository.md)) |
 | `$XDG_RUNTIME_DIR/volee.sock` (or the state directory) | Daemon socket, user-only permissions |
 
 ## Performance budget

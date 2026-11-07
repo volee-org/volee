@@ -78,11 +78,14 @@ rm ~/.local/bin/volee          # installed with the installer
 cargo uninstall volee-cli      # installed with Cargo
 ```
 
-Then remove volee's configuration, state and data:
+Then remove volee's configuration and state:
 
 ```sh
-rm -rf ~/.config/volee ~/.local/state/volee ~/.local/share/volee
+rm -rf ~/.config/volee ~/.local/state/volee
 ```
 
-Removing `~/.local/share/volee` also removes the worktrees volee created. Their
-branches stay in your repositories.
+The worktrees volee created stay in their repositories, under
+`.claude/worktrees/`. Before you uninstall, remove the ones whose work landed
+with `volee tidy --all`, and any other with `git worktree remove <path>` once
+you no longer need its changes. Their branches stay in your repositories
+either way.

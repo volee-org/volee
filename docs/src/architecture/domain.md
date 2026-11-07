@@ -60,8 +60,9 @@ group.
 | `workspace-updated`, `location-changed`, `model-changed` | Better knowledge of where and how the agent runs. |
 | `delivery-updated` | New delivery evidence from git or the forge. |
 | `agent-forgotten` | The agent is removed; its sessions are ignored from then on. |
+| `stop-requested` | The human stopped the agent: it is held, and volee does not resume it on its own. A later `message-posted` from the human to it lifts the hold. |
 | `thread-opened`, `message-posted`, `message-delivered`, `message-read` | Conversations and receipts. |
-| `mission-created`, `mission-updated` | Missions and their progress. |
+| `mission-created`, `mission-updated` | Missions and their progress. When a mission ends, every agent of it is held for good. |
 | `worker-assessed` | The supervisor's verdict on a worker of a mission, with its evidence. |
 
 ## Reconciliation
@@ -142,8 +143,8 @@ triggered it are already committed.
 
 - **Routing** (`Registry::check_route`): people and volee write to anyone;
   agents write to people; between agents, members of the same mission write to
-  each other, and otherwise an agent writes to its parent, its children and its
-  mission's coordinator.
+  each other, and otherwise an agent writes to its parent, its children, its
+  mission's coordinator and the agent that requested its mission.
 - **Cleanup** (`delivery::tidy_verdict`): a worktree may be removed only when
   the agent is not busy, the tree is clean, and the work is delivered (merged,
   merged through a pull request, or reported). Every missing condition is

@@ -25,7 +25,6 @@ wake_timeout = 3600
 path = "~/code/billing"
 base = "develop"
 model = "sonnet"
-setup = "bun install"
 
 [tui]
 theme = "catppuccin-mocha"
@@ -45,7 +44,9 @@ take-over = "ctrl-a"
 ## Worktrees
 
 volee creates each agent's worktree inside its repository, at
-`.claude/worktrees/<branch>`, where Claude Code keeps its own, and adds that
+`.claude/worktrees/<name>`, where Claude Code keeps its own. `<name>` is the
+branch with every character other than a letter, a digit, `.`, `_` or `-`
+replaced by `-`: `feat/invoices` becomes `feat-invoices`. volee adds that
 folder to the repository's local exclude file so `git status` stays clean.
 The location is not configurable: Claude Code only trusts a background
 session started from a repository you trust, and never a worktree elsewhere
@@ -63,7 +64,6 @@ and `.`.
 | `path` | yes | The main checkout. `~` is expanded. |
 | `base` | no | The branch work starts from. The repository's default branch when unset. |
 | `model` | no | Model for this repository's agents. |
-| `setup` | no | A first step agents run in a new worktree, such as `bun install`. |
 
 ## `[messages]`
 
@@ -76,9 +76,23 @@ A summary runs `claude -p` with no tools, no MCP server, none of your hooks
 and no saved session, in a directory of volee's own: the model reads the
 thread and nothing else.
 
+## `[missions]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `max_workers` | `8` | The most agents one mission may launch besides its coordinator, counting those that already stopped. |
+
+A coordinator launches workers with its `spawn_worker` tool, without asking
+you, so this limit is what keeps a coordinator gone wrong from starting
+sessions without end. Launches that run at the same time all count. A
+coordinator that reaches the limit gets a refusal that tells it to ask you.
+Workers also stay in the repositories the mission names: volee compares their
+main checkouts, never their directory names.
+
 ## `[tui]`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `theme` | `catppuccin-mocha` | A built-in theme or a file in `~/.config/volee/themes/`; see [Themes](themes.md). |
+| `reduced_motion` | `false` | Stop animations: a new message lights up its line on the [network](interface.md#the-network) instead of travelling along it, and spinners stop. |
 | `keys` | none | Key overrides by action name, such as `take-over = "ctrl-a"`; the [interface guide](interface.md#keys) lists the actions. |
