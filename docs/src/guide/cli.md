@@ -61,7 +61,7 @@ volee logs <agent>          # its recent terminal output
 volee diff <agent>          # its changes against the branch it started from, by file
 volee diff <agent> --full   # the same changes, as a full patch
 volee attach <agent>        # take it over in this terminal; Ctrl+Z comes back
-volee stop <agent>          # stop it; its conversation is kept
+volee stop <agent>          # stop it; volee does not resume it until you message it
 ```
 
 `volee logs` prints the screen the harness recorded, with its colors.
@@ -74,7 +74,10 @@ These commands work on every background session, including the ones you
 started yourself. A session running in a terminal of its own (an interactive
 `claude`) is shown by `volee ls`, but only that terminal can show or control
 it. `volee stop` only stops the agents volee launched: stop the others where
-they were started.
+they were started. A stopped agent keeps its conversation, and volee does not
+resume it on its own, even when other agents write to it, until you send it a
+message yourself. `volee stop` on an agent that is not running only records
+that.
 
 ## Launching agents
 
@@ -128,8 +131,17 @@ volee msg send ag_x7k2pq "Use TTC." --kind answer
 A message reaches a working agent at the end of its turn, and wakes an idle
 agent at once. When the session of an agent volee launched has ended (Claude
 Code stops idle background sessions after about an hour), volee resumes it in
-its worktree with the message as its prompt; if that fails, it tells you once. Agents you did not launch through volee cannot receive
-messages yet.
+its worktree with the message as its prompt; if that fails, it tells you once.
+Two cases are never resumed on their own:
+
+- an agent you stopped with `volee stop`: messages from agents and from volee
+  wait, and your next message to it resumes it with all of them;
+- an agent whose mission is over (closed or aborted): its messages wait until
+  it runs again, which only you can decide, with `claude --resume` in its
+  worktree.
+
+Agents you did not launch through volee cannot receive messages yet.
+`volee msg send` says, after sending, which of these cases applies.
 
 ## Summaries
 
@@ -190,10 +202,12 @@ volee demo --theme terminal       # with another theme than the configured one
 
 `volee` with no command starts the daemon when it does not run, then shows
 the agents it knows until you quit. `volee demo` needs no daemon and touches
-nothing: it shows a fictional lead, two missions and their workers, whose
-states change every few seconds. Both take their theme and keys from the
-`[tui]` table of the configuration. The [interface guide](interface.md)
-describes the screen, what needs the daemon, and every key.
+nothing: it shows a fictional lead, two missions and their workers, and two
+sessions volee did not launch, whose states change and who write to each
+other every few seconds. Both take their theme, keys and `reduced_motion`
+setting from the `[tui]` table of the configuration. The
+[interface guide](interface.md) describes the screen, what needs the daemon,
+and every key.
 
 ## Isolated runs
 

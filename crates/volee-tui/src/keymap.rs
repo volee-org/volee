@@ -275,6 +275,10 @@ actions! {
     First => "first",
     /// Go to the last item.
     Last => "last",
+    /// Move the timeline's cursor to the selected agent's previous event.
+    PreviousEvent => "previous-event",
+    /// Move the timeline's cursor to the selected agent's next event.
+    NextEvent => "next-event",
     /// Show only the selected agent and its descendants.
     FocusSubtree => "focus-subtree",
     /// Show more detail on cards.
@@ -324,6 +328,12 @@ pub(crate) enum Context {
     Agents,
     /// The hierarchy view.
     Hierarchy,
+    /// The network view.
+    Network,
+    /// The repositories view.
+    Repos,
+    /// The timeline view.
+    Timeline,
     /// The detail panel and its preview.
     Detail,
     /// The filter prompt.
@@ -340,10 +350,13 @@ pub(crate) enum Context {
 
 impl Context {
     /// Contexts in the order of the help and of the user guide.
-    pub(crate) const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 12] = [
         Self::Global,
         Self::Agents,
         Self::Hierarchy,
+        Self::Network,
+        Self::Repos,
+        Self::Timeline,
         Self::Detail,
         Self::Filter,
         Self::Composer,
@@ -358,6 +371,9 @@ impl Context {
             Self::Global => "Everywhere",
             Self::Agents => "Agents list",
             Self::Hierarchy => "Hierarchy",
+            Self::Network => "Network",
+            Self::Repos => "Repositories",
+            Self::Timeline => "Timeline",
             Self::Detail => "Detail and preview",
             Self::Filter => "Filter prompt",
             Self::Composer => "Message composer",
@@ -592,6 +608,7 @@ impl Keymap {
 // One binding per line reads best as a table; rustfmt would spread each one
 // over seven lines.
 #[rustfmt::skip]
+#[allow(clippy::too_many_lines)] // One table of every binding, one per line.
 fn default_bindings() -> Vec<Binding> {
     use Action as A;
     use Context as C;
@@ -647,6 +664,38 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Hierarchy, &[ch('+'), ch('=')], A::ZoomIn, "more detail on cards", Some("zoom")),
         bind(C::Hierarchy, &[ch('_')], A::ZoomOut, "less detail on cards", Some("zoom")),
         bind(C::Hierarchy, &[ch('0')], A::ZoomAuto, "choose the detail level from the size", None),
+
+        bind(C::Network, &[ch('h'), key(K::Left)], A::Left, "agent on the left", Some("move")),
+        bind(C::Network, &[ch('j'), key(K::Down)], A::Down, "agent below", Some("move")),
+        bind(C::Network, &[ch('k'), key(K::Up)], A::Up, "agent above", Some("move")),
+        bind(C::Network, &[ch('l'), key(K::Right)], A::Right, "agent on the right", Some("move")),
+        bind(C::Network, &[ch('g'), key(K::Home)], A::First, "first agent, top left", None),
+        bind(C::Network, &[ch('G'), key(K::End)], A::Last, "last agent, bottom right", None),
+        bind(C::Network, &[ch('+'), ch('=')], A::ZoomIn, "more detail on agents", Some("zoom")),
+        bind(C::Network, &[ch('_')], A::ZoomOut, "less detail on agents", Some("zoom")),
+        bind(C::Network, &[ch('0')], A::ZoomAuto, "choose the detail level from the size", None),
+
+        bind(C::Repos, &[ch('j'), key(K::Down)], A::Down, "next agent", Some("move")),
+        bind(C::Repos, &[ch('k'), key(K::Up)], A::Up, "previous agent", Some("move")),
+        bind(C::Repos, &[ch('h'), key(K::Left)], A::Left, "previous repository", Some("repository")),
+        bind(C::Repos, &[ch('l'), key(K::Right)], A::Right, "next repository", Some("repository")),
+        bind(C::Repos, &[ch('g'), key(K::Home)], A::First, "first agent", None),
+        bind(C::Repos, &[ch('G'), key(K::End)], A::Last, "last agent", None),
+        bind(C::Repos, &[ch('+'), ch('=')], A::ZoomIn, "more detail per agent", Some("zoom")),
+        bind(C::Repos, &[ch('_')], A::ZoomOut, "less detail per agent", Some("zoom")),
+        bind(C::Repos, &[ch('0')], A::ZoomAuto, "choose the detail level from the size", None),
+
+        bind(C::Timeline, &[ch('j'), key(K::Down)], A::Down, "next agent", Some("move")),
+        bind(C::Timeline, &[ch('k'), key(K::Up)], A::Up, "previous agent", Some("move")),
+        bind(C::Timeline, &[ch('h'), key(K::Left)], A::Left, "move the cursor back in time", Some("scrub")),
+        bind(C::Timeline, &[ch('l'), key(K::Right)], A::Right, "move the cursor forward in time", Some("scrub")),
+        bind(C::Timeline, &[ch('[')], A::PreviousEvent, "cursor to the selected agent's previous event", Some("event")),
+        bind(C::Timeline, &[ch(']')], A::NextEvent, "cursor to the selected agent's next event", Some("event")),
+        bind(C::Timeline, &[ch('g'), key(K::Home)], A::First, "first agent", None),
+        bind(C::Timeline, &[ch('G'), key(K::End)], A::Last, "last agent", None),
+        bind(C::Timeline, &[ch('+'), ch('=')], A::ZoomIn, "shorter time span, more detail", Some("zoom")),
+        bind(C::Timeline, &[ch('_')], A::ZoomOut, "longer time span", Some("zoom")),
+        bind(C::Timeline, &[ch('0')], A::ZoomAuto, "back to now and the default time span", None),
 
         bind(C::Detail, &[ch('j'), key(K::Down)], A::Down, "scroll the preview down", Some("scroll")),
         bind(C::Detail, &[ch('k'), key(K::Up)], A::Up, "scroll the preview up", Some("scroll")),

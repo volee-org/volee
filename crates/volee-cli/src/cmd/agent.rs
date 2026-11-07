@@ -84,11 +84,15 @@ pub(crate) async fn diff(input: &str, full: bool) -> Result<()> {
     Ok(())
 }
 
-/// Stops an agent volee launched. Its conversation is kept.
+/// Stops an agent volee launched. Its conversation is kept, and volee does
+/// not resume it until the human writes to it.
 pub(crate) async fn stop(input: &str) -> Result<()> {
     let client = connect_or_start().await?;
     let (agent, name) = agent(&client, input).await?;
     client.call::<Stop>(AgentParams { agent }).await?;
-    println!("Stopped {name}. Its conversation is kept and can be resumed.");
+    println!(
+        "Stopped {name}. Its conversation is kept, and volee does not resume it until you send \
+         it a message (`volee msg send {name} ...`)."
+    );
     Ok(())
 }
