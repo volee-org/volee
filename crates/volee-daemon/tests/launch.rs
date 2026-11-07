@@ -93,7 +93,11 @@ fn start_with(extra: &str) -> Running {
     let listener = UnixListener::bind(&socket).unwrap();
     let harness = Arc::new(FakeHarness::default());
     let settings = volee_config::Config::parse(
-        &format!("[repos.alpha]\npath = \"{}\"\n{extra}", repo.display()),
+        &format!(
+            "[repos.alpha]\npath = \"{}\"\n{}",
+            repo.display(),
+            extra.replace("{repo}", &repo.display().to_string())
+        ),
         Path::new("config.toml"),
         Path::new("/home/nobody"),
     )
@@ -273,6 +277,31 @@ async fn a_failed_launch_marks_the_agent_failed_and_keeps_the_worktree() {
             .unwrap()
             .starts_with("launch failed")
     );
+}
+
+#[tokio::test]
+async fn a_configured_folder_inside_a_repository_is_not_that_repository() {
+    // A plain folder inside `alpha`, configured as a repository of its own.
+    let daemon = start_with("[repos.docs]\npath = \"{repo}/docs\"\n");
+    std::fs::create_dir_all(daemon.repo.join("docs")).unwrap();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let error = rpc_error(
+        client
+            .call::<Spawn>(SpawnParams {
+                repo: "docs".into(),
+                ..worker("feat/docs")
+            })
+            .await
+            .unwrap_err(),
+    );
+    assert_eq!(error.code, rpc::INVALID_PARAMS);
+    assert!(
+        error.message.contains("not the main checkout"),
+        "{}",
+        error.message
+    );
+    assert!(!daemon.repo.join(".claude/worktrees/feat-docs").exists());
+    assert_eq!(daemon.harness.launches().len(), 0);
 }
 
 #[tokio::test]

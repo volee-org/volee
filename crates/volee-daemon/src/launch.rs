@@ -537,7 +537,8 @@ async fn locate(
     git: &Arc<dyn Git>,
     input: &str,
 ) -> Result<(PathBuf, String), DaemonError> {
-    let dir = if let Some(repo) = shared.settings.repos.get(input) {
+    let configured = shared.settings.repos.get(input);
+    let dir = if let Some(repo) = configured {
         repo.path.clone()
     } else {
         let path = PathBuf::from(input);
@@ -558,6 +559,17 @@ async fn locate(
         DaemonError::InvalidParams(format!("{} is not a git repository", dir.display()))
     })?;
     let root = info.main_checkout;
+    // git answers for the repository that holds a directory: a configured
+    // path that is only a folder inside another repository would send the
+    // agent's worktree and branch into that one.
+    if configured.is_some() && std::fs::canonicalize(&dir).is_ok_and(|dir| dir != root) {
+        return Err(DaemonError::InvalidParams(format!(
+            "repository `{input}` is set to {}, which is not the main checkout of a repository: \
+             it is inside {}. Set its path to a repository's main checkout",
+            dir.display(),
+            root.display()
+        )));
+    }
     let name = shared
         .settings
         .repo_at(&root)

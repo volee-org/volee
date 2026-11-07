@@ -64,7 +64,7 @@ and `.`.
 
 | Key | Required | Meaning |
 | --- | --- | --- |
-| `path` | yes | The main checkout. `~` is expanded. |
+| `path` | yes | The main checkout. `~` is expanded. A folder inside another repository is refused, so that agents never land in the repository around it. |
 | `base` | no | The branch work starts from. The repository's default branch when unset. |
 | `model` | no | Model for this repository's agents. |
 
