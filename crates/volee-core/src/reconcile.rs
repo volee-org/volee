@@ -90,7 +90,8 @@ pub struct Listing {
 ///   are skipped. Sessions of forgotten agents are always skipped.
 /// - When a complete listing no longer contains an agent's current session,
 ///   the agent becomes `stopped` if it ran in a terminal (the session ended)
-///   or `lost` if it ran in the background (the harness removed it).
+///   or `lost` if it ran in the background (the harness removed it), unless
+///   it is launching a new session.
 pub fn reconcile(
     registry: &Registry,
     listing: &Listing,
@@ -223,7 +224,14 @@ fn vanished(registry: &Registry, listing: &Listing, now: Timestamp, events: &mut
             continue;
         };
         let listed = listing.sessions.iter().any(|s| s.key == current.key);
-        if listed || matches!(agent.state, AgentState::Stopped | AgentState::Lost) {
+        // A launching agent waits for a new session (a resume forks one with
+        // a new id): its previous session being gone is expected.
+        if listed
+            || matches!(
+                agent.state,
+                AgentState::Stopped | AgentState::Lost | AgentState::Launching
+            )
+        {
             continue;
         }
         let (state, detail) = if agent.location == Location::Background {
@@ -587,5 +595,35 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event.kind, EventKind::AgentRegistered { .. }))
         );
+    }
+
+    #[test]
+    fn an_agent_launching_a_new_session_is_not_lost() {
+        // A resume: the old session is gone and the fork is not listed yet.
+        let mut registry = Registry::new();
+        let agent = launched(&mut registry, 1, "/work/alpha");
+        for kind in [
+            EventKind::SessionLinked {
+                agent,
+                session: SessionKey::claude("old"),
+                origin: SessionOrigin::Started,
+            },
+            EventKind::StateChanged {
+                agent,
+                state: AgentState::Launching,
+                detail: None,
+            },
+        ] {
+            registry
+                .apply(&Event::new(Timestamp::from_millis(2), kind))
+                .unwrap();
+        }
+        let events = reconcile(
+            &registry,
+            &listing(vec![]),
+            Timestamp::from_millis(5),
+            ids(),
+        );
+        assert_eq!(events, vec![]);
     }
 }
