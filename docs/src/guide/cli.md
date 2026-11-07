@@ -223,3 +223,9 @@ trying volee without touching your real state:
 | `VOLEE_STATE_DIR` | `$XDG_STATE_HOME/volee`, else `~/.local/state/volee` |
 | `VOLEE_DATA_DIR` | `$XDG_DATA_HOME/volee`, else `~/.local/share/volee` |
 | `VOLEE_SOCKET` | `$XDG_RUNTIME_DIR/volee.sock`, else `<state>/volee.sock` |
+
+Put a custom `VOLEE_SOCKET` in a directory only you can enter, as the
+defaults are: the daemon restricts the socket to you right after creating
+it, and a directory that others can enter would let them connect in
+between (the daemon logs a warning then). The daemon replaces a stale
+socket left by a crash, but never another kind of file.
