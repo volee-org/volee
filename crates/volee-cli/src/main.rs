@@ -84,6 +84,13 @@ enum Command {
     /// Send messages to agents.
     #[command(subcommand)]
     Msg(MsgCommand),
+    /// Summarize a mission's thread, or your thread with an agent, with a
+    /// model. Off unless `summaries = true` under [messages].
+    Summary {
+        /// A mission (title, short id or id) or an agent (name, short id or
+        /// id).
+        target: String,
+    },
     /// Start, follow, abort or close missions across repositories.
     #[command(subcommand)]
     Mission(MissionCommand),
@@ -290,6 +297,7 @@ fn async_main(command: Command) -> ExitCode {
                 cmd::msg::send(&to, body, kind.into()).await
             }
             Command::Mission(command) => mission(command).await,
+            Command::Summary { target } => cmd::summary::run(&target).await,
             Command::Spawn {
                 repo,
                 branch,

@@ -47,7 +47,7 @@ use crate::error::{HarnessError, ParseError};
 use crate::harness::{Capabilities, Harness, WorktreeRemoval};
 use crate::hooks;
 use crate::runner::{CommandRunner, Invocation, Output, RunError, SystemRunner};
-use crate::spec::{SpawnSpec, Spawned};
+use crate::spec::{Completion, SpawnSpec, Spawned};
 use crate::version::Version;
 
 /// The oldest Claude Code with background sessions (`claude --bg`, `attach`,
@@ -107,14 +107,18 @@ pub struct Timeouts {
     /// Launches and resumes, which may first start Claude Code's background
     /// supervisor.
     pub launch: Duration,
+    /// One-off answers (`claude -p`), which wait for the model.
+    pub completion: Duration,
 }
 
 impl Default for Timeouts {
-    /// 15 seconds for queries, 60 seconds for launches.
+    /// 15 seconds for queries, 60 seconds for launches, 3 minutes for
+    /// answers.
     fn default() -> Self {
         Self {
             query: Duration::from_secs(15),
             launch: Duration::from_secs(60),
+            completion: Duration::from_secs(180),
         }
     }
 }
@@ -453,6 +457,24 @@ impl<R: CommandRunner> Harness for ClaudeCode<R> {
     /// See [`hooks::mcp_config`].
     fn mcp_config(&self, volee_bin: &Path, agent: AgentId) -> Result<Value, HarnessError> {
         Ok(hooks::mcp_config(volee_bin, agent)?)
+    }
+
+    /// Runs `claude -p` with [`launch::completion_args`] in `request.cwd`.
+    fn complete(&self, request: &Completion) -> Result<String, HarnessError> {
+        if !request.cwd.is_absolute() {
+            return Err(crate::RequestError::RelativePath {
+                what: "working directory",
+                path: request.cwd.clone(),
+            }
+            .into());
+        }
+        let command = self.describe("-p");
+        let invocation = self
+            .invocation(self.timeouts.completion)
+            .args(launch::completion_args(request))
+            .cwd(&request.cwd);
+        let output = self.run(&command, &invocation)?;
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
     }
 }
 

@@ -13,7 +13,7 @@ use volee_core::AgentId;
 use volee_core::harness::{HarnessKind, SessionKey, SessionOrigin};
 use volee_core::reconcile::{ListedSession, Listing};
 use volee_harness::{
-    Capabilities, Harness, HarnessError, SpawnSpec, Spawned, Version, WorktreeRemoval,
+    Capabilities, Completion, Harness, HarnessError, SpawnSpec, Spawned, Version, WorktreeRemoval,
 };
 
 /// A harness whose listing the test sets, and which records launches and
@@ -25,6 +25,7 @@ pub(crate) struct FakeHarness {
     failing: Mutex<bool>,
     launches: Mutex<Vec<SpawnSpec>>,
     resumes: Mutex<Vec<(SessionKey, SpawnSpec)>>,
+    completions: Mutex<Vec<Completion>>,
     refuse_launches: Mutex<bool>,
     actions: Mutex<Vec<(String, String)>>,
     sessions_gone: Mutex<bool>,
@@ -72,6 +73,11 @@ impl FakeHarness {
     /// Makes launches fail, or work again.
     pub(crate) fn refuse_launches(&self, refuse: bool) {
         *self.refuse_launches.lock().unwrap() = refuse;
+    }
+
+    /// Every one-off question so far.
+    pub(crate) fn completions(&self) -> Vec<Completion> {
+        self.completions.lock().unwrap().clone()
     }
 
     /// Every resume so far, with the session it resumed.
@@ -172,6 +178,11 @@ impl Harness for FakeHarness {
         Ok(
             json!({ "hooks": { "Stop": format!("{} hook stop --agent {agent}", volee_bin.display()) } }),
         )
+    }
+
+    fn complete(&self, request: &Completion) -> Result<String, HarnessError> {
+        self.completions.lock().unwrap().push(request.clone());
+        Ok("- The invoice model is merged.\n- One question waits for the human.".to_owned())
     }
 
     fn mcp_config(&self, volee_bin: &Path, agent: AgentId) -> Result<Value, HarnessError> {

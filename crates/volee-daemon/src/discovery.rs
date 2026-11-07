@@ -61,6 +61,11 @@ pub(crate) async fn run(
                 continue;
             }
         };
+        // volee's own one-off runs (thread summaries) are never agents.
+        let mut listing = listing;
+        listing
+            .sessions
+            .retain(|session| !session.cwd.starts_with(&shared.paths.state_dir));
         let mut state = shared.state.lock().await;
         let now = state.now();
         let claimed = claim_expected(&mut state, &listing, now);
