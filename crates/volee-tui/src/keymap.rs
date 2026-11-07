@@ -259,6 +259,10 @@ actions! {
     Filter => "filter",
     /// Take over the selected agent in this terminal.
     TakeOver => "take-over",
+    /// Write a message to the selected agent.
+    Message => "message",
+    /// Show the selected agent's changes.
+    Diff => "diff",
     /// Move down.
     Down => "down",
     /// Move up.
@@ -271,6 +275,10 @@ actions! {
     First => "first",
     /// Go to the last item.
     Last => "last",
+    /// Move the timeline's cursor to the selected agent's previous event.
+    PreviousEvent => "previous-event",
+    /// Move the timeline's cursor to the selected agent's next event.
+    NextEvent => "next-event",
     /// Show only the selected agent and its descendants.
     FocusSubtree => "focus-subtree",
     /// Show more detail on cards.
@@ -279,10 +287,22 @@ actions! {
     ZoomOut => "zoom-out",
     /// Choose the detail level from the available size again.
     ZoomAuto => "zoom-auto",
-    /// Refresh the preview.
+    /// Refresh the preview or the changes.
     Refresh => "refresh",
     /// Apply what was typed.
     Apply => "apply",
+    /// Send the message.
+    Send => "send",
+    /// Start a new line in the message.
+    NewLine => "new-line",
+    /// The next kind of message.
+    NextKind => "next-kind",
+    /// The previous kind of message.
+    PreviousKind => "previous-kind",
+    /// Switch between the summary of the changes and the full patch.
+    ToggleFull => "toggle-full",
+    /// Answer yes to the question on the bottom line.
+    Confirm => "confirm",
 }
 
 impl FromStr for Action {
@@ -308,22 +328,40 @@ pub(crate) enum Context {
     Agents,
     /// The hierarchy view.
     Hierarchy,
+    /// The network view.
+    Network,
+    /// The repositories view.
+    Repos,
+    /// The timeline view.
+    Timeline,
     /// The detail panel and its preview.
     Detail,
     /// The filter prompt.
     Filter,
+    /// The message composer.
+    Composer,
+    /// The changes window.
+    Diff,
+    /// A yes or no question on the bottom line.
+    Confirm,
     /// The help overlay.
     Help,
 }
 
 impl Context {
     /// Contexts in the order of the help and of the user guide.
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 12] = [
         Self::Global,
         Self::Agents,
         Self::Hierarchy,
+        Self::Network,
+        Self::Repos,
+        Self::Timeline,
         Self::Detail,
         Self::Filter,
+        Self::Composer,
+        Self::Diff,
+        Self::Confirm,
         Self::Help,
     ];
 
@@ -333,8 +371,14 @@ impl Context {
             Self::Global => "Everywhere",
             Self::Agents => "Agents list",
             Self::Hierarchy => "Hierarchy",
+            Self::Network => "Network",
+            Self::Repos => "Repositories",
+            Self::Timeline => "Timeline",
             Self::Detail => "Detail and preview",
             Self::Filter => "Filter prompt",
+            Self::Composer => "Message composer",
+            Self::Diff => "Changes",
+            Self::Confirm => "Questions",
             Self::Help => "Help",
         }
     }
@@ -564,6 +608,7 @@ impl Keymap {
 // One binding per line reads best as a table; rustfmt would spread each one
 // over seven lines.
 #[rustfmt::skip]
+#[allow(clippy::too_many_lines)] // One table of every binding, one per line.
 fn default_bindings() -> Vec<Binding> {
     use Action as A;
     use Context as C;
@@ -579,11 +624,17 @@ fn default_bindings() -> Vec<Binding> {
     let ch = KeyCombo::char;
     let ctrl = KeyCombo::ctrl;
     let key = KeyCombo::key;
+    let alt_enter = KeyCombo {
+        code: K::Enter,
+        modifiers: KeyModifiers::ALT,
+    };
 
     vec![
         bind(C::Global, &[ch('\'')], A::Jump, "jump to an agent: press ' then its letter", Some("jump")),
-        bind(C::Global, &[ch('-')], A::JumpBack, "back to the agent selected before", Some("previous")),
+        bind(C::Global, &[ch('-')], A::JumpBack, "back to the agent selected before", None),
         bind(C::Global, &[ch('/')], A::Filter, "filter agents by name, repository, branch or mission", Some("filter")),
+        bind(C::Global, &[ch('m')], A::Message, "write a message to the selected agent", Some("message")),
+        bind(C::Global, &[ch('d')], A::Diff, "show the selected agent's changes", Some("diff")),
         bind(C::Global, &[ch('a')], A::TakeOver, "take over the selected agent in this terminal", Some("take over")),
         bind(C::Global, &[key(K::Tab)], A::NextPane, "focus the next panel", Some("panel")),
         bind(C::Global, &[key(K::BackTab)], A::PreviousPane, "focus the previous panel", None),
@@ -593,7 +644,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &[ch('4')], A::ShowTimeline, "show the timeline", None),
         bind(C::Global, &[ch('?')], A::Help, "show or hide the keys", Some("help")),
         bind(C::Global, &[key(K::Esc)], A::Back, "close, cancel or go back (never quits)", None),
-        bind(C::Global, &[ch('q'), ctrl('c')], A::Quit, "quit volee", Some("quit")),
+        bind(C::Global, &[ch('q'), ctrl('c')], A::Quit, "quit volee (asks first when a draft would be lost)", Some("quit")),
 
         bind(C::Agents, &[ch('h'), key(K::Left)], A::Left, "parent agent", Some("move")),
         bind(C::Agents, &[ch('j'), key(K::Down)], A::Down, "next agent", Some("move")),
@@ -614,6 +665,38 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Hierarchy, &[ch('_')], A::ZoomOut, "less detail on cards", Some("zoom")),
         bind(C::Hierarchy, &[ch('0')], A::ZoomAuto, "choose the detail level from the size", None),
 
+        bind(C::Network, &[ch('h'), key(K::Left)], A::Left, "agent on the left", Some("move")),
+        bind(C::Network, &[ch('j'), key(K::Down)], A::Down, "agent below", Some("move")),
+        bind(C::Network, &[ch('k'), key(K::Up)], A::Up, "agent above", Some("move")),
+        bind(C::Network, &[ch('l'), key(K::Right)], A::Right, "agent on the right", Some("move")),
+        bind(C::Network, &[ch('g'), key(K::Home)], A::First, "first agent, top left", None),
+        bind(C::Network, &[ch('G'), key(K::End)], A::Last, "last agent, bottom right", None),
+        bind(C::Network, &[ch('+'), ch('=')], A::ZoomIn, "more detail on agents", Some("zoom")),
+        bind(C::Network, &[ch('_')], A::ZoomOut, "less detail on agents", Some("zoom")),
+        bind(C::Network, &[ch('0')], A::ZoomAuto, "choose the detail level from the size", None),
+
+        bind(C::Repos, &[ch('j'), key(K::Down)], A::Down, "next agent", Some("move")),
+        bind(C::Repos, &[ch('k'), key(K::Up)], A::Up, "previous agent", Some("move")),
+        bind(C::Repos, &[ch('h'), key(K::Left)], A::Left, "previous repository", Some("repository")),
+        bind(C::Repos, &[ch('l'), key(K::Right)], A::Right, "next repository", Some("repository")),
+        bind(C::Repos, &[ch('g'), key(K::Home)], A::First, "first agent", None),
+        bind(C::Repos, &[ch('G'), key(K::End)], A::Last, "last agent", None),
+        bind(C::Repos, &[ch('+'), ch('=')], A::ZoomIn, "more detail per agent", Some("zoom")),
+        bind(C::Repos, &[ch('_')], A::ZoomOut, "less detail per agent", Some("zoom")),
+        bind(C::Repos, &[ch('0')], A::ZoomAuto, "choose the detail level from the size", None),
+
+        bind(C::Timeline, &[ch('j'), key(K::Down)], A::Down, "next agent", Some("move")),
+        bind(C::Timeline, &[ch('k'), key(K::Up)], A::Up, "previous agent", Some("move")),
+        bind(C::Timeline, &[ch('h'), key(K::Left)], A::Left, "move the cursor back in time", Some("scrub")),
+        bind(C::Timeline, &[ch('l'), key(K::Right)], A::Right, "move the cursor forward in time", Some("scrub")),
+        bind(C::Timeline, &[ch('[')], A::PreviousEvent, "cursor to the selected agent's previous event", Some("event")),
+        bind(C::Timeline, &[ch(']')], A::NextEvent, "cursor to the selected agent's next event", Some("event")),
+        bind(C::Timeline, &[ch('g'), key(K::Home)], A::First, "first agent", None),
+        bind(C::Timeline, &[ch('G'), key(K::End)], A::Last, "last agent", None),
+        bind(C::Timeline, &[ch('+'), ch('=')], A::ZoomIn, "shorter time span, more detail", Some("zoom")),
+        bind(C::Timeline, &[ch('_')], A::ZoomOut, "longer time span", Some("zoom")),
+        bind(C::Timeline, &[ch('0')], A::ZoomAuto, "back to now and the default time span", None),
+
         bind(C::Detail, &[ch('j'), key(K::Down)], A::Down, "scroll the preview down", Some("scroll")),
         bind(C::Detail, &[ch('k'), key(K::Up)], A::Up, "scroll the preview up", Some("scroll")),
         bind(C::Detail, &[ch('r')], A::Refresh, "refresh the preview", Some("refresh")),
@@ -621,6 +704,26 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Filter, &[key(K::Enter)], A::Apply, "keep the filter and close the prompt", Some("apply")),
         bind(C::Filter, &[key(K::Esc)], A::Back, "clear the filter and close the prompt", Some("cancel")),
         bind(C::Filter, &[ctrl('c')], A::Quit, "quit volee", None),
+
+        bind(C::Composer, &[key(K::Enter)], A::Send, "send the message", Some("send")),
+        bind(C::Composer, &[alt_enter, ctrl('j')], A::NewLine, "start a new line", Some("new line")),
+        bind(C::Composer, &[key(K::Tab)], A::NextKind, "next kind of message", Some("kind")),
+        bind(C::Composer, &[key(K::BackTab)], A::PreviousKind, "previous kind of message", Some("kind")),
+        bind(C::Composer, &[key(K::Esc)], A::Back, "close the composer and keep the draft", Some("close")),
+        bind(C::Composer, &[ctrl('c')], A::Quit, "quit volee (asks first)", None),
+
+        bind(C::Diff, &[ch('j'), key(K::Down)], A::Down, "scroll down", Some("scroll")),
+        bind(C::Diff, &[ch('k'), key(K::Up)], A::Up, "scroll up", Some("scroll")),
+        bind(C::Diff, &[ch('g'), key(K::Home)], A::First, "top", None),
+        bind(C::Diff, &[ch('G'), key(K::End)], A::Last, "bottom", None),
+        bind(C::Diff, &[ch('f')], A::ToggleFull, "switch between the summary and the full patch", Some("summary/patch")),
+        bind(C::Diff, &[ch('r')], A::Refresh, "load the changes again", Some("refresh")),
+        bind(C::Diff, &[key(K::Esc), ch('d'), ch('q')], A::Back, "close the changes", Some("close")),
+        bind(C::Diff, &[ctrl('c')], A::Quit, "quit volee", None),
+
+        bind(C::Confirm, &[ch('y')], A::Confirm, "yes", Some("yes")),
+        bind(C::Confirm, &[ch('n'), key(K::Esc)], A::Back, "no", Some("no")),
+        bind(C::Confirm, &[ctrl('c')], A::Quit, "quit volee without asking again", None),
 
         bind(C::Help, &[ch('j'), key(K::Down)], A::Down, "scroll down", Some("scroll")),
         bind(C::Help, &[ch('k'), key(K::Up)], A::Up, "scroll up", Some("scroll")),
@@ -800,11 +903,20 @@ mod tests {
         };
         assert_eq!(
             line(&[Context::Hierarchy, Context::Global]),
-            "h/j/k/l move · enter subtree · +/_ zoom · ' jump · - previous · / filter · \
+            "h/j/k/l move · enter subtree · +/_ zoom · ' jump · / filter · m message · d diff · \
              a take over · tab panel · ? help · q quit"
         );
         assert_eq!(line(&[Context::Help]), "j/k scroll · esc close");
         assert_eq!(line(&[Context::Filter]), "enter apply · esc cancel");
+        assert_eq!(
+            line(&[Context::Composer]),
+            "enter send · alt-enter new line · tab/shift-tab kind · esc close"
+        );
+        assert_eq!(
+            line(&[Context::Diff]),
+            "j/k scroll · f summary/patch · r refresh · esc close"
+        );
+        assert_eq!(line(&[Context::Confirm]), "y yes · n no");
     }
 
     #[test]
@@ -813,7 +925,10 @@ mod tests {
         assert!(markdown.starts_with(
             "### Everywhere\n\n| Keys | What it does | Action |\n| --- | --- | --- |\n"
         ));
-        assert!(markdown.contains("| `q`, `ctrl-c` | quit volee | `quit` |"));
+        assert!(markdown.contains(
+            "| `q`, `ctrl-c` | quit volee (asks first when a draft would be lost) | `quit` |"
+        ));
+        assert!(markdown.contains("| `alt-enter`, `ctrl-j` | start a new line | `new-line` |"));
         assert!(
             markdown
                 .contains("| `a` | take over the selected agent in this terminal | `take-over` |")

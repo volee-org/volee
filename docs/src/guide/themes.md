@@ -105,8 +105,10 @@ edge = "#3b4261"
 | `role.worker` | A worker in one repository. |
 | `role.subagent` | A helper started by another agent inside its session. |
 | `role.independent` | A session volee did not launch. |
-| `edge` | Lines between cards. |
-| `edge.pulse` | A message moving along an edge (used by the network view). |
+| `edge` | Lines between cards, and who launched whom in the network view. |
+| `edge.pulse` | A message moving along an edge of the network view. |
+| `edge.message` | Agents that exchanged messages, in the network view. |
+| `edge.question` | A question that waits for its answer, in the network view. |
 | `diff.added` | Added lines. |
 | `diff.removed` | Removed lines. |
 | `badge.pr` | Pull request numbers. |
@@ -119,5 +121,5 @@ edge = "#3b4261"
 | `notice` | Short notices at the bottom of the screen. |
 | `notice.error` | Notices about something that failed. |
 | `input` | Text being typed, such as a filter. |
-| `placeholder` | Views that arrive in a later version. |
+| `placeholder` | Words that stand in for missing content, such as an empty view. |
 <!-- roles:end -->

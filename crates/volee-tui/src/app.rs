@@ -11,18 +11,26 @@ use ratatui::crossterm::event::{
 };
 use ratatui::layout::{Position, Rect};
 use volee_core::event::{Event, EventKind};
+use volee_core::message::{MessageKind, Party};
 use volee_core::role::Role;
 use volee_core::time::Timestamp;
-use volee_core::workspace::Location;
-use volee_core::{Agent, AgentId, Registry};
+use volee_core::{Agent, AgentId, MessageId, Registry};
 
 use crate::activity::ActivityLog;
+use crate::editor::TextField;
+use crate::history::History;
 use crate::keymap::{Action, Context, KeyCombo, Keymap};
 use crate::layout::{Mode, ScreenLayout};
 use crate::letters::Letters;
 use crate::preview::PreviewScreen;
+use crate::pulses::Pulses;
+use crate::source::{Changes, Outgoing, SourceError, TakeOver};
+use crate::text;
 use crate::theme::Theme;
 use crate::views::hierarchy::{self, Direction, Scene, SceneKey, ZoomChoice};
+use crate::views::network::{self, NetworkState};
+use crate::views::repos::ReposState;
+use crate::views::timeline::TimelineState;
 
 /// The views, in tab order.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -66,13 +74,68 @@ pub(crate) enum Pane {
 }
 
 /// A window over the screen.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Overlay {
     /// The keys, scrolled by some lines.
     Help {
         /// Lines scrolled.
         scroll: u16,
     },
+    /// The message composer, editing [`Model::draft`].
+    Composer,
+    /// The changes of an agent.
+    Diff(DiffView),
+}
+
+/// A question asked on the bottom line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Prompt {
+    /// `'` was pressed and the letter of an agent is expected.
+    Jump,
+    /// Quitting would lose the draft: quit anyway?
+    Quit,
+}
+
+/// The kinds of message the person can send, in the composer's order.
+pub(crate) const MESSAGE_KINDS: [MessageKind; 5] = [
+    MessageKind::Note,
+    MessageKind::Question,
+    MessageKind::Answer,
+    MessageKind::Contract,
+    MessageKind::Alert,
+];
+
+/// A message being written to an agent. It survives closing the composer,
+/// so quitting asks first when it would be lost.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Draft {
+    /// The recipient.
+    pub(crate) to: AgentId,
+    /// What the message is for.
+    pub(crate) kind: MessageKind,
+    /// The text and the cursor.
+    pub(crate) field: TextField,
+    /// The agent's question to the person that an answer replies to.
+    pub(crate) question: Option<MessageId>,
+    /// The source is sending it.
+    pub(crate) sending: bool,
+}
+
+/// The changes window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DiffView {
+    /// Whose changes.
+    pub(crate) agent: AgentId,
+    /// The full patch rather than the summary.
+    pub(crate) full: bool,
+    /// The changes, once loaded.
+    pub(crate) changes: Option<Changes>,
+    /// Why they could not be loaded.
+    pub(crate) error: Option<String>,
+    /// A request is under way.
+    pub(crate) loading: bool,
+    /// Lines scrolled.
+    pub(crate) scroll: u16,
 }
 
 /// The filter prompt and its text.
@@ -122,6 +185,8 @@ pub(crate) struct PreviewState {
     pub(crate) loading: bool,
     /// When the last request left.
     pub(crate) requested_at: Option<Timestamp>,
+    /// The source cannot show this agent's screen: no refresh on its own.
+    pub(crate) unsupported: bool,
     /// Rows scrolled up from the bottom of the screen.
     pub(crate) scroll: u16,
 }
@@ -154,6 +219,9 @@ pub(crate) enum Hit {
     Tab(Tab),
     /// A panel.
     Pane(Pane),
+    /// The cells of an agent's lane in the timeline: a click also moves the
+    /// cursor to the column.
+    Lane(AgentId),
 }
 
 /// What changes the model.
@@ -176,17 +244,38 @@ pub(crate) enum Msg {
     Tick(Timestamp),
     /// New events from the source, in order.
     Events(Vec<Event>),
-    /// The source stopped sending events.
-    SourceClosed,
+    /// The source stopped sending events, and why when it said.
+    SourceClosed(Option<String>),
     /// A preview arrived.
     PreviewLoaded {
         /// Whose.
         agent: AgentId,
         /// The raw screen, or why it failed.
-        result: Result<String, String>,
+        result: Result<String, SourceError>,
     },
-    /// The source cannot take over this agent from here.
-    TakeOverUnavailable(AgentId),
+    /// Changes arrived.
+    DiffLoaded {
+        /// Whose.
+        agent: AgentId,
+        /// The full patch rather than the summary.
+        full: bool,
+        /// The changes, or why they could not be read.
+        result: Result<Changes, SourceError>,
+    },
+    /// The source said how to take over an agent, or why it cannot.
+    TakeOverReady {
+        /// The agent.
+        agent: AgentId,
+        /// The command, or why there is none.
+        result: Result<TakeOver, SourceError>,
+    },
+    /// The source sent a message, or could not.
+    MessageSent {
+        /// The recipient.
+        to: AgentId,
+        /// How it went.
+        result: Result<(), SourceError>,
+    },
     /// The interface is back after a take over.
     Resumed {
         /// The agent that was taken over.
@@ -197,14 +286,41 @@ pub(crate) enum Msg {
 }
 
 /// What the run loop must do after an update.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Effect {
     /// Leave volee.
     Quit,
     /// Fetch the screen of an agent.
     LoadPreview(AgentId),
-    /// Suspend the interface and take over an agent in this terminal.
-    TakeOver(AgentId),
+    /// Fetch the changes of an agent.
+    LoadDiff {
+        /// Whose.
+        agent: AgentId,
+        /// The full patch rather than the summary.
+        full: bool,
+    },
+    /// Ask the source how to take over an agent.
+    PrepareTakeOver(AgentId),
+    /// Suspend the interface and run the take over in this terminal.
+    TakeOver {
+        /// The agent.
+        agent: AgentId,
+        /// What to run.
+        take_over: TakeOver,
+    },
+    /// Send a message through the source.
+    Send(Outgoing),
+}
+
+/// How much the interface moves.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Motion {
+    /// Spinners turn and messages travel along the network's lines.
+    #[default]
+    Full,
+    /// Nothing travels: message pulses become short highlights and
+    /// spinners stop.
+    Reduced,
 }
 
 /// The spinner of working agents.
@@ -229,6 +345,12 @@ pub(crate) struct Model {
     pub(crate) letters: Letters,
     /// Activity counts for sparklines.
     pub(crate) activity: ActivityLog,
+    /// What happened when, for the timeline.
+    pub(crate) history: History,
+    /// Messages travelling along the network's lines.
+    pub(crate) pulses: Pulses,
+    /// How much the interface moves.
+    pub(crate) motion: Motion,
     /// The current time.
     pub(crate) now: Timestamp,
 
@@ -246,14 +368,20 @@ pub(crate) struct Model {
     pub(crate) zoom: ZoomChoice,
     /// The filter.
     pub(crate) filter: Filter,
-    /// `'` was pressed and a letter is expected.
-    pub(crate) jump_pending: bool,
+    /// The question on the bottom line, if any.
+    pub(crate) prompt: Option<Prompt>,
     /// The window on top, if any.
     pub(crate) overlay: Option<Overlay>,
     /// The message at the bottom, if any.
     pub(crate) notice: Option<Notice>,
     /// The preview of the selected agent.
     pub(crate) preview: PreviewState,
+    /// The message being written, if any.
+    pub(crate) draft: Option<Draft>,
+    /// The agent whose take over the source is preparing.
+    pub(crate) pending_take_over: Option<AgentId>,
+    /// Why the source stopped, once it has: the screen no longer updates.
+    pub(crate) offline: Option<String>,
 
     /// The terminal size.
     pub(crate) size: (u16, u16),
@@ -273,6 +401,12 @@ pub(crate) struct Model {
     pub(crate) scene_offset: (i32, i32),
     /// Bring the selection into view at the next layout pass.
     reveal_selection: bool,
+    /// The network view.
+    pub(crate) network: NetworkState,
+    /// The repositories view.
+    pub(crate) repos: ReposState,
+    /// The timeline view.
+    pub(crate) timeline: TimelineState,
     /// Everything the mouse can hit, topmost last.
     pub(crate) hits: Vec<(Rect, Hit)>,
 
@@ -296,6 +430,9 @@ impl Model {
             registry: Registry::new(),
             letters: Letters::default(),
             activity: ActivityLog::default(),
+            history: History::default(),
+            pulses: Pulses::default(),
+            motion: Motion::Full,
             now,
             tab: Tab::default(),
             focus: Pane::default(),
@@ -304,10 +441,13 @@ impl Model {
             subtree: Vec::new(),
             zoom: ZoomChoice::default(),
             filter: Filter::default(),
-            jump_pending: false,
+            prompt: None,
             overlay: None,
             notice: None,
             preview: PreviewState::default(),
+            draft: None,
+            pending_take_over: None,
+            offline: None,
             size,
             layout: ScreenLayout::default(),
             rail: Vec::new(),
@@ -317,6 +457,9 @@ impl Model {
             scene_key: None,
             scene_offset: (0, 0),
             reveal_selection: true,
+            network: NetworkState::default(),
+            repos: ReposState::default(),
+            timeline: TimelineState::default(),
             hits: Vec::new(),
             dirty: true,
         };
@@ -337,6 +480,13 @@ impl Model {
 
     /// Whether something on screen moves, so the run loop ticks fast.
     pub(crate) fn is_animating(&self) -> bool {
+        if self.motion == Motion::Reduced {
+            return false;
+        }
+        if self.tab == Tab::Network && self.layout.view.is_some() && self.pulses.is_moving(self.now)
+        {
+            return true;
+        }
         self.rail.iter().any(|entry| {
             self.registry.agent(entry.agent).is_some_and(|agent| {
                 matches!(
@@ -349,46 +499,47 @@ impl Model {
 
     /// Whether an agent passes the filter.
     pub(crate) fn matches(&self, agent: &Agent) -> bool {
-        let Some(needle) = self.filter.needle() else {
-            return true;
-        };
-        let mission = agent
-            .mission
-            .and_then(|mission| self.registry.mission(mission))
-            .map(|mission| mission.title.as_str());
-        [
-            Some(agent.name.as_str()),
-            agent.workspace.repo.as_deref(),
-            agent.workspace.branch.as_deref(),
-            mission,
-        ]
-        .into_iter()
-        .flatten()
-        .any(|field| field.to_lowercase().contains(&needle))
+        passes(self.filter.needle().as_deref(), &self.registry, agent)
     }
 
     /// The key contexts that apply now, the most specific first.
     pub(crate) fn contexts(&self) -> Vec<Context> {
-        if matches!(self.overlay, Some(Overlay::Help { .. })) {
-            return vec![Context::Help];
+        if self.prompt == Some(Prompt::Quit) {
+            return vec![Context::Confirm];
+        }
+        match self.overlay {
+            Some(Overlay::Help { .. }) => return vec![Context::Help],
+            Some(Overlay::Composer) => return vec![Context::Composer],
+            Some(Overlay::Diff(_)) => return vec![Context::Diff],
+            None => {}
         }
         if self.filter.editing {
             return vec![Context::Filter];
         }
         let pane = match self.focus {
-            Pane::Rail => Some(Context::Agents),
-            Pane::View if self.tab == Tab::Hierarchy => Some(Context::Hierarchy),
-            Pane::View => None,
-            Pane::Detail => Some(Context::Detail),
+            Pane::Rail => Context::Agents,
+            Pane::View => match self.tab {
+                Tab::Hierarchy => Context::Hierarchy,
+                Tab::Network => Context::Network,
+                Tab::Repos => Context::Repos,
+                Tab::Timeline => Context::Timeline,
+            },
+            Pane::Detail => Context::Detail,
         };
-        pane.into_iter().chain([Context::Global]).collect()
+        vec![pane, Context::Global]
+    }
+
+    /// Whether the timeline's cursor left the present.
+    fn scrubbing(&self) -> bool {
+        self.tab == Tab::Timeline && self.timeline.cursor.is_some()
     }
 
     /// Whether Escape has something to close or leave.
     pub(crate) fn can_go_back(&self) -> bool {
-        self.jump_pending
+        self.prompt.is_some()
             || self.overlay.is_some()
             || self.filter.editing
+            || self.scrubbing()
             || !self.subtree.is_empty()
             || self.filter.needle().is_some()
             || self.focus != Pane::Rail
@@ -412,7 +563,7 @@ impl Model {
         });
     }
 
-    fn name_of(&self, agent: AgentId) -> String {
+    pub(crate) fn name_of(&self, agent: AgentId) -> String {
         self.registry
             .agent(agent)
             .map_or_else(|| agent.short(), |agent| agent.name.clone())
@@ -471,6 +622,10 @@ impl Model {
                 tracing::warn!(%error, "event ignored");
                 continue;
             }
+            self.history.record(&event);
+            if let EventKind::MessagePosted { message } = &event.kind {
+                self.pulses.record(message, self.now);
+            }
             match &event.kind {
                 EventKind::AgentRegistered { agent, name, .. } => {
                     self.letters.assign(*agent, name);
@@ -495,7 +650,7 @@ impl Model {
     /// It runs at the end of every update; drawing reads its results.
     fn relayout(&mut self) {
         let area = Rect::new(0, 0, self.size.0, self.size.1);
-        self.layout = ScreenLayout::compute(area);
+        self.layout = ScreenLayout::compute(area, self.tab == Tab::Hierarchy);
         self.rail_order = if self.layout.mode == Mode::Narrow && self.tab == Tab::Hierarchy {
             RailOrder::Tree
         } else {
@@ -541,9 +696,36 @@ impl Model {
             }
             self.scene_offset = self.fit_offset(inner);
         }
+        if let Some(view) = self.layout.view {
+            self.relayout_view(inner(view));
+        }
         self.reveal_selection = false;
         self.rail_offset = self.fit_rail_offset();
         self.hits = self.hit_areas();
+    }
+
+    /// The layout pass of the network, repositories and timeline views.
+    fn relayout_view(&mut self, area: Rect) {
+        let needle = self.filter.needle();
+        let registry = &self.registry;
+        let matches = |agent: &Agent| passes(needle.as_deref(), registry, agent);
+        match self.tab {
+            Tab::Hierarchy => {}
+            Tab::Network => {
+                let (graph, _) = network::split(area);
+                self.network.relayout(
+                    registry,
+                    self.history.messages(),
+                    (graph.width, graph.height),
+                );
+            }
+            Tab::Repos => self
+                .repos
+                .relayout(registry, &matches, area.height, self.selected),
+            Tab::Timeline => self
+                .timeline
+                .relayout(registry, &matches, area, self.selected),
+        }
     }
 
     /// Rows of the agents list, filtered.
@@ -667,15 +849,46 @@ impl Model {
                 Hit::Agent(entry.agent, Pane::Rail),
             ));
         }
-        if let Some(view) = layout.view
-            && self.tab == Tab::Hierarchy
-        {
+        if let Some(view) = layout.view {
             let area = inner(view);
-            for (agent, rect) in self.scene.targets() {
-                let x = i32::from(area.x) + i32::from(rect.x) - self.scene_offset.0;
-                let y = i32::from(area.y) + i32::from(rect.y) - self.scene_offset.1;
-                if let Some(visible) = clip(x, y, rect.width, rect.height, area) {
-                    hits.push((visible, Hit::Agent(agent, Pane::View)));
+            match self.tab {
+                Tab::Hierarchy => {
+                    for (agent, rect) in self.scene.targets() {
+                        let x = i32::from(area.x) + i32::from(rect.x) - self.scene_offset.0;
+                        let y = i32::from(area.y) + i32::from(rect.y) - self.scene_offset.1;
+                        if let Some(visible) = clip(x, y, rect.width, rect.height, area) {
+                            hits.push((visible, Hit::Agent(agent, Pane::View)));
+                        }
+                    }
+                }
+                Tab::Network => {
+                    let (graph, _) = network::split(area);
+                    for (agent, rect) in self.network.targets() {
+                        let (x, y) = (i32::from(graph.x + rect.x), i32::from(graph.y + rect.y));
+                        if let Some(visible) = clip(x, y, rect.width, rect.height, graph) {
+                            hits.push((visible, Hit::Agent(agent, Pane::View)));
+                        }
+                    }
+                }
+                Tab::Repos => {
+                    let lines = self.repos.lines.iter().skip(self.repos.offset);
+                    for (row, line) in (0..area.height).zip(lines) {
+                        if let crate::views::repos::Line::Agent { agent, .. } = line {
+                            let rect = Rect::new(area.x, area.y + row, area.width, 1);
+                            hits.push((rect, Hit::Agent(*agent, Pane::View)));
+                        }
+                    }
+                }
+                Tab::Timeline => {
+                    let geometry = self.timeline.geometry;
+                    let lanes = self.timeline.lanes.iter().skip(self.timeline.offset);
+                    for (row, agent) in (0..geometry.lanes.height).zip(lanes) {
+                        let y = geometry.lanes.y + row;
+                        let label = Rect::new(geometry.lanes.x, y, geometry.label, 1);
+                        hits.push((label, Hit::Agent(*agent, Pane::View)));
+                        let cells = Rect::new(geometry.cells_x(), y, geometry.columns(), 1);
+                        hits.push((cells, Hit::Lane(*agent)));
+                    }
                 }
             }
         }
@@ -700,6 +913,27 @@ impl Model {
             _ => None,
         })
     }
+}
+
+/// Whether an agent's name, repository, branch or mission contains
+/// `needle`, written in lower case; everything passes without a needle.
+fn passes(needle: Option<&str>, registry: &Registry, agent: &Agent) -> bool {
+    let Some(needle) = needle else {
+        return true;
+    };
+    let mission = agent
+        .mission
+        .and_then(|mission| registry.mission(mission))
+        .map(|mission| mission.title.as_str());
+    [
+        Some(agent.name.as_str()),
+        agent.workspace.repo.as_deref(),
+        agent.workspace.branch.as_deref(),
+        mission,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|field| field.to_lowercase().contains(needle))
 }
 
 /// A panel's area inside its border.
@@ -742,53 +976,25 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             }
         }
         Msg::Mouse(mouse) => dirty = on_mouse(model, mouse, &mut effects),
-        Msg::Paste(text) => {
-            if model.filter.editing {
-                model
-                    .filter
-                    .text
-                    .extend(text.chars().filter(|c| !c.is_control()));
-            } else {
-                dirty = false;
-            }
-        }
+        Msg::Paste(text) => dirty = on_paste(model, &text),
         Msg::Resize { width, height } => model.size = (width, height),
         Msg::Tick(now) => dirty = on_tick(model, now, &mut effects),
         Msg::Events(events) => model.apply(events),
-        Msg::SourceClosed => {
+        Msg::SourceClosed(reason) => {
+            let reason = reason.unwrap_or_else(|| "the source stopped".to_owned());
             model.notify(
-                "The source stopped: what you see is no longer updated.",
+                format!(
+                    "{}: what you see is no longer updated.",
+                    text::sentence(&reason)
+                ),
                 true,
             );
+            model.offline = Some(reason);
         }
-        Msg::PreviewLoaded { agent, result } => {
-            if model.preview.agent == Some(agent) {
-                model.preview.loading = false;
-                match result {
-                    Ok(text) => {
-                        model.preview.screen =
-                            Some(PreviewScreen::parse(&text, model.theme.color_depth()));
-                        model.preview.error = None;
-                    }
-                    Err(error) => model.preview.error = Some(error),
-                }
-            } else {
-                dirty = false;
-            }
-        }
-        Msg::TakeOverUnavailable(agent) => {
-            let name = model.name_of(agent);
-            let record = model.registry.agent(agent);
-            let reason = match record.map(|agent| (agent.role, &agent.location)) {
-                Some((Role::Subagent, _)) => "it runs inside its parent's session",
-                Some((_, Location::Terminal)) => "it runs in another terminal; switch to it there",
-                Some((_, Location::Pane { .. })) => {
-                    "it runs in a multiplexer pane; switch to it there"
-                }
-                _ => "its harness cannot attach it from here",
-            };
-            model.notify(format!("Cannot take over {name}: {reason}."), true);
-        }
+        answer @ (Msg::PreviewLoaded { .. }
+        | Msg::DiffLoaded { .. }
+        | Msg::TakeOverReady { .. }
+        | Msg::MessageSent { .. }) => dirty = on_answer(model, answer, &mut effects),
         Msg::Resumed { agent, result } => {
             let name = model.name_of(agent);
             match result {
@@ -812,12 +1018,113 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     effects
 }
 
+/// An answer of the source to a request; returns whether anything changed.
+fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool {
+    match answer {
+        Msg::PreviewLoaded { agent, result } => {
+            if model.preview.agent == Some(agent) {
+                model.preview.loading = false;
+                match result {
+                    Ok(text) => {
+                        model.preview.screen =
+                            Some(PreviewScreen::parse(&text, model.theme.color_depth()));
+                        model.preview.error = None;
+                        model.preview.unsupported = false;
+                    }
+                    Err(error) => {
+                        model.preview.unsupported = matches!(error, SourceError::Unsupported(_));
+                        model.preview.error = Some(error.to_string());
+                    }
+                }
+            } else {
+                return false;
+            }
+        }
+        Msg::DiffLoaded {
+            agent,
+            full,
+            result,
+        } => {
+            if let Some(Overlay::Diff(diff)) = &mut model.overlay
+                && diff.agent == agent
+                && diff.full == full
+            {
+                diff.loading = false;
+                match result {
+                    Ok(changes) => {
+                        diff.changes = Some(changes);
+                        diff.error = None;
+                    }
+                    Err(error) => {
+                        diff.changes = None;
+                        diff.error = Some(error.to_string());
+                    }
+                }
+            } else {
+                return false;
+            }
+        }
+        Msg::TakeOverReady { agent, result } => {
+            model.pending_take_over = None;
+            match result {
+                Ok(mut take_over) => {
+                    // Said in the terminal as the agent's session starts.
+                    let name = model.name_of(agent);
+                    take_over.hint = Some(match take_over.hint {
+                        Some(hint) => format!("Taking over {name}. {hint}"),
+                        None => format!("Taking over {name}."),
+                    });
+                    effects.push(Effect::TakeOver { agent, take_over });
+                }
+                Err(error) => {
+                    let name = model.name_of(agent);
+                    let reason = error.to_string();
+                    let reason = text::clause(&reason);
+                    model.notify(format!("Cannot take over {name}: {reason}."), true);
+                }
+            }
+        }
+        Msg::MessageSent { to, result } => {
+            let name = model.name_of(to);
+            match result {
+                Ok(()) => {
+                    if model
+                        .draft
+                        .as_ref()
+                        .is_some_and(|draft| draft.to == to && draft.sending)
+                    {
+                        model.draft = None;
+                        if model.overlay == Some(Overlay::Composer) {
+                            model.overlay = None;
+                        }
+                    }
+                    model.notify(format!("Message sent to {name}."), false);
+                }
+                Err(error) => {
+                    if let Some(draft) = model.draft.as_mut().filter(|draft| draft.to == to) {
+                        draft.sending = false;
+                    }
+                    let reason = error.to_string();
+                    let reason = text::clause(&reason);
+                    model.notify(format!("Could not send to {name}: {reason}."), true);
+                }
+            }
+        }
+        // The other messages are not answers.
+        _ => return false,
+    }
+    true
+}
+
 fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool {
     let frame_before = model.spinner();
     let second_before = model.now.as_millis().div_euclid(1_000);
+    let pulses_before = model.tab == Tab::Network && model.pulses.is_moving(model.now);
     model.now = now;
-    let mut changed =
-        model.spinner() != frame_before || now.as_millis().div_euclid(1_000) != second_before;
+    model.pulses.prune(now);
+    let mut changed = model.spinner() != frame_before
+        || now.as_millis().div_euclid(1_000) != second_before
+        || pulses_before;
     if model
         .notice
         .as_ref()
@@ -833,8 +1140,9 @@ fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool
         .preview
         .requested_at
         .is_none_or(|at| at.millis_until(now) >= PREVIEW_REFRESH_MILLIS);
+    let wanted = !model.preview.loading && !model.preview.unsupported && model.offline.is_none();
     if busy
-        && !model.preview.loading
+        && wanted
         && due
         && let Some(selected) = model.selected
     {
@@ -844,13 +1152,31 @@ fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool
 }
 
 fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
-    if model.jump_pending {
-        model.jump_pending = false;
-        if let Some(letter) = key.typed_char().filter(char::is_ascii_alphabetic) {
-            match model.letters.agent(letter) {
-                Some(agent) => model.select(agent, effects),
-                None => model.notify(format!("No agent has the letter {letter}."), false),
+    match model.prompt {
+        Some(Prompt::Jump) => {
+            model.prompt = None;
+            if let Some(letter) = key.typed_char().filter(char::is_ascii_alphabetic) {
+                match model.letters.agent(letter) {
+                    Some(agent) => model.select(agent, effects),
+                    None => model.notify(format!("No agent has the letter {letter}."), false),
+                }
             }
+            return;
+        }
+        Some(Prompt::Quit) => {
+            match model.keymap.action(&[Context::Confirm], key) {
+                Some(Action::Confirm | Action::Quit) => effects.push(Effect::Quit),
+                Some(Action::Back) => model.prompt = None,
+                _ => {}
+            }
+            return;
+        }
+        None => {}
+    }
+    if model.overlay == Some(Overlay::Composer) {
+        match model.keymap.action(&[Context::Composer], key) {
+            Some(action) => compose(model, action, effects),
+            None => edit_draft(model, key),
         }
         return;
     }
@@ -858,7 +1184,7 @@ fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
         match model.keymap.action(&[Context::Filter], key) {
             Some(Action::Apply) => model.filter.editing = false,
             Some(Action::Back) => model.filter = Filter::default(),
-            Some(Action::Quit) => effects.push(Effect::Quit),
+            Some(Action::Quit) => request_quit(model, effects),
             _ => edit_filter(model, key),
         }
         return;
@@ -888,11 +1214,11 @@ fn edit_filter(model: &mut Model, key: KeyCombo) {
 
 fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Vec<Effect>) {
     match action {
-        Action::Quit => effects.push(Effect::Quit),
+        Action::Quit => request_quit(model, effects),
         Action::Help => {
             model.overlay = match model.overlay {
                 Some(Overlay::Help { .. }) => None,
-                None => Some(Overlay::Help { scroll: 0 }),
+                _ => Some(Overlay::Help { scroll: 0 }),
             };
         }
         Action::Back => back(model),
@@ -913,7 +1239,7 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
         Action::ShowNetwork => model.tab = Tab::Network,
         Action::ShowRepos => model.tab = Tab::Repos,
         Action::ShowTimeline => model.tab = Tab::Timeline,
-        Action::Jump => model.jump_pending = true,
+        Action::Jump => model.prompt = Some(Prompt::Jump),
         Action::JumpBack => {
             if let Some(previous) = model.previous
                 && model.registry.agent(previous).is_some()
@@ -923,8 +1249,23 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
         }
         Action::Filter => model.filter.editing = true,
         Action::TakeOver => {
+            if let Some(agent) = model.selected
+                && model.pending_take_over.is_none()
+            {
+                model.pending_take_over = Some(agent);
+                effects.push(Effect::PrepareTakeOver(agent));
+            }
+        }
+        Action::Message => open_composer(model),
+        Action::Diff => {
             if let Some(agent) = model.selected {
-                effects.push(Effect::TakeOver(agent));
+                open_diff(model, agent, false, effects);
+            }
+        }
+        Action::ToggleFull => {
+            if let Some(Overlay::Diff(diff)) = &model.overlay {
+                let (agent, full) = (diff.agent, !diff.full);
+                open_diff(model, agent, full, effects);
             }
         }
         Action::Down | Action::Up | Action::Left | Action::Right | Action::First | Action::Last => {
@@ -941,26 +1282,235 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
                 }
             }
         }
-        Action::ZoomIn => {
-            model.zoom = ZoomChoice::Fixed(model.scene.zoom.more_detail());
+        Action::ZoomIn | Action::ZoomOut | Action::ZoomAuto => zoom(model, context, action),
+        Action::PreviousEvent | Action::NextEvent => {
+            let forward = action == Action::NextEvent;
+            let found = model
+                .selected
+                .and_then(|agent| model.history.lane(agent))
+                .and_then(|lane| model.timeline.event_from(&lane.marks, model.now, forward));
+            match found {
+                Some(at) => model.timeline.jump_to(at, model.now),
+                None if forward => model.timeline.cursor = None,
+                None => model.notify("No earlier event on this lane.", false),
+            }
         }
-        Action::ZoomOut => {
-            model.zoom = ZoomChoice::Fixed(model.scene.zoom.less_detail());
-        }
-        Action::ZoomAuto => model.zoom = ZoomChoice::Auto,
         Action::Refresh => {
-            if let Some(agent) = model.selected {
+            if let Some(Overlay::Diff(diff)) = &model.overlay {
+                let (agent, full) = (diff.agent, diff.full);
+                open_diff(model, agent, full, effects);
+            } else if let Some(agent) = model.selected {
                 model.request_preview(agent, effects);
             }
         }
-        // Apply only means something in the filter prompt.
+        // The other actions belong to prompts and the composer, handled
+        // before the keymap's contexts.
         _ => {}
     }
+}
+
+/// The zoom keys of a view: more or less detail, or the level the size
+/// allows; on the timeline, a finer or coarser time scale, or back to now.
+fn zoom(model: &mut Model, context: Context, action: Action) {
+    let step = |choice: &mut ZoomChoice, current: hierarchy::Zoom| {
+        *choice = match action {
+            Action::ZoomIn => ZoomChoice::Fixed(current.more_detail()),
+            Action::ZoomOut => ZoomChoice::Fixed(current.less_detail()),
+            _ => ZoomChoice::Auto,
+        };
+    };
+    match context {
+        Context::Network => step(&mut model.network.zoom, model.network.scene.zoom),
+        Context::Repos => step(&mut model.repos.zoom, model.repos.density),
+        Context::Timeline => match action {
+            Action::ZoomIn => model.timeline.zoom(true),
+            Action::ZoomOut => model.timeline.zoom(false),
+            _ => model.timeline.reset(),
+        },
+        _ => step(&mut model.zoom, model.scene.zoom),
+    }
+}
+
+/// Quits, unless a draft would be lost: then asks first.
+fn request_quit(model: &mut Model, effects: &mut Vec<Effect>) {
+    if model
+        .draft
+        .as_ref()
+        .is_some_and(|draft| !draft.field.is_blank())
+    {
+        model.prompt = Some(Prompt::Quit);
+    } else {
+        effects.push(Effect::Quit);
+    }
+}
+
+/// Opens the changes window on an agent and asks for its changes.
+fn open_diff(model: &mut Model, agent: AgentId, full: bool, effects: &mut Vec<Effect>) {
+    model.overlay = Some(Overlay::Diff(DiffView {
+        agent,
+        full,
+        changes: None,
+        error: None,
+        loading: true,
+        scroll: 0,
+    }));
+    effects.push(Effect::LoadDiff { agent, full });
+}
+
+/// Opens the composer on the selected agent, keeping the draft. A draft
+/// written to another agent moves to this one. When the agent waits for an
+/// answer from the person, the message starts as that answer.
+fn open_composer(model: &mut Model) {
+    let Some(agent) = model.selected else {
+        model.notify("Select an agent to write to first.", false);
+        return;
+    };
+    let question = model
+        .registry
+        .unanswered_questions()
+        .into_iter()
+        .rfind(|message| message.from == Party::Agent(agent))
+        .map(|message| message.id);
+    let kind = if question.is_some() {
+        MessageKind::Answer
+    } else {
+        MessageKind::Note
+    };
+    match &mut model.draft {
+        Some(draft) if draft.to == agent => {}
+        Some(draft) => {
+            draft.to = agent;
+            draft.kind = kind;
+            draft.question = question;
+        }
+        None => {
+            model.draft = Some(Draft {
+                to: agent,
+                kind,
+                field: TextField::default(),
+                question,
+                sending: false,
+            });
+        }
+    }
+    model.overlay = Some(Overlay::Composer);
+}
+
+/// The composer's own keys.
+fn compose(model: &mut Model, action: Action, effects: &mut Vec<Effect>) {
+    match action {
+        Action::Send => send_draft(model, effects),
+        Action::NewLine => edit(model, |field| field.insert("\n")),
+        Action::NextKind | Action::PreviousKind => {
+            if let Some(draft) = model.draft.as_mut().filter(|draft| !draft.sending) {
+                let index = MESSAGE_KINDS
+                    .iter()
+                    .position(|kind| *kind == draft.kind)
+                    .unwrap_or(0);
+                let count = MESSAGE_KINDS.len();
+                let next = if action == Action::NextKind {
+                    (index + 1) % count
+                } else {
+                    (index + count - 1) % count
+                };
+                draft.kind = MESSAGE_KINDS[next];
+            }
+        }
+        Action::Back => {
+            model.overlay = None;
+            if model
+                .draft
+                .as_ref()
+                .is_some_and(|draft| draft.field.is_blank() && !draft.sending)
+            {
+                model.draft = None;
+            }
+        }
+        Action::Quit => request_quit(model, effects),
+        _ => {}
+    }
+}
+
+fn send_draft(model: &mut Model, effects: &mut Vec<Effect>) {
+    let Some(draft) = model.draft.as_mut().filter(|draft| !draft.sending) else {
+        return;
+    };
+    let body = draft.field.text().trim().to_owned();
+    if body.is_empty() {
+        model.notify("Write something first.", false);
+        return;
+    }
+    draft.sending = true;
+    effects.push(Effect::Send(Outgoing {
+        to: draft.to,
+        kind: draft.kind,
+        body,
+        in_reply_to: draft.question.filter(|_| draft.kind == MessageKind::Answer),
+    }));
+}
+
+/// Changes the draft's text, unless it is being sent.
+fn edit(model: &mut Model, change: impl FnOnce(&mut TextField)) {
+    if let Some(draft) = model.draft.as_mut().filter(|draft| !draft.sending) {
+        change(&mut draft.field);
+    }
+}
+
+/// Keys the composer does not bind edit the text.
+fn edit_draft(model: &mut Model, key: KeyCombo) {
+    use ratatui::crossterm::event::KeyCode;
+    let control = key.ctrl_held();
+    match key.code() {
+        KeyCode::Backspace | KeyCode::Char('w') if control => {
+            edit(model, TextField::delete_word);
+        }
+        KeyCode::Char('u') if control => edit(model, TextField::delete_to_line_start),
+        KeyCode::Char('a') if control => edit(model, TextField::home),
+        KeyCode::Char('e') if control => edit(model, TextField::end),
+        KeyCode::Backspace => edit(model, TextField::backspace),
+        KeyCode::Delete => edit(model, TextField::delete),
+        KeyCode::Left => edit(model, TextField::left),
+        KeyCode::Right => edit(model, TextField::right),
+        KeyCode::Up => edit(model, TextField::up),
+        KeyCode::Down => edit(model, TextField::down),
+        KeyCode::Home => edit(model, TextField::home),
+        KeyCode::End => edit(model, TextField::end),
+        _ => {
+            if let Some(c) = key.typed_char() {
+                edit(model, |field| field.insert(c.encode_utf8(&mut [0; 4])));
+            }
+        }
+    }
+}
+
+/// Pasted text goes to the composer or the filter prompt, whichever has
+/// the keyboard; returns whether anything changed.
+fn on_paste(model: &mut Model, text: &str) -> bool {
+    if model.prompt.is_some() {
+        return false;
+    }
+    if model.overlay == Some(Overlay::Composer) {
+        let text = crate::editor::clean_paste(text);
+        edit(model, |field| field.insert(&text));
+        return true;
+    }
+    if model.filter.editing && model.overlay.is_none() {
+        model
+            .filter
+            .text
+            .extend(text.chars().filter(|c| !c.is_control()));
+        return true;
+    }
+    false
 }
 
 /// Escape: closes or leaves the innermost thing, and never quits.
 fn back(model: &mut Model) {
     if model.overlay.take().is_some() {
+        return;
+    }
+    if model.scrubbing() {
+        model.timeline.cursor = None;
         return;
     }
     if !model.subtree.is_empty() {
@@ -978,11 +1528,16 @@ fn back(model: &mut Model) {
 fn navigate(model: &mut Model, context: Context, action: Action, effects: &mut Vec<Effect>) {
     match context {
         Context::Help => {
+            let most = crate::widgets::help::max_scroll(model);
             if let Some(Overlay::Help { scroll }) = &mut model.overlay {
-                *scroll = match action {
-                    Action::Down => scroll.saturating_add(1),
-                    _ => scroll.saturating_sub(1),
-                };
+                *scroll = scrolled(*scroll, action, most);
+            }
+        }
+        Context::Diff => {
+            let size = model.size;
+            if let Some(Overlay::Diff(diff)) = &mut model.overlay {
+                let most = crate::widgets::diff::max_scroll(diff, size);
+                diff.scroll = scrolled(diff.scroll, action, most);
             }
         }
         Context::Detail => {
@@ -997,20 +1552,19 @@ fn navigate(model: &mut Model, context: Context, action: Action, effects: &mut V
                 Action::First => model.scene.first(),
                 Action::Last => model.scene.last(),
                 _ => model.selected.and_then(|from| {
-                    let direction = match action {
-                        Action::Down => Direction::Down,
-                        Action::Up => Direction::Up,
-                        Action::Left => Direction::Left,
-                        _ => Direction::Right,
-                    };
                     let selectable: Vec<AgentId> =
                         model.rail.iter().map(|entry| entry.agent).collect();
                     model
                         .scene
-                        .neighbour(from, direction, |id| selectable.contains(&id))
+                        .neighbour(from, direction(action), |id| selectable.contains(&id))
                 }),
             };
             if let Some(agent) = target {
+                model.select(agent, effects);
+            }
+        }
+        Context::Network | Context::Repos | Context::Timeline => {
+            if let Some(agent) = view_target(model, context, action) {
                 model.select(agent, effects);
             }
         }
@@ -1046,17 +1600,117 @@ fn navigate(model: &mut Model, context: Context, action: Action, effects: &mut V
     }
 }
 
+/// Where a move key goes in the network, repositories or timeline view; on
+/// the timeline, left and right move the cursor instead of the selection.
+fn view_target(model: &mut Model, context: Context, action: Action) -> Option<AgentId> {
+    let selected = model.selected;
+    match context {
+        Context::Network => {
+            let selectable: Vec<AgentId> = model.rail.iter().map(|entry| entry.agent).collect();
+            let allowed = |id| selectable.contains(&id);
+            match action {
+                Action::First => model.network.corner(false, allowed),
+                Action::Last => model.network.corner(true, allowed),
+                _ => selected
+                    .and_then(|from| model.network.neighbour(from, direction(action), allowed)),
+            }
+        }
+        Context::Repos => match action {
+            Action::Down => model.repos.step(selected, true),
+            Action::Up => model.repos.step(selected, false),
+            Action::Left => model.repos.jump_repo(selected, false),
+            Action::Right => model.repos.jump_repo(selected, true),
+            Action::First => model.repos.order.first().copied(),
+            _ => model.repos.order.last().copied(),
+        },
+        _ => match action {
+            Action::Left | Action::Right => {
+                model.timeline.scrub(model.now, action == Action::Right);
+                None
+            }
+            Action::Down => model.timeline.step_lane(selected, true),
+            Action::Up => model.timeline.step_lane(selected, false),
+            Action::First => model.timeline.lanes.first().copied(),
+            _ => model.timeline.lanes.last().copied(),
+        },
+    }
+}
+
+/// The direction of a move action.
+fn direction(action: Action) -> Direction {
+    match action {
+        Action::Down => Direction::Down,
+        Action::Up => Direction::Up,
+        Action::Left => Direction::Left,
+        _ => Direction::Right,
+    }
+}
+
+/// A window's scroll after a key, between 0 and `most` lines.
+fn scrolled(scroll: u16, action: Action, most: u16) -> u16 {
+    let scroll = match action {
+        Action::Down => scroll.saturating_add(1),
+        Action::Up => scroll.saturating_sub(1),
+        Action::First => 0,
+        Action::Last => most,
+        _ => scroll,
+    };
+    scroll.min(most)
+}
+
+/// The wheel over the view: the hierarchy scrolls (`sideways` with Shift),
+/// the repositories and the timeline move the selection, and Shift moves
+/// the timeline's cursor. Returns whether anything changed.
+fn scroll_view(model: &mut Model, down: bool, sideways: bool, effects: &mut Vec<Effect>) -> bool {
+    match model.tab {
+        Tab::Hierarchy => {
+            let step = if down { 2 } else { -2 };
+            if sideways {
+                model.scene_offset.0 += step * 2;
+            } else {
+                model.scene_offset.1 += step;
+            }
+        }
+        Tab::Timeline if sideways => model.timeline.scrub(model.now, down),
+        Tab::Repos | Tab::Timeline => {
+            let context = if model.tab == Tab::Repos {
+                Context::Repos
+            } else {
+                Context::Timeline
+            };
+            let action = if down { Action::Down } else { Action::Up };
+            navigate(model, context, action, effects);
+        }
+        Tab::Network => return false,
+    }
+    true
+}
+
 /// Handles the mouse; returns whether anything changed.
 fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> bool {
     let (column, row) = (mouse.column, mouse.row);
+    if model.prompt.is_some() {
+        return false;
+    }
     if model.overlay.is_some() {
-        if let Some(Overlay::Help { scroll }) = &mut model.overlay {
-            match mouse.kind {
-                MouseEventKind::ScrollDown => *scroll = scroll.saturating_add(2),
-                MouseEventKind::ScrollUp => *scroll = scroll.saturating_sub(2),
-                MouseEventKind::Down(_) => model.overlay = None,
-                _ => return false,
+        let action = match mouse.kind {
+            MouseEventKind::ScrollDown => Action::Down,
+            MouseEventKind::ScrollUp => Action::Up,
+            // A click outside the composer could lose a sentence: only the
+            // keys close it.
+            MouseEventKind::Down(_) if model.overlay != Some(Overlay::Composer) => {
+                model.overlay = None;
+                return true;
             }
+            _ => return false,
+        };
+        let context = match model.overlay {
+            Some(Overlay::Help { .. }) => Context::Help,
+            Some(Overlay::Diff(_)) => Context::Diff,
+            _ => return false,
+        };
+        for _ in 0..2 {
+            navigate(model, context, action, effects);
         }
         return true;
     }
@@ -1075,6 +1729,15 @@ fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> 
                 model.focus = pane;
                 true
             }
+            Some(Hit::Lane(agent)) => {
+                model.focus = Pane::View;
+                model.select(agent, effects);
+                let geometry = model.timeline.geometry;
+                let window = model.timeline.window(model.now);
+                let offset = column.saturating_sub(geometry.cells_x());
+                model.timeline.jump_to(window.start_of(offset), model.now);
+                true
+            }
             None => false,
         },
         MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
@@ -1085,12 +1748,8 @@ fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> 
                     navigate(model, Context::Agents, action, effects);
                 }
                 Some(Pane::View) => {
-                    let step = if down { 2 } else { -2 };
-                    if mouse.modifiers.contains(KeyModifiers::SHIFT) {
-                        model.scene_offset.0 += step * 2;
-                    } else {
-                        model.scene_offset.1 += step;
-                    }
+                    let sideways = mouse.modifiers.contains(KeyModifiers::SHIFT);
+                    return scroll_view(model, down, sideways, effects);
                 }
                 Some(Pane::Detail) => {
                     let action = if down { Action::Down } else { Action::Up };
@@ -1103,12 +1762,12 @@ fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> 
         MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight
             if model.pane_at(column, row) == Some(Pane::View) =>
         {
-            let step = if mouse.kind == MouseEventKind::ScrollRight {
-                4
-            } else {
-                -4
-            };
-            model.scene_offset.0 += step;
+            let right = mouse.kind == MouseEventKind::ScrollRight;
+            match model.tab {
+                Tab::Hierarchy => model.scene_offset.0 += if right { 4 } else { -4 },
+                Tab::Timeline => model.timeline.scrub(model.now, right),
+                Tab::Network | Tab::Repos => return false,
+            }
             true
         }
         _ => false,

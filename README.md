@@ -32,8 +32,8 @@ one screen:
 - **Who needs me?** Permission prompts, questions and finished work, sorted by
   urgency.
 - **What did they do?** Commits, diffs, push state, pull request and checks.
-- **Who talks to whom?** Messages between agents and with you, as threads and
-  as a live graph.
+- **Who talks to whom?** Messages between agents and with you, as threads (a
+  live graph comes next).
 
 It also runs **missions**: a goal across one or more repositories, split by a
 coordinator agent and delivered by worker agents, with delivery checked by
@@ -47,8 +47,7 @@ code, not by trust.
   SQLite. The interface, the command line and the agents all talk to it.
 - Agents message each other through an MCP server, which any MCP-capable
   harness can use.
-- No multiplexer, editor or git client is required; the ones you use are
-  optional integrations.
+- No multiplexer, editor or git client is required.
 
 Read the [architecture overview](https://volee-org.github.io/volee/architecture/overview.html)
 and the [design decisions](https://volee-org.github.io/volee/adr/README.html).
@@ -75,10 +74,12 @@ volee supports macOS and Linux and needs [Claude Code](https://code.claude.com)
 [installation guide](https://volee-org.github.io/volee/guide/installation.html)
 covers specific versions, manual downloads and uninstalling.
 
-Try the interface on a simulated team of agents, no setup needed:
+Open the interface on every agent of your machine, or try it on a simulated
+team of agents first, no setup needed:
 
 ```sh
-volee demo
+volee        # the agents on this machine; starts the daemon when needed
+volee demo   # a simulated team
 ```
 
 ![volee demo](docs/src/images/demo.gif)

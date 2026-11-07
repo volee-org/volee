@@ -46,21 +46,34 @@ fn lines(model: &Model) -> Vec<Vec<Span<'static>>> {
     lines
 }
 
-/// Draws the help over `area`, scrolled by `scroll` lines.
-pub(crate) fn render(model: &Model, scroll: u16, area: Rect, buf: &mut Buffer) {
-    let theme = &model.theme;
-    let lines = lines(model);
-    let height = u16::try_from(lines.len())
+/// The window for `lines` lines of help over `area`.
+fn window(lines: usize, area: Rect) -> Rect {
+    let height = u16::try_from(lines)
         .unwrap_or(u16::MAX)
         .saturating_add(2)
         .min(area.height.saturating_sub(2));
     let width = 78.min(area.width.saturating_sub(4));
-    let window = Rect::new(
+    Rect::new(
         area.x + (area.width - width) / 2,
         area.y + (area.height - height) / 2,
         width,
         height,
-    );
+    )
+}
+
+/// How far the help can scroll on the model's screen.
+pub(crate) fn max_scroll(model: &Model) -> u16 {
+    let count = lines(model).len();
+    let area = Rect::new(0, 0, model.size.0, model.size.1);
+    let visible = usize::from(window(count, area).height.saturating_sub(2));
+    u16::try_from(count.saturating_sub(visible)).unwrap_or(u16::MAX)
+}
+
+/// Draws the help over `area`, scrolled by `scroll` lines.
+pub(crate) fn render(model: &Model, scroll: u16, area: Rect, buf: &mut Buffer) {
+    let theme = &model.theme;
+    let lines = lines(model);
+    let window = window(lines.len(), area);
     Clear.render(window, buf);
     buf.set_style(window, theme.style(StyleRole::Background));
     let title = vec![

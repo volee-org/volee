@@ -802,6 +802,38 @@ impl Git for GitCli {
         Ok(())
     }
 
+    fn unlock_worktree(&self, repo: &Path, path: &Path) -> Result<(), GitError> {
+        let path = absolute(repo, path)?;
+        let worktrees = self.worktrees(repo)?;
+        let linked = worktrees
+            .iter()
+            .enumerate()
+            .find(|(_, worktree)| same_path(&worktree.path, &path));
+        let worktree = match linked {
+            Some((position, worktree)) if position > 0 => worktree,
+            Some(_) => {
+                return Err(GitError::RemovalRefused {
+                    path,
+                    reason: RemovalRefusal::MainCheckout,
+                });
+            }
+            None => {
+                return Err(GitError::RemovalRefused {
+                    path,
+                    reason: RemovalRefusal::NotAWorktree,
+                });
+            }
+        };
+        if worktree.locked.is_none() {
+            return Ok(());
+        }
+        self.write(repo)
+            .args(["worktree", "unlock", "--"])
+            .arg(&path)
+            .stdout()?;
+        Ok(())
+    }
+
     fn delivery(
         &self,
         worktree: &Path,

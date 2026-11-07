@@ -60,8 +60,9 @@ group.
 | `workspace-updated`, `location-changed`, `model-changed` | Better knowledge of where and how the agent runs. |
 | `delivery-updated` | New delivery evidence from git or the forge. |
 | `agent-forgotten` | The agent is removed; its sessions are ignored from then on. |
+| `stop-requested` | The human stopped the agent: it is held, and volee does not resume it on its own. A later `message-posted` from the human to it lifts the hold. |
 | `thread-opened`, `message-posted`, `message-delivered`, `message-read` | Conversations and receipts. |
-| `mission-created`, `mission-updated` | Missions and their progress. |
+| `mission-created`, `mission-updated` | Missions and their progress. When a mission ends, every agent of it is held for good. |
 | `worker-assessed` | The supervisor's verdict on a worker of a mission, with its evidence. |
 
 ## Reconciliation
@@ -77,11 +78,19 @@ group.
   agent becomes `stopped` (it ran in a terminal) or `lost` (it ran in the
   background). It never becomes `done` because it disappeared.
 
-The daemon runs it every two seconds (module `discovery` of `volee-daemon`)
-against `claude agents --json --all`. The listing runs outside the state
-lock, so a slow `claude` never blocks requests; a failing listing changes
-nothing and is logged once, then again when it works. When Claude Code is
-missing or too old, `volee daemon status` says why and discovery stays off.
+The daemon runs it (module `discovery` of `volee-daemon`) against `claude
+agents --json --all`: when it starts, then every two seconds while an
+interactive client (the interface) is subscribed, and every thirty seconds
+otherwise (`discovery_interval` and `idle_discovery_interval` of its
+configuration). A new interactive subscription triggers a listing at once,
+so the interface opens on fresh data. Each wait starts when the previous
+listing ends, so a slow listing on a loaded machine never runs back to back.
+Agents volee launched report through their hooks in real time either way;
+only sessions started elsewhere, and sessions that end without a word, show
+up later while nobody watches. The listing runs outside the state lock, so a
+slow `claude` never blocks requests; a failing listing changes nothing and is
+logged once, then again when it works. When Claude Code is missing or too
+old, `volee daemon status` says why and discovery stays off.
 
 ## The mission supervisor
 
@@ -114,8 +123,10 @@ daemon without a git source) is judged as it is.
 
 Every new or changed verdict is recorded as `worker-assessed` and told to the
 coordinator. When every worker delivered, the mission moves to `reporting`
-and the coordinator and the human are asked for the final report. A worker
-that regresses moves the mission back to `running`.
+and the coordinator and the human are asked for the final report, once. A
+delivered worker that works again (to answer its coordinator, say) keeps its
+delivery until a new verdict says otherwise; a new verdict that is not
+`delivered` moves the mission back to `running`.
 
 In the daemon (`volee-daemon`, module `missions`), supervision follows every
 commit: the daemon finds the missions the new events concern (an agent of
@@ -132,12 +143,16 @@ triggered it are already committed.
 
 - **Routing** (`Registry::check_route`): people and volee write to anyone;
   agents write to people; between agents, members of the same mission write to
-  each other, and otherwise an agent writes to its parent, its children and its
-  mission's coordinator.
+  each other, and otherwise an agent writes to its parent, its children, its
+  mission's coordinator and the agent that requested its mission.
 - **Cleanup** (`delivery::tidy_verdict`): a worktree may be removed only when
   the agent is not busy, the tree is clean, and the work is delivered (merged,
   merged through a pull request, or reported). Every missing condition is
-  reported at once.
+  reported at once. `delivery::tidy_check` adds what makes a worktree volee's
+  to remove: the agent was launched by volee, the worktree lies under
+  `<repository>/.claude/worktrees/`, and the delivery evidence was checked
+  since the agent's last change (stale or missing evidence proves nothing).
+  The branch is never part of the decision: it is always kept.
 - **Delivery evidence** (`delivery::Delivery`) describes the agent's branch:
   `commits` counts its commits that the base branch does not have, and `tip`
   is the commit it was computed from. A merge leaves no commit of the branch

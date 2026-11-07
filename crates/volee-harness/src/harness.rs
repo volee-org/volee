@@ -11,7 +11,7 @@ use volee_core::ids::AgentId;
 use volee_core::reconcile::{ListedSession, Listing};
 
 use crate::error::HarnessError;
-use crate::spec::{SpawnSpec, Spawned};
+use crate::spec::{Completion, SpawnSpec, Spawned};
 use crate::version::Version;
 
 /// What an installed harness can do. The daemon offers only these actions
@@ -114,4 +114,15 @@ pub trait Harness: fmt::Debug + Send + Sync {
     /// The per-agent MCP configuration that gives the agent volee's tools,
     /// written to the file passed as [`SpawnSpec::mcp_config_file`].
     fn mcp_config(&self, volee_bin: &Path, agent: AgentId) -> Result<Value, HarnessError>;
+
+    /// Asks the harness's model one question, with no tools, no MCP server,
+    /// no hooks and no saved session, and returns its answer. volee uses it
+    /// only for what the person opts into, such as thread summaries.
+    fn complete(&self, request: &Completion) -> Result<String, HarnessError> {
+        let _ = request;
+        Err(HarnessError::Unsupported {
+            harness: self.kind(),
+            what: "answer one-off questions",
+        })
+    }
 }

@@ -13,20 +13,66 @@ use volee_core::AgentId;
 use volee_core::harness::{HarnessKind, SessionKey, SessionOrigin};
 use volee_core::reconcile::{ListedSession, Listing};
 use volee_harness::{
-    Capabilities, Harness, HarnessError, SpawnSpec, Spawned, Version, WorktreeRemoval,
+    Capabilities, Completion, Harness, HarnessError, SpawnSpec, Spawned, Version, WorktreeRemoval,
 };
 
-/// A harness whose listing the test sets, and which records launches.
+/// A harness whose listing the test sets, and which records launches and
+/// the actions on sessions (`logs`, `stop`, `attach`) with the handle each
+/// one received.
 #[derive(Debug, Default)]
 pub(crate) struct FakeHarness {
     sessions: Mutex<Vec<ListedSession>>,
     failing: Mutex<bool>,
     launches: Mutex<Vec<SpawnSpec>>,
     resumes: Mutex<Vec<(SessionKey, SpawnSpec)>>,
+    completions: Mutex<Vec<Completion>>,
     refuse_launches: Mutex<bool>,
+    actions: Mutex<Vec<(String, String)>>,
+    sessions_gone: Mutex<bool>,
+    keep_on_remove: Mutex<bool>,
+    listings: Mutex<usize>,
 }
 
 impl FakeHarness {
+    /// How many times the daemon listed sessions so far.
+    pub(crate) fn listings(&self) -> usize {
+        *self.listings.lock().unwrap()
+    }
+
+    /// Makes `remove` answer as Claude Code does for a worktree it did not
+    /// create: it keeps the session (and leaves the worktree locked).
+    pub(crate) fn keep_on_remove(&self, keep: bool) {
+        *self.keep_on_remove.lock().unwrap() = keep;
+    }
+
+    /// Every action on a session so far, as `(action, handle)`.
+    pub(crate) fn actions(&self) -> Vec<(String, String)> {
+        self.actions.lock().unwrap().clone()
+    }
+
+    /// Makes the harness forget every session, as `claude rm` would.
+    pub(crate) fn forget_sessions(&self) {
+        *self.sessions_gone.lock().unwrap() = true;
+    }
+
+    /// Records an action on `session` and returns its handle, or the error
+    /// Claude Code gives for a session it does not know.
+    fn act(&self, action: &str, session: &ListedSession) -> Result<String, HarnessError> {
+        let handle = session
+            .handle
+            .clone()
+            .ok_or_else(|| HarnessError::NotControllable {
+                session: session.key.clone(),
+            })?;
+        if *self.sessions_gone.lock().unwrap() {
+            return Err(HarnessError::UnknownSession { handle });
+        }
+        self.actions
+            .lock()
+            .unwrap()
+            .push((action.to_owned(), handle.clone()));
+        Ok(handle)
+    }
     /// Sets what the next listings return.
     pub(crate) fn set(&self, sessions: Vec<ListedSession>) {
         *self.sessions.lock().unwrap() = sessions;
@@ -40,6 +86,11 @@ impl FakeHarness {
     /// Makes launches fail, or work again.
     pub(crate) fn refuse_launches(&self, refuse: bool) {
         *self.refuse_launches.lock().unwrap() = refuse;
+    }
+
+    /// Every one-off question so far.
+    pub(crate) fn completions(&self) -> Vec<Completion> {
+        self.completions.lock().unwrap().clone()
     }
 
     /// Every resume so far, with the session it resumed.
@@ -75,6 +126,7 @@ impl Harness for FakeHarness {
     }
 
     fn list(&self) -> Result<Listing, HarnessError> {
+        *self.listings.lock().unwrap() += 1;
         if *self.failing.lock().unwrap() {
             return Err(unsupported("agents"));
         }
@@ -110,20 +162,42 @@ impl Harness for FakeHarness {
         })
     }
 
-    fn stop(&self, _: &ListedSession) -> Result<(), HarnessError> {
-        Err(unsupported("stop"))
+    fn stop(&self, session: &ListedSession) -> Result<(), HarnessError> {
+        self.act("stop", session).map(drop)
     }
 
-    fn remove(&self, _: &ListedSession, _: WorktreeRemoval) -> Result<(), HarnessError> {
-        Err(unsupported("remove"))
+    /// Records the removal with the evidence it was given (`remove` or
+    /// `remove-delivered`).
+    fn remove(
+        &self,
+        session: &ListedSession,
+        worktree: WorktreeRemoval,
+    ) -> Result<(), HarnessError> {
+        let action = match worktree {
+            WorktreeRemoval::Refuse => "remove",
+            WorktreeRemoval::Delivered => "remove-delivered",
+        };
+        let handle = self.act(action, session)?;
+        if *self.keep_on_remove.lock().unwrap() {
+            return Err(HarnessError::SessionKept {
+                handle,
+                reason: "its worktree has 1 unpushed commit".to_owned(),
+            });
+        }
+        Ok(())
     }
 
-    fn logs(&self, _: &ListedSession) -> Result<Vec<u8>, HarnessError> {
-        Err(unsupported("logs"))
+    /// A screen with a color escape, like `claude logs` prints.
+    fn logs(&self, session: &ListedSession) -> Result<Vec<u8>, HarnessError> {
+        let handle = self.act("logs", session)?;
+        Ok(format!("\u{1b}[2J\u{1b}[1;1H\u{1b}[32mscreen of {handle}\u{1b}[0m").into_bytes())
     }
 
-    fn attach_command(&self, _: &ListedSession) -> Result<Command, HarnessError> {
-        Err(unsupported("attach"))
+    fn attach_command(&self, session: &ListedSession) -> Result<Command, HarnessError> {
+        let handle = self.act("attach", session)?;
+        let mut command = Command::new("claude");
+        command.arg("attach").arg(handle).env_remove("CLAUDECODE");
+        Ok(command)
     }
 
     fn agent_settings(
@@ -135,6 +209,11 @@ impl Harness for FakeHarness {
         Ok(
             json!({ "hooks": { "Stop": format!("{} hook stop --agent {agent}", volee_bin.display()) } }),
         )
+    }
+
+    fn complete(&self, request: &Completion) -> Result<String, HarnessError> {
+        self.completions.lock().unwrap().push(request.clone());
+        Ok("- The invoice model is merged.\n- One question waits for the human.".to_owned())
     }
 
     fn mcp_config(&self, volee_bin: &Path, agent: AgentId) -> Result<Value, HarnessError> {

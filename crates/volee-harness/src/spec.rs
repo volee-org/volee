@@ -160,6 +160,22 @@ fn check_path(what: &'static str, path: &Path, utf8: bool) -> Result<(), Request
     Ok(())
 }
 
+/// One question to the harness's model, answered with no tools, no MCP
+/// server, no hooks and no saved session ([`crate::Harness::complete`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Completion {
+    /// Where the harness runs: a directory of volee's own, so that nothing of
+    /// the person's projects is read and discovery never takes the run for an
+    /// agent. Absolute.
+    pub cwd: PathBuf,
+    /// The model, or the harness's default.
+    pub model: Option<String>,
+    /// What the model is asked to be.
+    pub system_prompt: String,
+    /// The question, with the material to work on.
+    pub prompt: String,
+}
+
 /// A background session the harness started.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Spawned {

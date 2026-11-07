@@ -83,14 +83,17 @@ pub struct Listing {
 ///   the coarse state differs. When both agree, the registry keeps its richer
 ///   state, which usually comes from hooks.
 /// - A live listed session that nobody owns, running in the directory of an
-///   agent volee launched and that has no session yet, is that agent's
-///   session: the listing saw it before the session's first hook did.
+///   agent volee is launching or resuming (state `launching`, and no session
+///   of its own listed), is that agent's session: the listing saw it before
+///   the session's first hook did. It is a fork when the agent already had a
+///   session.
 /// - Any other live listed session that nobody owns becomes a new
 ///   `independent` agent. Finished sessions that nobody owns are history and
 ///   are skipped. Sessions of forgotten agents are always skipped.
 /// - When a complete listing no longer contains an agent's current session,
 ///   the agent becomes `stopped` if it ran in a terminal (the session ended)
-///   or `lost` if it ran in the background (the harness removed it).
+///   or `lost` if it ran in the background (the harness removed it), unless
+///   it is launching a new session.
 pub fn reconcile(
     registry: &Registry,
     listing: &Listing,
@@ -106,7 +109,7 @@ pub fn reconcile(
         match registry.agent_for_session(&session.key) {
             Some(agent) => follow(agent, session, now, &mut events),
             None if session.alive => {
-                if let Some(waiting) = awaiting_session(registry, session, &adopted) {
+                if let Some(waiting) = awaiting_session(registry, listing, session, &adopted) {
                     adopted.push(waiting.id);
                     adopt(waiting, session, now, &mut events);
                 } else {
@@ -151,14 +154,20 @@ fn follow(agent: &Agent, session: &ListedSession, now: Timestamp, events: &mut V
     }
 }
 
-/// A launched agent's first session, seen before its first hook.
+/// The session of an agent volee is launching or resuming, seen before its
+/// first hook.
 fn adopt(agent: &Agent, session: &ListedSession, now: Timestamp, events: &mut Vec<Event>) {
+    let origin = if agent.current_session().is_some() {
+        SessionOrigin::Forked
+    } else {
+        SessionOrigin::Started
+    };
     events.push(Event::new(
         now,
         EventKind::SessionLinked {
             agent: agent.id,
             session: session.key.clone(),
-            origin: SessionOrigin::Started,
+            origin,
         },
     ));
     if agent.state.category() != session.state.category() {
@@ -223,7 +232,14 @@ fn vanished(registry: &Registry, listing: &Listing, now: Timestamp, events: &mut
             continue;
         };
         let listed = listing.sessions.iter().any(|s| s.key == current.key);
-        if listed || matches!(agent.state, AgentState::Stopped | AgentState::Lost) {
+        // A launching agent waits for a new session (a resume forks one with
+        // a new id): its previous session being gone is expected.
+        if listed
+            || matches!(
+                agent.state,
+                AgentState::Stopped | AgentState::Lost | AgentState::Launching
+            )
+        {
             continue;
         }
         let (state, detail) = if agent.location == Location::Background {
@@ -242,18 +258,25 @@ fn vanished(registry: &Registry, listing: &Listing, now: Timestamp, events: &mut
     }
 }
 
-/// The agent volee launched in `session`'s directory that still waits for
-/// its first session, if any.
+/// The agent volee is launching or resuming in `session`'s directory, if
+/// any: it is `launching`, and none of its own sessions is listed alive.
 fn awaiting_session<'a>(
     registry: &'a Registry,
+    listing: &Listing,
     session: &ListedSession,
     adopted: &[AgentId],
 ) -> Option<&'a Agent> {
     registry.agents().find(|agent| {
+        let has_live_session = agent.current_session().is_some_and(|current| {
+            listing
+                .sessions
+                .iter()
+                .any(|listed| listed.key == current.key && listed.alive)
+        });
         agent.harness == session.key.harness
             && agent.launched_by != LaunchedBy::Outside
-            && agent.current_session().is_none()
-            && agent.state.is_live()
+            && agent.state == AgentState::Launching
+            && !has_live_session
             && agent.workspace.cwd == session.cwd
             && !adopted.contains(&agent.id)
     })
@@ -579,6 +602,106 @@ mod tests {
         let events = reconcile(
             &registry,
             &listing(vec![listed("s-1", AgentState::Working, true)]),
+            Timestamp::from_millis(5),
+            ids(),
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event.kind, EventKind::AgentRegistered { .. }))
+        );
+    }
+
+    #[test]
+    fn an_agent_launching_a_new_session_is_not_lost() {
+        // A resume: the old session is gone and the fork is not listed yet.
+        let mut registry = Registry::new();
+        let agent = launched(&mut registry, 1, "/work/alpha");
+        for kind in [
+            EventKind::SessionLinked {
+                agent,
+                session: SessionKey::claude("old"),
+                origin: SessionOrigin::Started,
+            },
+            EventKind::StateChanged {
+                agent,
+                state: AgentState::Launching,
+                detail: None,
+            },
+        ] {
+            registry
+                .apply(&Event::new(Timestamp::from_millis(2), kind))
+                .unwrap();
+        }
+        let events = reconcile(
+            &registry,
+            &listing(vec![]),
+            Timestamp::from_millis(5),
+            ids(),
+        );
+        assert_eq!(events, vec![]);
+    }
+
+    #[test]
+    fn a_resumed_agent_adopts_its_fork_in_its_directory() {
+        let mut registry = Registry::new();
+        let agent = launched(&mut registry, 1, "/work/alpha");
+        for kind in [
+            EventKind::SessionLinked {
+                agent,
+                session: SessionKey::claude("old"),
+                origin: SessionOrigin::Started,
+            },
+            EventKind::StateChanged {
+                agent,
+                state: AgentState::Launching,
+                detail: None,
+            },
+        ] {
+            registry
+                .apply(&Event::new(Timestamp::from_millis(2), kind))
+                .unwrap();
+        }
+        let events = reconcile(
+            &registry,
+            &listing(vec![listed("fork", AgentState::Working, true)]),
+            Timestamp::from_millis(5),
+            ids(),
+        );
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            EventKind::SessionLinked { agent: linked, origin: SessionOrigin::Forked, .. }
+                if *linked == agent
+        )));
+        assert!(
+            events
+                .iter()
+                .all(|event| !matches!(event.kind, EventKind::AgentRegistered { .. }))
+        );
+    }
+
+    #[test]
+    fn an_agent_whose_session_is_listed_adopts_nothing_more() {
+        let mut registry = Registry::new();
+        let agent = launched(&mut registry, 1, "/work/alpha");
+        registry
+            .apply(&Event::new(
+                Timestamp::from_millis(2),
+                EventKind::SessionLinked {
+                    agent,
+                    session: SessionKey::claude("mine"),
+                    origin: SessionOrigin::Started,
+                },
+            ))
+            .unwrap();
+        // Still launching (no hook yet), its session listed, and a stranger
+        // starts in the same directory: the stranger is someone else.
+        let events = reconcile(
+            &registry,
+            &listing(vec![
+                listed("mine", AgentState::Working, true),
+                listed("stranger", AgentState::Working, true),
+            ]),
             Timestamp::from_millis(5),
             ids(),
         );

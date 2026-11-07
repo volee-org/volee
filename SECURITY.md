@@ -56,3 +56,25 @@ give us a reasonable amount of time to ship a fix before you disclose publicly.
 
 If you find a way to break one of these properties, please report it as a
 vulnerability.
+
+### What volee trusts
+
+These follow from the design and are not vulnerabilities:
+
+- **Every process that runs as you.** The daemon accepts any process that
+  can open its socket, and takes the caller's word for who it acts for. Any
+  program you run can therefore act as you: send messages in your name, answer
+  agents' questions, launch, stop or tidy agents, and abort or close
+  missions. That includes a command an agent runs with its shell tool, such
+  as `volee msg send` or `volee mission close --force`. The MCP server volee
+  gives an agent always acts for that agent; only a process that talks to
+  the socket directly can claim another identity. Guard the socket as you
+  guard your shell.
+- **The MCP tools of the agents volee launches.** Their settings allow every
+  volee tool (`mcp__volee`) without a permission prompt, so that a background
+  agent never stalls on asking to send a message or a report. A mission's
+  coordinator can therefore launch workers, and close its mission once
+  volee sees every worker delivered, without asking you. It launches at
+  most `[missions] max_workers` agents (8 by default), only in the
+  repositories the mission names. The workers it launches get the same
+  permission mode and tools as any agent volee launches.

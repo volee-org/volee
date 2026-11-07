@@ -14,17 +14,20 @@ use tokio::task::JoinSet;
 use volee_git::Git;
 use volee_harness::Harness;
 use volee_proto::methods::{
-    EVENTS_APPENDED, EventBatch, ForgeStatus, HarnessStatus, Method, SeqEvent, Subscribe,
+    EVENTS_APPENDED, EVENTS_LAGGED, EventBatch, ForgeStatus, HarnessStatus, Lagged, Method,
+    SeqEvent, Subscribe,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc::{self, Id, Notification, Outcome, Request, Response, RpcError, Version2};
 
 use crate::clock::Clock;
+use crate::discovery::Cadence;
 use crate::error::DaemonError;
 use crate::evidence::EvidenceSources;
 use crate::handlers::{dispatch, parse};
 use crate::log::EventLog;
 use crate::state::State;
+use crate::watchers::Watchers;
 
 /// What the daemon needs to run.
 pub struct Config {
@@ -42,8 +45,13 @@ pub struct Config {
     /// The harness whose sessions the daemon discovers, when one is
     /// installed.
     pub harness: Option<Arc<dyn Harness>>,
-    /// How often the harness is listed.
+    /// How often the harness is listed while at least one interactive
+    /// client (the interface) is subscribed.
     pub discovery_interval: Duration,
+    /// How often the harness is listed while no interactive client is
+    /// subscribed. Agents volee launched report through their hooks either
+    /// way; only sessions started elsewhere show up later.
+    pub idle_discovery_interval: Duration,
     /// Where workspaces and delivery evidence are read from:
     /// [`EvidenceSources::default()`] reads nothing.
     pub evidence: EvidenceSources,
@@ -71,6 +79,10 @@ pub(crate) struct Shared {
     pub(crate) settings: volee_config::Config,
     pub(crate) volee_bin: Option<PathBuf>,
     pub(crate) paths: Paths,
+    /// The interactive subscriptions open now, which set discovery's pace.
+    pub(crate) watchers: Watchers,
+    /// Agents being launched for each mission, counted against its limit.
+    pub(crate) slots: crate::launch::Slots,
     /// What the evidence refresher learned about the forge, once it checked.
     forge: std::sync::Mutex<Option<ForgeStatus>>,
     shutdown: watch::Sender<bool>,
@@ -132,6 +144,8 @@ impl Daemon {
             settings: config.evidence.settings.clone(),
             volee_bin: config.volee_bin,
             paths: config.paths,
+            watchers: Watchers::new(),
+            slots: crate::launch::Slots::default(),
             forge: std::sync::Mutex::new(None),
             shutdown,
         });
@@ -139,10 +153,14 @@ impl Daemon {
             replay_spool(&shared, dir).await;
         }
         if let Some(harness) = config.harness {
+            let cadence = Cadence {
+                watched: config.discovery_interval,
+                idle: config.idle_discovery_interval,
+            };
             tokio::spawn(crate::discovery::run(
                 Arc::clone(&shared),
                 harness,
-                config.discovery_interval,
+                cadence,
                 stop.clone(),
             ));
         }
@@ -331,7 +349,9 @@ async fn serve_connection(stream: UnixStream, shared: Arc<Shared>) {
 }
 
 /// Answers with the backlog, then forwards every new event. The backlog and
-/// the receiver are taken under the same lock, so nothing is missed.
+/// the receiver are taken under the same lock, so nothing is missed. An
+/// interactive subscription counts as a watcher for as long as it forwards
+/// events (discovery then lists at once, and often).
 async fn subscribe(
     shared: &Arc<Shared>,
     request: Request,
@@ -358,6 +378,9 @@ async fn subscribe(
             return;
         }
     };
+    // The guard lives in the forwarding task: it is dropped when the
+    // subscription ends, or when its connection closes and aborts the task.
+    let watcher = params.interactive.then(|| shared.watchers.watch());
     let batch = EventBatch { events, last_seq };
     let value = serde_json::to_value(&batch)
         .map_err(|error| RpcError::new(rpc::INTERNAL_ERROR, error.to_string()));
@@ -365,6 +388,7 @@ async fn subscribe(
     let floor = last_seq.unwrap_or(0);
     let outgoing = outgoing.clone();
     tasks.spawn(async move {
+        let _watcher = watcher;
         loop {
             match receiver.recv().await {
                 Ok(event) if event.seq > floor => {
@@ -377,8 +401,8 @@ async fn subscribe(
                     tracing::warn!(skipped, "a subscriber lagged behind and was dropped");
                     let lagged = Notification {
                         jsonrpc: Version2,
-                        method: "events.lagged".to_owned(),
-                        params: serde_json::json!({ "skipped": skipped }),
+                        method: EVENTS_LAGGED.to_owned(),
+                        params: serde_json::to_value(Lagged { skipped }).unwrap_or_default(),
                     };
                     if let Ok(line) = serde_json::to_string(&lagged) {
                         let _ = outgoing.send(line + "\n");

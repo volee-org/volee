@@ -22,7 +22,8 @@ use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_proto::client::{Client, ClientError, appended_event};
 use volee_proto::methods::{
     AgentParams, Empty, EventsSince, Forget, HookIngest, HookParams, HookWait, SendMessage,
-    SendParams, Shutdown, SinceParams, Status, StatusParams, Subscribe, WaitParams,
+    SendParams, Shutdown, SinceParams, Status, StatusParams, Subscribe, SubscribeParams,
+    WaitParams,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
@@ -79,6 +80,7 @@ fn start() -> Running {
         spool: None,
         harness: None,
         discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
+        idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
         volee_bin: None,
     };
@@ -151,7 +153,10 @@ async fn subscribers_get_the_backlog_then_every_new_event_in_order() {
     let mut subscriber = connect(&daemon.socket).await;
     let mut notifications = subscriber.take_notifications().unwrap();
     let backlog = subscriber
-        .call::<Subscribe>(SinceParams { after: Some(1) })
+        .call::<Subscribe>(SubscribeParams {
+            after: Some(1),
+            interactive: false,
+        })
         .await
         .unwrap();
     let seqs: Vec<u64> = backlog.events.iter().map(|e| e.seq).collect();

@@ -8,6 +8,7 @@ mod cmd;
 mod connect;
 mod resolve;
 mod table;
+mod text;
 
 use std::process::ExitCode;
 
@@ -16,7 +17,8 @@ use volee_core::AgentId;
 use volee_core::message::MessageKind;
 use volee_core::mission::MissionKind;
 
-/// See, launch and coordinate every coding agent on your machine.
+/// See, launch and coordinate every coding agent on your machine. Without a
+/// command, opens the interface.
 #[derive(Debug, Parser)]
 #[command(name = "volee", version = volee_core::VERSION, about, long_about = None)]
 struct Cli {
@@ -58,9 +60,51 @@ enum Command {
         #[arg(long)]
         name: Option<String>,
     },
+    /// Take an agent over in this terminal; Ctrl+Z comes back.
+    Attach {
+        /// The agent: its name, short id or id.
+        agent: String,
+    },
+    /// Print an agent's recent terminal output.
+    Logs {
+        /// The agent: its name, short id or id.
+        agent: String,
+    },
+    /// Show an agent's changes against the branch it started from.
+    Diff {
+        /// The agent: its name, short id or id.
+        agent: String,
+        /// The full patch instead of a summary by file.
+        #[arg(long)]
+        full: bool,
+    },
+    /// Stop an agent volee launched; its conversation is kept.
+    Stop {
+        /// The agent: its name, short id or id.
+        agent: String,
+    },
+    /// Remove the worktree of an agent whose work landed; its branch is kept.
+    Tidy {
+        /// The agent: its name, short id or id.
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        agent: Option<String>,
+        /// Every agent volee launched whose evidence allows it.
+        #[arg(long)]
+        all: bool,
+        /// Only say what would be removed and what kept.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Send messages to agents.
     #[command(subcommand)]
     Msg(MsgCommand),
+    /// Summarize a mission's thread, or your thread with an agent, with a
+    /// model. Off unless `summaries = true` under `[messages]`.
+    Summary {
+        /// A mission (title, short id or id) or an agent (name, short id or
+        /// id).
+        target: String,
+    },
     /// Start, follow, abort or close missions across repositories.
     #[command(subcommand)]
     Mission(MissionCommand),
@@ -230,18 +274,12 @@ fn main() -> ExitCode {
             ConfigCommand::Check => cmd::config::check(),
         }),
         Some(command) => async_main(command),
-        None => {
-            println!(
-                "volee {} is under construction: try `volee ls`, or see the roadmap at \
-                 https://volee-org.github.io/volee/project/roadmap.html",
-                volee_core::VERSION
-            );
-            ExitCode::SUCCESS
-        }
+        None => block_on(cmd::interface::run()),
     }
 }
 
-fn async_main(command: Command) -> ExitCode {
+/// Runs a command on a multi-threaded runtime and reports how it ended.
+fn block_on(command: impl Future<Output = anyhow::Result<()>>) -> ExitCode {
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -252,17 +290,31 @@ fn async_main(command: Command) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let result = runtime.block_on(async {
+    report(runtime.block_on(command))
+}
+
+fn async_main(command: Command) -> ExitCode {
+    block_on(async {
         match command {
             Command::Daemon(DaemonCommand::Run) => cmd::daemon::run().await,
             Command::Daemon(DaemonCommand::Start) => cmd::daemon::start().await,
             Command::Daemon(DaemonCommand::Stop) => cmd::daemon::stop().await,
             Command::Daemon(DaemonCommand::Status) => cmd::daemon::status().await,
             Command::Ls { json } => cmd::ls::run(json).await,
+            Command::Attach { agent } => cmd::agent::attach(&agent).await,
+            Command::Logs { agent } => cmd::agent::logs(&agent).await,
+            Command::Diff { agent, full } => cmd::agent::diff(&agent, full).await,
+            Command::Stop { agent } => cmd::agent::stop(&agent).await,
+            Command::Tidy {
+                agent,
+                all,
+                dry_run,
+            } => cmd::tidy::run(agent.as_deref(), all, dry_run).await,
             Command::Msg(MsgCommand::Send { to, body, kind }) => {
                 cmd::msg::send(&to, body, kind.into()).await
             }
             Command::Mission(command) => mission(command).await,
+            Command::Summary { target } => cmd::summary::run(&target).await,
             Command::Spawn {
                 repo,
                 branch,
@@ -287,8 +339,7 @@ fn async_main(command: Command) -> ExitCode {
                 unreachable!("these commands run without the async runtime")
             }
         }
-    });
-    report(result)
+    })
 }
 
 async fn mission(command: MissionCommand) -> anyhow::Result<()> {
@@ -319,11 +370,12 @@ fn report(result: anyhow::Result<()>) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             // A refusal from the daemon is meant for people: its code is not.
+            // Both texts may quote names and messages that agents wrote.
             match error.downcast_ref::<volee_proto::client::ClientError>() {
                 Some(volee_proto::client::ClientError::Rpc(refusal)) => {
-                    eprintln!("volee: {}", refusal.message);
+                    eprintln!("volee: {}", text::printable(&refusal.message));
                 }
-                _ => eprintln!("volee: {error:#}"),
+                _ => eprintln!("volee: {}", text::printable(&format!("{error:#}"))),
             }
             ExitCode::FAILURE
         }
@@ -348,5 +400,62 @@ mod tests {
         );
         let cli = Cli::try_parse_from(["volee", "demo"]).unwrap();
         assert!(matches!(cli.command, Some(Command::Demo { theme: None })));
+    }
+
+    #[test]
+    fn no_command_opens_the_interface() {
+        let cli = Cli::try_parse_from(["volee"]).unwrap();
+        assert!(cli.command.is_none());
+    }
+
+    fn parse(args: &[&str]) -> Command {
+        Cli::try_parse_from(args).unwrap().command.unwrap()
+    }
+
+    #[test]
+    fn agent_commands_take_an_agent_as_people_type_it() {
+        assert!(matches!(
+            parse(&["volee", "attach", "alpha-feat-x"]),
+            Command::Attach { agent } if agent == "alpha-feat-x"
+        ));
+        assert!(matches!(
+            parse(&["volee", "logs", "ag_x7k2pq"]),
+            Command::Logs { agent } if agent == "ag_x7k2pq"
+        ));
+        assert!(matches!(
+            parse(&["volee", "diff", "alpha"]),
+            Command::Diff { agent, full: false } if agent == "alpha"
+        ));
+        assert!(matches!(
+            parse(&["volee", "diff", "alpha", "--full"]),
+            Command::Diff { full: true, .. }
+        ));
+        assert!(matches!(
+            parse(&["volee", "stop", "alpha"]),
+            Command::Stop { agent } if agent == "alpha"
+        ));
+        assert!(Cli::try_parse_from(["volee", "attach"]).is_err());
+    }
+
+    #[test]
+    fn tidy_takes_one_agent_or_all_of_them() {
+        assert!(matches!(
+            parse(&["volee", "tidy", "alpha"]),
+            Command::Tidy { agent: Some(agent), all: false, dry_run: false } if agent == "alpha"
+        ));
+        assert!(matches!(
+            parse(&["volee", "tidy", "--all", "--dry-run"]),
+            Command::Tidy {
+                agent: None,
+                all: true,
+                dry_run: true
+            }
+        ));
+        assert!(Cli::try_parse_from(["volee", "tidy"]).is_err());
+        assert!(Cli::try_parse_from(["volee", "tidy", "alpha", "--all"]).is_err());
+        assert!(
+            Cli::try_parse_from(["volee", "tidy", "alpha", "--force"]).is_err(),
+            "there is no way to force a removal"
+        );
     }
 }

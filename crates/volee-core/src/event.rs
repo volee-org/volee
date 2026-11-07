@@ -114,6 +114,12 @@ pub enum EventKind {
         /// The agent.
         agent: AgentId,
     },
+    /// The human asked volee to stop an agent. volee does not resume it on
+    /// its own until the human sends it a message.
+    StopRequested {
+        /// The agent.
+        agent: AgentId,
+    },
     /// A conversation thread was opened.
     ThreadOpened {
         /// The thread.

@@ -154,6 +154,17 @@ pub trait Git: Send + Sync {
     /// ([`tidy_verdict`](volee_core::delivery::tidy_verdict)) allows it.
     fn remove_worktree(&self, repo: &Path, path: &Path) -> Result<(), GitError>;
 
+    /// Unlocks the worktree at `path` (`git worktree unlock`), which a
+    /// harness may leave locked after its session. Does nothing when it is
+    /// not locked; refuses, with [`GitError::RemovalRefused`], a path that is
+    /// not a linked worktree of the repository. A relative `path` is resolved
+    /// against `repo`.
+    ///
+    /// Unlocking deletes nothing, but it lifts a protection: call it only
+    /// right before [`Git::remove_worktree`], once the cleanup rule allows
+    /// the removal.
+    fn unlock_worktree(&self, repo: &Path, path: &Path) -> Result<(), GitError>;
+
     /// The delivery evidence of an agent's branch, checked out in
     /// `worktree`, compared with its base branch (see
     /// [the base branch](crate#the-base-branch)).

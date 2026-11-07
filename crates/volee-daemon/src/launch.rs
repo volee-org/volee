@@ -12,8 +12,9 @@
 //! registered before its session starts, so that the session's first hooks
 //! find it; a launch that fails marks it failed and deletes nothing.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use volee_core::harness::HarnessKind;
@@ -70,13 +71,10 @@ pub(crate) async fn spawn(
             params.role.label()
         )));
     }
-    let mission = context(shared, params.parent, params.mission).await?;
+    let (mission, slot) = context(shared, params.parent, params.mission).await?;
     let target = resolve(shared, &git, &params.repo, params.base.as_deref()).await?;
     if let Some(mission) = &mission
-        && !mission
-            .repos
-            .iter()
-            .any(|repo| *repo == target.name || Path::new(repo) == target.root)
+        && !in_mission(shared, &git, mission, &target.root).await
     {
         return Err(DaemonError::Refused(format!(
             "repository {} is not part of mission \"{}\" ({})",
@@ -124,6 +122,7 @@ pub(crate) async fn spawn(
         params.parent,
         mission.as_ref().map(|m| m.id),
         workspace,
+        slot,
     )
     .await?;
 
@@ -195,6 +194,7 @@ pub(crate) async fn coordinator(
         None,
         Some(mission),
         workspace,
+        None,
     )
     .await?;
     let spec = SpawnSpec {
@@ -271,22 +271,24 @@ pub(crate) fn coordinator_instructions(mission: &Mission) -> String {
 
 /// Checks the parent and the mission a launch names, and returns what the
 /// launch needs to know about the mission.
+/// The mission a launch serves, and a slot among the agents it may launch,
+/// taken under the state lock so that launches running at once all count.
 async fn context(
     shared: &Arc<Shared>,
     parent: Option<AgentId>,
     mission: Option<MissionId>,
-) -> Result<Option<MissionContext>, DaemonError> {
+) -> Result<(Option<MissionContext>, Option<Slot>), DaemonError> {
     let state = shared.state.lock().await;
+    let registry = state.registry();
     if let Some(parent) = parent
-        && state.registry().agent(parent).is_none()
+        && registry.agent(parent).is_none()
     {
         return Err(DaemonError::NotFound(format!("unknown agent {parent}")));
     }
     let Some(id) = mission else {
-        return Ok(None);
+        return Ok((None, None));
     };
-    let record = state
-        .registry()
+    let record = registry
         .mission(id)
         .ok_or_else(|| DaemonError::NotFound(format!("unknown mission {id}")))?;
     if record.status.is_over() {
@@ -296,15 +298,100 @@ async fn context(
             record.status.label()
         )));
     }
-    Ok(Some(MissionContext {
-        id,
-        title: record.title.clone(),
-        kind: record.kind,
-        repos: record.repos.clone(),
-    }))
+    let launched = registry
+        .mission_agents(id)
+        .iter()
+        .filter(|agent| agent.role != Role::Coordinator)
+        .count();
+    let max = shared.settings.missions.max_workers;
+    let slot = shared.slots.take(id, launched, max).ok_or_else(|| {
+        DaemonError::Refused(format!(
+            "mission \"{}\" already launched {launched} agents, the most `[missions] \
+             max_workers` allows ({max}): ask the human to raise it in volee's configuration",
+            record.title
+        ))
+    })?;
+    Ok((
+        Some(MissionContext {
+            id,
+            title: record.title.clone(),
+            kind: record.kind,
+            repos: record.repos.clone(),
+        }),
+        Some(slot),
+    ))
 }
 
-/// Records the agent before its session exists.
+/// Agents being launched for each mission, not registered yet.
+#[derive(Debug, Default)]
+pub(crate) struct Slots(Arc<Mutex<HashMap<MissionId, usize>>>);
+
+impl Slots {
+    /// A slot for one more agent of `mission`, unless the `launched` agents
+    /// and those being launched already reach `max`.
+    fn take(&self, mission: MissionId, launched: usize, max: usize) -> Option<Slot> {
+        let mut pending = lock_slots(&self.0);
+        let count = pending.entry(mission).or_default();
+        if launched + *count >= max {
+            return None;
+        }
+        *count += 1;
+        Some(Slot {
+            pending: Arc::clone(&self.0),
+            mission,
+        })
+    }
+}
+
+fn lock_slots(
+    pending: &Mutex<HashMap<MissionId, usize>>,
+) -> MutexGuard<'_, HashMap<MissionId, usize>> {
+    // The map only holds counts; a poisoned lock is still consistent.
+    pending.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// One agent being launched for a mission. It stops counting as pending
+/// when dropped, which [`register`] does under the state lock, right after
+/// the agent counts as launched.
+#[derive(Debug)]
+pub(crate) struct Slot {
+    pending: Arc<Mutex<HashMap<MissionId, usize>>>,
+    mission: MissionId,
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        let mut pending = lock_slots(&self.pending);
+        if let Some(count) = pending.get_mut(&self.mission) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                pending.remove(&self.mission);
+            }
+        }
+    }
+}
+
+/// Whether `root` is the main checkout of one of the mission's repositories,
+/// each given as a configured name or a path. Directory names never decide.
+async fn in_mission(
+    shared: &Arc<Shared>,
+    git: &Arc<dyn Git>,
+    mission: &MissionContext,
+    root: &Path,
+) -> bool {
+    for repo in &mission.repos {
+        if let Ok((main, _)) = locate(shared, git, repo).await
+            && main == root
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Records the agent before its session exists. Its mission `slot`, if
+/// any, is released under the same lock, once the agent counts as launched.
+#[allow(clippy::too_many_arguments)] // Each is one fact of the registration.
 async fn register(
     shared: &Arc<Shared>,
     agent: AgentId,
@@ -313,6 +400,7 @@ async fn register(
     parent: Option<AgentId>,
     mission: Option<MissionId>,
     workspace: Workspace,
+    slot: Option<Slot>,
 ) -> Result<(), DaemonError> {
     let mut state = shared.state.lock().await;
     let now = state.now();
@@ -330,6 +418,7 @@ async fn register(
             location: Location::Background,
         },
     )])?;
+    drop(slot);
     Ok(())
 }
 
@@ -420,7 +509,35 @@ pub(crate) async fn resolve(
     base: Option<&str>,
 ) -> Result<Target, DaemonError> {
     let configured = shared.settings.repos.get(input);
-    let dir = if let Some(repo) = configured {
+    let (root, name) = locate(shared, git, input).await?;
+    let chosen = base
+        .map(str::to_owned)
+        .or_else(|| configured.and_then(|repo| repo.base.clone()));
+    let base = if let Some(base) = chosen {
+        base
+    } else {
+        let git = Arc::clone(git);
+        let root = root.clone();
+        blocking(move || git.default_branch(&root))
+            .await??
+            .ok_or_else(|| {
+                DaemonError::InvalidParams(format!(
+                    "{name} has no main, master or develop branch: say which base to start from"
+                ))
+            })?
+    };
+    Ok(Target { name, root, base })
+}
+
+/// The main checkout of the repository `input` names (a configured name, or
+/// a directory inside a repository), and the repository's name: the
+/// configured one, else its directory's.
+async fn locate(
+    shared: &Arc<Shared>,
+    git: &Arc<dyn Git>,
+    input: &str,
+) -> Result<(PathBuf, String), DaemonError> {
+    let dir = if let Some(repo) = shared.settings.repos.get(input) {
         repo.path.clone()
     } else {
         let path = PathBuf::from(input);
@@ -445,23 +562,7 @@ pub(crate) async fn resolve(
         .settings
         .repo_at(&root)
         .map_or(info.name, |(name, _)| name.to_owned());
-    let chosen = base
-        .map(str::to_owned)
-        .or_else(|| configured.and_then(|repo| repo.base.clone()));
-    let base = if let Some(base) = chosen {
-        base
-    } else {
-        let git = Arc::clone(git);
-        let root = root.clone();
-        blocking(move || git.default_branch(&root))
-            .await??
-            .ok_or_else(|| {
-                DaemonError::InvalidParams(format!(
-                    "{name} has no main, master or develop branch: say which base to start from"
-                ))
-            })?
-    };
-    Ok(Target { name, root, base })
+    Ok((root, name))
 }
 
 /// A branch name as a directory name: `feat/invoices` becomes
@@ -674,7 +775,8 @@ pub(crate) fn worker_instructions(
     )
 }
 
-fn harness(shared: &Shared) -> Result<Arc<dyn Harness>, DaemonError> {
+/// The harness, or why the daemon has none.
+pub(crate) fn harness(shared: &Shared) -> Result<Arc<dyn Harness>, DaemonError> {
     shared.harness.clone().ok_or_else(|| {
         DaemonError::Unavailable(
             "Claude Code is not available to this daemon; see `volee daemon status`".into(),
@@ -682,7 +784,8 @@ fn harness(shared: &Shared) -> Result<Arc<dyn Harness>, DaemonError> {
     })
 }
 
-fn git(shared: &Shared) -> Result<Arc<dyn Git>, DaemonError> {
+/// git, or why the daemon has none.
+pub(crate) fn git(shared: &Shared) -> Result<Arc<dyn Git>, DaemonError> {
     shared
         .git
         .clone()

@@ -111,10 +111,12 @@ fn triggered(kind: &EventKind) -> Vec<(AgentId, bool)> {
 }
 
 /// Whether volee should resume `agent` now: it launched it, its session
-/// ended, and messages wait for it.
+/// ended, messages wait for it, and nothing holds it (the human stopped it,
+/// or its mission is over).
 fn needs_resume(registry: &Registry, agent: &Agent) -> bool {
     agent.harness == HarnessKind::ClaudeCode
         && agent.launched_by != LaunchedBy::Outside
+        && agent.hold.is_none()
         && agent.current_session().is_some()
         && matches!(agent.state, AgentState::Stopped | AgentState::Lost)
         && agent.workspace.repo_root.is_some()
@@ -190,8 +192,17 @@ async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, D
         .clone()
         .ok_or_else(|| DaemonError::Unavailable("Claude Code is not available".into()))?;
     let (settings_file, mcp_config_file) = launch::write_agent_files(shared, &harness, agent)?;
-    let plan = {
-        let state = shared.state.lock().await;
+    // The check and the move to Launching share one lock, so that a stop or
+    // the end of a mission cannot slip in between.
+    let (
+        Plan {
+            session,
+            spec,
+            shown,
+        },
+        previous,
+    ) = {
+        let mut state = shared.state.lock().await;
         let registry = state.registry();
         let Some(record) = registry.agent(agent) else {
             return Ok(None);
@@ -199,24 +210,50 @@ async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, D
         if !needs_resume(registry, record) {
             return Ok(None);
         }
-        plan(shared, registry, record, settings_file, mcp_config_file)
+        let previous = record.state.clone();
+        let Some(plan) = plan(shared, registry, record, settings_file, mcp_config_file) else {
+            return Ok(None);
+        };
+        let shown = plan.shown.len();
+        // Launching from now on, before the harness even starts: discovery
+        // then adopts the fork if it lists it before its first hook, and
+        // never marks the agent lost in between.
+        let now = state.now();
+        state.commit(vec![Event::new(
+            now,
+            EventKind::StateChanged {
+                agent,
+                state: AgentState::Launching,
+                detail: Some(format!(
+                    "resuming to deliver {shown} message{}",
+                    if shown == 1 { "" } else { "s" }
+                )),
+            },
+        )])?;
+        (plan, previous)
     };
-    let Some(plan) = plan else {
-        return Ok(None);
-    };
-    let Plan {
-        session,
-        spec,
-        shown,
-    } = plan;
     let resumed = {
         let harness = Arc::clone(&harness);
-        launch::blocking(move || harness.resume(&session, &spec)).await??
+        launch::blocking(move || harness.resume(&session, &spec)).await?
     };
     let mut state = shared.state.lock().await;
-    state.expect_session(resumed.handle, agent, resumed.origin);
     let now = state.now();
-    let mut events: Vec<Event> = shown
+    let resumed = match resumed {
+        Ok(resumed) => resumed,
+        Err(error) => {
+            state.commit(vec![Event::new(
+                now,
+                EventKind::StateChanged {
+                    agent,
+                    state: previous,
+                    detail: Some(format!("resume failed: {error}")),
+                },
+            )])?;
+            return Err(error.into());
+        }
+    };
+    state.expect_session(resumed.handle, agent, resumed.origin);
+    let events: Vec<Event> = shown
         .iter()
         .map(|message| {
             Event::new(
@@ -228,18 +265,6 @@ async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, D
             )
         })
         .collect();
-    events.push(Event::new(
-        now,
-        EventKind::StateChanged {
-            agent,
-            state: AgentState::Launching,
-            detail: Some(format!(
-                "resumed to deliver {} message{}",
-                shown.len(),
-                if shown.len() == 1 { "" } else { "s" }
-            )),
-        },
-    ));
     state.commit(events)?;
     Ok(Some(shown.len()))
 }

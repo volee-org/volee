@@ -55,6 +55,19 @@ pub struct SeqEvent {
 /// params are a [`SeqEvent`].
 pub const EVENTS_APPENDED: &str = "events.appended";
 
+/// The name of the notification that tells a subscriber it fell too far
+/// behind and no longer receives events. Its params are a [`Lagged`]. The
+/// subscriber can subscribe again with `after` set to the last sequence
+/// number it applied.
+pub const EVENTS_LAGGED: &str = "events.lagged";
+
+/// The params of [`EVENTS_LAGGED`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Lagged {
+    /// How many events the subscriber missed.
+    pub skipped: u64,
+}
+
 // ---- daemon ---------------------------------------------------------------
 
 /// Parameters of [`Status`].
@@ -132,11 +145,24 @@ method!(
 
 // ---- events ---------------------------------------------------------------
 
-/// Parameters of [`EventsSince`] and [`Subscribe`].
+/// Parameters of [`EventsSince`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SinceParams {
     /// Return events after this sequence number; from the start when absent.
     pub after: Option<u64>,
+}
+
+/// Parameters of [`Subscribe`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubscribeParams {
+    /// Return events after this sequence number; from the start when absent.
+    pub after: Option<u64>,
+    /// Whether a person watches through this subscription (the interface),
+    /// rather than a program (an agent's MCP server). While at least one
+    /// interactive subscription is open, the daemon looks for new sessions
+    /// every few seconds; otherwise it looks rarely.
+    #[serde(default)]
+    pub interactive: bool,
 }
 
 /// The result of [`EventsSince`].
@@ -160,10 +186,11 @@ method!(
 method!(
     /// Like [`EventsSince`], then keeps the connection subscribed: every new
     /// event arrives as an [`EVENTS_APPENDED`] notification, in order and
-    /// without gaps.
+    /// without gaps. An interactive subscription also makes the daemon look
+    /// for new sessions at once, then every few seconds while it lasts.
     Subscribe,
     "events.subscribe",
-    SinceParams,
+    SubscribeParams,
     EventBatch
 );
 
@@ -190,30 +217,42 @@ method!(
 pub struct TidyParams {
     /// The agent whose worktree to remove.
     pub agent: AgentId,
-    /// Remove even without delivery evidence. Never deletes the branch.
+    /// Only say what tidying would do; touch nothing.
     #[serde(default)]
-    pub force: bool,
+    pub dry_run: bool,
 }
 
 /// The result of [`Tidy`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "outcome")]
 pub enum TidyOutcome {
-    /// The worktree was removed; the branch was kept.
+    /// The worktree was removed and the agent forgotten; the branch was
+    /// kept.
     Removed {
         /// The removed worktree.
         worktree: String,
+        /// The agent's branch, which is kept.
+        branch: Option<String>,
+    },
+    /// A dry run: the evidence allows removing the worktree. Nothing was
+    /// touched.
+    WouldRemove {
+        /// The worktree tidying would remove.
+        worktree: String,
+        /// The agent's branch, which tidying keeps.
+        branch: Option<String>,
     },
     /// Nothing was removed, for these reasons.
     Kept {
-        /// Why.
+        /// Why, every reason at once.
         reasons: Vec<TidyRefusal>,
     },
 }
 
 method!(
-    /// Removes an agent's worktree when delivery evidence allows it
-    /// (ADR 0011).
+    /// Removes an agent's worktree when its delivery evidence allows it
+    /// (ADR 0011), then forgets the agent. Never deletes a branch, never
+    /// forces.
     Tidy,
     "agents.tidy",
     TidyParams,
@@ -269,7 +308,8 @@ pub struct PreviewText {
 }
 
 method!(
-    /// The agent's recent terminal output.
+    /// The agent's recent terminal output. Refused for an agent in a terminal
+    /// of its own (an interactive session), which only that terminal shows.
     Preview,
     "agents.preview",
     AgentParams,
@@ -291,6 +331,10 @@ pub struct DiffParams {
 pub struct DiffText {
     /// A unified diff, or `git diff --stat` output.
     pub text: String,
+    /// Whether the diff was longer than the daemon returns and `text` holds
+    /// only its beginning, cut at a line break.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 method!(
@@ -311,16 +355,30 @@ pub struct AttachCommand {
     pub args: Vec<String>,
     /// Its working directory.
     pub cwd: Option<String>,
+    /// Environment variables to remove before running it: the ones that
+    /// would tie it to another agent's session.
+    #[serde(default)]
+    pub env_remove: Vec<String>,
     /// A sentence telling the person how to come back.
     pub hint: String,
 }
 
 method!(
-    /// How to take over an agent in the client's terminal.
+    /// How to take over an agent in the client's terminal. Refused for an
+    /// agent in a terminal of its own: switch to that terminal instead.
     Attach,
     "agents.attach",
     AgentParams,
     AttachCommand
+);
+
+method!(
+    /// Stops an agent's session; its conversation is kept and can be
+    /// resumed. Refused for agents volee did not launch (ADR 0011).
+    Stop,
+    "agents.stop",
+    AgentParams,
+    Empty
 );
 
 // ---- messages -------------------------------------------------------------
@@ -380,6 +438,35 @@ method!(
     "messages.read",
     MarkReadParams,
     Empty
+);
+
+// ---- threads --------------------------------------------------------------
+
+/// Parameters of [`Summarize`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SummarizeParams {
+    /// The thread.
+    pub thread: ThreadId,
+}
+
+/// The result of [`Summarize`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadSummary {
+    /// The summary, as plain text.
+    pub summary: String,
+    /// How many messages it covers.
+    pub messages: usize,
+    /// The model that wrote it.
+    pub model: String,
+}
+
+method!(
+    /// Summarizes a thread with a model. Refused unless the person turned
+    /// summaries on in the configuration.
+    Summarize,
+    "threads.summarize",
+    SummarizeParams,
+    ThreadSummary
 );
 
 // ---- missions -------------------------------------------------------------
@@ -537,10 +624,12 @@ mod tests {
             Preview::NAME,
             Diff::NAME,
             Attach::NAME,
+            Stop::NAME,
             SendMessage::NAME,
             MarkRead::NAME,
             HookIngest::NAME,
             HookWait::NAME,
+            Summarize::NAME,
             CreateMission::NAME,
             AbortMission::NAME,
             CloseMission::NAME,
@@ -560,5 +649,32 @@ mod tests {
         let json = serde_json::to_value(&kept).unwrap();
         assert_eq!(json["outcome"], "kept");
         assert_eq!(json["reasons"][0]["reason"], "not-delivered");
+        let would = TidyOutcome::WouldRemove {
+            worktree: "/work/alpha/.claude/worktrees/feat-x".into(),
+            branch: Some("feat/x".into()),
+        };
+        let json = serde_json::to_value(&would).unwrap();
+        assert_eq!(json["outcome"], "would-remove");
+        let params: TidyParams =
+            serde_json::from_value(serde_json::json!({ "agent": "ag_01jc5x8m3kq7v2c4b9e0f1g2h3" }))
+                .unwrap();
+        assert!(!params.dry_run, "a request without dry_run removes");
+    }
+
+    #[test]
+    fn subscriptions_are_not_interactive_unless_they_say_so() {
+        let params: SubscribeParams =
+            serde_json::from_value(serde_json::json!({ "after": 7 })).unwrap();
+        assert_eq!(
+            params,
+            SubscribeParams {
+                after: Some(7),
+                interactive: false
+            }
+        );
+        let params: SubscribeParams =
+            serde_json::from_value(serde_json::json!({ "interactive": true })).unwrap();
+        assert!(params.interactive);
+        assert_eq!(params.after, None);
     }
 }
