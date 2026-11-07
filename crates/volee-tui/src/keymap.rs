@@ -695,6 +695,11 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Agents, &[ch('g'), key(K::Home)], A::First, "first agent", None),
         bind(C::Agents, &[ch('G'), key(K::End)], A::Last, "last agent", None),
         bind(C::Agents, &[key(K::Enter)], A::FocusSubtree, "show the agent's subtree in the hierarchy", Some("subtree")),
+        // The list has the keyboard at first: the zoom keys reach the view
+        // beside it from there too.
+        bind(C::Agents, &[ch('+'), ch('=')], A::ZoomIn, "more detail in the view beside the list", None),
+        bind(C::Agents, &[ch('_')], A::ZoomOut, "less detail in the view beside the list", None),
+        bind(C::Agents, &[ch('0')], A::ZoomAuto, "the view's detail chosen from the size again", None),
 
         bind(C::Hierarchy, &[ch('h'), key(K::Left)], A::Left, "card on the left", Some("move")),
         bind(C::Hierarchy, &[ch('j'), key(K::Down)], A::Down, "card below", Some("move")),
@@ -909,7 +914,11 @@ mod tests {
             keymap.action(&contexts, KeyCombo::char('j')),
             Some(Action::Down)
         );
-        assert_eq!(keymap.action(&contexts, KeyCombo::char('+')), None);
+        // The zoom keys reach the view beside the list.
+        assert_eq!(
+            keymap.action(&contexts, KeyCombo::char('+')),
+            Some(Action::ZoomIn)
+        );
         let contexts = [Context::Hierarchy, Context::Global];
         assert_eq!(
             keymap.action(&contexts, KeyCombo::char('=')),

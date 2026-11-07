@@ -14,11 +14,15 @@ use std::time::Duration;
 
 use common::FakeHarness;
 use tokio::net::UnixListener;
+use volee_core::event::EventKind;
 use volee_core::harness::SessionKey;
+use volee_core::harness::{HarnessKind, SessionOrigin};
 use volee_core::reconcile::ListedSession;
+use volee_core::role::{LaunchedBy, Role};
 use volee_core::state::AgentState;
-use volee_core::workspace::Location;
-use volee_core::{Event, Registry};
+use volee_core::time::Timestamp;
+use volee_core::workspace::{Location, Workspace};
+use volee_core::{AgentId, Event, Registry};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_harness::Harness;
 use volee_mux::{Hosted, Located, Multiplexer, MultiplexerStatus, MuxError};
@@ -116,6 +120,11 @@ struct Running {
 }
 
 fn start() -> Running {
+    start_with(Vec::new(), true)
+}
+
+/// A daemon whose log holds `history`, with the fake multiplexer or none.
+fn start_with(history: Vec<Event>, uses_mux: bool) -> Running {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::rooted(dir.path());
     let socket = paths.socket.clone();
@@ -124,7 +133,7 @@ fn start() -> Running {
     let mux = Arc::new(FakeMux::default());
     let config = Config {
         paths,
-        log: Box::new(MemoryLog::with(vec![])),
+        log: Box::new(MemoryLog::with(history)),
         clock: Arc::new(ManualClock::at(10_000)),
         harnesses: vec![],
         spool: None,
@@ -134,7 +143,11 @@ fn start() -> Running {
         idle_discovery_interval: Duration::from_millis(10),
         evidence: EvidenceSources::default(),
         volee_bin: None,
-        multiplexers: vec![Arc::clone(&mux) as Arc<dyn Multiplexer>],
+        multiplexers: if uses_mux {
+            vec![Arc::clone(&mux) as Arc<dyn Multiplexer>]
+        } else {
+            Vec::new()
+        },
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -264,5 +277,47 @@ async fn an_agent_whose_session_ended_leaves_its_pane() {
     ended.alive = false;
     ended.pid = None;
     daemon.harness.set(vec![ended]);
+    located(&daemon.socket, &Location::Terminal).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pane_of_a_multiplexer_no_longer_used_is_forgotten() {
+    // An earlier run found the session in a tuios pane; this one runs
+    // without tuios, so it can neither show nor reach that pane.
+    let agent = AgentId::from_ulid(ulid::Ulid::from_parts(1, 1));
+    let at = Timestamp::from_millis(5_000);
+    let history = vec![
+        Event::new(
+            at,
+            EventKind::AgentRegistered {
+                agent,
+                name: "developer-a1".into(),
+                role: Role::Independent,
+                harness: HarnessKind::ClaudeCode,
+                launched_by: LaunchedBy::Outside,
+                parent: None,
+                mission: None,
+                workspace: Workspace::at("/work/alpha"),
+                location: Location::Terminal,
+            },
+        ),
+        Event::new(
+            at,
+            EventKind::SessionLinked {
+                agent,
+                session: SessionKey::claude(SESSION),
+                origin: SessionOrigin::Discovered,
+            },
+        ),
+        Event::new(
+            at,
+            EventKind::LocationChanged {
+                agent,
+                location: pane("work:c434b5b6"),
+            },
+        ),
+    ];
+    let daemon = start_with(history, false);
+    daemon.harness.set(vec![interactive(SESSION)]);
     located(&daemon.socket, &Location::Terminal).await;
 }
