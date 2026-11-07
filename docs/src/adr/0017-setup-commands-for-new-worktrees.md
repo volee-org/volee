@@ -29,21 +29,28 @@ commands out.
   ([ADR 0016](0016-what-a-failed-launch-left-untouched.md)): after the
   worktree exists and the agent is registered, before its session starts.
   The coordinator of a mission, which works in a main checkout, has none.
-- **How.** The daemon runs them in order, each with `sh -c`, in the
-  worktree, with standard input closed. Each gets the daemon's environment
-  plus `VOLEE_REPO` (the repository's name), `VOLEE_REPO_ROOT` (its main
-  checkout), `VOLEE_WORKTREE`, `VOLEE_BRANCH` and `VOLEE_BASE`. Each may run
-  for 15 minutes.
+- **How.** The daemon runs them in order, each with `/bin/sh -c`, in the
+  worktree, in a process group of its own, with standard input closed. Each
+  gets the daemon's environment plus `VOLEE_REPO` (the repository's name),
+  `VOLEE_REPO_ROOT` (its main checkout), `VOLEE_WORKTREE`, `VOLEE_BRANCH` and
+  `VOLEE_BASE`. Each may run for 15 minutes; then it is killed with its
+  whole process group.
 - **What people see.** The agent is listed as launching, its detail naming
   the command that runs (`setting up: bun install`). What the commands print
-  goes to `setup.log` in the agent's state directory; `volee spawn` names that
-  file once the agent runs.
+  goes to `setup.log` in the agent's state directory as they print it, so it
+  can be followed while they run; `volee spawn` names that file.
 - **Failure.** The first command that exits with a failure status, or runs
-  out of time, stops the setup. The launch then fails as a failed session
-  start does: the agent is marked failed with the command and the last line
-  it printed, no session starts, the worktree and branch stay
+  out of time, stops the setup; so does a log that cannot be written. The
+  launch then fails as a failed session start does: the agent is marked
+  failed with the command and the last line it printed, no session starts,
+  the worktree and branch stay
   ([ADR 0011](0011-safety-and-delivery-evidence.md)), and the same command
-  can run again once the problem is fixed; the setup runs again then.
+  can run again once the problem is fixed: it reuses the worktree while git
+  sees it clean, and runs the setup again.
+- **Interruption.** Before each command and before the session starts, the
+  launch checks under the state lock that the agent is still launching. If
+  its mission ended meanwhile, the launch stops there: the agent is marked
+  stopped, no session starts, and the worktree and branch stay.
 
 ## Consequences
 
@@ -55,9 +62,9 @@ commands out.
 - Setup commands should be safe to run twice: a launch that reuses a worktree
   runs them again. A setup that changes tracked files, or leaves files git
   does not ignore, makes the worktree no longer untouched, so it is not
-  reused.
-- A command that runs out of time is killed; processes it started in the
-  background are not.
+  reused: the person removes it before launching again. Commands that write
+  only ignored files (dependencies, a `.env.local` listed in `.gitignore`)
+  keep it reusable.
 
 ## Alternatives considered
 

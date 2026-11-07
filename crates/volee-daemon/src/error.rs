@@ -89,6 +89,10 @@ pub enum DaemonError {
         /// The setup log.
         log: PathBuf,
     },
+    /// A launch stopped during its setup, as when its mission ended: no
+    /// session started (ADR 0017).
+    #[error("{0}")]
+    Interrupted(String),
     /// git failed or refused.
     #[error(transparent)]
     Git(#[from] volee_git::GitError),
@@ -137,6 +141,7 @@ fn code(error: &DaemonError) -> i64 {
         }
         DaemonError::Refused(_)
         | DaemonError::SetupFailed { .. }
+        | DaemonError::Interrupted(_)
         | DaemonError::Harness(
             volee_harness::HarnessError::NotControllable { .. }
             | volee_harness::HarnessError::ForeignSession { .. }

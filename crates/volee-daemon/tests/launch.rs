@@ -25,7 +25,8 @@ use volee_git::GitCli;
 use volee_harness::{Harness, PermissionMode};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    CreateMission, CreateMissionParams, EventsSince, SinceParams, Spawn, SpawnParams,
+    AbortMission, AbortParams, CreateMission, CreateMissionParams, EventsSince, SinceParams, Spawn,
+    SpawnParams,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
@@ -865,4 +866,102 @@ async fn a_repository_without_setup_starts_at_once() {
     let spawned = client.call::<Spawn>(worker("feat/plain")).await.unwrap();
     assert_eq!(spawned.setup_log, None);
     assert_eq!(daemon.harness.launches().len(), 1);
+}
+
+/// A mission on `alpha`, so that its workers may be launched there.
+fn mission_on_alpha() -> (MissionId, Vec<Event>) {
+    let id = MissionId::from_ulid(Ulid::from_parts(4_000, 2));
+    let thread = ThreadId::from_ulid(Ulid::from_parts(2_000, 2));
+    let at = |kind| Event::new(Timestamp::from_millis(1), kind);
+    let events = vec![
+        at(EventKind::ThreadOpened {
+            thread: Thread {
+                id: thread,
+                title: "Mission: Invoices".into(),
+                mission: Some(id),
+                participants: vec![Party::Human],
+                opened_at: Timestamp::from_millis(1),
+            },
+        }),
+        at(EventKind::MissionCreated {
+            mission: Mission {
+                id,
+                title: "Invoices".into(),
+                kind: MissionKind::Change,
+                goal: "Add invoices".into(),
+                repos: vec!["alpha".into()],
+                requested_by: None,
+                coordinator: None,
+                thread,
+                status: MissionStatus::Running,
+                report: None,
+                created_at: Timestamp::from_millis(1),
+                ended_at: None,
+                assessments: BTreeMap::new(),
+            },
+        }),
+    ];
+    (id, events)
+}
+
+#[tokio::test]
+async fn a_mission_that_ends_during_the_setup_stops_the_launch() {
+    let (mission, events) = mission_on_alpha();
+    // The setup waits for a file next to the repository.
+    let daemon = start_prepared(
+        "setup = ['while [ ! -f \"$VOLEE_REPO_ROOT/../release\" ]; do sleep 0.05; done']\n",
+        move |_| events,
+    );
+    let launch = {
+        let socket = daemon.socket.clone();
+        tokio::spawn(async move {
+            let client = Client::connect(&socket).await.unwrap();
+            client
+                .call::<Spawn>(SpawnParams {
+                    mission: Some(mission),
+                    ..worker("feat/late")
+                })
+                .await
+        })
+    };
+    // Wait for the setup to run, then abort the mission and let it finish.
+    let agent = loop {
+        let registry = registry(&daemon.socket).await;
+        let setting_up = registry.agents().find(|agent| {
+            agent
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.starts_with("setting up"))
+        });
+        if let Some(agent) = setting_up {
+            break agent.id;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    client
+        .call::<AbortMission>(AbortParams {
+            mission,
+            reason: None,
+        })
+        .await
+        .unwrap();
+    std::fs::write(daemon.repo.join("../release"), "").unwrap();
+    let error = rpc_error(launch.await.unwrap().unwrap_err());
+    assert_eq!(error.code, rpc::REFUSED);
+    assert!(
+        error.message.contains("its mission ended during its setup"),
+        "{}",
+        error.message
+    );
+    // No session started for an aborted mission, and the agent says why.
+    assert_eq!(daemon.harness.launches().len(), 0);
+    let registry = registry(&daemon.socket).await;
+    let record = registry.agent(agent).unwrap();
+    assert_eq!(record.state, AgentState::Stopped);
+    assert_eq!(
+        record.detail.as_deref(),
+        Some("no session started: its mission ended during its setup")
+    );
+    assert!(daemon.repo.join(".claude/worktrees/feat-late").is_dir());
 }

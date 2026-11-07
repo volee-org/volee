@@ -85,19 +85,25 @@ setup = [
 ]
 ```
 
-The daemon runs the commands in order, each with `sh -c`, in the new
+The daemon runs the commands in order, each with `/bin/sh -c`, in the new
 worktree. Besides the daemon's environment, they get `VOLEE_REPO` (the
 repository's name), `VOLEE_REPO_ROOT` (its main checkout), `VOLEE_WORKTREE`,
-`VOLEE_BRANCH` and `VOLEE_BASE`. Each may run for 15 minutes. Meanwhile the
-agent is listed as launching, with the command that runs; what the commands
-print goes to `setup.log` in the agent's folder of volee's state directory.
+`VOLEE_BRANCH` and `VOLEE_BASE`. Each may run for 15 minutes, after which it
+is killed with everything it started. Meanwhile the agent is listed as
+launching, with the command that runs; what the commands print goes to
+`setup.log` in the agent's folder of volee's state directory as they print
+it, so `tail -f` follows it, and `volee spawn` says where it is.
 
 If a command fails, the launch fails: no session starts, the worktree and
 branch stay, and the agent is listed as failed with the command and the last
 line it printed. Fix the cause and run the same `volee spawn` again: volee
-reuses the worktree when nothing changed in it, and runs the setup again, so
-keep the commands safe to run twice. A mission's coordinator works in the
-main checkout and runs no setup.
+reuses the worktree while git sees it clean, and runs the setup again, so
+keep the commands safe to run twice. Commands that write only files git
+ignores, such as dependencies or a `.env.local` listed in `.gitignore`, keep
+the worktree clean; if the setup left other files, remove the worktree and
+its branch before launching again. If the agent's mission ends during the
+setup, the launch stops and no session starts. A mission's coordinator works
+in the main checkout and runs no setup.
 
 ## `[messages]`
 

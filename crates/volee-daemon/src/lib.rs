@@ -21,6 +21,7 @@ mod missions;
 mod panes;
 mod resume;
 mod server;
+mod setup;
 mod sqlite;
 mod state;
 mod tidy;
