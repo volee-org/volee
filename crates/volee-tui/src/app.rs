@@ -1658,6 +1658,34 @@ fn scrolled(scroll: u16, action: Action, most: u16) -> u16 {
     scroll.min(most)
 }
 
+/// The wheel over the view: the hierarchy scrolls (`sideways` with Shift),
+/// the repositories and the timeline move the selection, and Shift moves
+/// the timeline's cursor. Returns whether anything changed.
+fn scroll_view(model: &mut Model, down: bool, sideways: bool, effects: &mut Vec<Effect>) -> bool {
+    match model.tab {
+        Tab::Hierarchy => {
+            let step = if down { 2 } else { -2 };
+            if sideways {
+                model.scene_offset.0 += step * 2;
+            } else {
+                model.scene_offset.1 += step;
+            }
+        }
+        Tab::Timeline if sideways => model.timeline.scrub(model.now, down),
+        Tab::Repos | Tab::Timeline => {
+            let context = if model.tab == Tab::Repos {
+                Context::Repos
+            } else {
+                Context::Timeline
+            };
+            let action = if down { Action::Down } else { Action::Up };
+            navigate(model, context, action, effects);
+        }
+        Tab::Network => return false,
+    }
+    true
+}
+
 /// Handles the mouse; returns whether anything changed.
 fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> bool {
     let (column, row) = (mouse.column, mouse.row);
@@ -1719,29 +1747,10 @@ fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> 
                     let action = if down { Action::Down } else { Action::Up };
                     navigate(model, Context::Agents, action, effects);
                 }
-                Some(Pane::View) => match model.tab {
-                    Tab::Hierarchy => {
-                        let step = if down { 2 } else { -2 };
-                        if mouse.modifiers.contains(KeyModifiers::SHIFT) {
-                            model.scene_offset.0 += step * 2;
-                        } else {
-                            model.scene_offset.1 += step;
-                        }
-                    }
-                    Tab::Timeline if mouse.modifiers.contains(KeyModifiers::SHIFT) => {
-                        model.timeline.scrub(model.now, down);
-                    }
-                    Tab::Repos | Tab::Timeline => {
-                        let context = if model.tab == Tab::Repos {
-                            Context::Repos
-                        } else {
-                            Context::Timeline
-                        };
-                        let action = if down { Action::Down } else { Action::Up };
-                        navigate(model, context, action, effects);
-                    }
-                    Tab::Network => return false,
-                },
+                Some(Pane::View) => {
+                    let sideways = mouse.modifiers.contains(KeyModifiers::SHIFT);
+                    return scroll_view(model, down, sideways, effects);
+                }
                 Some(Pane::Detail) => {
                     let action = if down { Action::Down } else { Action::Up };
                     navigate(model, Context::Detail, action, effects);

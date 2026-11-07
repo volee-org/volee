@@ -608,6 +608,7 @@ impl Keymap {
 // One binding per line reads best as a table; rustfmt would spread each one
 // over seven lines.
 #[rustfmt::skip]
+#[allow(clippy::too_many_lines)] // One table of every binding, one per line.
 fn default_bindings() -> Vec<Binding> {
     use Action as A;
     use Context as C;
