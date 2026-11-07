@@ -3,7 +3,7 @@
 **See, launch and coordinate every coding agent on your machine, from your
 terminal.**
 
-> **Early development.** volee 0.1 is being built in the open. Pages marked
+> **Early development.** volee is being built in the open. Pages marked
 > *planned* describe behavior that is designed (see the
 > [decisions](adr/README.md)) but not released yet.
 
@@ -33,7 +33,10 @@ do*. volee shows what they do.
   agent; volee supervises its workers and checks that the work was delivered.
 - **Your terminal, your tools**: jump into an agent with a key and come back
   with `Ctrl+Z`; open its worktree in your editor, your diff viewer or your
-  git interface. None of them is required, and no multiplexer either.
+  git interface. None of them is required, and no multiplexer either; a
+  session you started in a tuios or tmux pane is shown and reached there.
+- **Worktrees ready to work**: your setup commands, such as `bun install`,
+  run in each new worktree before its agent starts.
 
 ## Where to go next
 

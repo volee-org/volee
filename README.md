@@ -17,8 +17,8 @@
 </div>
 
 > [!NOTE]
-> volee 0.1 is a first release, built in the open. Expect rough edges and tell
-> us about them; the [roadmap](https://volee-org.github.io/volee/project/roadmap.html)
+> volee is young and built in the open. Expect rough edges and tell us about
+> them; the [roadmap](https://volee-org.github.io/volee/project/roadmap.html)
 > says what comes next.
 
 ## Why
@@ -44,6 +44,11 @@ code, not by trust.
 
 - Agents run as Claude Code background sessions, so they survive closed
   windows. Take one over with a key, come back with `Ctrl+Z`.
+- Sessions you started by hand in a tuios or tmux pane are found in that
+  pane: their preview is the pane's screen, and the same key brings the pane
+  forward.
+- Each new worktree can run your setup commands, such as `bun install`,
+  before its agent starts.
 - A small local daemon keeps the registry, the event log and the messages in
   SQLite. The interface, the command line and the agents all talk to it.
 - Agents message each other through an MCP server, which any MCP-capable
