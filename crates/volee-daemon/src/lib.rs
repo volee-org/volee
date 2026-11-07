@@ -13,6 +13,7 @@ mod delivery;
 mod discovery;
 mod error;
 mod handlers;
+mod launch;
 mod log;
 mod missions;
 mod server;

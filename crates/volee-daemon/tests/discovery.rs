@@ -4,104 +4,23 @@
 // In tests, a failed unwrap is a failed test with a clear location.
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::Value;
+use common::FakeHarness;
 use tokio::net::UnixListener;
-use volee_core::harness::{HarnessKind, SessionKey};
-use volee_core::reconcile::{ListedSession, Listing};
+use volee_core::harness::SessionKey;
+use volee_core::reconcile::ListedSession;
 use volee_core::state::AgentState;
-use volee_core::{AgentId, Event, Registry};
+use volee_core::{Event, Registry};
 use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
-use volee_harness::{Capabilities, Harness, HarnessError, SpawnSpec, Spawned, Version};
+use volee_harness::Harness;
 use volee_proto::client::Client;
 use volee_proto::methods::{EventsSince, SinceParams};
 use volee_proto::paths::Paths;
-
-/// A harness whose listing the test sets. Listing fails while `failing`.
-#[derive(Debug, Default)]
-struct FakeHarness {
-    sessions: Mutex<Vec<ListedSession>>,
-    failing: Mutex<bool>,
-}
-
-impl FakeHarness {
-    fn set(&self, sessions: Vec<ListedSession>) {
-        *self.sessions.lock().unwrap() = sessions;
-    }
-
-    fn fail(&self, failing: bool) {
-        *self.failing.lock().unwrap() = failing;
-    }
-}
-
-fn unsupported(what: &str) -> HarnessError {
-    HarnessError::CommandFailed {
-        command: what.to_owned(),
-        code: None,
-        message: "not supported by the fake harness".to_owned(),
-    }
-}
-
-impl Harness for FakeHarness {
-    fn kind(&self) -> HarnessKind {
-        HarnessKind::ClaudeCode
-    }
-
-    fn capabilities(&self) -> Result<Capabilities, HarnessError> {
-        Ok(Capabilities {
-            version: Version::new(2, 1, 319),
-            list_sessions: true,
-            background_sessions: true,
-        })
-    }
-
-    fn list(&self) -> Result<Listing, HarnessError> {
-        if *self.failing.lock().unwrap() {
-            return Err(unsupported("agents"));
-        }
-        Ok(Listing {
-            harness: HarnessKind::ClaudeCode,
-            sessions: self.sessions.lock().unwrap().clone(),
-            complete: true,
-        })
-    }
-
-    fn spawn(&self, _: &SpawnSpec) -> Result<Spawned, HarnessError> {
-        Err(unsupported("spawn"))
-    }
-
-    fn resume(&self, _: &SessionKey, _: &SpawnSpec) -> Result<Spawned, HarnessError> {
-        Err(unsupported("resume"))
-    }
-
-    fn stop(&self, _: &SessionKey) -> Result<(), HarnessError> {
-        Err(unsupported("stop"))
-    }
-
-    fn remove(&self, _: &SessionKey) -> Result<(), HarnessError> {
-        Err(unsupported("remove"))
-    }
-
-    fn logs(&self, _: &SessionKey) -> Result<Vec<u8>, HarnessError> {
-        Err(unsupported("logs"))
-    }
-
-    fn attach_command(&self, _: &SessionKey) -> Result<Command, HarnessError> {
-        Err(unsupported("attach"))
-    }
-
-    fn agent_settings(&self, _: &Path, _: AgentId, _: Duration) -> Result<Value, HarnessError> {
-        Err(unsupported("settings"))
-    }
-
-    fn mcp_config(&self, _: &Path, _: AgentId) -> Result<Value, HarnessError> {
-        Err(unsupported("mcp"))
-    }
-}
 
 fn session(id: &str, name: &str, state: AgentState, alive: bool) -> ListedSession {
     ListedSession {
@@ -134,6 +53,9 @@ fn start() -> Running {
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
         discovery_interval: Duration::from_millis(10),
+        git: None,
+        settings: volee_config::Config::default(),
+        volee_bin: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

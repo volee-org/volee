@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use volee_core::harness::HarnessKind;
 use volee_core::time::Elapsed;
 use volee_daemon::{Clock, Config, DEFAULT_DISCOVERY_INTERVAL, Daemon, SqliteLog, SystemClock};
+use volee_git::GitCli;
 use volee_harness::{ClaudeCode, Harness};
 use volee_proto::client::Client;
 use volee_proto::methods::{Empty, HarnessStatus, Shutdown, Status, StatusParams};
@@ -20,6 +21,12 @@ pub(crate) async fn run() -> Result<()> {
         .with_context(|| format!("cannot create {}", paths.state_dir.display()))?;
     let log = SqliteLog::open(&paths.database())
         .with_context(|| format!("cannot open {}", paths.database().display()))?;
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+    let settings = volee_config::Config::load(&paths.config_file(), &home)
+        .context("the configuration file is invalid; run `volee config check`")?;
+    let volee_bin = std::env::current_exe().ok();
     let (harness, status) = detect_claude_code().await;
     if harness.is_some() {
         tracing::info!(version = ?status.version, "using Claude Code");
@@ -34,6 +41,9 @@ pub(crate) async fn run() -> Result<()> {
         harnesses: vec![status],
         harness,
         discovery_interval: DEFAULT_DISCOVERY_INTERVAL,
+        git: Some(Arc::new(GitCli::new())),
+        settings,
+        volee_bin,
     };
     Daemon::run(config)
         .await

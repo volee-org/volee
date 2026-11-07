@@ -1,8 +1,13 @@
 //! Finding the agent or mission a person means: a full identifier, the
 //! short form tables print (`ag_x7k2pq`), or a name.
 
-use anyhow::{Result, bail};
+use std::path::Path;
+
+use anyhow::{Context, Result, bail};
+use volee_config::Config;
 use volee_core::{AgentId, MissionId, Registry};
+
+use crate::connect::paths;
 
 /// The shortest identifier ending accepted, so that a typo rarely matches.
 const MIN_SUFFIX: usize = 4;
@@ -81,6 +86,40 @@ pub(crate) fn mission(registry: &Registry, input: &str) -> Result<MissionId> {
                 .join(", ")
         ),
     }
+}
+
+/// The configuration file, or the defaults when there is none.
+pub(crate) fn load_config() -> Result<Config> {
+    let file = paths()?.config_file();
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+    Ok(Config::load(&file, &home)?)
+}
+
+/// A repository as the daemon understands it: a name from the
+/// configuration, or the absolute path of a directory (resolved against
+/// `cwd`).
+pub(crate) fn repository(config: &Config, cwd: &Path, input: &str) -> Result<String> {
+    if config.repos.contains_key(input) {
+        return Ok(input.to_owned());
+    }
+    let path = cwd.join(input);
+    if !path.is_dir() {
+        bail!(
+            "unknown repository `{input}`: it is not a [repos.<name>] of the configuration (see \
+             `volee config check`) nor a directory"
+        );
+    }
+    let path = path
+        .canonicalize()
+        .with_context(|| format!("cannot resolve {}", path.display()))?;
+    if let Some((name, _)) = config.repo_at(&path) {
+        return Ok(name.to_owned());
+    }
+    path.into_os_string()
+        .into_string()
+        .map_err(|path| anyhow::anyhow!("{} is not valid UTF-8", Path::new(&path).display()))
 }
 
 /// Whether the identifier `full` ends with what the person typed, with or

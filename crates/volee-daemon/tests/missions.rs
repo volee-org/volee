@@ -151,6 +151,9 @@ fn start(events: Vec<Event>) -> Running {
         spool: None,
         harness: None,
         discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
+        git: None,
+        settings: volee_config::Config::default(),
+        volee_bin: None,
     };
     let task = tokio::spawn(Daemon::serve(listener, config));
     Running {

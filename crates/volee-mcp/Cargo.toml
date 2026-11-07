@@ -25,6 +25,7 @@ volee-proto.workspace = true
 rmcp = { workspace = true, features = ["client", "macros", "server", "transport-io"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+volee-config.workspace = true
 ulid.workspace = true
 volee-daemon.workspace = true
 
