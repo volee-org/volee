@@ -737,11 +737,14 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
             ..Delivery::default()
         },
     );
+    // The pull request's head is the branch's tip, as volee requires.
+    let tip = "9c41d07e2b5a8f63c0e1d4b7a2f95e8c6d3b1a04";
     let pr = |checks| PullRequest {
         number: 42,
         url: "https://git.example.com/dashboard/pull/42".to_owned(),
         state: PrState::Open,
         checks,
+        head: Some(tip.to_owned()),
     };
     let page = |checks| Delivery {
         commits: 3,
@@ -752,6 +755,7 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         },
         push: PushState::UpToDate,
         pull_request: Some(pr(checks)),
+        tip: Some(tip.to_owned()),
         ..Delivery::default()
     };
     script.delivery(-400, INVOICE_PAGE, page(ChecksState::Pending));

@@ -112,6 +112,7 @@ pub(crate) fn one_of_each_kind() -> Vec<Event> {
                     url: "https://github.com/volee-org/volee/pull/7".into(),
                     state: PrState::Open,
                     checks: ChecksState::Pending,
+                    head: Some("6adc11fa9619748617663ded520ce631e9292269".into()),
                 }),
                 report_delivered: false,
                 tip: Some("6adc11fa9619748617663ded520ce631e9292269".into()),

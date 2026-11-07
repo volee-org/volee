@@ -98,14 +98,30 @@ so the interface and the mission supervisor never wait for git:
 ## Pull requests
 
 With the [GitHub CLI](https://cli.github.com) installed and signed in, the
-daemon looks up the most recent pull request opened from each agent's branch
-(`gh pr list --head <branch> --state all`), in the repository's directory so
-`gh` finds the GitHub repository from its remotes, and maps its state (draft,
-open, merged, closed) and its checks (passing, pending, failing). A branch is
-looked up at most once a minute, and again right after its agent stopped.
-When `gh` is missing or signed out, pull requests stay unknown and
-`volee daemon status` says why. volee never sees a token: `gh` uses your own
-sign-in.
+daemon looks up the pull request of each agent's branch, in the repository's
+directory so `gh` finds the GitHub repository from its remotes, and maps its
+state (draft, open, merged, closed) and its checks (passing, pending,
+failing). A branch is looked up at most once a minute, and again right after
+its agent stopped. When `gh` is missing or signed out, pull requests stay
+unknown and `volee daemon status` says why. volee never sees a token: `gh`
+uses your own sign-in.
+
+A branch name alone does not identify a pull request: the name may have been
+used before (an old pull request, merged long ago), and forks may have
+branches of the same name. `gh pr list --head <branch> --state all` returns
+the ten most recent pull requests with that name, and volee keeps the most
+recent one that is really the branch's:
+
+- its head repository is the one `origin` points to (`owner/name`, read from
+  `git remote get-url origin`); when `origin` is not a repository on a forge,
+  no pull request is the branch's;
+- its head commit is the tip of the agent's branch, exactly. A pull request
+  whose head is a later commit (someone pushed to it from elsewhere) counts
+  once the agent's branch has that commit too.
+
+The pull request records its head commit, and counts as delivery evidence
+only while the branch is still at that commit: commits made after it are not
+part of it, until the next look-up finds them in it.
 
 ## Worktrees volee creates
 

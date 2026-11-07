@@ -83,6 +83,12 @@ pub struct PullRequest {
     pub state: PrState,
     /// Its checks.
     pub checks: ChecksState,
+    /// The commit at the head of the pull request when volee read it. volee
+    /// keeps only a pull request opened from `origin` whose head is the tip
+    /// of the agent's branch, so this is the tip the pull request proves
+    /// something about; `None` in evidence recorded before volee read heads.
+    #[serde(default)]
+    pub head: Option<String>,
 }
 
 /// What volee can prove about an agent's work.
@@ -143,14 +149,23 @@ impl Delivery {
         }
     }
 
-    /// Whether the work has landed: merged, merged through a pull request, or
-    /// reported.
+    /// The pull request, when its head is the branch's current tip. A pull
+    /// request read for an older tip says nothing about the commits made
+    /// since, and one recorded without its head proves nothing: neither
+    /// counts as evidence.
+    pub fn pull_request_at_tip(&self) -> Option<&PullRequest> {
+        self.pull_request
+            .as_ref()
+            .filter(|pr| pr.head.is_some() && pr.head == self.tip)
+    }
+
+    /// Whether the work has landed: merged, merged through a pull request
+    /// whose head is the branch's tip, or reported.
     pub fn is_delivered(&self) -> bool {
         self.merged_into_base
             || self.report_delivered
             || self
-                .pull_request
-                .as_ref()
+                .pull_request_at_tip()
                 .is_some_and(|pr| pr.state == PrState::Merged)
     }
 
@@ -353,12 +368,16 @@ fn is_volee_worktree(worktree: &Path, repo_root: Option<&Path>) -> bool {
 mod tests {
     use super::*;
 
+    /// The tip of the branch in these tests, and the head of its pull request.
+    const TIP: &str = "c0ffee";
+
     fn merged_pr() -> PullRequest {
         PullRequest {
             number: 42,
             url: "https://example.com/pr/42".into(),
             state: PrState::Merged,
             checks: ChecksState::Passing,
+            head: Some(TIP.into()),
         }
     }
 
@@ -377,12 +396,42 @@ mod tests {
     fn a_merged_pull_request_allows_tidying() {
         let delivery = Delivery {
             pull_request: Some(merged_pr()),
+            tip: Some(TIP.into()),
             ..Delivery::default()
         };
         assert_eq!(
             tidy_verdict(&AgentState::Done, &delivery),
             TidyVerdict::Allowed
         );
+    }
+
+    #[test]
+    fn a_pull_request_proves_only_the_tip_it_was_read_at() {
+        let at = |tip: Option<&str>, head: Option<&str>| Delivery {
+            pull_request: Some(PullRequest {
+                head: head.map(str::to_owned),
+                ..merged_pr()
+            }),
+            tip: tip.map(str::to_owned),
+            ..Delivery::default()
+        };
+        assert!(at(Some(TIP), Some(TIP)).is_delivered());
+        assert!(at(Some(TIP), Some(TIP)).pull_request_at_tip().is_some());
+        // Commits came after the pull request was read: they are not in it.
+        let moved = at(Some("beef00"), Some(TIP));
+        assert!(!moved.is_delivered());
+        assert_eq!(moved.pull_request_at_tip(), None);
+        assert_eq!(
+            tidy_verdict(&AgentState::Done, &moved),
+            TidyVerdict::Refused {
+                reasons: vec![TidyRefusal::NotDelivered]
+            }
+        );
+        // Evidence recorded before volee read heads, or a branch that is
+        // gone, proves nothing.
+        assert!(!at(Some(TIP), None).is_delivered());
+        assert!(!at(None, Some(TIP)).is_delivered());
+        assert!(!at(None, None).is_delivered());
     }
 
     #[test]
@@ -462,6 +511,17 @@ mod tests {
         };
         let json = serde_json::to_string(&recorded).unwrap();
         assert_eq!(serde_json::from_str::<Delivery>(&json).unwrap(), recorded);
+    }
+
+    #[test]
+    fn a_pull_request_recorded_before_heads_reads_without_one() {
+        let old = r#"{"commits":0,"dirty":false,"diff":{"files":0,"insertions":0,"deletions":0},
+            "push":{"push":"up-to-date"},"merged_into_base":false,
+            "pull_request":{"number":42,"url":"u","state":"merged","checks":"passing"},
+            "report_delivered":false,"tip":"c0ffee"}"#;
+        let delivery: Delivery = serde_json::from_str(old).unwrap();
+        assert_eq!(delivery.pull_request.as_ref().unwrap().head, None);
+        assert!(!delivery.is_delivered(), "no head, no proof");
     }
 
     #[test]
