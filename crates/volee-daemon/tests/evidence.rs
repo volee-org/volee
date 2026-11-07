@@ -463,7 +463,9 @@ async fn live_agents_are_checked_again_on_a_timer() {
     })
     .await;
 
-    // No event says anything: the timer finds the new commit.
+    // No event says anything: the timer finds the new commit. The timer may
+    // run while the commit is being made; evidence must never mix the tree
+    // before the commit with the branch after it.
     let tip = sandbox.commit(&worktree, "invoice.rs", "pub struct Invoice;\n");
     let delivery = eventually(&client, "the new commit", |registry, _| {
         let delivery = &registry.agent(agent(1))?.delivery;
