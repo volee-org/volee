@@ -22,6 +22,11 @@ use crate::{
 /// output or start thousands of processes.
 const MAX_UNTRACKED_FILES: usize = 100;
 
+/// How many times [`Git::delivery`] reads the evidence before it accepts a
+/// read during which the branch moved. A branch rarely moves twice within
+/// one read; an agent that commits in a tight loop gets its latest read.
+const SNAPSHOT_ATTEMPTS: usize = 3;
+
 /// Diff options that keep the output the same whatever the person's
 /// configuration says: no colors, no external diff program, paths from the
 /// top of the worktree, and the usual `a/` and `b/` prefixes.
@@ -95,7 +100,7 @@ impl GitCli {
     /// Runs the given git executable.
     pub fn with_program(program: impl Into<PathBuf>) -> Self {
         Self {
-            runner: Runner::new(program.into(), Self::DEFAULT_MAX_CONCURRENT),
+            runner: Runner::git(program.into(), Self::DEFAULT_MAX_CONCURRENT),
             timeout: Self::DEFAULT_TIMEOUT,
             write_timeout: Self::DEFAULT_WRITE_TIMEOUT,
             fetch_timeout: Self::DEFAULT_FETCH_TIMEOUT,
@@ -471,6 +476,87 @@ impl GitCli {
         Ok(None)
     }
 
+    /// Reads the delivery evidence once: see [`Git::delivery`].
+    fn read_delivery(
+        &self,
+        worktree: &Path,
+        query: &DeliveryQuery<'_>,
+    ) -> Result<DeliveryReport, GitError> {
+        let status = self.status(worktree)?;
+        let on_branch = status.branch.as_deref() == Some(query.branch);
+        let tip = self.commit_of(worktree, &format!("refs/heads/{}", query.branch))?;
+        let previous = match query.unmerged_tip {
+            Some(revision) => self.commit_of(worktree, revision)?,
+            None => None,
+        };
+        let base = if tip.is_some() || previous.is_some() {
+            Some(self.resolve_base(worktree, query.base)?)
+        } else {
+            None
+        };
+        let (commits, merge_base) = match (&tip, &base) {
+            (Some(tip), Some(base)) => (
+                self.count_commits(worktree, tip, Some(&base.commit))?,
+                self.merge_base(worktree, &base.commit, tip)?,
+            ),
+            _ => (0, None),
+        };
+        let diff = self.branch_diff(worktree, tip.as_deref(), merge_base.as_deref(), on_branch)?;
+        let (push, upstream) = match &tip {
+            Some(tip) => self.push_state(worktree, query.branch, tip)?,
+            None => (PushState::NoUpstream, None),
+        };
+        // The memory that proves a merge: the tip while it has commits of
+        // its own, the previous one otherwise.
+        let unmerged_tip = if commits > 0 {
+            tip.clone()
+        } else {
+            query.unmerged_tip.map(str::to_owned)
+        };
+        let merged_into_base = match (commits, &previous, &base) {
+            (0, Some(previous), Some(base)) => {
+                self.is_ancestor(worktree, previous, &base.commit)?
+            }
+            _ => false,
+        };
+        Ok(DeliveryReport {
+            delivery: Delivery {
+                commits,
+                dirty: status.is_dirty(),
+                diff,
+                push,
+                merged_into_base,
+                tip,
+                unmerged_tip,
+                ..Delivery::default()
+            },
+            head: Head {
+                branch: status.branch,
+                commit: status.oid,
+            },
+            on_branch,
+            base: base.map(|base| base.name),
+            upstream,
+        })
+    }
+
+    /// Whether `branch` held still while `report` was read: it still points
+    /// at the tip the report used, and when it is checked out, `HEAD` (as the
+    /// status of the tree saw it) was that tip. Otherwise a commit landed in
+    /// between, and the report mixes two moments.
+    fn held_still(
+        &self,
+        worktree: &Path,
+        branch: &str,
+        report: &DeliveryReport,
+    ) -> Result<bool, GitError> {
+        if report.on_branch && report.head.commit != report.delivery.tip {
+            return Ok(false);
+        }
+        let now = self.commit_of(worktree, &format!("refs/heads/{branch}"))?;
+        Ok(now == report.delivery.tip)
+    }
+
     /// The error for a failed step of [`Git::add_worktree`]:
     /// [`GitError::WorktreeIncomplete`] when the worktree exists anyway, so
     /// the caller knows it is there.
@@ -721,62 +807,21 @@ impl Git for GitCli {
         worktree: &Path,
         query: &DeliveryQuery<'_>,
     ) -> Result<DeliveryReport, GitError> {
-        let status = self.status(worktree)?;
-        let on_branch = status.branch.as_deref() == Some(query.branch);
-        let tip = self.commit_of(worktree, &format!("refs/heads/{}", query.branch))?;
-        let previous = match query.unmerged_tip {
-            Some(revision) => self.commit_of(worktree, revision)?,
-            None => None,
-        };
-        let base = if tip.is_some() || previous.is_some() {
-            Some(self.resolve_base(worktree, query.base)?)
-        } else {
-            None
-        };
-        let (commits, merge_base) = match (&tip, &base) {
-            (Some(tip), Some(base)) => (
-                self.count_commits(worktree, tip, Some(&base.commit))?,
-                self.merge_base(worktree, &base.commit, tip)?,
-            ),
-            _ => (0, None),
-        };
-        let diff = self.branch_diff(worktree, tip.as_deref(), merge_base.as_deref(), on_branch)?;
-        let (push, upstream) = match &tip {
-            Some(tip) => self.push_state(worktree, query.branch, tip)?,
-            None => (PushState::NoUpstream, None),
-        };
-        // The memory that proves a merge: the tip while it has commits of
-        // its own, the previous one otherwise.
-        let unmerged_tip = if commits > 0 {
-            tip.clone()
-        } else {
-            query.unmerged_tip.map(str::to_owned)
-        };
-        let merged_into_base = match (commits, &previous, &base) {
-            (0, Some(previous), Some(base)) => {
-                self.is_ancestor(worktree, previous, &base.commit)?
+        // Evidence takes several git commands. A commit that lands while
+        // they run would mix the tree before it with the branch after it, a
+        // state that never existed: read again until the branch held still.
+        let mut report = self.read_delivery(worktree, query)?;
+        for _ in 1..SNAPSHOT_ATTEMPTS {
+            if self.held_still(worktree, query.branch, &report)? {
+                break;
             }
-            _ => false,
-        };
-        Ok(DeliveryReport {
-            delivery: Delivery {
-                commits,
-                dirty: status.is_dirty(),
-                diff,
-                push,
-                merged_into_base,
-                tip,
-                unmerged_tip,
-                ..Delivery::default()
-            },
-            head: Head {
-                branch: status.branch,
-                commit: status.oid,
-            },
-            on_branch,
-            base: base.map(|base| base.name),
-            upstream,
-        })
+            tracing::debug!(
+                branch = query.branch,
+                "the branch moved while it was read; reading again"
+            );
+            report = self.read_delivery(worktree, query)?;
+        }
+        Ok(report)
     }
 
     fn diff(

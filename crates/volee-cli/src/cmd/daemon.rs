@@ -1,14 +1,19 @@
 //! `volee daemon run | start | stop | status`.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use volee_core::harness::HarnessKind;
 use volee_core::time::Elapsed;
-use volee_daemon::{Clock, Config, DEFAULT_DISCOVERY_INTERVAL, Daemon, SqliteLog, SystemClock};
+use volee_daemon::{
+    Clock, Config, DEFAULT_DISCOVERY_INTERVAL, Daemon, EvidenceSources, SqliteLog, SystemClock,
+};
+use volee_git::{GhCli, GitCli};
 use volee_harness::{ClaudeCode, Harness};
 use volee_proto::client::Client;
 use volee_proto::methods::{Empty, HarnessStatus, Shutdown, Status, StatusParams};
+use volee_proto::paths::Paths;
 
 use crate::connect::{paths, spawn_daemon, wait_for_daemon};
 
@@ -26,6 +31,14 @@ pub(crate) async fn run() -> Result<()> {
     } else {
         tracing::warn!(detail = ?status.detail, "Claude Code is not available");
     }
+    let evidence = EvidenceSources {
+        git: Some(Arc::new(GitCli::new())),
+        // `gh` is optional: without it (or signed out), pull requests are
+        // not looked up and `volee daemon status` says why.
+        forge: Some(Arc::new(GhCli::new())),
+        settings: settings(&paths),
+        ..EvidenceSources::default()
+    };
     let config = Config {
         spool: Some(paths.spool_dir()),
         paths,
@@ -34,6 +47,7 @@ pub(crate) async fn run() -> Result<()> {
         harnesses: vec![status],
         harness,
         discovery_interval: DEFAULT_DISCOVERY_INTERVAL,
+        evidence,
     };
     Daemon::run(config)
         .await
@@ -131,7 +145,29 @@ pub(crate) async fn status() -> Result<()> {
         };
         println!("  harness  {} {version}, {state}", harness.kind);
     }
+    if let Some(forge) = &status.forge {
+        let version = forge.version.as_deref().unwrap_or("unknown version");
+        if forge.available {
+            println!("  forge    {} {version}, available", forge.program);
+        } else {
+            let reason = forge.detail.as_deref().unwrap_or("unknown reason");
+            println!("  forge    {} unavailable: {reason}", forge.program);
+        }
+    }
     Ok(())
+}
+
+/// The person's configuration (repository names and base branches), or the
+/// defaults when it cannot be read: the daemon must start even when the file
+/// has a mistake, which `volee config check` explains.
+fn settings(paths: &Paths) -> volee_config::Config {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    volee_config::Config::load(&paths.config_file(), &home).unwrap_or_else(|error| {
+        tracing::warn!(%error, "ignoring the configuration file");
+        volee_config::Config::default()
+    })
 }
 
 fn init_logging() {

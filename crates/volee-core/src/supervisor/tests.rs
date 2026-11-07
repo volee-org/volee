@@ -121,6 +121,15 @@ impl World {
     fn status(&self) -> MissionStatus {
         self.registry.mission(mission_id()).unwrap().status
     }
+
+    /// The time of the last applied event.
+    fn now(&self) -> Timestamp {
+        Timestamp::from_millis(self.clock)
+    }
+
+    fn assessments(&self) -> &BTreeMap<AgentId, crate::mission::Assessment> {
+        &self.registry.mission(mission_id()).unwrap().assessments
+    }
 }
 
 fn shipped() -> Delivery {
@@ -315,4 +324,74 @@ fn the_coordinator_itself_is_never_judged() {
     let decision = world.step();
     assert_eq!(decision, Decision::default());
     assert_eq!(world.status(), MissionStatus::Planning);
+}
+
+#[test]
+fn a_stopped_worker_is_judged_on_evidence_checked_after_it_stopped() {
+    let mut world = World::new(MissionKind::Change);
+    world.register(1, Role::Worker, "billing");
+    world.set_state(1, AgentState::Working);
+    let while_working = world.now();
+    world.set_delivery(
+        1,
+        Delivery {
+            checked_at: Some(while_working),
+            ..Delivery::default()
+        },
+    );
+    world.set_state(1, AgentState::Done);
+    // Evidence from before the stop would say "no commits": wait.
+    world.step();
+    assert!(world.assessments().is_empty());
+
+    let after_stop = world.now();
+    world.set_delivery(
+        1,
+        Delivery {
+            checked_at: Some(after_stop),
+            ..shipped()
+        },
+    );
+    let decision = world.step();
+    assert_eq!(decision.notices.len(), 2);
+    assert_eq!(decision.notices[0].kind, MessageKind::Report);
+    assert_eq!(world.assessments()[&agent(1)].verdict, Verdict::Delivered);
+    assert_eq!(world.status(), MissionStatus::Reporting);
+}
+
+#[test]
+fn a_stale_check_holds_the_mission_back_from_reporting() {
+    let mut world = World::new(MissionKind::Change);
+    world.register(1, Role::Worker, "billing");
+    world.set_delivery(
+        1,
+        Delivery {
+            checked_at: Some(world.now()),
+            ..shipped()
+        },
+    );
+    world.set_state(1, AgentState::Stopped);
+    world.step();
+    // Even good evidence waits for a check after the stop.
+    assert!(world.assessments().is_empty());
+    assert_ne!(world.status(), MissionStatus::Reporting);
+}
+
+#[test]
+fn analysis_workers_do_not_wait_for_git_evidence() {
+    let mut world = World::new(MissionKind::Analysis);
+    world.register(1, Role::Worker, "billing");
+    world.set_delivery(
+        1,
+        Delivery {
+            checked_at: Some(world.now()),
+            ..Delivery::default()
+        },
+    );
+    world.set_state(1, AgentState::Done);
+    world.step();
+    assert_eq!(
+        world.assessments()[&agent(1)].verdict,
+        Verdict::NotDelivered
+    );
 }

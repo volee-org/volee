@@ -15,7 +15,7 @@ use volee_core::harness::{HarnessKind, SessionKey};
 use volee_core::reconcile::{ListedSession, Listing};
 use volee_core::state::AgentState;
 use volee_core::{AgentId, Event, Registry};
-use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
+use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_harness::{
     Capabilities, Harness, HarnessError, SpawnSpec, Spawned, Version, WorktreeRemoval,
 };
@@ -134,6 +134,7 @@ fn start() -> Running {
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
         discovery_interval: Duration::from_millis(10),
+        evidence: EvidenceSources::default(),
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

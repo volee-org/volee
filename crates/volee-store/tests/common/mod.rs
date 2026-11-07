@@ -116,6 +116,7 @@ pub(crate) fn one_of_each_kind() -> Vec<Event> {
                 report_delivered: false,
                 tip: Some("6adc11fa9619748617663ded520ce631e9292269".into()),
                 unmerged_tip: Some("6adc11fa9619748617663ded520ce631e9292269".into()),
+                checked_at: Some(Timestamp::from_millis(1_234)),
             },
         },
         EventKind::MessagePosted {

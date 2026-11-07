@@ -16,7 +16,7 @@ use volee_core::state::{AgentState, InputRequest};
 use volee_core::time::Timestamp;
 use volee_core::workspace::{Location, Workspace};
 use volee_core::{Agent, AgentId, Event, EventKind, Registry};
-use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
+use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_proto::client::Client;
 use volee_proto::methods::{EventsSince, HookIngest, HookParams, SinceParams};
 use volee_proto::paths::Paths;
@@ -58,6 +58,7 @@ fn start() -> Running {
         spool: None,
         harness: None,
         discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
+        evidence: EvidenceSources::default(),
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running { socket, _dir: dir }
