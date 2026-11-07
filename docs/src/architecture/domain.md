@@ -143,8 +143,8 @@ triggered it are already committed.
 
 - **Routing** (`Registry::check_route`): people and volee write to anyone;
   agents write to people; between agents, members of the same mission write to
-  each other, and otherwise an agent writes to its parent, its children and its
-  mission's coordinator.
+  each other, and otherwise an agent writes to its parent, its children, its
+  mission's coordinator and the agent that requested its mission.
 - **Cleanup** (`delivery::tidy_verdict`): a worktree may be removed only when
   the agent is not busy, the tree is clean, and the work is delivered (merged,
   merged through a pull request, or reported). Every missing condition is

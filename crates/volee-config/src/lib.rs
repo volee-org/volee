@@ -162,9 +162,6 @@ pub struct Repo {
     /// The model for this repository's agents.
     #[serde(default)]
     pub model: Option<String>,
-    /// A first step agents run in a new worktree, such as `bun install`.
-    #[serde(default)]
-    pub setup: Option<String>,
 }
 
 /// Interface settings.
@@ -299,7 +296,6 @@ mod tests {
             path = "~/code/billing"
             base = "develop"
             model = "sonnet"
-            setup = "bun install"
             "#,
         )
         .unwrap();

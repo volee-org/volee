@@ -87,11 +87,14 @@ volee spawn . fix/flaky-test "Make the payment test stable." --base develop --mo
 ```
 
 `volee spawn <repository> <branch> <task>` creates the branch from the base
-(the repository's default branch unless `--base` says otherwise), checks it
-out in a new worktree at `.claude/worktrees/<branch>` inside the repository,
-and starts a Claude Code background session there with the task as its first
-prompt. The agent gets volee's hooks and MCP tools, so it appears at once in
-`volee ls` and can message other agents.
+(`--base`, else the repository's `base` in the configuration, else its
+default branch), checks it out in a new worktree at
+`.claude/worktrees/<name>` inside the repository (the branch with `/` and
+other unusual characters replaced by `-`), and starts a Claude Code
+background session there with the task as its first prompt. `--name` sets
+its display name, `<repository>-<name>` otherwise. The agent gets volee's
+hooks and MCP tools, so it appears at once in `volee ls` and can send you
+messages.
 
 Claude Code only starts background sessions in repositories you trust: run
 `claude` once in each repository and accept its trust prompt. volee says so
