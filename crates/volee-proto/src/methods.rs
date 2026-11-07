@@ -90,6 +90,20 @@ pub struct HarnessStatus {
     pub detail: Option<String>,
 }
 
+/// What the daemon knows about the forge client it asks for pull requests,
+/// such as the GitHub CLI.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForgeStatus {
+    /// The program, such as `gh`.
+    pub program: String,
+    /// Whether volee can use it: installed and signed in.
+    pub available: bool,
+    /// Its version, when known.
+    pub version: Option<String>,
+    /// Why it is unavailable, or a note.
+    pub detail: Option<String>,
+}
+
 /// The result of [`Status`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusInfo {
@@ -107,6 +121,10 @@ pub struct StatusInfo {
     pub agents: usize,
     /// Harnesses found on this machine.
     pub harnesses: Vec<HarnessStatus>,
+    /// The forge client for pull requests; `None` when the daemon has none,
+    /// or has not checked it yet.
+    #[serde(default)]
+    pub forge: Option<ForgeStatus>,
 }
 
 method!(
@@ -264,7 +282,8 @@ pub struct PreviewText {
 }
 
 method!(
-    /// The agent's recent terminal output.
+    /// The agent's recent terminal output. Refused for an agent in a terminal
+    /// of its own (an interactive session), which only that terminal shows.
     Preview,
     "agents.preview",
     AgentParams,
@@ -286,6 +305,10 @@ pub struct DiffParams {
 pub struct DiffText {
     /// A unified diff, or `git diff --stat` output.
     pub text: String,
+    /// Whether the diff was longer than the daemon returns and `text` holds
+    /// only its beginning, cut at a line break.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 method!(
@@ -306,16 +329,30 @@ pub struct AttachCommand {
     pub args: Vec<String>,
     /// Its working directory.
     pub cwd: Option<String>,
+    /// Environment variables to remove before running it: the ones that
+    /// would tie it to another agent's session.
+    #[serde(default)]
+    pub env_remove: Vec<String>,
     /// A sentence telling the person how to come back.
     pub hint: String,
 }
 
 method!(
-    /// How to take over an agent in the client's terminal.
+    /// How to take over an agent in the client's terminal. Refused for an
+    /// agent in a terminal of its own: switch to that terminal instead.
     Attach,
     "agents.attach",
     AgentParams,
     AttachCommand
+);
+
+method!(
+    /// Stops an agent's session; its conversation is kept and can be
+    /// resumed. Refused for agents volee did not launch (ADR 0011).
+    Stop,
+    "agents.stop",
+    AgentParams,
+    Empty
 );
 
 // ---- messages -------------------------------------------------------------
@@ -402,6 +439,9 @@ pub struct CreatedMission {
     pub mission: MissionId,
     /// Its conversation thread.
     pub thread: ThreadId,
+    /// Its coordinator, when volee could launch one.
+    #[serde(default)]
+    pub coordinator: Option<AgentId>,
 }
 
 method!(
@@ -529,6 +569,7 @@ mod tests {
             Preview::NAME,
             Diff::NAME,
             Attach::NAME,
+            Stop::NAME,
             SendMessage::NAME,
             MarkRead::NAME,
             HookIngest::NAME,

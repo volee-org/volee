@@ -9,7 +9,7 @@ use std::sync::Arc;
 use volee_core::message::{Message, MessageKind, Party, Receipt, Thread};
 use volee_core::mission::{Mission, MissionStatus, Verdict};
 use volee_core::role::Role;
-use volee_core::{Event, EventKind, MessageId, MissionId, Registry};
+use volee_core::{Event, EventKind, MessageId, MissionId, Registry, ThreadId};
 use volee_proto::methods::{AbortParams, CloseParams, CreateMissionParams, CreatedMission, Empty};
 
 use super::require_agent;
@@ -32,6 +32,41 @@ pub(super) async fn create(
             "a mission needs at least one repository".into(),
         ));
     }
+    let (mission, thread) = open(shared, &params, title).await?;
+    let coordinator = if shared.harness.is_some() {
+        match crate::launch::coordinator(shared, mission).await {
+            Ok(agent) => Some(agent),
+            Err(error) => {
+                tracing::warn!(%error, %mission, "cannot launch the coordinator");
+                alert_human(
+                    shared,
+                    thread,
+                    format!(
+                        "volee could not launch the coordinator of this mission: {error}. The \
+                         mission stays in planning: abort it, or fix the problem and create it \
+                         again."
+                    ),
+                )
+                .await?;
+                None
+            }
+        }
+    } else {
+        None
+    };
+    Ok(CreatedMission {
+        mission,
+        thread,
+        coordinator,
+    })
+}
+
+/// Records the mission and its thread.
+async fn open(
+    shared: &Arc<Shared>,
+    params: &CreateMissionParams,
+    title: &str,
+) -> Result<(MissionId, ThreadId), DaemonError> {
     let mut state = shared.state.lock().await;
     if let Some(agent) = params.requested_by {
         require_agent(&state, agent)?;
@@ -59,8 +94,8 @@ pub(super) async fn create(
                     id: mission,
                     title: title.to_owned(),
                     kind: params.kind,
-                    goal: params.goal,
-                    repos: params.repos,
+                    goal: params.goal.clone(),
+                    repos: params.repos.clone(),
                     requested_by: params.requested_by,
                     coordinator: None,
                     thread,
@@ -73,7 +108,34 @@ pub(super) async fn create(
             },
         ),
     ])?;
-    Ok(CreatedMission { mission, thread })
+    Ok((mission, thread))
+}
+
+/// Tells the human something went wrong, in the mission's thread.
+async fn alert_human(
+    shared: &Arc<Shared>,
+    thread: ThreadId,
+    body: String,
+) -> Result<(), DaemonError> {
+    let mut state = shared.state.lock().await;
+    let now = state.now();
+    let message = Message {
+        id: state.new_message_id(),
+        thread,
+        from: Party::System,
+        kind: MessageKind::Alert,
+        body,
+        refs: vec![],
+        in_reply_to: None,
+        at: now,
+        receipts: vec![Receipt {
+            to: Party::Human,
+            delivered_at: None,
+            read_at: None,
+        }],
+    };
+    state.commit(vec![Event::new(now, EventKind::MessagePosted { message })])?;
+    Ok(())
 }
 
 pub(super) async fn abort(shared: &Arc<Shared>, params: AbortParams) -> Result<Empty, DaemonError> {

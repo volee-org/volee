@@ -76,7 +76,15 @@ pub fn supervise(registry: &Registry, mission: MissionId) -> Decision {
     let mut all_delivered = !workers.is_empty();
     for worker in &workers {
         let current = verdict_for(registry, record.kind, worker);
-        let delivered = matches!(current, Some((Verdict::Delivered, _)));
+        let delivered = match &current {
+            Some((verdict, _)) => *verdict == Verdict::Delivered,
+            // Working again after delivering (to answer a question, say):
+            // the delivery stands until a new verdict says otherwise.
+            None => record
+                .assessments
+                .get(&worker.id)
+                .is_some_and(|assessment| assessment.verdict == Verdict::Delivered),
+        };
         all_delivered &= delivered;
         let Some((verdict, evidence)) = current else {
             continue;
@@ -134,11 +142,25 @@ pub fn supervise(registry: &Registry, mission: MissionId) -> Decision {
 
 /// The verdict on a worker and its evidence, or `None` while it is still
 /// working.
+///
+/// A change worker that stopped is judged on its delivery evidence, and only
+/// on evidence checked after it stopped: evidence checked before (while it
+/// was still working) may miss its last commits, push or pull request, and
+/// would tell the coordinator "not delivered" just before "delivered". The
+/// verdict waits until the daemon's next check. Evidence that was never
+/// checked (no git source configured) is judged as it is.
 pub fn verdict_for(
     registry: &Registry,
     kind: MissionKind,
     worker: &Agent,
 ) -> Option<(Verdict, String)> {
+    let finished = matches!(
+        worker.state,
+        AgentState::Idle | AgentState::Done | AgentState::Stopped
+    );
+    if finished && kind == MissionKind::Change && worker.delivery.is_stale_at(worker.state_since) {
+        return None;
+    }
     match &worker.state {
         AgentState::Launching | AgentState::Working => None,
         AgentState::NeedsInput { .. } => Some((

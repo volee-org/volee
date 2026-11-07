@@ -71,6 +71,42 @@ memory in its `delivery-updated` events. Some consequences are worth knowing:
 - A squash-merged branch is never in its base's history: its evidence is the
   merged pull request, which comes from the forge.
 
+## When the daemon checks
+
+The daemon keeps every agent's workspace and evidence up to date by itself,
+so the interface and the mission supervisor never wait for git:
+
+- **Workspaces.** When an agent registers, or its working directory changes,
+  the daemon reads where the directory sits: the repository (named after its
+  `[repos.<name>]` entry in the configuration when one matches, otherwise
+  after its folder), the main checkout, the worktree when it is a linked one,
+  the branch, and the base branch (the one already known, else the configured
+  one, else the repository's default branch). The branch an agent was
+  launched on, or first seen on, stays its branch even when `HEAD` moves.
+- **Evidence.** It is read again the moment an agent finishes a turn, stops
+  or fails, when the supervisor judges it, and every minute for live agents.
+  The previous evidence's `unmerged_tip` is passed back, so merges are
+  proven. Each repository is fetched at most every five minutes, in batch
+  mode. A `delivery-updated` event is recorded only when the evidence
+  changed, or when it is the first check since the agent's state changed,
+  which the supervisor waits for.
+- git and the forge never run under the daemon's state lock or on a request
+  path: they run on background threads, for four agents at a time and one
+  job per agent, and triggers that arrive meanwhile are merged into the next
+  job. A failure is logged and the next trigger tries again.
+
+## Pull requests
+
+With the [GitHub CLI](https://cli.github.com) installed and signed in, the
+daemon looks up the most recent pull request opened from each agent's branch
+(`gh pr list --head <branch> --state all`), in the repository's directory so
+`gh` finds the GitHub repository from its remotes, and maps its state (draft,
+open, merged, closed) and its checks (passing, pending, failing). A branch is
+looked up at most once a minute, and again right after its agent stopped.
+When `gh` is missing or signed out, pull requests stay unknown and
+`volee daemon status` says why. volee never sees a token: `gh` uses your own
+sign-in.
+
 ## Worktrees volee creates
 
 - The worktree is created detached at `origin/<base>` (volee fetches first),

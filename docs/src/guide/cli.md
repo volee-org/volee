@@ -50,6 +50,46 @@ color:
 Each agent also has a short id such as `ag_x7k2pq`. Wherever a command asks
 for an agent, you can type its name, that short id, or its full id.
 
+### Acting on an agent
+
+```sh
+volee logs <agent>          # its recent terminal output
+volee diff <agent>          # its changes against the branch it started from, by file
+volee diff <agent> --full   # the same changes, as a full patch
+volee attach <agent>        # take it over in this terminal; Ctrl+Z comes back
+volee stop <agent>          # stop it; its conversation is kept
+```
+
+`volee logs` prints the screen the harness recorded, with its colors.
+`volee diff` compares the agent's worktree, committed or not, with the merge
+base of its base branch, and lists the files it created; a very long diff is
+cut, and the rest is in the worktree. `volee attach` hands this terminal to
+the agent until you press `Ctrl+Z`; the agent keeps running after you leave.
+
+These commands work on every background session, including the ones you
+started yourself. A session running in a terminal of its own (an interactive
+`claude`) is shown by `volee ls`, but only that terminal can show or control
+it. `volee stop` only stops the agents volee launched: stop the others where
+they were started.
+
+## Launching agents
+
+```sh
+volee spawn billing feat/invoices "Add invoices to the billing module."
+volee spawn . fix/flaky-test "Make the payment test stable." --base develop --model sonnet
+```
+
+`volee spawn <repository> <branch> <task>` creates the branch from the base
+(the repository's default branch unless `--base` says otherwise), checks it
+out in a new worktree at `.claude/worktrees/<branch>` inside the repository,
+and starts a Claude Code background session there with the task as its first
+prompt. The agent gets volee's hooks and MCP tools, so it appears at once in
+`volee ls` and can message other agents.
+
+Claude Code only starts background sessions in repositories you trust: run
+`claude` once in each repository and accept its trust prompt. volee says so
+when it is missing, and starts nothing.
+
 ## Messages
 
 ```sh
@@ -58,7 +98,9 @@ volee msg send ag_x7k2pq "Use TTC." --kind answer
 ```
 
 A message reaches a working agent at the end of its turn, and wakes an idle
-agent at once. Agents you did not launch through volee cannot receive
+agent at once. When the session of an agent volee launched has ended (Claude
+Code stops idle background sessions after about an hour), volee resumes it in
+its worktree with the message as its prompt; if that fails, it tells you once. Agents you did not launch through volee cannot receive
 messages yet.
 
 ## Missions
@@ -79,6 +121,11 @@ volee mission close invoicing         # once every worker delivered
 A repository is a name from the [configuration](configuration.md) or a
 directory. A mission is named by its title, its short id (`ms_x7k2pq`) or its
 id.
+
+Creating a mission starts its coordinator: a Claude Code session in the main
+checkout of the mission's first repository, with Claude Code's editing tools
+turned off. It plans the work and launches one worker per task with the MCP
+tool `spawn_worker`, each in its own worktree.
 
 volee checks each worker when it stops. A change worker has delivered when
 its commits are pushed with an open pull request, or merged; an analysis

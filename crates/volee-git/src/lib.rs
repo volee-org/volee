@@ -72,10 +72,12 @@ use volee_core::delivery::Delivery;
 mod cli;
 mod command;
 mod error;
+mod forge;
 mod parse;
 
 pub use cli::GitCli;
 pub use error::{GitError, RemovalRefusal};
+pub use forge::{Forge, ForgeStatus, GhCli};
 
 /// Everything volee asks of git.
 ///
@@ -187,6 +189,10 @@ pub trait Git: Send + Sync {
     ///
     /// `pull_request` and `report_delivered` are left at their defaults:
     /// they come from the forge and from messages, not from git.
+    ///
+    /// The evidence takes several git commands. When the branch moves while
+    /// they run (a commit lands), the evidence is read again, so it never
+    /// mixes the tree before a commit with the branch after it.
     ///
     /// The base branch is looked up only when there is something to compare:
     /// a branch without commits and without memory needs none, which suits a

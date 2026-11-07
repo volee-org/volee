@@ -139,6 +139,12 @@ pub enum RequestError {
         /// The path.
         path: PathBuf,
     },
+    /// A worktree name is not a single, plain path component.
+    #[error("`{name}` is not a valid worktree name")]
+    InvalidWorktreeName {
+        /// The name.
+        name: String,
+    },
     /// A tool rule is empty or starts with `-`, which the harness would read
     /// as an option.
     #[error("`{rule}` is not a valid tool rule")]

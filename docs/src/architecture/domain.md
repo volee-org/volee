@@ -105,10 +105,19 @@ Delivery evidence depends on the mission kind:
   tree; a merged branch or pull request always counts;
 - **analysis**: a `report` message from the worker.
 
+A change worker is judged only on fresh evidence: evidence checked before it
+stopped (`checked_at` earlier than its `state_since`) may miss its last
+commits, push or pull request, so the verdict waits for the daemon's next
+check, which the stop itself triggers. The coordinator therefore never hears
+"not delivered" just before "delivered". Evidence that was never checked (a
+daemon without a git source) is judged as it is.
+
 Every new or changed verdict is recorded as `worker-assessed` and told to the
 coordinator. When every worker delivered, the mission moves to `reporting`
-and the coordinator and the human are asked for the final report. A worker
-that regresses moves the mission back to `running`.
+and the coordinator and the human are asked for the final report, once. A
+delivered worker that works again (to answer its coordinator, say) keeps its
+delivery until a new verdict says otherwise; a new verdict that is not
+`delivered` moves the mission back to `running`.
 
 In the daemon (`volee-daemon`, module `missions`), supervision follows every
 commit: the daemon finds the missions the new events concern (an agent of
@@ -139,4 +148,7 @@ triggered it are already committed.
   with commits of its own. `merged_into_base` is true only once that commit
   is part of the base branch. The daemon passes the previous `unmerged_tip`
   back to git on each check; `delivery-updated` events keep it across
-  restarts. How git computes each fact is described in [Git](git.md).
+  restarts. `checked_at` is when the daemon began the check that produced the
+  evidence, which tells the supervisor whether it is fresh (above). How git
+  computes each fact, and when the daemon checks, is described in
+  [Git](git.md).
