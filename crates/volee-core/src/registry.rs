@@ -407,6 +407,11 @@ impl Registry {
         self.messages.get(&id)
     }
 
+    /// Every message, oldest first.
+    pub fn messages(&self) -> impl Iterator<Item = &Message> {
+        self.messages.values()
+    }
+
     /// The messages of a thread, oldest first.
     pub fn thread_messages(&self, thread: ThreadId) -> Vec<&Message> {
         self.messages

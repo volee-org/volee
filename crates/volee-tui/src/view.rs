@@ -7,7 +7,7 @@ use ratatui::text::Span;
 
 use crate::app::{Model, Overlay, Pane, Tab};
 use crate::theme::StyleRole;
-use crate::views::{hierarchy, placeholder};
+use crate::views::{hierarchy, network, repos, timeline};
 use crate::widgets::{detail, help, hints, panel, rail, top_bar};
 
 /// Draws the whole screen from the model.
@@ -44,13 +44,21 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
                 theme.style(StyleRole::TextDim),
             ));
         }
+        match model.tab {
+            Tab::Hierarchy => {}
+            Tab::Network => title.extend(network::title(model)),
+            Tab::Repos => title.extend(repos::title(model)),
+            Tab::Timeline => title.extend(timeline::title(model)),
+        }
         let inner = panel(buf, view, title, focused, theme);
         match model.tab {
             Tab::Hierarchy => {
                 hierarchy::render(model, inner, buf);
                 scroll_marks(model, view, inner, buf);
             }
-            tab => placeholder::render(model, tab, inner, buf),
+            Tab::Network => network::render(model, inner, buf),
+            Tab::Repos => repos::render(model, inner, buf),
+            Tab::Timeline => timeline::render(model, inner, buf),
         }
     }
     detail::render(model, layout.detail, buf);

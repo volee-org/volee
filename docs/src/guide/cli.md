@@ -99,9 +99,11 @@ volee demo --theme terminal       # with another theme than the configured one
 ```
 
 `volee demo` needs no daemon and touches nothing: it shows a fictional lead,
-two missions and their workers, whose states change every few seconds. Its
-theme and keys come from the `[tui]` table of the configuration. The
-[interface guide](interface.md) describes the screen and every key.
+two missions and their workers, and two sessions volee did not launch, whose
+states change and who write to each other every few seconds. Its theme,
+keys and `reduced_motion` setting come from the `[tui]` table of the
+configuration. The [interface guide](interface.md) describes the screen and
+every key.
 
 ## Isolated runs
 

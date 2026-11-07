@@ -13,7 +13,7 @@ deliberately out of scope. Dates are targets, not promises.
 | Interface | Hierarchy view, preview, take over with `claude attach`, keymap and help, themes, semantic zoom | In progress: the interface runs on `volee demo`; the daemon client comes next |
 | Messaging | MCP server for agents, typed threads, delivery to working, idle and stopped agents, inbox, message pulses on the graph | In progress: MCP server, threads and delivery are done |
 | Missions | Supervisor plus coordinator agent, change and analysis missions, delivery evidence, `volee tidy` | In progress: lifecycle, supervisor and `volee mission` are done |
-| More views | Network, repositories and worktrees, timeline | Planned |
+| More views | Network, repositories and worktrees, timeline | Done: the three views run on `volee demo`, message pulses included |
 | Release | Prebuilt binaries for macOS and Linux, shell installer, demo recordings | Planned |
 
 ## Later

@@ -9,9 +9,9 @@ use volee_tui::{ColorDepth, DemoSource, Keymap, Options, SystemClock, Theme};
 
 use crate::connect::paths;
 
-/// Runs the interface on the demo until the person quits. The theme and the
-/// key overrides come from the configuration; `theme` replaces the
-/// configured theme.
+/// Runs the interface on the demo until the person quits. The theme, the
+/// key overrides and reduced motion come from the configuration; `theme`
+/// replaces the configured theme.
 pub(crate) async fn run(theme: Option<&str>) -> Result<()> {
     let paths = paths()?;
     let home = std::env::var_os("HOME")
@@ -38,6 +38,7 @@ pub(crate) async fn run(theme: Option<&str>) -> Result<()> {
     options.keymap = keymap;
     options.clock = clock.clone();
     options.banner = Some("demo · simulated data".to_owned());
+    options.reduced_motion = config.tui.reduced_motion;
     volee_tui::run(DemoSource::new(clock), options).await?;
     Ok(())
 }

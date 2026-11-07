@@ -1,5 +1,6 @@
 //! Drawing pieces shared by the views. Widgets only read the model.
 
+pub(crate) mod braille;
 pub(crate) mod canvas;
 pub(crate) mod card;
 pub(crate) mod detail;

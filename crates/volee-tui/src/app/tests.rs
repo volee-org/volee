@@ -16,6 +16,7 @@ use crate::demo::{
     LATENCY_AUDIT, TOWER, TRACE_GATEWAY,
 };
 use crate::views::hierarchy::Zoom;
+use crate::views::timeline::Scale;
 
 fn start() -> Timestamp {
     Timestamp::from_millis(1_793_986_617_000)
@@ -268,7 +269,11 @@ fn numbers_switch_tabs_and_the_keys_follow_the_panel() {
     assert_eq!(model.contexts(), [Context::Hierarchy, Context::Global]);
     press(&mut model, "2");
     assert_eq!(model.tab, Tab::Network);
-    assert_eq!(model.contexts(), [Context::Global]);
+    assert_eq!(model.contexts(), [Context::Network, Context::Global]);
+    press(&mut model, "3");
+    assert_eq!(model.contexts(), [Context::Repos, Context::Global]);
+    press(&mut model, "4");
+    assert_eq!(model.contexts(), [Context::Timeline, Context::Global]);
     press(&mut model, "1");
     assert_eq!(model.tab, Tab::Hierarchy);
 }
@@ -536,4 +541,187 @@ fn bad_events_are_ignored() {
     assert_eq!(model.registry.agents().count(), before);
     let gateway = model.registry.agent(id(TRACE_GATEWAY)).unwrap();
     assert_eq!(gateway.name, "trace-gateway");
+}
+
+/// A model of the demo `at` a moment, as if the interface was open then.
+fn model_at_time(width: u16, height: u16, at: Timestamp) -> Model {
+    let mut model = Model::new(
+        Theme::default(),
+        Keymap::default(),
+        None,
+        (width, height),
+        at,
+    );
+    update(&mut model, Msg::Events(demo().events_until(at)));
+    model
+}
+
+#[test]
+fn network_arrows_follow_the_picture_and_its_zoom_is_its_own() {
+    let mut model = model(200, 50);
+    press(&mut model, "2");
+    key(&mut model, KeyCode::Tab);
+    assert_eq!(model.focus, Pane::View);
+    press(&mut model, "'g");
+    let rect = |model: &Model, agent| {
+        model
+            .network
+            .targets()
+            .into_iter()
+            .find(|(id, _)| *id == agent)
+            .unwrap()
+            .1
+    };
+    let gateway = rect(&model, id(TRACE_GATEWAY));
+    press(&mut model, "h");
+    let left = model.selected.unwrap();
+    assert!(rect(&model, left).right() <= gateway.x, "h goes left");
+    press(&mut model, "'g");
+    press(&mut model, "k");
+    let above = model.selected.unwrap();
+    assert!(rect(&model, above).bottom() <= gateway.y, "k goes up");
+    assert!(
+        model.rail.iter().any(|entry| entry.agent == above),
+        "the list shows the same selection"
+    );
+    press(&mut model, "_");
+    assert_eq!(model.network.zoom, ZoomChoice::Fixed(Zoom::Compact));
+    assert_eq!(model.zoom, ZoomChoice::Auto, "the hierarchy keeps its zoom");
+    press(&mut model, "0");
+    assert_eq!(model.network.zoom, ZoomChoice::Auto);
+    press(&mut model, "g");
+    let corner = model.selected.unwrap();
+    assert!(
+        model.network.targets().iter().all(
+            |(_, other)| (other.y, other.x) >= (rect(&model, corner).y, rect(&model, corner).x)
+        )
+    );
+}
+
+#[test]
+fn clicks_on_the_network_and_the_timeline_select_agents() {
+    let mut model = model(120, 40);
+    press(&mut model, "2");
+    let (node, _) = model
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::Agent(id(INFRA), Pane::View))
+        .copied()
+        .unwrap();
+    click(&mut model, node.x, node.y);
+    assert_eq!(model.selected, Some(id(INFRA)));
+    press(&mut model, "4");
+    let (lane, _) = model
+        .hits
+        .iter()
+        .find(|(_, hit)| *hit == Hit::Lane(id(TOWER)))
+        .copied()
+        .unwrap();
+    click(&mut model, lane.x + 10, lane.y);
+    assert_eq!(model.selected, Some(id(TOWER)));
+    assert_eq!(model.focus, Pane::View);
+    let cursor = model.timeline.cursor.unwrap();
+    assert_eq!(
+        model.timeline.window(model.now).column_of(cursor),
+        Some(10),
+        "the cursor moved to the clicked column"
+    );
+}
+
+#[test]
+fn the_timeline_scrubs_jumps_to_events_and_escape_comes_back() {
+    let mut model = model(120, 40);
+    press(&mut model, "4");
+    key(&mut model, KeyCode::Tab);
+    press(&mut model, "'v");
+    press(&mut model, "h");
+    assert!(model.timeline.cursor.is_some());
+    assert!(model.can_go_back());
+    key(&mut model, KeyCode::Esc);
+    assert_eq!(model.timeline.cursor, None, "escape goes back to now");
+    assert_eq!(model.focus, Pane::View, "before it leaves the panel");
+    press(&mut model, "[");
+    let last = model.timeline.cursor.unwrap();
+    press(&mut model, "[");
+    let before = model.timeline.cursor.unwrap();
+    assert!(before < last);
+    press(&mut model, "]");
+    assert_eq!(model.timeline.cursor, Some(last));
+    press(&mut model, "]");
+    assert_eq!(model.timeline.cursor, None, "past the last event, now");
+    press(&mut model, "+");
+    assert!(matches!(model.timeline.scale, Scale::Fixed(_)));
+    press(&mut model, "h0");
+    assert_eq!(model.timeline.scale, Scale::Auto);
+    assert_eq!(model.timeline.cursor, None);
+    // Lanes follow the hierarchy, so they never jump around.
+    press(&mut model, "g");
+    assert_eq!(model.selected, Some(id(TOWER)));
+    press(&mut model, "j");
+    assert_eq!(model.selected, Some(id(INVOICING)));
+}
+
+#[test]
+fn repository_keys_walk_agents_and_repositories() {
+    let mut model = model(200, 50);
+    press(&mut model, "3");
+    key(&mut model, KeyCode::Tab);
+    press(&mut model, "g");
+    assert_eq!(
+        model.selected,
+        Some(id(INVOICE_SCHEMA)),
+        "billing comes first"
+    );
+    press(&mut model, "j");
+    assert_eq!(model.selected, Some(id(INVOICE_PAGE)));
+    press(&mut model, "l");
+    assert_eq!(model.selected, Some(id(TRACE_GATEWAY)), "next repository");
+    press(&mut model, "h");
+    assert_eq!(model.selected, Some(id(INVOICE_PAGE)));
+    press(&mut model, "G");
+    assert_eq!(model.selected, model.repos.order.last().copied());
+    press(&mut model, "_");
+    assert_eq!(model.repos.zoom, ZoomChoice::Fixed(Zoom::Compact));
+}
+
+#[test]
+fn messages_pulse_while_they_travel_unless_motion_is_reduced() {
+    // Just before trace-gateway writes to latency-audit, 16 s in.
+    let at = start().plus_millis(15_900);
+    let mut model = model_at_time(120, 40, at);
+    press(&mut model, "2");
+    let next: Vec<Event> = demo()
+        .events_until(start().plus_millis(16_000))
+        .into_iter()
+        .filter(|event| event.at > at)
+        .collect();
+    update(&mut model, Msg::Events(next));
+    assert!(model.pulses.is_moving(model.now), "about to leave");
+    update(&mut model, Msg::Tick(start().plus_millis(16_500)));
+    assert_eq!(model.pulses.active(model.now).count(), 1);
+    update(&mut model, Msg::Tick(start().plus_millis(17_100)));
+    assert_eq!(model.pulses.active(model.now).count(), 0, "arrived");
+    model.motion = Motion::Reduced;
+    assert!(
+        !model.is_animating(),
+        "nothing ticks fast with reduced motion"
+    );
+}
+
+#[test]
+fn small_screens_put_other_views_next_to_the_list() {
+    let mut model = model(80, 24);
+    press(&mut model, "2");
+    assert_eq!(model.layout.mode, Mode::Split);
+    assert!(model.layout.view.is_some());
+    let mut seen = vec![model.focus];
+    for _ in 0..3 {
+        key(&mut model, KeyCode::Tab);
+        seen.push(model.focus);
+    }
+    assert_eq!(seen, [Pane::Rail, Pane::View, Pane::Detail, Pane::Rail]);
+    key(&mut model, KeyCode::Tab);
+    press(&mut model, "1");
+    assert_eq!(model.layout.mode, Mode::Narrow);
+    assert_eq!(model.focus, Pane::Rail, "the hierarchy lives in the list");
 }

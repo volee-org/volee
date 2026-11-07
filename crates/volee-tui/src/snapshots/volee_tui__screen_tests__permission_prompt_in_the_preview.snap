@@ -27,7 +27,7 @@ expression: draw(&model)
 "│ n · invoicing           14 min ││                                                                                    │"
 "│    idle · ◆ Invoicing          ││                                                                                    │"
 "│ i · infra               25 min ││                                                                                    │"
-"│    idle · infra › main         ││                                                                                    │"
+"│    idle · infra › chore/load-… ││                                                                                    │"
 "╰────────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────╯"
 "╭ Detail ────────────────────────╮╭ Preview · invoice-schema ──────────────────────────────────────────────────────────╮"
 "│ invoice-schema · worker        ││ │                                                                          │       │"

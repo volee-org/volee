@@ -27,7 +27,7 @@ expression: draw(&model)
 "│ n · invoicing      │   g, home         first agent                                              │                    │"
 "│    idle · ◆ Invoici│   G, end          last agent                                               │                    │"
 "│ i · infra          │   enter           show the agent's subtree in the hierarchy                │                    │"
-"│    idle · infra › m│                                                                            │                    │"
+"│    idle · infra › c│                                                                            │                    │"
 "╰────────────────────│ Hierarchy                                                                  │────────────────────╯"
 "╭ Detail ────────────│   h, ←            card on the left                                         │────────────────────╮"
 "│ invoice-tools · wor│   j, ↓            card below                                               │                    │"
