@@ -68,22 +68,68 @@ pub(crate) fn check() -> Result<()> {
     if config.repos.is_empty() {
         println!("  repositories      none (add [repos.<name>] tables)");
     }
+    for line in repository_lines(&config, std::path::Path::is_dir) {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+/// One line per repository, its path aligned after the longest name, then
+/// one line per setup command each new worktree runs (ADR 0017). `exists`
+/// tells whether a path is a folder on this machine.
+fn repository_lines(config: &Config, exists: impl Fn(&std::path::Path) -> bool) -> Vec<String> {
+    let width = config
+        .repos
+        .keys()
+        .map(|name| name.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(12);
+    let mut lines = Vec::new();
     for (name, repo) in &config.repos {
-        let exists = if repo.path.is_dir() {
+        let missing = if exists(&repo.path) {
             ""
         } else {
             "  (missing)"
         };
-        println!("  repo {name:<12} {}{exists}", repo.path.display());
-        // The setup commands each new worktree runs (ADR 0017), one line
-        // each, under their repository.
+        lines.push(format!(
+            "  repo {name:<width$} {}{missing}",
+            repo.path.display()
+        ));
         for command in &repo.setup {
-            println!(
-                "       {:<12} setup: {}",
+            lines.push(format!(
+                "       {:<width$} setup: {}",
                 "",
                 crate::text::one_line(command)
-            );
+            ));
         }
     }
-    Ok(())
+    lines
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+
+    #[test]
+    fn repositories_align_on_the_longest_name() {
+        let config = Config::parse(
+            "[repos.shop]\npath = \"/srv/shop\"\nsetup = [\"bun install\"]\n\
+             [repos.simulateur-freelance]\npath = \"/srv/sim\"\n",
+            Path::new("config.toml"),
+            Path::new("/home/ada"),
+        )
+        .unwrap();
+        let lines = repository_lines(&config, |path| path != Path::new("/srv/sim"));
+        assert_eq!(
+            lines,
+            [
+                "  repo shop                 /srv/shop",
+                "                            setup: bun install",
+                "  repo simulateur-freelance /srv/sim  (missing)",
+            ]
+        );
+    }
 }
