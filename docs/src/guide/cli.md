@@ -132,7 +132,11 @@ messages.
 
 Claude Code only starts background sessions in repositories you trust: run
 `claude` once in each repository and accept its trust prompt. volee says so
-when it is missing, and starts nothing.
+when it is missing. The worktree and the branch it had already made stay,
+untouched: once the repository is trusted, run the same `volee spawn` again,
+and volee reuses them, as long as nothing was done in them
+([ADR 0016](../adr/0016-what-a-failed-launch-left-untouched.md)). The same
+goes for any launch that failed before its session started.
 
 ## Tidying worktrees
 
@@ -144,7 +148,10 @@ volee tidy --all --dry-run     # say what would be removed, touch nothing
 
 `volee tidy` removes the worktree of an agent only when the evidence says
 its work landed: its branch is merged into its base branch, its pull request
-is merged, or, for analysis work, its report was delivered. The worktree
+is merged, or, for analysis work, its report was delivered. It also removes
+the worktree of a launch that failed before any session started, when
+nothing was ever done in it: no change, no untracked file, no commit of its
+own. The worktree
 must also be clean, the agent must not be running, and volee must have
 checked the agent's work since its last change. It only touches agents volee
 launched, in the worktrees it created under `.claude/worktrees/`. Files git

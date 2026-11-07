@@ -67,7 +67,10 @@ is touched.
 agent's hook settings and MCP configuration (readable only by you), records
 the agent, then starts the session from the repository's main checkout with
 `--worktree` ([ADR 0013](../adr/0013-worktrees-live-in-their-repository.md)).
-A failed start marks the agent `failed` and keeps the worktree. It refuses
+A failed start marks the agent `failed` and keeps the worktree; the same
+request sent again reuses that worktree while nothing was done in it, and
+forgets the failed agent
+([ADR 0016](../adr/0016-what-a-failed-launch-left-untouched.md)). It refuses
 coordinators (missions launch them) and, for a mission, repositories the
 mission does not list. `missions.create` launches the coordinator when Claude
 Code is available; when it cannot, it tells the human in the mission's thread

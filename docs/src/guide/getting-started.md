@@ -51,6 +51,8 @@ base = "main"
 Then run `volee config check`. Claude Code only starts background sessions
 in folders you trust, and each repository counts on its own: if you have
 never run `claude` in a repository, do it once and accept the trust prompt.
+If you forget, the launch below fails and says so; trust the repository and
+run the same command again.
 
 ## 4. Launch an agent
 

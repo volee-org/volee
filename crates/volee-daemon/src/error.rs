@@ -59,15 +59,13 @@ pub enum DaemonError {
     #[error(transparent)]
     Harness(#[from] volee_harness::HarnessError),
     /// A launch failed after volee created the agent's worktree and branch,
-    /// which it keeps (ADR 0011): the message says how to start again.
+    /// which it keeps (ADR 0011): the message says that the same command
+    /// can simply run again (ADR 0016).
     #[error(
         "{error}. volee kept the worktree it made for the agent, {}, and its new branch {branch}: \
-         to launch on that branch again, remove both first (`git -C {} worktree remove {}`, \
-         then `git -C {} branch -d {branch}`), or choose another branch",
-        worktree.display(),
-        repo.display(),
-        worktree.display(),
-        repo.display()
+         once that is fixed, run the same command again, and volee reuses them as long as \
+         nothing was done in them",
+        worktree.display()
     )]
     LaunchFailed {
         /// Why the launch failed.
