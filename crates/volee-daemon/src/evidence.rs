@@ -32,7 +32,7 @@ use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
 use volee_core::workspace::Workspace;
 use volee_core::{Agent, AgentId, Event, EventKind};
-use volee_git::{DeliveryQuery, Forge, Git, GitError, RepoInfo};
+use volee_git::{BranchHead, DeliveryQuery, Forge, Git, GitError, RepoInfo};
 use volee_proto::methods::ForgeStatus;
 
 use crate::server::Shared;
@@ -471,7 +471,11 @@ impl Refresher {
         else {
             return;
         };
-        let looked_up = self.pull_request(&workspace, &branch, forge_now).await;
+        let looked_up = match report.delivery.tip.as_deref() {
+            Some(tip) => self.pull_request(&workspace, &branch, tip, forge_now).await,
+            // No branch, so no pull request can be at its tip.
+            None => None,
+        };
 
         let mut state = self.shared.state.lock().await;
         let Some(current) = state.registry().agent(agent) else {
@@ -523,13 +527,16 @@ impl Refresher {
         }
     }
 
-    /// The pull request of `branch`, looked up unless it was within the
-    /// forge interval (or `forge_now`). `None` when it was not looked up or
-    /// the lookup failed: the previous one stays.
+    /// The pull request of `branch` at `tip`, opened from the repository's
+    /// `origin`, looked up unless it was within the forge interval (or
+    /// `forge_now`). `None` when it was not looked up or the lookup failed:
+    /// the previous one stays, and counts as evidence only while the branch
+    /// is still at its head.
     async fn pull_request(
         &self,
         workspace: &Workspace,
         branch: &str,
+        tip: &str,
         forge_now: bool,
     ) -> Option<Option<PullRequest>> {
         let forge = Arc::clone(self.forge.as_ref()?);
@@ -555,9 +562,23 @@ impl Refresher {
             }
             book.looked_up.insert(key, Instant::now());
         }
+        // Which repository the branch is pushed to: pull requests from any
+        // other (a fork with the same branch name) are not the branch's.
+        let origin_dir = workspace.cwd.clone();
+        let origin = self
+            .ask("origin", move |git| git.origin(&origin_dir))
+            .await?;
         let dir = workspace.cwd.clone();
-        let branch = branch.to_owned();
-        match tokio::task::spawn_blocking(move || forge.pull_request(&dir, &branch)).await {
+        let (branch, tip) = (branch.to_owned(), tip.to_owned());
+        let lookup = move || {
+            let head = BranchHead {
+                branch: &branch,
+                origin: origin.as_ref(),
+                tip: &tip,
+            };
+            forge.pull_request(&dir, &head)
+        };
+        match tokio::task::spawn_blocking(lookup).await {
             Ok(Ok(found)) => Some(found),
             Ok(Err(error)) => {
                 tracing::debug!(%error, "pull request lookup failed");

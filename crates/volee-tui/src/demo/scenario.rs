@@ -29,6 +29,12 @@ const SEED: u128 = 0x00de_0000_0000_0000_0000;
 /// The fictional home directory of the demo.
 const HOME: &str = "/home/dev";
 
+// The tips of the demo's pushed branches. A pull request counts as evidence
+// only at its branch's tip, so the demo's pull requests have them as heads.
+const INVOICE_PAGE_TIP: &str = "9c41d07e2b5a8f63c0e1d4b7a2f95e8c6d3b1a04";
+const INFRA_TIP: &str = "5e7a1c93d0b24f86a1c3e5d7f9b2a4c6e8d0f1a3";
+const WEBSITE_TIP: &str = "b3d5f7a9c1e3052749e6a8c0d2f4b6a8c0e2d4f6";
+
 // Members of the cast, by index.
 pub(crate) const TOWER: usize = 0;
 pub(crate) const INVOICING: usize = 1;
@@ -798,6 +804,7 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         url: "https://git.example.com/dashboard/pull/42".to_owned(),
         state: PrState::Open,
         checks,
+        head: Some(INVOICE_PAGE_TIP.to_owned()),
     };
     let page = |checks| Delivery {
         commits: 3,
@@ -808,6 +815,7 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         },
         push: PushState::UpToDate,
         pull_request: Some(pr(checks)),
+        tip: Some(INVOICE_PAGE_TIP.to_owned()),
         ..Delivery::default()
     };
     script.delivery(-400, INVOICE_PAGE, page(ChecksState::Pending));
@@ -853,6 +861,7 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         url: "https://git.example.com/infra/pull/12".to_owned(),
         state,
         checks,
+        head: Some(INFRA_TIP.to_owned()),
     };
     let opened = |checks| Delivery {
         commits: 2,
@@ -863,6 +872,7 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         },
         push: PushState::UpToDate,
         pull_request: Some(lb(PrState::Open, checks)),
+        tip: Some(INFRA_TIP.to_owned()),
         ..Delivery::default()
     };
     script.delivery(-1_620, INFRA, opened(ChecksState::Pending));
@@ -874,6 +884,7 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
             push: PushState::UpToDate,
             merged_into_base: true,
             pull_request: Some(lb(PrState::Merged, ChecksState::Passing)),
+            tip: Some(INFRA_TIP.to_owned()),
             ..Delivery::default()
         },
     );
@@ -1311,7 +1322,9 @@ fn conversations(script: &mut Script, cycle: i64, offset: i64) {
                             url: "https://git.example.com/dashboard/pull/42".to_owned(),
                             state: PrState::Merged,
                             checks: ChecksState::Passing,
+                            head: Some(INVOICE_PAGE_TIP.to_owned()),
                         }),
+                        tip: Some(INVOICE_PAGE_TIP.to_owned()),
                         ..Delivery::default()
                     },
                 );
@@ -1351,7 +1364,9 @@ fn conversations(script: &mut Script, cycle: i64, offset: i64) {
                         url: "https://git.example.com/website/pull/7".to_owned(),
                         state: PrState::Open,
                         checks,
+                        head: Some(WEBSITE_TIP.to_owned()),
                     }),
+                    tip: Some(WEBSITE_TIP.to_owned()),
                     ..Delivery::default()
                 },
             );
