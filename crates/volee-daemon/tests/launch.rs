@@ -14,25 +14,28 @@ use std::sync::Arc;
 use common::{FakeHarness, git, repository};
 use tokio::net::UnixListener;
 use ulid::Ulid;
+use volee_core::harness::HarnessKind;
 use volee_core::message::{MessageKind, Party, Thread};
 use volee_core::mission::{Mission, MissionKind, MissionStatus};
-use volee_core::role::Role;
+use volee_core::role::{LaunchedBy, Role};
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
-use volee_core::{Event, EventKind, MissionId, Registry, ThreadId};
+use volee_core::workspace::{Location, Workspace};
+use volee_core::{AgentId, Event, EventKind, MissionId, Registry, ThreadId};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_git::GitCli;
 use volee_harness::{Harness, PermissionMode};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     AbortMission, AbortParams, AgentParams, CreateMission, CreateMissionParams, EventsSince,
-    Preview, SinceParams, Spawn, SpawnParams,
+    Preview, RefreshDiscovery, RefreshParams, SinceParams, Spawn, SpawnParams,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
 
 struct Running {
     socket: PathBuf,
+    clock: Arc<ManualClock>,
     harness: Arc<FakeHarness>,
     paths: Paths,
     repo: PathBuf,
@@ -100,6 +103,7 @@ fn start_prepared(extra: &str, prepare: impl FnOnce(&Path) -> Vec<Event>) -> Run
     let socket = paths.socket.clone();
     let listener = UnixListener::bind(&socket).unwrap();
     let harness = Arc::new(FakeHarness::default());
+    let clock = Arc::new(ManualClock::at(10_000));
     let settings = volee_config::Config::parse(
         &format!(
             "[repos.alpha]\npath = \"{}\"\n{}",
@@ -116,7 +120,7 @@ fn start_prepared(extra: &str, prepare: impl FnOnce(&Path) -> Vec<Event>) -> Run
     let config = Config {
         paths: paths.clone(),
         log: Box::new(MemoryLog::with([mission_elsewhere(), events].concat())),
-        clock: Arc::new(ManualClock::at(10_000)),
+        clock: Arc::clone(&clock) as Arc<dyn volee_daemon::Clock>,
         harnesses: vec![],
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
@@ -135,6 +139,7 @@ fn start_prepared(extra: &str, prepare: impl FnOnce(&Path) -> Vec<Event>) -> Run
     tokio::spawn(Daemon::serve(listener, config));
     Running {
         socket,
+        clock,
         harness,
         paths,
         repo,
@@ -324,7 +329,7 @@ async fn a_configured_folder_inside_a_repository_is_not_that_repository() {
 
 /// Launches `branch` while the harness refuses: the worktree and the branch
 /// stay, and the agent failed before any session started. Returns it.
-async fn failed_launch(daemon: &Running, client: &Client, branch: &str) -> volee_core::AgentId {
+async fn failed_launch(daemon: &Running, client: &Client, branch: &str) -> AgentId {
     daemon.harness.refuse_launches(true);
     let error = rpc_error(client.call::<Spawn>(worker(branch)).await.unwrap_err());
     assert!(
@@ -435,7 +440,7 @@ async fn what_a_failed_launch_left_is_never_reused_once_something_was_done_in_it
 async fn an_agent_that_had_a_session_never_leaves_its_worktree_to_another() {
     // A worker that ran (a session linked), then failed: its worktree is not
     // a launch's leftover, even clean and without commits.
-    let ran = volee_core::AgentId::from_ulid(Ulid::from_parts(7_000, 1));
+    let ran = AgentId::from_ulid(Ulid::from_parts(7_000, 1));
     let daemon = start_prepared("", |repo| {
         let worktree = repo.join(".claude/worktrees/feat-ran");
         git(
@@ -458,19 +463,19 @@ async fn an_agent_that_had_a_session_never_leaves_its_worktree_to_another() {
                     agent: ran,
                     name: "alpha-feat-ran".into(),
                     role: Role::Worker,
-                    harness: volee_core::harness::HarnessKind::ClaudeCode,
-                    launched_by: volee_core::role::LaunchedBy::Human,
+                    harness: HarnessKind::ClaudeCode,
+                    launched_by: LaunchedBy::Human,
                     parent: None,
                     mission: None,
-                    workspace: volee_core::workspace::Workspace {
+                    workspace: Workspace {
                         repo: Some("alpha".into()),
                         repo_root: Some(repo.to_path_buf()),
                         worktree: Some(worktree.clone()),
                         branch: Some("feat/ran".into()),
                         base: Some("main".into()),
-                        ..volee_core::workspace::Workspace::at(&worktree)
+                        ..Workspace::at(&worktree)
                     },
-                    location: volee_core::workspace::Location::Background,
+                    location: Location::Background,
                 },
             ),
             Event::new(
@@ -995,5 +1000,74 @@ async fn the_preview_of_a_failed_setup_is_its_log() {
             ),
         "{}",
         preview.screen
+    );
+}
+
+/// Asks the daemon for a listing now, and waits until it is applied.
+async fn refresh(socket: &Path) {
+    let client = Client::connect(socket).await.unwrap();
+    let refreshed = client
+        .call::<RefreshDiscovery>(RefreshParams::default())
+        .await
+        .unwrap();
+    assert!(refreshed.listed);
+}
+
+#[tokio::test]
+async fn a_launch_whose_session_never_appears_fails_after_two_minutes() {
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    // The fake harness reports session abcd1234 but never lists it.
+    let spawned = client.call::<Spawn>(worker("feat/ghost")).await.unwrap();
+    refresh(&daemon.socket).await;
+    let waiting = registry(&daemon.socket).await;
+    assert_eq!(
+        waiting.agent(spawned.agent).unwrap().state,
+        AgentState::Launching
+    );
+    daemon.clock.advance(121_000);
+    refresh(&daemon.socket).await;
+    let registry = registry(&daemon.socket).await;
+    let agent = registry.agent(spawned.agent).unwrap();
+    assert_eq!(agent.state, AgentState::Failed);
+    assert_eq!(
+        agent.detail.as_deref(),
+        Some("Claude Code started session abcd1234 but never listed it: run the same launch again")
+    );
+    // A failed launch: the same command reuses what it left (ADR 0016).
+    let again = client.call::<Spawn>(worker("feat/ghost")).await.unwrap();
+    assert_eq!(again.worktree, spawned.worktree);
+}
+
+#[tokio::test]
+async fn a_launch_cut_short_by_a_restart_fails_at_the_first_listing() {
+    // The log of a daemon that stopped while it launched an agent.
+    let agent = AgentId::from_ulid(Ulid::from_parts(3_000, 1));
+    let daemon = start_prepared("", move |repo| {
+        vec![Event::new(
+            Timestamp::from_millis(1),
+            EventKind::AgentRegistered {
+                agent,
+                name: "alpha-feat-cut".into(),
+                role: Role::Worker,
+                harness: HarnessKind::ClaudeCode,
+                launched_by: LaunchedBy::Human,
+                parent: None,
+                mission: None,
+                workspace: Workspace::at(repo),
+                location: Location::Background,
+            },
+        )]
+    });
+    refresh(&daemon.socket).await;
+    let registry = registry(&daemon.socket).await;
+    let record = registry.agent(agent).unwrap();
+    assert_eq!(record.state, AgentState::Failed);
+    assert_eq!(
+        record.detail.as_deref(),
+        Some(
+            "the launch stopped before its session started, as when the daemon stops: run the \
+             same launch again"
+        )
     );
 }

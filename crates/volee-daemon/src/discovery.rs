@@ -22,11 +22,16 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use std::collections::HashSet;
 use tokio::sync::watch;
 use tokio::time::Instant;
+
+use volee_core::harness::HarnessKind;
 use volee_core::reconcile::{Listing, reconcile};
+use volee_core::role::LaunchedBy;
+use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
-use volee_core::{Event, EventKind};
+use volee_core::{AgentId, Event, EventKind};
 use volee_harness::Harness;
 use volee_proto::methods::{RefreshParams, Refreshed};
 
@@ -290,32 +295,97 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
     }
     state.sessions_mut().record(&listing);
     let events = reconcile(state.registry(), &listing, now, || state.new_agent_id());
-    if events.is_empty() {
-        return Listed {
-            succeeded: true,
-            changed: linked,
-            hosted,
+    let mut changed = linked;
+    if !events.is_empty() {
+        let count = events.len();
+        match state.commit(events) {
+            Ok(_) => {
+                tracing::debug!(events = count, "discovery applied");
+                changed = true;
+            }
+            Err(error) => {
+                tracing::error!(%error, "cannot apply discovered sessions");
+                return Listed {
+                    succeeded: false,
+                    changed: linked,
+                    hosted: Vec::new(),
+                };
+            }
+        }
+    }
+    // After the listing linked what it could: launches that will never
+    // start their session.
+    let stalled = stalled_launches(
+        &mut state,
+        &listing.harness,
+        &shared.launches_in_flight(),
+        now,
+    );
+    if !stalled.is_empty() {
+        match state.commit(stalled) {
+            Ok(_) => changed = true,
+            Err(error) => tracing::error!(%error, "cannot record stalled launches"),
+        }
+    }
+    Listed {
+        succeeded: true,
+        changed,
+        hosted,
+    }
+}
+
+/// How long a session the daemon started may take to appear in a listing
+/// before its launch counts as stalled.
+const STALLED_AFTER_MS: u64 = 120_000;
+
+/// Launches that will never start their session: agents volee launched,
+/// still launching, that never had a session, are not being launched now,
+/// and wait for no session started less than two minutes ago. A daemon that
+/// stopped during a launch leaves such agents, and so does a harness that
+/// reports a session it never lists. They are marked failed: a stop would
+/// find no session and a forget would refuse an agent still launching, while
+/// a failed launch is one the same command reuses (ADR 0016).
+fn stalled_launches(
+    state: &mut State,
+    harness: &HarnessKind,
+    in_flight: &HashSet<AgentId>,
+    now: Timestamp,
+) -> Vec<Event> {
+    let stuck: Vec<AgentId> = state
+        .registry()
+        .agents()
+        .filter(|agent| {
+            agent.harness == *harness
+                && agent.launched_by != LaunchedBy::Outside
+                && agent.state == AgentState::Launching
+                && agent.sessions.is_empty()
+                && !in_flight.contains(&agent.id)
+        })
+        .map(|agent| agent.id)
+        .collect();
+    let mut events = Vec::new();
+    for agent in stuck {
+        let detail = match state.expected_since(agent) {
+            Some((_, since)) if since.millis_until(now) < STALLED_AFTER_MS => continue,
+            Some((handle, _)) => format!(
+                "Claude Code started session {handle} but never listed it: run the same launch \
+                 again"
+            ),
+            None => "the launch stopped before its session started, as when the daemon stops: \
+                     run the same launch again"
+                .to_owned(),
         };
+        state.forget_expected(agent);
+        events.push(Event::new(
+            now,
+            EventKind::StateChanged {
+                agent,
+                state: AgentState::Failed,
+                detail: Some(detail),
+            },
+        ));
     }
-    let count = events.len();
-    match state.commit(events) {
-        Ok(_) => {
-            tracing::debug!(events = count, "discovery applied");
-            Listed {
-                succeeded: true,
-                changed: true,
-                hosted,
-            }
-        }
-        Err(error) => {
-            tracing::error!(%error, "cannot apply discovered sessions");
-            Listed {
-                succeeded: false,
-                changed: linked,
-                hosted: Vec::new(),
-            }
-        }
-    }
+    events
 }
 
 /// Links the sessions the daemon started or resumed, recognized by the

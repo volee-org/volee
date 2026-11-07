@@ -46,10 +46,19 @@ pub(crate) struct State {
     last_id: Cell<Ulid>,
     /// Sessions the daemon started or resumed and no event linked yet, by
     /// the harness's handle, with the agent they belong to.
-    expected: HashMap<String, (AgentId, SessionOrigin)>,
+    expected: HashMap<String, Expected>,
     /// The harness sessions the daemon can act on. Not persisted: rebuilt by
     /// the next listing.
     sessions: Sessions,
+}
+
+/// A session the daemon started or resumed and no event linked yet.
+#[derive(Clone, Copy, Debug)]
+struct Expected {
+    agent: AgentId,
+    origin: SessionOrigin,
+    /// When the daemon started it.
+    since: Timestamp,
 }
 
 impl std::fmt::Debug for State {
@@ -143,12 +152,37 @@ impl State {
     /// Remembers that the session the harness calls `handle` belongs to
     /// `agent`, until a hook or a listing links it.
     pub(crate) fn expect_session(&mut self, handle: String, agent: AgentId, origin: SessionOrigin) {
-        self.expected.insert(handle, (agent, origin));
+        let since = self.now();
+        self.expected.insert(
+            handle,
+            Expected {
+                agent,
+                origin,
+                since,
+            },
+        );
     }
 
     /// The agent waiting for the session the harness calls `handle`.
     pub(crate) fn take_expected(&mut self, handle: &str) -> Option<(AgentId, SessionOrigin)> {
-        self.expected.remove(handle)
+        self.expected
+            .remove(handle)
+            .map(|expected| (expected.agent, expected.origin))
+    }
+
+    /// The newest session the daemon started or resumed for `agent` that no
+    /// listing has shown yet, and when it started it.
+    pub(crate) fn expected_since(&self, agent: AgentId) -> Option<(String, Timestamp)> {
+        self.expected
+            .iter()
+            .filter(|(_, expected)| expected.agent == agent)
+            .max_by_key(|(_, expected)| expected.since)
+            .map(|(handle, expected)| (handle.clone(), expected.since))
+    }
+
+    /// Stops waiting for the sessions of `agent`.
+    pub(crate) fn forget_expected(&mut self, agent: AgentId) {
+        self.expected.retain(|_, expected| expected.agent != agent);
     }
 
     /// The handle of the session the daemon started or resumed for `agent`
@@ -157,8 +191,8 @@ impl State {
     pub(crate) fn expected_handle(&self, agent: AgentId) -> Option<&str> {
         self.expected
             .iter()
-            .filter(|(_, (owner, _))| *owner == agent)
-            .max_by_key(|(handle, (_, origin))| (*origin != SessionOrigin::Started, *handle))
+            .filter(|(_, expected)| expected.agent == agent)
+            .max_by_key(|(handle, expected)| (expected.origin != SessionOrigin::Started, *handle))
             .map(|(handle, _)| handle.as_str())
     }
 

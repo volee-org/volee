@@ -144,7 +144,10 @@ when it is missing. The worktree and the branch it had already made stay,
 untouched: once the repository is trusted, run the same `volee spawn` again,
 and volee reuses them, as long as nothing was done in them
 ([ADR 0016](../adr/0016-what-a-failed-launch-left-untouched.md)). The same
-goes for any launch that failed before its session started.
+goes for any launch that failed before its session started, including a
+launch the daemon could not finish because it stopped, and one whose session
+Claude Code reported but never listed within two minutes: volee marks those
+failed at its next look for sessions.
 
 ## Tidying worktrees
 

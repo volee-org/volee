@@ -106,6 +106,7 @@ pub(crate) async fn spawn(
         start_commit: Some(start_commit),
         ..Workspace::at(&worktree)
     };
+    let _in_flight = shared.begin_launch(agent);
     register(
         shared,
         agent,
@@ -208,6 +209,7 @@ pub(crate) async fn coordinator(
         repo_root: Some(target.root.clone()),
         ..Workspace::at(&target.root)
     };
+    let _in_flight = shared.begin_launch(agent);
     register(
         shared,
         agent,
