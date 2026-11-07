@@ -1137,10 +1137,11 @@ mod tests {
         assert!(lineage.lineage);
         let contract = link(&graph, node(INVOICING), node(INVOICE_PAGE)).unwrap();
         assert!(contract.lineage && contract.talked());
-        // An independent agent of another harness talks to a worker of a
-        // mission it is not part of.
-        let across = link(&graph, node(INFRA), node(TRACE_GATEWAY)).unwrap();
-        assert!(across.talked() && !across.lineage);
+        // A session of another harness that volee did not launch talks to
+        // you, along the routes volee allows, and to no mission's worker.
+        let codex = link(&graph, node(INFRA), NodeId::Human).unwrap();
+        assert!(codex.talked() && !codex.lineage);
+        assert_eq!(link(&graph, node(INFRA), node(TRACE_GATEWAY)), None);
     }
 
     #[test]
@@ -1151,6 +1152,12 @@ mod tests {
         let (asker, respondent) = to_you.waiting.unwrap();
         assert_eq!(graph.nodes[asker], node(INVOICE_TOOLS));
         assert_eq!(graph.nodes[respondent], NodeId::Human);
+        // The latency audit asks you about the other mission.
+        let relay = link(&graph, node(TRACE_GATEWAY), NodeId::Human).unwrap();
+        assert_eq!(
+            relay.waiting.map(|(asker, _)| graph.nodes[asker]),
+            Some(node(TRACE_GATEWAY))
+        );
         let answered = link(
             &graph,
             node(INVOICE_PAGE),
