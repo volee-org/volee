@@ -14,7 +14,25 @@ deliberately out of scope. Dates are targets, not promises.
 | Messaging | MCP server for agents, typed threads, delivery to working, idle and stopped agents, inbox, message pulses on the graph | Done |
 | Missions | Supervisor plus coordinator agent, change and analysis missions, delivery evidence, `volee tidy` | Done |
 | More views | Network, repositories and worktrees, timeline | Done |
-| Release | Prebuilt binaries for macOS and Linux, shell installer, demo recordings | In progress: v0.1.0 |
+| Release | Prebuilt binaries for macOS and Linux, shell installer, demo recordings | Done: v0.1.0 |
+
+## 0.2: other harnesses and tuios panes
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| Other harnesses | Agents of any MCP-capable harness join volee and its missions with `volee mcp --join` ([ADR 0014](../adr/0014-agents-of-other-harnesses-join-through-mcp.md)) | Done |
+| tuios panes | Claude Code sessions in tuios panes are shown, previewed and reached from the interface ([ADR 0015](../adr/0015-tuios-location-adapter.md)) | Done |
+| Launch recovery | A failed launch runs again without a git step ([ADR 0016](../adr/0016-what-a-failed-launch-left-untouched.md)); `volee forget` removes an agent that no longer runs | Done |
+| Release | v0.2.0 | Done: v0.2.0 |
+
+## 0.3: setting up and tidying
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| Shell completions | `volee completions <shell>` prints a completion script | Done |
+| Setup commands | Commands each new worktree runs before its agent starts, such as `bun install` | In progress |
+| Forget from the interface | The interface forgets an agent that no longer runs, like `volee forget` | In progress |
+| Fixes from the 0.2 review | The forge line of `volee daemon status`, focus steps for tuios panes on the daemon's server | In progress |
 
 ## Later
 
@@ -24,8 +42,6 @@ deliberately out of scope. Dates are targets, not promises.
   Agents of any MCP-capable harness can already
   [join](../guide/other-harnesses.md) through `volee mcp --join`; discovering
   their sessions and handing them messages would come with adapters.
-- Setup commands for new worktrees: a first step, such as `bun install`,
-  that each new worktree runs.
 - Leads that start missions and workers themselves.
 - Adopting and messaging sessions started outside volee.
 - A Homebrew tap and a crates.io release.
