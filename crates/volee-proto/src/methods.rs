@@ -389,6 +389,10 @@ pub struct Spawned {
     pub agent: AgentId,
     /// Its worktree.
     pub worktree: String,
+    /// The log of the repository's setup commands, when it has some
+    /// (ADR 0017).
+    #[serde(default)]
+    pub setup_log: Option<String>,
 }
 
 method!(

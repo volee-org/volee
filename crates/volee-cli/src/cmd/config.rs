@@ -75,6 +75,15 @@ pub(crate) fn check() -> Result<()> {
             "  (missing)"
         };
         println!("  repo {name:<12} {}{exists}", repo.path.display());
+        // The setup commands each new worktree runs (ADR 0017), one line
+        // each, under their repository.
+        for command in &repo.setup {
+            println!(
+                "       {:<12} setup: {}",
+                "",
+                crate::text::one_line(command)
+            );
+        }
     }
     Ok(())
 }

@@ -130,6 +130,13 @@ its display name, `<repository>-<name>` otherwise. The agent gets volee's
 hooks and MCP tools, so it appears at once in `volee ls` and can send you
 messages.
 
+When the repository has `setup` commands in the configuration, such as
+`bun install`, they run in the new worktree before the session starts, and
+`volee spawn` says so before it waits; the agent is listed as launching,
+with the command that runs. A failing command fails the launch and keeps the
+worktree, like the cases below
+([setup commands](configuration.md#setup-commands)).
+
 Claude Code only starts background sessions in repositories you trust: run
 `claude` once in each repository and accept its trust prompt. volee says so
 when it is missing. The worktree and the branch it had already made stay,

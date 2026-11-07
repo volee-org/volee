@@ -78,6 +78,21 @@ pub enum DaemonError {
         /// The branch volee created.
         branch: String,
     },
+    /// A setup command of the repository failed or ran out of time
+    /// (ADR 0017).
+    #[error("the setup command `{command}` {reason}; what it printed is in {}", log.display())]
+    SetupFailed {
+        /// The command, as configured.
+        command: String,
+        /// What went wrong, such as `exited with status 1: <its last line>`.
+        reason: String,
+        /// The setup log.
+        log: PathBuf,
+    },
+    /// A launch stopped during its setup, as when its mission ended: no
+    /// session started (ADR 0017).
+    #[error("{0}")]
+    Interrupted(String),
     /// git failed or refused.
     #[error(transparent)]
     Git(#[from] volee_git::GitError),
@@ -125,6 +140,8 @@ fn code(error: &DaemonError) -> i64 {
             rpc::NOT_FOUND
         }
         DaemonError::Refused(_)
+        | DaemonError::SetupFailed { .. }
+        | DaemonError::Interrupted(_)
         | DaemonError::Harness(
             volee_harness::HarnessError::NotControllable { .. }
             | volee_harness::HarnessError::ForeignSession { .. }

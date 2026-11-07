@@ -22,6 +22,8 @@ wake_timeout = 3600
 # path = "~/code/billing"
 # base = "develop"         # the repository's default branch when unset
 # model = "sonnet"         # overrides [agents] model for this repository
+# setup = ["cp \"$VOLEE_REPO_ROOT/.env.local\" .", "bun install"]
+#                          # prepares each new worktree before its agent starts
 
 [messages]
 # Summaries of long threads, written by a model when you ask for one

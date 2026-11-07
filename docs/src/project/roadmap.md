@@ -30,7 +30,7 @@ deliberately out of scope. Dates are targets, not promises.
 | Milestone | Content | Status |
 | --- | --- | --- |
 | Shell completions | `volee completions <shell>` prints a completion script | Done |
-| Setup commands | Commands each new worktree runs before its agent starts, such as `bun install` | In progress |
+| Setup commands | Commands each new worktree runs before its agent starts, such as `bun install` ([ADR 0017](../adr/0017-setup-commands-for-new-worktrees.md)) | Done |
 | Forget from the interface | The interface forgets an agent that no longer runs, like `volee forget` | Done |
 | Fixes from the 0.2 review | The forge line of `volee daemon status`, focus steps for tuios panes on the daemon's server | Done |
 

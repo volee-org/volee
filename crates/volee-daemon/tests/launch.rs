@@ -25,7 +25,8 @@ use volee_git::GitCli;
 use volee_harness::{Harness, PermissionMode};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    CreateMission, CreateMissionParams, EventsSince, SinceParams, Spawn, SpawnParams,
+    AbortMission, AbortParams, CreateMission, CreateMissionParams, EventsSince, SinceParams, Spawn,
+    SpawnParams,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
@@ -767,4 +768,200 @@ async fn a_mission_launches_at_most_its_limit_even_all_at_once() {
         3,
         "two and the coordinator"
     );
+}
+
+#[tokio::test]
+async fn setup_commands_prepare_the_worktree_before_the_session_starts() {
+    let daemon = start_with(concat!(
+        "setup = [\n",
+        "  'printf \"%s|%s|%s\" \"$VOLEE_REPO\" \"$VOLEE_BRANCH\" \"$VOLEE_BASE\" > env.txt',\n",
+        "  'echo one >> order.txt',\n",
+        "  'echo two >> order.txt; echo installed',\n",
+        "  'printf \"%s\\n%s\" \"$VOLEE_WORKTREE\" \"$VOLEE_REPO_ROOT\" > paths.txt',\n",
+        "]\n",
+    ));
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let spawned = client.call::<Spawn>(worker("feat/setup")).await.unwrap();
+    let worktree = daemon.repo.join(".claude/worktrees/feat-setup");
+    // In the new worktree, in order, with what they need to know.
+    let read = |name: &str| std::fs::read_to_string(worktree.join(name)).unwrap();
+    assert_eq!(read("env.txt"), "alpha|feat/setup|main");
+    assert_eq!(read("order.txt"), "one\ntwo\n");
+    assert_eq!(
+        read("paths.txt"),
+        format!("{}\n{}", worktree.display(), daemon.repo.display())
+    );
+    // Then the session starts.
+    assert_eq!(daemon.harness.launches().len(), 1);
+    // What they printed is in the log, which the answer names.
+    let log = spawned.setup_log.expect("a setup log");
+    assert!(log.ends_with("setup.log"), "{log}");
+    let text = std::fs::read_to_string(&log).unwrap();
+    assert!(text.contains("$ echo one >> order.txt\n"), "{text}");
+    assert!(text.contains("installed\n"), "{text}");
+    // The agent no longer says it is setting up.
+    let registry = registry(&daemon.socket).await;
+    let agent = registry.agent(spawned.agent).unwrap();
+    assert_eq!(agent.state, AgentState::Launching);
+    assert_eq!(agent.detail, None);
+}
+
+#[tokio::test]
+async fn a_failing_setup_keeps_the_worktree_and_runs_again_with_the_launch() {
+    // The second command fails until a file appears next to the repository.
+    let daemon = start_with(concat!(
+        "setup = [\n",
+        "  'echo preparing',\n",
+        "  'test -f \"$VOLEE_REPO_ROOT/../go\" || { echo \"the lockfile is stale\" >&2; exit 3; }',\n",
+        "  'echo done > ../setup-ran-to-the-end',\n",
+        "]\n",
+    ));
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let error = rpc_error(
+        client
+            .call::<Spawn>(worker("feat/setup"))
+            .await
+            .unwrap_err(),
+    );
+    assert_eq!(error.code, rpc::REFUSED);
+    assert!(
+        error
+            .message
+            .contains("exited with status 3: the lockfile is stale")
+            && error.message.contains("setup.log")
+            && error.message.contains("kept the worktree")
+            && error.message.contains("run the same command again"),
+        "{}",
+        error.message
+    );
+    // No session, the rest of the setup skipped, the worktree kept.
+    assert_eq!(daemon.harness.launches().len(), 0);
+    let worktree = daemon.repo.join(".claude/worktrees/feat-setup");
+    assert!(worktree.is_dir());
+    assert!(!worktree.join("../setup-ran-to-the-end").exists());
+    let registry = registry(&daemon.socket).await;
+    let agent = registry.agents().next().unwrap();
+    assert_eq!(agent.state, AgentState::Failed);
+    assert_eq!(
+        agent.detail.as_deref(),
+        Some(
+            "setup failed: `test -f \"$VOLEE_REPO_ROOT/../go\" || { echo \"the lockfile is \
+             stale\" >&2; exit 3; }` exited with status 3: the lockfile is stale"
+        )
+    );
+
+    // Once fixed, the same command reuses the untouched worktree and sets
+    // it up again.
+    std::fs::write(daemon.repo.join("../go"), "").unwrap();
+    let spawned = client.call::<Spawn>(worker("feat/setup")).await.unwrap();
+    assert_eq!(PathBuf::from(&spawned.worktree), worktree);
+    assert!(worktree.join("../setup-ran-to-the-end").exists());
+    assert_eq!(daemon.harness.launches().len(), 1);
+}
+
+#[tokio::test]
+async fn a_repository_without_setup_starts_at_once() {
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let spawned = client.call::<Spawn>(worker("feat/plain")).await.unwrap();
+    assert_eq!(spawned.setup_log, None);
+    assert_eq!(daemon.harness.launches().len(), 1);
+}
+
+/// A mission on `alpha`, so that its workers may be launched there.
+fn mission_on_alpha() -> (MissionId, Vec<Event>) {
+    let id = MissionId::from_ulid(Ulid::from_parts(4_000, 2));
+    let thread = ThreadId::from_ulid(Ulid::from_parts(2_000, 2));
+    let at = |kind| Event::new(Timestamp::from_millis(1), kind);
+    let events = vec![
+        at(EventKind::ThreadOpened {
+            thread: Thread {
+                id: thread,
+                title: "Mission: Invoices".into(),
+                mission: Some(id),
+                participants: vec![Party::Human],
+                opened_at: Timestamp::from_millis(1),
+            },
+        }),
+        at(EventKind::MissionCreated {
+            mission: Mission {
+                id,
+                title: "Invoices".into(),
+                kind: MissionKind::Change,
+                goal: "Add invoices".into(),
+                repos: vec!["alpha".into()],
+                requested_by: None,
+                coordinator: None,
+                thread,
+                status: MissionStatus::Running,
+                report: None,
+                created_at: Timestamp::from_millis(1),
+                ended_at: None,
+                assessments: BTreeMap::new(),
+            },
+        }),
+    ];
+    (id, events)
+}
+
+#[tokio::test]
+async fn a_mission_that_ends_during_the_setup_stops_the_launch() {
+    let (mission, events) = mission_on_alpha();
+    // The setup waits for a file next to the repository.
+    let daemon = start_prepared(
+        "setup = ['while [ ! -f \"$VOLEE_REPO_ROOT/../release\" ]; do sleep 0.05; done']\n",
+        move |_| events,
+    );
+    let launch = {
+        let socket = daemon.socket.clone();
+        tokio::spawn(async move {
+            let client = Client::connect(&socket).await.unwrap();
+            client
+                .call::<Spawn>(SpawnParams {
+                    mission: Some(mission),
+                    ..worker("feat/late")
+                })
+                .await
+        })
+    };
+    // Wait for the setup to run, then abort the mission and let it finish.
+    let agent = loop {
+        let registry = registry(&daemon.socket).await;
+        let setting_up = registry.agents().find(|agent| {
+            agent
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.starts_with("setting up"))
+        });
+        if let Some(agent) = setting_up {
+            break agent.id;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    client
+        .call::<AbortMission>(AbortParams {
+            mission,
+            reason: None,
+        })
+        .await
+        .unwrap();
+    std::fs::write(daemon.repo.join("../release"), "").unwrap();
+    let error = rpc_error(launch.await.unwrap().unwrap_err());
+    assert_eq!(error.code, rpc::REFUSED);
+    assert!(
+        error.message.contains("its mission ended during its setup"),
+        "{}",
+        error.message
+    );
+    // No session started for an aborted mission, and the agent says why.
+    assert_eq!(daemon.harness.launches().len(), 0);
+    let registry = registry(&daemon.socket).await;
+    let record = registry.agent(agent).unwrap();
+    assert_eq!(record.state, AgentState::Stopped);
+    assert_eq!(
+        record.detail.as_deref(),
+        Some("no session started: its mission ended during its setup")
+    );
+    assert!(daemon.repo.join(".claude/worktrees/feat-late").is_dir());
 }

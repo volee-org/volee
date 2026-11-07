@@ -8,9 +8,10 @@
 //! and reuses the worktree volee created. Started directly in a fresh
 //! worktree, a background session would be refused as untrusted.
 //!
-//! Every slow step (git, the harness) runs off the state lock. The agent is
-//! registered before its session starts, so that the session's first hooks
-//! find it; a launch that fails marks it failed and deletes nothing.
+//! Every slow step (git, the setup commands, the harness) runs off the state
+//! lock. The agent is registered before its worktree is set up and its
+//! session starts, so that people see it launching and the session's first
+//! hooks find it; a launch that fails marks it failed and deletes nothing.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -116,6 +117,7 @@ pub(crate) async fn spawn(
         slot,
     )
     .await?;
+    let setup_log = prepare(shared, agent, &target, &worktree, &params.branch).await?;
 
     let model = params.model.clone().or_else(|| {
         shared
@@ -147,7 +149,34 @@ pub(crate) async fn spawn(
     Ok(Spawned {
         agent,
         worktree: worktree.display().to_string(),
+        setup_log,
     })
+}
+
+/// Runs the repository's setup commands in the new worktree, if it has any
+/// (ADR 0017), and returns their log. A failed setup marks the agent failed
+/// and keeps the worktree; an interrupted one (its mission ended) has marked
+/// it stopped.
+async fn prepare(
+    shared: &Arc<Shared>,
+    agent: AgentId,
+    target: &Target,
+    worktree: &Path,
+    branch: &str,
+) -> Result<Option<String>, DaemonError> {
+    let setup = crate::setup::commands(shared, &target.root);
+    if setup.is_empty() {
+        return Ok(None);
+    }
+    match crate::setup::run(shared, agent, target, worktree, branch, &setup).await {
+        Ok(log) => Ok(Some(log.display().to_string())),
+        // The same command would not help: its mission is over.
+        Err(error @ DaemonError::Interrupted(_)) => Err(error),
+        Err(error) => {
+            crate::setup::fail(shared, agent, &error).await;
+            Err(kept(error, &target.root, worktree, branch))
+        }
+    }
 }
 
 /// Launches the coordinator of a new mission, in the main checkout of its
