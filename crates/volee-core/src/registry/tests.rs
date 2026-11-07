@@ -467,6 +467,100 @@ fn closing_a_mission_records_its_end_once() {
     assert_eq!(record.coordinator, Some(agent_id(7)));
 }
 
+fn stop(registry: &mut Registry, agent: AgentId, millis: i64) {
+    registry
+        .apply(&Event::new(at(millis), EventKind::StopRequested { agent }))
+        .unwrap();
+}
+
+#[test]
+fn a_stop_holds_the_agent_until_the_human_writes_to_it() {
+    let mut registry = Registry::new();
+    register(&mut registry, agent_id(1), Role::Worker, None);
+    register(&mut registry, agent_id(2), Role::Lead, None);
+    let worker = Party::Agent(agent_id(1));
+    let thread = open_thread(&mut registry, 1, None, vec![Party::Human, worker]);
+    stop(&mut registry, agent_id(1), 5);
+    let held = || Some(Hold::StoppedByHuman { at: at(5) });
+    assert_eq!(registry.agent(agent_id(1)).unwrap().hold, held());
+
+    // Messages from volee and from agents leave the hold in place.
+    post(
+        &mut registry,
+        1,
+        thread,
+        Party::System,
+        &[worker],
+        MessageKind::Note,
+        None,
+    );
+    post(
+        &mut registry,
+        2,
+        thread,
+        Party::Agent(agent_id(2)),
+        &[worker],
+        MessageKind::Note,
+        None,
+    );
+    assert_eq!(registry.agent(agent_id(1)).unwrap().hold, held());
+
+    // A message from the human lifts it.
+    post(
+        &mut registry,
+        3,
+        thread,
+        Party::Human,
+        &[worker],
+        MessageKind::Note,
+        None,
+    );
+    assert_eq!(registry.agent(agent_id(1)).unwrap().hold, None);
+}
+
+#[test]
+fn a_finished_mission_holds_its_agents_for_good() {
+    let mut registry = Registry::new();
+    let mission = create_mission(&mut registry, Some(agent_id(10)));
+    join_mission(&mut registry, agent_id(10), mission, Role::Coordinator);
+    join_mission(&mut registry, agent_id(11), mission, Role::Worker);
+    register(&mut registry, agent_id(12), Role::Worker, None);
+    registry
+        .apply(&Event::new(
+            at(9),
+            EventKind::MissionUpdated {
+                mission,
+                status: MissionStatus::Aborted,
+                coordinator: None,
+                report: None,
+            },
+        ))
+        .unwrap();
+    let over = Some(Hold::MissionOver { at: at(9) });
+    assert_eq!(registry.agent(agent_id(10)).unwrap().hold, over);
+    assert_eq!(registry.agent(agent_id(11)).unwrap().hold, over);
+    assert_eq!(
+        registry.agent(agent_id(12)).unwrap().hold,
+        None,
+        "not a member"
+    );
+
+    // Neither a message from the human nor a stop replaces it.
+    let worker = Party::Agent(agent_id(11));
+    let thread = open_thread(&mut registry, 2, None, vec![Party::Human, worker]);
+    post(
+        &mut registry,
+        4,
+        thread,
+        Party::Human,
+        &[worker],
+        MessageKind::Note,
+        None,
+    );
+    stop(&mut registry, agent_id(11), 20);
+    assert_eq!(registry.agent(agent_id(11)).unwrap().hold, over);
+}
+
 #[test]
 fn replaying_the_same_events_gives_the_same_registry() {
     let events = vec![

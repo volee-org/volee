@@ -13,10 +13,11 @@ use std::ffi::OsStr;
 use std::sync::Arc;
 
 use volee_core::harness::SessionKey;
+use volee_core::message::{Message, MessageKind, Party, Receipt};
 use volee_core::reconcile::{ListedSession, Listing};
 use volee_core::role::LaunchedBy;
 use volee_core::workspace::Location;
-use volee_core::{Agent, AgentId};
+use volee_core::{Agent, AgentId, Event, EventKind};
 use volee_git::DiffFormat;
 use volee_harness::{Harness, HarnessError};
 use volee_proto::methods::{AgentParams, AttachCommand, DiffParams, DiffText, Empty, PreviewText};
@@ -24,6 +25,7 @@ use volee_proto::methods::{AgentParams, AttachCommand, DiffParams, DiffText, Emp
 use crate::error::DaemonError;
 use crate::launch::{blocking, git, harness};
 use crate::server::Shared;
+use crate::state::State;
 
 /// The most diff text one request returns, in bytes. Past it, the text is
 /// cut at a line break and flagged as truncated.
@@ -100,7 +102,6 @@ impl Sessions {
 struct Target {
     harness: Arc<dyn Harness>,
     name: String,
-    launched_by: LaunchedBy,
     session: ListedSession,
 }
 
@@ -126,7 +127,6 @@ async fn target(shared: &Arc<Shared>, agent: AgentId) -> Result<Target, DaemonEr
     Ok(Target {
         harness,
         name: record.name.clone(),
-        launched_by: record.launched_by,
         session,
     })
 }
@@ -210,28 +210,97 @@ pub(crate) async fn attach(
     })
 }
 
-/// `agents.stop`: stops the agent's session; the conversation is kept.
-/// volee stops only the agents it launched (ADR 0011).
+/// `agents.stop`: stops the agent's session; the conversation is kept, and
+/// volee does not resume the agent on its own until the human writes to it.
+/// An agent that is not running is only held. volee stops only the agents it
+/// launched (ADR 0011).
 pub(crate) async fn stop(shared: &Arc<Shared>, params: AgentParams) -> Result<Empty, DaemonError> {
-    let Target {
-        harness,
-        name,
-        launched_by,
-        session,
-    } = target(shared, params.agent).await?;
+    harness(shared)?;
+    let (name, launched_by, live) = {
+        let state = shared.state.lock().await;
+        let record = state
+            .registry()
+            .agent(params.agent)
+            .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {}", params.agent)))?;
+        (
+            record.name.clone(),
+            record.launched_by,
+            record.state.is_live(),
+        )
+    };
+    // A running agent's session decides first: it says where to act on a
+    // session that volee cannot drive.
+    let running = if live {
+        Some(target(shared, params.agent).await?)
+    } else {
+        None
+    };
     if launched_by == LaunchedBy::Outside {
         return Err(DaemonError::Refused(format!(
             "{name} was not launched by volee, which stops only the agents it launched: stop it \
              where it was started"
         )));
     }
-    if !session.alive {
-        return Err(DaemonError::Refused(format!("{name} is not running")));
+    // Recorded before the session ends: the end must find the hold, or a
+    // message waiting for the agent would resume it at once.
+    hold(shared, params.agent).await?;
+    if let Some(Target {
+        harness,
+        name,
+        session,
+        ..
+    }) = running
+        && session.alive
+    {
+        blocking(move || harness.stop(&session))
+            .await?
+            .map_err(|error| harness_error(&name, error))?;
     }
-    blocking(move || harness.stop(&session))
-        .await?
-        .map_err(|error| harness_error(&name, error))?;
     Ok(Empty {})
+}
+
+/// Records that the human stopped `agent`, and tells the coordinator of its
+/// running mission so that it does not wait for it.
+async fn hold(shared: &Arc<Shared>, agent: AgentId) -> Result<(), DaemonError> {
+    let mut state = shared.state.lock().await;
+    let now = state.now();
+    let mut events = vec![Event::new(now, EventKind::StopRequested { agent })];
+    if let Some(message) = stop_notice(&state, agent) {
+        events.push(Event::new(now, EventKind::MessagePosted { message }));
+    }
+    state.commit(events)?;
+    Ok(())
+}
+
+/// The note for the coordinator when the human stops one of its workers;
+/// none when the agent was already held or its mission is over.
+fn stop_notice(state: &State, agent: AgentId) -> Option<Message> {
+    let registry = state.registry();
+    let record = registry.agent(agent)?;
+    let mission = registry.mission(record.mission?)?;
+    let coordinator = mission.coordinator.filter(|id| *id != agent)?;
+    if record.hold.is_some() || mission.status.is_over() {
+        return None;
+    }
+    Some(Message {
+        id: state.new_message_id(),
+        thread: mission.thread,
+        from: Party::System,
+        kind: MessageKind::Note,
+        body: format!(
+            "The human stopped {}. volee will not resume it until the human writes to it, so \
+             messages you send it wait: plan without it, or ask the human.",
+            record.name
+        ),
+        refs: Vec::new(),
+        in_reply_to: None,
+        at: state.now(),
+        receipts: vec![Receipt {
+            to: Party::Agent(coordinator),
+            delivered_at: None,
+            read_at: None,
+        }],
+    })
 }
 
 /// `agents.diff`: the agent's changes against the merge base with the branch

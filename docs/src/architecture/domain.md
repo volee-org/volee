@@ -60,8 +60,9 @@ group.
 | `workspace-updated`, `location-changed`, `model-changed` | Better knowledge of where and how the agent runs. |
 | `delivery-updated` | New delivery evidence from git or the forge. |
 | `agent-forgotten` | The agent is removed; its sessions are ignored from then on. |
+| `stop-requested` | The human stopped the agent: it is held, and volee does not resume it on its own. A later `message-posted` from the human to it lifts the hold. |
 | `thread-opened`, `message-posted`, `message-delivered`, `message-read` | Conversations and receipts. |
-| `mission-created`, `mission-updated` | Missions and their progress. |
+| `mission-created`, `mission-updated` | Missions and their progress. When a mission ends, every agent of it is held for good. |
 | `worker-assessed` | The supervisor's verdict on a worker of a mission, with its evidence. |
 
 ## Reconciliation
