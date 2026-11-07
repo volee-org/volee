@@ -383,8 +383,10 @@ time it looks for sessions, and the Detail panel says where it runs
 is the pane's screen, and `a` brings the pane forward instead of taking the
 agent over: tuios focuses it, shows its workspace and, when volee runs in a
 tuios pane itself, switches your tuios window to the pane's session. volee
-stays where it was. Nothing is typed into the pane, and no pane is opened,
-closed or moved.
+stays where it was. When no tuios window shows that session (none is
+attached), volee says the agent is in front in its session and how to see
+it: `tuios attach <session>`. Nothing is typed into the pane, and no pane is
+opened, closed or moved.
 
 tuios's own Claude Code hooks (`tuios integration install claude-code`)
 tell volee which session runs in which pane; without them, volee follows

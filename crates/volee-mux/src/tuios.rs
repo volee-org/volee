@@ -260,6 +260,15 @@ impl<R: CommandRunner> Multiplexer for Tuios<R> {
             step(&["switch-session", session]),
         ])
     }
+
+    fn attach_command(&self, target: &str) -> Option<Vec<String>> {
+        let (session, _) = split_target(target).ok()?;
+        Some(vec![
+            PROGRAM.to_owned(),
+            "attach".to_owned(),
+            session.to_owned(),
+        ])
+    }
 }
 
 /// Why a program could not be run: tuios (or `ps`) is missing, or did not
@@ -504,5 +513,9 @@ mod tests {
             ]
         );
         assert!(tuios.runner.calls().is_empty(), "the client runs the steps");
+        assert_eq!(
+            tuios.attach_command("main-session:475fc3f0"),
+            Some(vec!["tuios".into(), "attach".into(), "main-session".into()])
+        );
     }
 }

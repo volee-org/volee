@@ -27,7 +27,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use volee_core::Event;
 
-use crate::app::{Effect, Model, Msg, update};
+use crate::app::{Effect, FocusFailure, Model, Msg, update};
 use crate::clock::Clock;
 use crate::source::{Source, SourceError, TakeOver};
 use crate::view::view;
@@ -74,8 +74,8 @@ pub(crate) trait Screen {
 
     /// Runs the steps that bring a multiplexer pane forward, one after the
     /// other, keeping the terminal: they print nothing on it. The first that
-    /// fails says why.
-    fn bring_forward(&mut self, steps: &[Vec<String>]) -> Result<(), String>;
+    /// fails says why, and how many ran fine before it.
+    fn bring_forward(&mut self, steps: &[Vec<String>]) -> Result<(), FocusFailure>;
 }
 
 /// Runs the loop until the person quits or the terminal goes away.
@@ -398,25 +398,30 @@ impl Screen for TerminalScreen {
         Ok(())
     }
 
-    fn bring_forward(&mut self, steps: &[Vec<String>]) -> Result<(), String> {
-        for step in steps {
+    fn bring_forward(&mut self, steps: &[Vec<String>]) -> Result<(), FocusFailure> {
+        for (done, step) in steps.iter().enumerate() {
             let Some((program, args)) = step.split_first() else {
                 continue;
+            };
+            let failure = |reason: String| FocusFailure {
+                done,
+                program: program.clone(),
+                reason,
             };
             let output = Command::new(program)
                 .args(args)
                 .stdin(Stdio::null())
                 .output()
-                .map_err(|error| format!("cannot run {program}: {error}"))?;
+                .map_err(|error| failure(format!("cannot run it: {error}")))?;
             if !output.status.success() {
                 // The multiplexer's own words, from the first line it wrote.
                 let said = String::from_utf8_lossy(&output.stderr);
                 let said = said.lines().next().unwrap_or_default().trim();
-                return Err(if said.is_empty() {
-                    format!("{program} ended with {}", output.status)
+                return Err(failure(if said.is_empty() {
+                    format!("it ended with {}", output.status)
                 } else {
-                    format!("{program} says: {said}")
-                });
+                    said.to_owned()
+                }));
             }
         }
         Ok(())
@@ -581,7 +586,7 @@ mod tests {
             Ok(())
         }
 
-        fn bring_forward(&mut self, steps: &[Vec<String>]) -> Result<(), String> {
+        fn bring_forward(&mut self, steps: &[Vec<String>]) -> Result<(), FocusFailure> {
             for step in steps {
                 self.taken_over.push(step.join(" "));
             }
@@ -684,6 +689,7 @@ mod tests {
                     step(&["tuios", "focus-window", "-s", "work", "3f2a"]),
                     step(&["tuios", "switch-session", "work"]),
                 ],
+                attach: step(&["tuios", "attach", "work"]),
             }),
         };
         type_later(send, vec![vec![key('q')]]);

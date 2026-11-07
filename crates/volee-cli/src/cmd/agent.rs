@@ -34,10 +34,22 @@ pub(crate) async fn attach(input: &str) -> Result<()> {
     if let Some(focus) = command.focus {
         let multiplexer = text::one_line(&focus.multiplexer).into_owned();
         let session = text::one_line(&focus.session).into_owned();
-        tokio::task::spawn_blocking(move || bring_forward(&focus.steps))
+        let attach = text::one_line(&focus.attach.join(" ")).into_owned();
+        let steps = focus.steps;
+        let outcome = tokio::task::spawn_blocking(move || bring_forward(&steps))
             .await
-            .context("the focus task failed")??;
-        println!("{name} runs in a {multiplexer} pane: brought forward, in session {session}.");
+            .context("the focus task failed")?;
+        match outcome {
+            Ok(()) => println!(
+                "{name} runs in a {multiplexer} pane: brought forward, in session {session}."
+            ),
+            // Focused in its session, which no window of the multiplexer
+            // shows: say how to see it.
+            Err((done, _)) if done > 0 && !attach.is_empty() => println!(
+                "{name} is in front in {multiplexer} session {session}: run `{attach}` to see it."
+            ),
+            Err((_, error)) => return Err(error),
+        }
         return Ok(());
     }
     println!("Taking over {name}. {}", command.hint);
@@ -63,9 +75,10 @@ pub(crate) async fn attach(input: &str) -> Result<()> {
 }
 
 /// Runs the steps that bring a pane forward, in order, in this process's
-/// environment: from a pane, the multiplexer acts on this pane's client.
-fn bring_forward(steps: &[Vec<String>]) -> Result<()> {
-    for step in steps {
+/// environment: from a pane, the multiplexer acts on this pane's client. A
+/// failure says how many steps ran fine before it.
+fn bring_forward(steps: &[Vec<String>]) -> Result<(), (usize, anyhow::Error)> {
+    for (done, step) in steps.iter().enumerate() {
         let Some((program, args)) = step.split_first() else {
             continue;
         };
@@ -73,14 +86,17 @@ fn bring_forward(steps: &[Vec<String>]) -> Result<()> {
             .args(args)
             .stdin(std::process::Stdio::null())
             .output()
-            .with_context(|| format!("cannot run {program}"))?;
+            .with_context(|| format!("cannot run {program}"))
+            .map_err(|error| (done, error))?;
         if !output.status.success() {
             let said = String::from_utf8_lossy(&output.stderr);
             let said = said.lines().next().unwrap_or_default().trim();
-            if said.is_empty() {
-                bail!("{program} ended with {}", output.status);
-            }
-            bail!("{program}: {said}");
+            let error = if said.is_empty() {
+                anyhow::anyhow!("{program} ended with {}", output.status)
+            } else {
+                anyhow::anyhow!("{program}: {said}")
+            };
+            return Err((done, error));
         }
     }
     Ok(())

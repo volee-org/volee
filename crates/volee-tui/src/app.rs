@@ -130,6 +130,18 @@ impl Settings {
     }
 }
 
+/// A step that brings a pane forward failed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FocusFailure {
+    /// How many steps ran fine before it: from one on, the pane is in front
+    /// in its own session.
+    pub(crate) done: usize,
+    /// The program that failed.
+    pub(crate) program: String,
+    /// What it said, or how it ended.
+    pub(crate) reason: String,
+}
+
 /// A question asked on the bottom line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Prompt {
@@ -337,7 +349,7 @@ pub(crate) enum Msg {
         /// The pane.
         focus: PaneFocus,
         /// How it went.
-        result: Result<(), String>,
+        result: Result<(), FocusFailure>,
     },
     /// The source marked a message read, or could not.
     MarkedRead(Result<(), SourceError>),
@@ -1147,10 +1159,27 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
                     format!("{name} is in front: {multiplexer} pane, session {session}."),
                     false,
                 ),
-                Err(error) => {
-                    let reason = text::clause(&error);
+                // Focused in its session, which no window of the multiplexer
+                // shows (none is attached, or another one would have to
+                // switch): say where it is and how to see it.
+                Err(failure) if failure.done > 0 && !focus.attach.is_empty() => {
+                    let attach = printable(&focus.attach.join(" "));
                     model.notify(
-                        format!("Could not bring {name} forward in {multiplexer}: {reason}."),
+                        format!(
+                            "{name} is in front in {multiplexer} session {session}: run `{attach}` \
+                             to see it."
+                        ),
+                        false,
+                    );
+                }
+                Err(failure) => {
+                    let reason = text::clause(&failure.reason);
+                    let program = printable(&failure.program);
+                    model.notify(
+                        format!(
+                            "Could not bring {name} forward in {multiplexer}: {program} says: \
+                             {reason}."
+                        ),
                         true,
                     );
                 }
