@@ -138,8 +138,11 @@ below replaces what it would find.
 
 Each value is a command line, split like a shell would (quotes, no
 variables or pipes) and run in the agent's worktree. `{dir}` stands for
-the worktree and `{base}` for the branch the agent started from. An empty
-string turns a tool off, even when it is installed:
+the worktree and `{base}` for the branch the agent started from, each
+passed as one argument. Keep them out of `sh -c '...'`: the base may come
+from a coordinator agent (volee only accepts a plain branch name, but a
+shell is still the wrong place for text an agent chose). An empty string
+turns a tool off, even when it is installed:
 
 ```toml
 [tui.tools]

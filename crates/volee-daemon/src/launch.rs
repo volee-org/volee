@@ -152,7 +152,7 @@ pub(crate) async fn spawn(
     };
     start_session(shared, &harness, agent, spec)
         .await
-        .map_err(|error| kept(error, &worktree, &params.branch))?;
+        .map_err(|error| kept(error, &target.root, &worktree, &params.branch))?;
     Ok(Spawned {
         agent,
         worktree: worktree.display().to_string(),
@@ -223,9 +223,10 @@ pub(crate) async fn coordinator(
 
 /// A launch that failed once volee had created `worktree` on the new
 /// `branch`: both stay (ADR 0011), and the error says how to start again.
-fn kept(error: DaemonError, worktree: &Path, branch: &str) -> DaemonError {
+fn kept(error: DaemonError, repo: &Path, worktree: &Path, branch: &str) -> DaemonError {
     DaemonError::LaunchFailed {
         error: Box::new(error),
+        repo: repo.to_path_buf(),
         worktree: worktree.to_path_buf(),
         branch: branch.to_owned(),
     }
@@ -526,6 +527,7 @@ pub(crate) async fn resolve(
         .map(str::to_owned)
         .or_else(|| configured.and_then(|repo| repo.base.clone()));
     let base = if let Some(base) = chosen {
+        check_base(&base)?;
         base
     } else {
         let git = Arc::clone(git);
@@ -587,6 +589,28 @@ async fn locate(
         .repo_at(&root)
         .map_or(info.name, |(name, _)| name.to_owned());
     Ok((root, name))
+}
+
+/// Accepts a base that names a branch, such as `main` or `release/2.0`.
+/// A coordinator chooses it, and it ends up in the person's tool command
+/// lines (`{base}`), so any other revision syntax (`HEAD~1`, `:/text`),
+/// spaces and quotes are refused.
+fn check_base(base: &str) -> Result<(), DaemonError> {
+    let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.');
+    let valid = !base.is_empty()
+        && base.chars().all(allowed)
+        && !base.starts_with(['-', '.', '/'])
+        && !base.ends_with(['/', '.'])
+        && !base.contains("..")
+        && !base.contains("//")
+        && !base.to_ascii_lowercase().ends_with(".lock");
+    if valid {
+        Ok(())
+    } else {
+        Err(DaemonError::InvalidParams(format!(
+            "the base must be a branch name, such as main or release/2.0: `{base}` is not one"
+        )))
+    }
 }
 
 /// A branch name as a directory name: `feat/invoices` becomes
@@ -828,6 +852,31 @@ pub(crate) async fn blocking<T: Send + 'static>(
 #[cfg(test)]
 mod tests {
     use super::slug;
+
+    #[test]
+    fn a_base_is_a_branch_name_and_nothing_else() {
+        for base in ["main", "develop", "release/2.0", "feat/x_y-z"] {
+            assert!(super::check_base(base).is_ok(), "{base}");
+        }
+        for base in [
+            "",
+            "HEAD~1",
+            ":/fix",
+            "main^",
+            "a b",
+            "x;y",
+            "$(id)",
+            "-x",
+            ".hidden",
+            "a..b",
+            "a//b",
+            "dir/",
+            "branch.lock",
+            "'quoted'",
+        ] {
+            assert!(super::check_base(base).is_err(), "{base}");
+        }
+    }
 
     #[test]
     fn worktree_names_come_from_volee_worktrees_only() {

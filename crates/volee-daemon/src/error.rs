@@ -62,14 +62,18 @@ pub enum DaemonError {
     /// which it keeps (ADR 0011): the message says how to start again.
     #[error(
         "{error}. volee kept the worktree it made for the agent, {}, and its new branch {branch}: \
-         to launch on that branch again, remove both first (`git worktree remove {}`, then \
-         `git branch -d {branch}`), or choose another branch",
+         to launch on that branch again, remove both first (`git -C {} worktree remove {}`, \
+         then `git -C {} branch -d {branch}`), or choose another branch",
         worktree.display(),
-        worktree.display()
+        repo.display(),
+        worktree.display(),
+        repo.display()
     )]
     LaunchFailed {
         /// Why the launch failed.
         error: Box<DaemonError>,
+        /// The repository's main checkout.
+        repo: PathBuf,
         /// The worktree volee created.
         worktree: PathBuf,
         /// The branch volee created.
