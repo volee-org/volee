@@ -20,6 +20,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0011](0011-safety-and-delivery-evidence.md) | Destructive actions require delivery evidence | Accepted |
 | [0012](0012-language-license-and-scope.md) | Rust, dual MIT/Apache-2.0, Unix first | Accepted |
 | [0013](0013-worktrees-live-in-their-repository.md) | Agent worktrees live in their repository | Accepted |
+| [0014](0014-agents-of-other-harnesses-join-through-mcp.md) | Agents of other harnesses join through MCP | Accepted |
 
 ## Not built yet
 

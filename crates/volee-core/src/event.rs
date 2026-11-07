@@ -120,6 +120,15 @@ pub enum EventKind {
         /// The agent.
         agent: AgentId,
     },
+    /// An agent that joined through volee's MCP server takes part in a
+    /// mission, or no longer does (ADR 0014). Only such agents change
+    /// missions: the others keep the one they were launched for.
+    MembershipChanged {
+        /// The agent.
+        agent: AgentId,
+        /// The mission it takes part in now, if any.
+        mission: Option<MissionId>,
+    },
     /// A conversation thread was opened.
     ThreadOpened {
         /// The thread.

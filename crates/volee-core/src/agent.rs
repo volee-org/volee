@@ -108,6 +108,17 @@ impl Agent {
         self.sessions.last()
     }
 
+    /// Whether this agent joined through volee's MCP server (`volee mcp
+    /// --join`, ADR 0014): an agent of another harness, which volee did not
+    /// launch and only knows through its MCP server. Its state comes from
+    /// that server, and messages reach it when it reads them.
+    ///
+    /// volee discovers the sessions of no other harness yet, so an agent of
+    /// another harness that volee did not launch is a joined one.
+    pub fn joined(&self) -> bool {
+        self.launched_by == LaunchedBy::Outside && matches!(self.harness, HarnessKind::Other(_))
+    }
+
     /// Whether `key` is one of the agent's sessions, current or past.
     pub fn owns_session(&self, key: &SessionKey) -> bool {
         self.sessions.iter().any(|link| &link.key == key)

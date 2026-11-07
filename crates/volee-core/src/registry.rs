@@ -50,6 +50,9 @@ pub enum ApplyError {
     /// The mission already exists.
     #[error("mission {0} already exists")]
     DuplicateMission(MissionId),
+    /// Only agents that joined through volee's MCP server change missions.
+    #[error("agent {0} did not join through volee's MCP server, so its mission is fixed")]
+    NotJoined(AgentId),
 }
 
 /// Why a message may not be sent (ADR 0006).
@@ -228,6 +231,19 @@ impl Registry {
                 if !matches!(record.hold, Some(Hold::MissionOver { .. })) {
                     record.hold = Some(Hold::StoppedByHuman { at });
                 }
+                record.updated_at = at;
+            }
+            EventKind::MembershipChanged { agent, mission } => {
+                if let Some(mission) = mission
+                    && !self.missions.contains_key(mission)
+                {
+                    return Err(ApplyError::UnknownMission(*mission));
+                }
+                let record = self.agent_mut(*agent)?;
+                if !record.joined() {
+                    return Err(ApplyError::NotJoined(*agent));
+                }
+                record.mission = *mission;
                 record.updated_at = at;
             }
             EventKind::ThreadOpened { thread } => {

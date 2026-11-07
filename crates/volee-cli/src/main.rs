@@ -115,11 +115,25 @@ enum Command {
     /// Start, follow, abort or close missions across repositories.
     #[command(subcommand)]
     Mission(MissionCommand),
-    /// Serve the MCP tools of an agent over stdio. Harnesses start this.
+    /// Serve the MCP tools of an agent over stdio. Harnesses start this:
+    /// with --agent for the agents volee launches, with --join to bring an
+    /// agent of another harness (Codex CLI, Gemini CLI...) into volee.
     Mcp {
         /// The agent the server speaks for.
-        #[arg(long)]
-        agent: AgentId,
+        #[arg(long, required_unless_present = "join", conflicts_with = "join")]
+        agent: Option<AgentId>,
+        /// Join volee as an agent of another harness, under this name. The
+        /// same name, harness and directory find the same agent again.
+        #[arg(long, value_name = "NAME")]
+        join: Option<String>,
+        /// With --join: the harness it runs in, such as codex or gemini-cli.
+        #[arg(long, requires = "join", default_value = "other")]
+        harness: String,
+        /// With --join: an open mission to take part in (its title, short id
+        /// or id), so that its members and this agent can write to each
+        /// other.
+        #[arg(long, requires = "join", conflicts_with = "agent")]
+        mission: Option<String>,
     },
     /// Open the interface on a simulated team of agents, to try volee.
     Demo {
@@ -341,7 +355,16 @@ fn async_main(command: Command) -> ExitCode {
                 })
                 .await
             }
-            Command::Mcp { agent } => cmd::mcp::run(agent).await,
+            Command::Mcp {
+                agent,
+                join,
+                harness,
+                mission,
+            } => match (agent, join) {
+                (Some(agent), _) => cmd::mcp::run(agent).await,
+                (None, Some(name)) => cmd::mcp::join(&name, &harness, mission.as_deref()).await,
+                (None, None) => unreachable!("clap requires --agent or --join"),
+            },
             Command::Demo { theme } => cmd::demo::run(theme.as_deref()).await,
             Command::Hook { .. } | Command::Config(_) => {
                 unreachable!("these commands run without the async runtime")
@@ -464,6 +487,40 @@ mod tests {
         assert!(
             Cli::try_parse_from(["volee", "tidy", "alpha", "--force"]).is_err(),
             "there is no way to force a removal"
+        );
+    }
+
+    #[test]
+    fn mcp_serves_an_agent_volee_knows_or_joins_one() {
+        let id = "ag_01jc5x8m3kq7v2c4b9e0f1g2h3";
+        assert!(matches!(
+            parse(&["volee", "mcp", "--agent", id]),
+            Command::Mcp {
+                agent: Some(_),
+                join: None,
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse(&["volee", "mcp", "--join", "infra"]),
+            Command::Mcp { agent: None, join: Some(name), harness, mission: None }
+                if name == "infra" && harness == "other"
+        ));
+        assert!(matches!(
+            parse(&[
+                "volee", "mcp", "--join", "docs", "--harness", "gemini-cli", "--mission", "Invoicing",
+            ]),
+            Command::Mcp { join: Some(_), harness, mission: Some(mission), .. }
+                if harness == "gemini-cli" && mission == "Invoicing"
+        ));
+        assert!(
+            Cli::try_parse_from(["volee", "mcp"]).is_err(),
+            "one or the other"
+        );
+        assert!(Cli::try_parse_from(["volee", "mcp", "--agent", id, "--join", "x"]).is_err());
+        assert!(
+            Cli::try_parse_from(["volee", "mcp", "--agent", id, "--mission", "x"]).is_err(),
+            "only a joined agent picks its mission"
         );
     }
 }

@@ -11,7 +11,7 @@ expression: draw(&model)
 "│ p │  └─ ✓ invoice-page     6 min ││ runs in  a terminal · opus               │"
 "│ l └─ · latency-audit      12 min ││ delivery pushed · PR #12 merged, checks… │"
 "│ ╭ Message to infra ────────────────────────────────────────────────────────╮ │"
-"│ │ infra was started outside volee: it cannot receive messages yet.         │ │"
+"│ │ infra joined through MCP: it reads this when it calls read_messages.     │ │"
 "│ │ kind   note   question   answer   contract   alert                       │ │"
 "│ │                                                                          │ │"
 "│▌│ Write to infra. Markdown is fine.                                        │─╯"

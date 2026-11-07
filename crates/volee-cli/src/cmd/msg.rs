@@ -45,6 +45,20 @@ pub(crate) async fn send(to: &str, body: String, kind: MessageKind) -> Result<()
 /// What happens to a message from the human to `agent`, in one sentence.
 fn outlook(agent: &Agent) -> String {
     let name = text::one_line(&agent.name);
+    if agent.joined() {
+        // No hooks: only the agent's own read_messages call hands it over.
+        return if agent.state.is_live() {
+            format!(
+                "{name} joined through volee's MCP server, which cannot hand it messages: it sees \
+                 this one when it calls read_messages."
+            )
+        } else {
+            format!(
+                "{name}'s MCP server is not running: the message waits until {name} joins again \
+                 and calls read_messages."
+            )
+        };
+    }
     if agent.launched_by == LaunchedBy::Outside {
         return format!(
             "volee did not launch {name}, so nothing hands it this message: {name} sees it only if \
@@ -167,5 +181,45 @@ mod tests {
             }],
         );
         assert!(outlook(&failed).contains("waits until it runs again"));
+    }
+
+    #[test]
+    fn a_joined_agent_reads_its_messages_itself() {
+        let id = AgentId::from_ulid(Ulid::from_parts(1, 1));
+        let joined = |extra: Vec<EventKind>| {
+            let mut events = vec![EventKind::AgentRegistered {
+                agent: id,
+                name: "infra".into(),
+                role: Role::Independent,
+                harness: HarnessKind::Other("codex".into()),
+                launched_by: LaunchedBy::Outside,
+                parent: None,
+                mission: None,
+                workspace: Workspace::default(),
+                location: Location::Unknown,
+            }];
+            events.extend(extra);
+            let events: Vec<Event> = events
+                .into_iter()
+                .map(|kind| Event::new(Timestamp::from_millis(1), kind))
+                .collect();
+            Registry::from_events(&events)
+                .unwrap()
+                .agent(id)
+                .unwrap()
+                .clone()
+        };
+        let state = |state| EventKind::StateChanged {
+            agent: id,
+            state,
+            detail: None,
+        };
+        let connected = outlook(&joined(vec![state(AgentState::Idle)]));
+        assert!(
+            connected.contains("when it calls read_messages"),
+            "{connected}"
+        );
+        let gone = outlook(&joined(vec![state(AgentState::Stopped)]));
+        assert!(gone.contains("joins again"), "{gone}");
     }
 }

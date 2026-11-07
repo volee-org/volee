@@ -61,6 +61,7 @@ group.
 | `delivery-updated` | New delivery evidence from git or the forge. |
 | `agent-forgotten` | The agent is removed; its sessions are ignored from then on. |
 | `stop-requested` | The human stopped the agent: it is held, and volee does not resume it on its own. A later `message-posted` from the human to it lifts the hold. |
+| `membership-changed` | An agent that joined through volee's MCP server takes part in a mission, or no longer does (ADR 0014). Only such agents change missions. |
 | `thread-opened`, `message-posted`, `message-delivered`, `message-read` | Conversations and receipts. |
 | `mission-created`, `mission-updated` | Missions and their progress. When a mission ends, every agent of it is held for good. |
 | `worker-assessed` | The supervisor's verdict on a worker of a mission, with its evidence. |
