@@ -150,7 +150,9 @@ pub(crate) async fn spawn(
         )),
         worktree: Some(worktree_name),
     };
-    start_session(shared, &harness, agent, spec).await?;
+    start_session(shared, &harness, agent, spec)
+        .await
+        .map_err(|error| kept(error, &worktree, &params.branch))?;
     Ok(Spawned {
         agent,
         worktree: worktree.display().to_string(),
@@ -217,6 +219,16 @@ pub(crate) async fn coordinator(
     };
     start_session(shared, &harness, agent, spec).await?;
     Ok(agent)
+}
+
+/// A launch that failed once volee had created `worktree` on the new
+/// `branch`: both stay (ADR 0011), and the error says how to start again.
+fn kept(error: DaemonError, worktree: &Path, branch: &str) -> DaemonError {
+    DaemonError::LaunchFailed {
+        error: Box::new(error),
+        worktree: worktree.to_path_buf(),
+        branch: branch.to_owned(),
+    }
 }
 
 /// The coordinator's first prompt: the mission itself.

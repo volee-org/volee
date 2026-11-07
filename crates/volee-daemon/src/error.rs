@@ -58,6 +58,23 @@ pub enum DaemonError {
     /// The harness failed.
     #[error(transparent)]
     Harness(#[from] volee_harness::HarnessError),
+    /// A launch failed after volee created the agent's worktree and branch,
+    /// which it keeps (ADR 0011): the message says how to start again.
+    #[error(
+        "{error}. volee kept the worktree it made for the agent, {}, and its new branch {branch}: \
+         to launch on that branch again, remove both first (`git worktree remove {}`, then \
+         `git branch -d {branch}`), or choose another branch",
+        worktree.display(),
+        worktree.display()
+    )]
+    LaunchFailed {
+        /// Why the launch failed.
+        error: Box<DaemonError>,
+        /// The worktree volee created.
+        worktree: PathBuf,
+        /// The branch volee created.
+        branch: String,
+    },
     /// git failed or refused.
     #[error(transparent)]
     Git(#[from] volee_git::GitError),
@@ -85,38 +102,43 @@ impl From<RouteError> for DaemonError {
 
 impl From<DaemonError> for RpcError {
     fn from(error: DaemonError) -> Self {
-        let code = match &error {
-            DaemonError::NotFound(_)
-            | DaemonError::Harness(volee_harness::HarnessError::UnknownSession { .. }) => {
-                rpc::NOT_FOUND
-            }
-            DaemonError::Refused(_)
-            | DaemonError::Harness(
-                volee_harness::HarnessError::NotControllable { .. }
-                | volee_harness::HarnessError::ForeignSession { .. }
-                | volee_harness::HarnessError::UntrustedDirectory { .. }
-                | volee_harness::HarnessError::WorktreeAtRisk { .. }
-                | volee_harness::HarnessError::SessionKept { .. },
-            )
-            | DaemonError::Git(
-                volee_git::GitError::BranchExists { .. }
-                | volee_git::GitError::PathExists { .. }
-                | volee_git::GitError::InvalidBranchName { .. }
-                | volee_git::GitError::UnknownRevision { .. }
-                | volee_git::GitError::RemovalRefused { .. },
-            ) => rpc::REFUSED,
-            DaemonError::InvalidParams(_)
-            | DaemonError::Harness(volee_harness::HarnessError::InvalidRequest(_)) => {
-                rpc::INVALID_PARAMS
-            }
-            DaemonError::VersionMismatch(_) => rpc::VERSION_MISMATCH,
-            DaemonError::Unavailable(_)
-            | DaemonError::Harness(
-                volee_harness::HarnessError::NotInstalled { .. }
-                | volee_harness::HarnessError::UnsupportedVersion { .. },
-            ) => rpc::UNAVAILABLE,
-            _ => rpc::INTERNAL_ERROR,
-        };
-        Self::new(code, error.to_string())
+        Self::new(code(&error), error.to_string())
+    }
+}
+
+/// The JSON-RPC code of `error`: a failed launch keeps the code of its cause.
+fn code(error: &DaemonError) -> i64 {
+    match error {
+        DaemonError::LaunchFailed { error, .. } => code(error),
+        DaemonError::NotFound(_)
+        | DaemonError::Harness(volee_harness::HarnessError::UnknownSession { .. }) => {
+            rpc::NOT_FOUND
+        }
+        DaemonError::Refused(_)
+        | DaemonError::Harness(
+            volee_harness::HarnessError::NotControllable { .. }
+            | volee_harness::HarnessError::ForeignSession { .. }
+            | volee_harness::HarnessError::UntrustedDirectory { .. }
+            | volee_harness::HarnessError::WorktreeAtRisk { .. }
+            | volee_harness::HarnessError::SessionKept { .. },
+        )
+        | DaemonError::Git(
+            volee_git::GitError::BranchExists { .. }
+            | volee_git::GitError::PathExists { .. }
+            | volee_git::GitError::InvalidBranchName { .. }
+            | volee_git::GitError::UnknownRevision { .. }
+            | volee_git::GitError::RemovalRefused { .. },
+        ) => rpc::REFUSED,
+        DaemonError::InvalidParams(_)
+        | DaemonError::Harness(volee_harness::HarnessError::InvalidRequest(_)) => {
+            rpc::INVALID_PARAMS
+        }
+        DaemonError::VersionMismatch(_) => rpc::VERSION_MISMATCH,
+        DaemonError::Unavailable(_)
+        | DaemonError::Harness(
+            volee_harness::HarnessError::NotInstalled { .. }
+            | volee_harness::HarnessError::UnsupportedVersion { .. },
+        ) => rpc::UNAVAILABLE,
+        _ => rpc::INTERNAL_ERROR,
     }
 }
