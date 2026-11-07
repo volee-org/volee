@@ -303,19 +303,34 @@ impl DemoSource {
     /// and waits for Enter, so the demo shows the round trip. Only the
     /// background sessions can be taken over, as with Claude Code.
     fn take_over(&self, agent: AgentId) -> Result<TakeOver, SourceError> {
-        let member =
-            scenario::member_of(self.start, agent).ok_or(SourceError::UnknownAgent(agent))?;
-        let cast = &scenario::CAST[member];
-        if cast.role == volee_core::role::Role::Subagent {
-            return Err(SourceError::Unsupported(
-                "it runs inside its parent's session".to_owned(),
-            ));
-        }
-        if !cast.background {
-            return Err(SourceError::Unsupported(
-                "it runs in another terminal; switch to it there".to_owned(),
-            ));
-        }
+        let (handle, name) = if let Some(member) = scenario::member_of(self.start, agent) {
+            let cast = &scenario::CAST[member];
+            if cast.role == volee_core::role::Role::Subagent {
+                return Err(SourceError::Unsupported(
+                    "it runs inside its parent's session".to_owned(),
+                ));
+            }
+            if !cast.background {
+                return Err(SourceError::Unsupported(
+                    "it runs in another terminal; switch to it there".to_owned(),
+                ));
+            }
+            (
+                scenario::session_of(member).short().to_owned(),
+                cast.name.to_owned(),
+            )
+        } else {
+            // An agent the person launched in the demo: a background session
+            // of its own.
+            let registry = self.registry_now()?;
+            let record = registry
+                .agent(agent)
+                .ok_or(SourceError::UnknownAgent(agent))?;
+            let handle = record
+                .current_session()
+                .map_or_else(|| agent.short(), |link| link.key.short().to_owned());
+            (handle, record.name.clone())
+        };
         let script = "printf '\\n  volee demo: here volee would run claude attach %s\\n  \
                       and show the session of %s in this terminal.\\n\\n  \
                       Press Enter to come back to volee. ' \"$1\" \"$2\"; read -r _";
@@ -325,8 +340,8 @@ impl DemoSource {
                 "-c".to_owned(),
                 script.to_owned(),
                 "volee-demo".to_owned(),
-                scenario::session_of(member).short().to_owned(),
-                cast.name.to_owned(),
+                handle,
+                name,
             ],
             cwd: None,
             env_remove: Vec::new(),
@@ -338,7 +353,10 @@ impl DemoSource {
 
     /// The changes of an agent at `at`: a summary, or a small patch.
     fn diff_at(&self, agent: AgentId, full: bool, at: Timestamp) -> Result<String, SourceError> {
-        let registry = Registry::from_events(&self.events_until(at))
+        let mut events = self.events_until(at);
+        // Agents the person launched have changes too: none yet.
+        events.extend(self.outbox().made.iter().filter(|e| e.at <= at).cloned());
+        let registry = Registry::from_events(&events)
             .map_err(|error| SourceError::Failed(error.to_string()))?;
         let record = registry
             .agent(agent)
@@ -673,6 +691,13 @@ mod tests {
         let launched = registry.agent(agent).unwrap();
         assert_eq!(launched.name, "billing-feat-export");
         assert_eq!(launched.model.as_deref(), Some("sonnet"));
+        // It has no changes yet, and can be taken over like the others.
+        assert_eq!(demo.diff(agent, false).await.unwrap().text, "");
+        let take_over = demo.attach(agent).await.unwrap();
+        assert_eq!(
+            take_over.args.last().map(String::as_str),
+            Some("billing-feat-export")
+        );
         assert_eq!(
             demo.spawn(request).await,
             Err(SourceError::Failed(

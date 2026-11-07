@@ -728,6 +728,25 @@ fn zoom_keys_override_the_automatic_level() {
 }
 
 #[test]
+fn zoom_keys_reach_the_view_from_the_agents_list() {
+    let mut model = model(200, 50);
+    assert_eq!(model.focus, Pane::Rail);
+    press(&mut model, "_");
+    assert_eq!(model.zoom, ZoomChoice::Fixed(Zoom::Compact));
+    press(&mut model, "2");
+    assert_eq!(model.focus, Pane::Rail);
+    press(&mut model, "_");
+    assert_eq!(model.network.zoom, ZoomChoice::Fixed(Zoom::Compact));
+    press(&mut model, "0");
+    assert_eq!(model.network.zoom, ZoomChoice::Auto);
+    assert_eq!(
+        model.zoom,
+        ZoomChoice::Fixed(Zoom::Compact),
+        "each view keeps its own"
+    );
+}
+
+#[test]
 fn small_screens_show_the_hierarchy_in_the_list() {
     let mut model = model(120, 40);
     key(&mut model, KeyCode::Tab);

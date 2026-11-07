@@ -629,12 +629,7 @@ impl Model {
         }
         let pane = match self.focus {
             Pane::Rail => Context::Agents,
-            Pane::View => match self.tab {
-                Tab::Hierarchy => Context::Hierarchy,
-                Tab::Network => Context::Network,
-                Tab::Repos => Context::Repos,
-                Tab::Timeline => Context::Timeline,
-            },
+            Pane::View => view_context(self.tab),
             Pane::Detail => Context::Detail,
         };
         vec![pane, Context::Global]
@@ -1532,9 +1527,25 @@ fn perform_windows(
     true
 }
 
+/// The keys of the view a tab shows.
+fn view_context(tab: Tab) -> Context {
+    match tab {
+        Tab::Hierarchy => Context::Hierarchy,
+        Tab::Network => Context::Network,
+        Tab::Repos => Context::Repos,
+        Tab::Timeline => Context::Timeline,
+    }
+}
+
 /// The zoom keys of a view: more or less detail, or the level the size
 /// allows; on the timeline, a finer or coarser time scale, or back to now.
+/// From the agents list, they act on the view beside it.
 fn zoom(model: &mut Model, context: Context, action: Action) {
+    let context = if context == Context::Agents {
+        view_context(model.tab)
+    } else {
+        context
+    };
     let step = |choice: &mut ZoomChoice, current: hierarchy::Zoom| {
         *choice = match action {
             Action::ZoomIn => ZoomChoice::Fixed(current.more_detail()),
