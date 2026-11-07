@@ -209,14 +209,52 @@ async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, D
         spec,
         shown,
     } = plan;
+    // Launching from now on, before the harness even starts: discovery then
+    // adopts the fork if it lists it before its first hook, and never marks
+    // the agent lost in between.
+    let previous = {
+        let mut state = shared.state.lock().await;
+        let previous = state
+            .registry()
+            .agent(agent)
+            .map_or(AgentState::Lost, |record| record.state.clone());
+        let now = state.now();
+        state.commit(vec![Event::new(
+            now,
+            EventKind::StateChanged {
+                agent,
+                state: AgentState::Launching,
+                detail: Some(format!(
+                    "resuming to deliver {} message{}",
+                    shown.len(),
+                    if shown.len() == 1 { "" } else { "s" }
+                )),
+            },
+        )])?;
+        previous
+    };
     let resumed = {
         let harness = Arc::clone(&harness);
-        launch::blocking(move || harness.resume(&session, &spec)).await??
+        launch::blocking(move || harness.resume(&session, &spec)).await?
     };
     let mut state = shared.state.lock().await;
-    state.expect_session(resumed.handle, agent, resumed.origin);
     let now = state.now();
-    let mut events: Vec<Event> = shown
+    let resumed = match resumed {
+        Ok(resumed) => resumed,
+        Err(error) => {
+            state.commit(vec![Event::new(
+                now,
+                EventKind::StateChanged {
+                    agent,
+                    state: previous,
+                    detail: Some(format!("resume failed: {error}")),
+                },
+            )])?;
+            return Err(error.into());
+        }
+    };
+    state.expect_session(resumed.handle, agent, resumed.origin);
+    let events: Vec<Event> = shown
         .iter()
         .map(|message| {
             Event::new(
@@ -228,18 +266,6 @@ async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, D
             )
         })
         .collect();
-    events.push(Event::new(
-        now,
-        EventKind::StateChanged {
-            agent,
-            state: AgentState::Launching,
-            detail: Some(format!(
-                "resumed to deliver {} message{}",
-                shown.len(),
-                if shown.len() == 1 { "" } else { "s" }
-            )),
-        },
-    ));
     state.commit(events)?;
     Ok(Some(shown.len()))
 }
