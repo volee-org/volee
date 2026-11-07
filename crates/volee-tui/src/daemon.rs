@@ -51,17 +51,26 @@ impl DaemonSource {
     /// (its notifications not taken) and talk to a daemon of the same
     /// protocol version, which the command line checks when it starts or
     /// finds the daemon.
+    ///
+    /// The subscription is interactive: while the interface is open, the
+    /// daemon looks for new sessions every few seconds, and it looks once
+    /// right away so the interface opens on fresh data.
     pub async fn connect(mut client: Client) -> Result<Self, SourceError> {
-        let feed = replica::subscribe(&mut client)
+        let feed = replica::subscribe_interactive(&mut client)
             .await
-            .map_err(|error| match error {
-                ReplicaError::Client(error) => failure(error, "cannot follow the volee daemon"),
-                other => SourceError::Failed(other.to_string()),
-            })?;
+            .map_err(cannot_follow)?;
         Ok(Self {
             client: Arc::new(client),
             feed: Mutex::new(Some(feed)),
         })
+    }
+}
+
+/// What the interface says when it cannot subscribe to the daemon.
+fn cannot_follow(error: ReplicaError) -> SourceError {
+    match error {
+        ReplicaError::Client(error) => failure(error, "cannot follow the volee daemon"),
+        other => SourceError::Failed(other.to_string()),
     }
 }
 

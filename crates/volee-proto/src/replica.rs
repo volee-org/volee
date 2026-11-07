@@ -9,7 +9,9 @@
 //!
 //! [`Replica`] applies a feed to a registry that callers read at any time;
 //! the MCP server answers its tools from it. The interface follows a feed
-//! directly, because it needs the events themselves as well as the registry.
+//! directly, because it needs the events themselves as well as the registry,
+//! and subscribes with [`subscribe_interactive`]: while a person watches,
+//! the daemon looks for new sessions every few seconds instead of rarely.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -20,7 +22,9 @@ use volee_core::registry::ApplyError;
 use volee_core::{Event, Registry};
 
 use crate::client::{Client, ClientError};
-use crate::methods::{EVENTS_APPENDED, EVENTS_LAGGED, Lagged, SeqEvent, SinceParams, Subscribe};
+use crate::methods::{
+    EVENTS_APPENDED, EVENTS_LAGGED, Lagged, SeqEvent, Subscribe, SubscribeParams,
+};
 use crate::rpc::Notification;
 
 /// Why a replica could not start.
@@ -58,15 +62,31 @@ pub enum FeedEnd {
 }
 
 /// Subscribes `client` to the daemon's events: the events so far, and the
-/// events that follow.
+/// events that follow. For programs, such as an agent's MCP server.
 ///
 /// It takes the client's notifications, so a client has at most one feed;
 /// calls on the client keep working.
 pub async fn subscribe(client: &mut Client) -> Result<Feed, ReplicaError> {
+    follow(client, false).await
+}
+
+/// Like [`subscribe`], for a client a person watches, such as the
+/// interface: the daemon looks for new sessions at once, then every few
+/// seconds until the feed's connection closes.
+pub async fn subscribe_interactive(client: &mut Client) -> Result<Feed, ReplicaError> {
+    follow(client, true).await
+}
+
+async fn follow(client: &mut Client, interactive: bool) -> Result<Feed, ReplicaError> {
     let notifications = client
         .take_notifications()
         .ok_or(ReplicaError::AlreadySubscribed)?;
-    let batch = client.call::<Subscribe>(SinceParams::default()).await?;
+    let batch = client
+        .call::<Subscribe>(SubscribeParams {
+            after: None,
+            interactive,
+        })
+        .await?;
     let last_seq = batch.last_seq.unwrap_or(0);
     let backlog = batch.events.into_iter().map(|e| e.event).collect();
     Ok(Feed {
@@ -76,6 +96,7 @@ pub async fn subscribe(client: &mut Client) -> Result<Feed, ReplicaError> {
             pending: VecDeque::new(),
             last_seq,
             end: None,
+            interactive,
         },
     })
 }
@@ -97,6 +118,8 @@ pub struct Updates {
     pending: VecDeque<SeqEvent>,
     last_seq: u64,
     end: Option<FeedEnd>,
+    /// Whether the subscription is interactive, which a resumed one keeps.
+    interactive: bool,
 }
 
 impl Updates {
@@ -138,10 +161,15 @@ impl Updates {
     /// Subscribes again after the daemon dropped the subscription for
     /// falling behind: the events missed since the last one handed out come
     /// first, then the feed goes on. `client` must be the connection the
-    /// feed came from.
+    /// feed came from. An interactive feed stays interactive.
     pub async fn resume(&mut self, client: &Client) -> Result<(), ClientError> {
         let after = self.last_seq();
-        let batch = client.call::<Subscribe>(SinceParams { after }).await?;
+        let batch = client
+            .call::<Subscribe>(SubscribeParams {
+                after,
+                interactive: self.interactive,
+            })
+            .await?;
         self.pending.extend(batch.events);
         self.end = None;
         Ok(())
@@ -315,6 +343,7 @@ mod tests {
         });
         let (id, params) = daemon.request("events.subscribe").await;
         assert_eq!(params["after"], Value::Null);
+        assert_eq!(params["interactive"], false, "a program does not watch");
         daemon
             .respond(
                 id,
@@ -350,6 +379,7 @@ mod tests {
         });
         let (id, params) = daemon.request("events.subscribe").await;
         assert_eq!(params["after"], 3);
+        assert_eq!(params["interactive"], false);
         daemon
             .respond(
                 id,
@@ -369,6 +399,39 @@ mod tests {
             subscribe(&mut client).await,
             Err(ReplicaError::AlreadySubscribed)
         ));
+    }
+
+    #[tokio::test]
+    async fn an_interactive_feed_says_so_and_stays_interactive_when_resumed() {
+        let (mut client, mut daemon, _dir) = connect().await;
+        let subscribed = tokio::spawn(async move {
+            let feed = subscribe_interactive(&mut client).await.unwrap();
+            (client, feed)
+        });
+        let (id, params) = daemon.request("events.subscribe").await;
+        assert_eq!(params["interactive"], true);
+        daemon
+            .respond(id, json!({ "events": [seq_event(1, 1)], "last_seq": 1 }))
+            .await;
+        daemon
+            .notify(EVENTS_LAGGED, json!({ "skipped": 5000 }))
+            .await;
+        let (client, mut feed) = subscribed.await.unwrap();
+        assert!(matches!(
+            feed.updates.next().await,
+            Err(FeedEnd::Lagged { .. })
+        ));
+        let resumed = tokio::spawn(async move {
+            feed.updates.resume(&client).await.unwrap();
+            client
+        });
+        let (id, params) = daemon.request("events.subscribe").await;
+        assert_eq!(params["after"], 1);
+        assert_eq!(params["interactive"], true);
+        daemon
+            .respond(id, json!({ "events": [], "last_seq": 1 }))
+            .await;
+        resumed.await.unwrap();
     }
 
     #[tokio::test]
