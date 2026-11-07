@@ -7,7 +7,7 @@ use volee_core::{Event, Registry};
 use volee_proto::methods::{EventsSince, SinceParams, Summarize, SummarizeParams};
 
 use crate::connect::connect_or_start;
-use crate::resolve;
+use crate::{resolve, text};
 
 /// Prints the summary of the thread `target` names: a mission, else an agent.
 pub(crate) async fn run(target: &str) -> Result<()> {
@@ -33,7 +33,7 @@ pub(crate) async fn run(target: &str) -> Result<()> {
         }
     };
     let summary = client.call::<Summarize>(SummarizeParams { thread }).await?;
-    println!("{}", summary.summary);
+    println!("{}", text::printable(&summary.summary));
     if !summary.model.is_empty() {
         println!(
             "\n({} messages, summarized by {} with your Claude Code account)",

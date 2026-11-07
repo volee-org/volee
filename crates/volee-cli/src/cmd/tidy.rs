@@ -7,7 +7,7 @@ use volee_core::{AgentId, Registry};
 use volee_proto::methods::{Tidy, TidyOutcome, TidyParams};
 
 use crate::connect::connect_or_start;
-use crate::resolve;
+use crate::{resolve, text};
 
 /// Tidies one agent, or with `all` every agent volee launched that still has
 /// a worktree; `dry_run` only says what would happen. A single agent that is
@@ -76,14 +76,15 @@ fn candidates(registry: &Registry) -> Vec<(AgentId, String)> {
         .filter(|agent| {
             agent.launched_by != LaunchedBy::Outside && agent.workspace.worktree.is_some()
         })
-        .map(|agent| (agent.id, agent.name.clone()))
+        .map(|agent| (agent.id, text::one_line(&agent.name).into_owned()))
         .collect()
 }
 
 fn name(registry: &Registry, agent: AgentId) -> String {
-    registry
-        .agent(agent)
-        .map_or_else(|| agent.short(), |record| record.name.clone())
+    registry.agent(agent).map_or_else(
+        || agent.short(),
+        |record| text::one_line(&record.name).into_owned(),
+    )
 }
 
 fn kept_branch(branch: Option<&str>) -> String {
