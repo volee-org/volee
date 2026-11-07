@@ -161,12 +161,20 @@ soon as they take part in a conversation.
   in bold. The line under the graph tells which questions it waits for or
   owes, who it talks with, who launched it and whom it launched.
 
-Agents that talk end up close together, across missions: positions come
-from a force-directed layout (linked agents attract each other, all agents
-push each other away). It is computed only when an agent or a new pair of
-correspondents appears, never while you watch, and it starts from the
-previous positions, so a newcomer moves the others little. Agents that do
-not match the filter are dimmed.
+Lines follow the routes volee allows
+([ADR 0006](../adr/0006-messaging.md)): agents of a mission write to each
+other freely; otherwise an agent writes to its parent, its children, its
+mission's coordinator or the lead who asked for the mission, and to you. So
+a conversation between two missions goes through their coordinators and
+the lead, or through you, and a session volee did not launch talks with
+you: the picture shows who relays what.
+
+Agents that talk end up close together, whatever their mission: positions
+come from a force-directed layout (linked agents attract each other, all
+agents push each other away). It is computed only when an agent or a new
+pair of correspondents appears, never while you watch, and it starts from
+the previous positions, so a newcomer moves the others little. Agents that
+do not match the filter are dimmed.
 
 Like the hierarchy, the network has three levels of detail: **cards** with
 the name and the state, **compact** labels with the state's glyph and the
