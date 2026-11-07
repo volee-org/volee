@@ -30,6 +30,11 @@ wake_timeout = 3600
 # summaries = true
 # summary_model = "haiku"
 
+[missions]
+# The most agents one mission may launch besides its coordinator, counting
+# those that already stopped. A coordinator asking for more is refused.
+# max_workers = 8
+
 [tui]
 # "catppuccin-mocha" (default), "catppuccin-macchiato", "catppuccin-frappe",
 # "catppuccin-latte", "terminal", or the name of a file in

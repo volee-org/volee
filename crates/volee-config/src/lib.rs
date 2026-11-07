@@ -54,8 +54,25 @@ pub struct Config {
     pub repos: BTreeMap<String, Repo>,
     /// Messaging settings.
     pub messages: Messages,
+    /// Mission settings.
+    pub missions: Missions,
     /// Interface settings.
     pub tui: Tui,
+}
+
+/// Mission settings.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Missions {
+    /// The most agents one mission may launch besides its coordinator, so
+    /// that a coordinator gone wrong cannot start sessions without end.
+    pub max_workers: usize,
+}
+
+impl Default for Missions {
+    fn default() -> Self {
+        Self { max_workers: 8 }
+    }
 }
 
 /// Messaging settings.
@@ -211,6 +228,11 @@ impl Config {
                 "agents.wake_timeout must be at least 1 second".to_owned(),
             ));
         }
+        if self.missions.max_workers == 0 {
+            return Err(invalid(
+                "missions.max_workers must be at least 1".to_owned(),
+            ));
+        }
         Ok(())
     }
 
@@ -263,6 +285,7 @@ mod tests {
     fn an_empty_file_is_the_defaults() {
         assert_eq!(parse("").unwrap(), Config::default());
         assert_eq!(Config::default().agents.wake_timeout, 3_600);
+        assert_eq!(Config::default().missions.max_workers, 8);
     }
 
     #[test]

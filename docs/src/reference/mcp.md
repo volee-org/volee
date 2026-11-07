@@ -76,7 +76,9 @@ task is done, blocked or failed. A `done` report is a `report` message;
 
 For a mission's coordinator: launches a worker on a new branch, in its own
 worktree of one of the mission's repositories. volee tells the coordinator
-when the worker stops, with the evidence it checked.
+when the worker stops, with the evidence it checked. A mission launches at
+most `[missions] max_workers` agents (8 by default); past it, the tool
+returns an error that tells the coordinator to ask the human.
 
 | Argument | Type | Meaning |
 | --- | --- | --- |
