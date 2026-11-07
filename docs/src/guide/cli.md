@@ -33,12 +33,13 @@ it waits for you, and none of it changes your work:
 | Fetch | At most every five minutes per repository, for the repositories of agents volee launched | `git fetch --prune origin`; the [`[git] fetch`](configuration.md#git) setting chooses which repositories, or none |
 | Look up pull requests | At most once a minute per branch, and right after its agent stops | `gh pr list`, with your own `gh` sign-in, when the GitHub CLI is installed and signed in |
 | Find sessions in tuios panes | After each look for sessions, while Claude Code sessions run by hand | `tuios call list-agents`, then `ps` and `tuios call resolve-pane` for a session tuios's hooks did not report; only when `tuios` was on the `PATH` when the daemon started ([ADR 0015](../adr/0015-tuios-location-adapter.md)) |
+| Find sessions in tmux panes | After each look for sessions, while Claude Code sessions run by hand | `tmux list-panes -a`, then `ps` for a session not found before; only when `tmux` was on the `PATH` when the daemon started |
 
 Pull request look-ups use your GitHub account's API allowance, a few
 requests a minute with several agents running. Without `gh`, or signed out,
-volee skips them and `volee daemon status` says why. Without a tuios server,
-the search for panes changes nothing, and `volee daemon status` says so on
-its `panes` line.
+volee skips them and `volee daemon status` says why. Without a tuios or tmux
+server, the search for panes changes nothing, and `volee daemon status` says
+so on its `panes` lines.
 
 ## Agents
 
@@ -99,9 +100,9 @@ the agent until you press `Ctrl+Z`; the agent keeps running after you leave.
 These commands work on every background session, including the ones you
 started yourself. A session running in a terminal of its own (an interactive
 `claude`) is shown by `volee ls`, but only that terminal can show or control
-it, unless it runs in a tuios pane: then `volee logs` prints the pane's
-screen, and `volee attach` brings the pane forward instead of taking the
-terminal ([panes](interface.md#agents-in-tuios-panes)). `volee stop` only
+it, unless it runs in a tuios or tmux pane: then `volee logs` prints the
+pane's screen, and `volee attach` brings the pane forward instead of taking
+the terminal ([panes](interface.md#agents-in-tuios-panes)). `volee stop` only
 stops the agents volee launched: stop the others where they were started. A stopped agent keeps its conversation, and volee does not
 resume it on its own, even when other agents write to it, until you send it a
 message yourself. `volee stop` on an agent that is not running only records

@@ -5,7 +5,8 @@
 //! A [`Multiplexer`] is optional: the daemon uses one only when its program is
 //! installed, and a multiplexer that does not answer changes nothing. It only
 //! reads panes and focuses them: it never types into a pane, and never
-//! creates, closes or moves one. [`Tuios`] is the first adapter.
+//! creates, closes or moves one. [`Tuios`] was the first adapter; [`Tmux`] is
+//! the second.
 //!
 //! Pane addresses are written `<session>:<pane>`, in the multiplexer's own
 //! terms, so that a person can be told which session holds the pane
@@ -17,12 +18,14 @@
 
 mod process;
 mod screen;
+mod tmux;
 mod tuios;
 
 use std::fmt;
 
 use volee_core::harness::SessionKey;
 
+pub use tmux::Tmux;
 pub use tuios::Tuios;
 
 /// A session that may run in a pane: an interactive session of a harness,

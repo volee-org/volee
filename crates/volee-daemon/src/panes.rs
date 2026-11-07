@@ -124,10 +124,22 @@ pub(crate) fn hosted(sessions: &[ListedSession]) -> Vec<Hosted> {
 /// where their agents run. Agents left in a pane whose session no longer
 /// runs go back to a plain terminal, and so do agents in a pane of a
 /// multiplexer this daemon does not use (it was used by an earlier run).
+///
+/// The multiplexers are asked in order, and a session one of them found is
+/// not offered to the next: two that both claimed it (a session in tmux,
+/// inside a tuios pane whose variables it inherited) would otherwise move
+/// its agent back and forth at every round.
 pub(crate) async fn locate(shared: &Arc<Shared>, live: &[Hosted]) {
     forget_unused(shared).await;
+    let mut claimed: Vec<SessionKey> = Vec::new();
     for adapter in shared.panes.adapters.clone() {
         let name = adapter.name();
+        let live: Vec<Hosted> = live
+            .iter()
+            .filter(|session| !claimed.contains(&session.key))
+            .cloned()
+            .collect();
+        let live = live.as_slice();
         let ended = in_panes_of(shared, name, live).await;
         if live.is_empty() && ended.is_empty() {
             continue;
@@ -160,6 +172,7 @@ pub(crate) async fn locate(shared: &Arc<Shared>, live: &[Hosted]) {
             .into_iter()
             .map(|located| (located.key, located.target))
             .collect();
+        claimed.extend(found.iter().map(|(key, _)| key.clone()));
         let asked: Vec<SessionKey> = live
             .iter()
             .map(|session| session.key.clone())
