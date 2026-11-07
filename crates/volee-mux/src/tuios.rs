@@ -506,16 +506,16 @@ mod tests {
     fn focus_shows_the_pane_then_its_session() {
         let tuios = Tuios::with_runner(FakeRunner::new());
         assert_eq!(
-            tuios.focus_steps("main-session:475fc3f0").unwrap(),
+            tuios.focus_steps("work:0a1b2c3d").unwrap(),
             [
-                vec!["tuios", "focus-window", "-s", "main-session", "475fc3f0"],
-                vec!["tuios", "switch-session", "main-session"],
+                vec!["tuios", "focus-window", "-s", "work", "0a1b2c3d"],
+                vec!["tuios", "switch-session", "work"],
             ]
         );
         assert!(tuios.runner.calls().is_empty(), "the client runs the steps");
         assert_eq!(
-            tuios.attach_command("main-session:475fc3f0"),
-            Some(vec!["tuios".into(), "attach".into(), "main-session".into()])
+            tuios.attach_command("work:0a1b2c3d"),
+            Some(vec!["tuios".into(), "attach".into(), "work".into()])
         );
     }
 }
