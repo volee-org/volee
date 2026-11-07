@@ -446,6 +446,9 @@ take-over = "ctrl-a"
 | `g`, `home` | first agent | `first` |
 | `G`, `end` | last agent | `last` |
 | `enter` | show the agent's subtree in the hierarchy | `focus-subtree` |
+| `+`, `=` | more detail in the view beside the list | `zoom-in` |
+| `_` | less detail in the view beside the list | `zoom-out` |
+| `0` | the view's detail chosen from the size again | `zoom-auto` |
 
 ### Hierarchy
 

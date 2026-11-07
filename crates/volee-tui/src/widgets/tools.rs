@@ -59,7 +59,11 @@ pub(crate) fn render(model: &Model, menu: ToolMenu, area: Rect, buf: &mut Buffer
                     tool.label.clone(),
                     theme.style(StyleRole::Input),
                 ));
-                spans.push(Span::styled(format!("  {line}"), dim));
+                // The command line, unless it says nothing more than the
+                // name (`lazygit`).
+                if line != tool.label {
+                    spans.push(Span::styled(format!("  {line}"), dim));
+                }
             }
             None => spans.push(Span::styled(
                 format!("none found; set one under [tui.tools] {}", config_key(kind)),
