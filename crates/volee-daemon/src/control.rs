@@ -200,7 +200,9 @@ fn pane_error(name: &str, adapter: &dyn Multiplexer, error: &MuxError) -> Daemon
 
 /// `agents.preview`: the agent's recent terminal output, raw, with its
 /// terminal escape sequences, for a terminal emulator to render. For an
-/// agent in a multiplexer pane, what the pane shows.
+/// agent in a multiplexer pane, what the pane shows; for one that never had a
+/// session, the end of its setup log when it has one (ADR 0017), which shows
+/// a setup under way or why it failed.
 pub(crate) async fn preview(
     shared: &Arc<Shared>,
     params: AgentParams,
@@ -222,12 +224,69 @@ pub(crate) async fn preview(
         name,
         session,
         ..
-    } = target(shared, params.agent).await?;
+    } = match target(shared, params.agent).await {
+        Ok(target) => target,
+        Err(error) => {
+            return match setup_screen(shared, params.agent).await {
+                Some(screen) => Ok(PreviewText { screen }),
+                None => Err(error),
+            };
+        }
+    };
     let screen = blocking(move || harness.logs(&session))
         .await?
         .map_err(|error| harness_error(&name, error))?;
     Ok(PreviewText {
         screen: String::from_utf8_lossy(&screen).into_owned(),
+    })
+}
+
+/// How much of a setup log a preview shows, from its end.
+const SETUP_PREVIEW_BYTES: u64 = 64 * 1024;
+
+/// The end of the setup log of an agent that never had a session, as
+/// terminal output under a line that says what it is; `None` without one.
+async fn setup_screen(shared: &Arc<Shared>, agent: AgentId) -> Option<String> {
+    let never_ran = shared
+        .state
+        .lock()
+        .await
+        .registry()
+        .agent(agent)
+        .is_some_and(|record| record.sessions.is_empty());
+    if !never_ran {
+        return None;
+    }
+    let log = shared.paths.agent_dir(agent).join("setup.log");
+    let text = blocking(move || read_tail(&log, SETUP_PREVIEW_BYTES))
+        .await
+        .ok()??;
+    let mut screen =
+        String::from("volee set up this worktree; no session has started. setup.log:\r\n\r\n");
+    for line in text.lines() {
+        screen.push_str(line);
+        screen.push_str("\r\n");
+    }
+    Some(screen)
+}
+
+/// The last `bytes` of the file at `path`, from a line start; `None` when it
+/// cannot be read.
+fn read_tail(path: &std::path::Path, bytes: u64) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let length = file.metadata().ok()?.len();
+    let start = length.saturating_sub(bytes);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut raw = Vec::new();
+    file.read_to_end(&mut raw).ok()?;
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    Some(if start > 0 {
+        // Drop the partial first line.
+        text.split_once('\n')
+            .map_or(text.clone(), |(_, rest)| rest.to_owned())
+    } else {
+        text
     })
 }
 

@@ -25,8 +25,8 @@ use volee_git::GitCli;
 use volee_harness::{Harness, PermissionMode};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    AbortMission, AbortParams, CreateMission, CreateMissionParams, EventsSince, SinceParams, Spawn,
-    SpawnParams,
+    AbortMission, AbortParams, AgentParams, CreateMission, CreateMissionParams, EventsSince,
+    Preview, SinceParams, Spawn, SpawnParams,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
@@ -413,9 +413,7 @@ async fn what_a_failed_launch_left_is_never_reused_once_something_was_done_in_it
         .unwrap()
         .id;
     client
-        .call::<volee_proto::methods::Forget>(volee_proto::methods::AgentParams {
-            agent: forgotten,
-        })
+        .call::<volee_proto::methods::Forget>(AgentParams { agent: forgotten })
         .await
         .unwrap();
     let error = rpc_error(
@@ -964,4 +962,38 @@ async fn a_mission_that_ends_during_the_setup_stops_the_launch() {
         Some("no session started: its mission ended during its setup")
     );
     assert!(daemon.repo.join(".claude/worktrees/feat-late").is_dir());
+}
+
+#[tokio::test]
+async fn the_preview_of_a_failed_setup_is_its_log() {
+    let daemon = start_with(concat!(
+        "setup = [\n",
+        "  'echo resolving packages',\n",
+        "  'echo \"error: lockfile had changes, but lockfile is frozen\" >&2; exit 1',\n",
+        "]\n",
+    ));
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    client
+        .call::<Spawn>(worker("feat/frozen"))
+        .await
+        .unwrap_err();
+    let agent = registry(&daemon.socket).await.agents().next().unwrap().id;
+    let preview = client.call::<Preview>(AgentParams { agent }).await.unwrap();
+    assert!(
+        preview
+            .screen
+            .starts_with("volee set up this worktree; no session has started. setup.log:\r\n\r\n"),
+        "{}",
+        preview.screen
+    );
+    assert!(
+        preview
+            .screen
+            .contains("$ echo resolving packages\r\nresolving packages\r\n")
+            && preview.screen.contains(
+                "error: lockfile had changes, but lockfile is frozen\r\n[exited with status 1]\r\n"
+            ),
+        "{}",
+        preview.screen
+    );
 }
