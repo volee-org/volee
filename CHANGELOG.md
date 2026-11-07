@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 It is generated from the commit history with [git-cliff](https://git-cliff.org):
 see [RELEASING.md](RELEASING.md).
 
+## [0.3.0] - 2026-11-07
+
+### Added
+
+- **cli**: Print shell completion scripts ([#78](https://github.com/volee-org/volee/pull/78))
+- **tui**: Forget an agent from the interface ([#83](https://github.com/volee-org/volee/pull/83))
+- **daemon**: Run setup commands in a new worktree before its agent starts ([#85](https://github.com/volee-org/volee/pull/85))
+
+### Fixed
+
+- **cli**: Say that gh is not checked yet in volee daemon status ([#81](https://github.com/volee-org/volee/pull/81))
+- **mux**: Bring tuios panes forward on the server the daemon reads ([#82](https://github.com/volee-org/volee/pull/82))
+- **daemon**: Say a failed launch's cause without a doubled period ([#84](https://github.com/volee-org/volee/pull/84))
+
+### Documentation
+
+- Mark 0.1 and 0.2 done in the roadmap and list what 0.3 brings ([#80](https://github.com/volee-org/volee/pull/80))
+
 ## [0.2.0] - 2026-11-07
 
 ### Added
@@ -87,5 +105,6 @@ see [RELEASING.md](RELEASING.md).
 - Mark the interface, messaging and views milestones done ([#52](https://github.com/volee-org/volee/pull/52))
 - Start the daemon in the first step of the guide, and say what tidy removes ([#56](https://github.com/volee-org/volee/pull/56))
 
+[0.3.0]: https://github.com/volee-org/volee/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/volee-org/volee/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/volee-org/volee/releases/tag/v0.1.0
