@@ -22,7 +22,7 @@ use crate::keymap::{Action, Context, KeyCombo, Keymap};
 use crate::layout::{Mode, ScreenLayout};
 use crate::letters::Letters;
 use crate::preview::PreviewScreen;
-use crate::source::{Outgoing, SourceError, TakeOver};
+use crate::source::{Changes, Outgoing, SourceError, TakeOver};
 use crate::text;
 use crate::theme::Theme;
 use crate::views::hierarchy::{self, Direction, Scene, SceneKey, ZoomChoice};
@@ -123,9 +123,9 @@ pub(crate) struct DiffView {
     pub(crate) agent: AgentId,
     /// The full patch rather than the summary.
     pub(crate) full: bool,
-    /// The text, once loaded.
-    pub(crate) text: Option<String>,
-    /// Why it could not be loaded.
+    /// The changes, once loaded.
+    pub(crate) changes: Option<Changes>,
+    /// Why they could not be loaded.
     pub(crate) error: Option<String>,
     /// A request is under way.
     pub(crate) loading: bool,
@@ -251,8 +251,8 @@ pub(crate) enum Msg {
         agent: AgentId,
         /// The full patch rather than the summary.
         full: bool,
-        /// The text, or why it failed.
-        result: Result<String, SourceError>,
+        /// The changes, or why they could not be read.
+        result: Result<Changes, SourceError>,
     },
     /// The source said how to take over an agent, or why it cannot.
     TakeOverReady {
@@ -929,12 +929,12 @@ fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool 
             {
                 diff.loading = false;
                 match result {
-                    Ok(text) => {
-                        diff.text = Some(text);
+                    Ok(changes) => {
+                        diff.changes = Some(changes);
                         diff.error = None;
                     }
                     Err(error) => {
-                        diff.text = None;
+                        diff.changes = None;
                         diff.error = Some(error.to_string());
                     }
                 }
@@ -945,7 +945,15 @@ fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool 
         Msg::TakeOverReady { agent, result } => {
             model.pending_take_over = None;
             match result {
-                Ok(take_over) => effects.push(Effect::TakeOver { agent, take_over }),
+                Ok(mut take_over) => {
+                    // Said in the terminal as the agent's session starts.
+                    let name = model.name_of(agent);
+                    take_over.hint = Some(match take_over.hint {
+                        Some(hint) => format!("Taking over {name}. {hint}"),
+                        None => format!("Taking over {name}."),
+                    });
+                    effects.push(Effect::TakeOver { agent, take_over });
+                }
                 Err(error) => {
                     let name = model.name_of(agent);
                     let reason = error.to_string();
@@ -1188,7 +1196,7 @@ fn open_diff(model: &mut Model, agent: AgentId, full: bool, effects: &mut Vec<Ef
     model.overlay = Some(Overlay::Diff(DiffView {
         agent,
         full,
-        text: None,
+        changes: None,
         error: None,
         loading: true,
         scroll: 0,

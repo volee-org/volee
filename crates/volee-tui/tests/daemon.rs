@@ -17,7 +17,7 @@ use volee_core::role::{LaunchedBy, Role};
 use volee_core::time::Timestamp;
 use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, Registry};
-use volee_daemon::{Config, Daemon, DaemonError, ManualClock, MemoryLog};
+use volee_daemon::{Config, Daemon, DaemonError, EvidenceSources, ManualClock, MemoryLog};
 use volee_proto::client::Client;
 use volee_proto::methods::{Empty, Shutdown};
 use volee_proto::paths::Paths;
@@ -54,7 +54,8 @@ struct Running {
     _dir: tempfile::TempDir,
 }
 
-/// A daemon with a lead (1) and its worker "api" (2), and no harness.
+/// A daemon with a lead (1) and its worker "api" (2), without Claude Code
+/// or a version control program.
 fn start() -> Running {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::rooted(dir.path());
@@ -71,6 +72,8 @@ fn start() -> Running {
         spool: None,
         harness: None,
         discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
+        evidence: EvidenceSources::default(),
+        volee_bin: None,
     };
     let task = tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -140,21 +143,21 @@ async fn the_snapshot_and_the_updates_build_the_daemons_registry() {
 async fn what_the_daemon_cannot_do_is_said_plainly() {
     let daemon = start();
     let source = source(&daemon).await;
-    // This daemon has no harness to show screens or attach sessions with,
-    // and older daemons do not know these methods at all: either way the
-    // interface gets a sentence to show, not a failure.
-    for result in [
-        source.preview(agent(2)).await.map(|_| ()),
-        source.attach(agent(2)).await.map(|_| ()),
-    ] {
-        match result {
-            Err(SourceError::Unsupported(message)) => assert_ne!(message, ""),
-            other => panic!("expected a plain refusal, got {other:?}"),
-        }
-    }
+    // This daemon has no Claude Code to show screens or attach sessions
+    // with, and nothing to read changes with: the interface gets the
+    // daemon's sentence to show, and may ask again later.
+    let no_claude = "Claude Code is not available to this daemon; see `volee daemon status`";
+    assert_eq!(
+        source.preview(agent(2)).await,
+        Err(SourceError::Failed(no_claude.to_owned()))
+    );
+    assert_eq!(
+        source.attach(agent(2)).await,
+        Err(SourceError::Failed(no_claude.to_owned()))
+    );
     assert!(matches!(
         source.diff(agent(2), false).await,
-        Err(SourceError::Unsupported(_) | SourceError::Failed(_))
+        Err(SourceError::Failed(message)) if message.ends_with("is not available to this daemon")
     ));
     let unknown = AgentId::from_ulid(Ulid::from_parts(1_000, 99));
     assert!(

@@ -15,7 +15,7 @@ use crate::demo::{
     DemoSource, EXPLORE_HANDLERS, INFRA, INVOICE_PAGE, INVOICE_SCHEMA, INVOICE_TOOLS, INVOICING,
     LATENCY_AUDIT, TOWER, TRACE_GATEWAY,
 };
-use crate::source::{Outgoing, SourceError, TakeOver};
+use crate::source::{Changes, Outgoing, SourceError, TakeOver};
 use crate::views::hierarchy::Zoom;
 
 fn start() -> Timestamp {
@@ -285,7 +285,8 @@ fn a_asks_the_source_then_takes_over_the_selected_agent() {
         program: "claude".into(),
         args: vec!["attach".into(), "7f3k2m9q".into()],
         cwd: None,
-        hint: Some("Ctrl+Z comes back to volee.".into()),
+        env_remove: vec!["CLAUDE_CODE_SESSION_ID".into()],
+        hint: Some("Press Ctrl+Z to come back.".into()),
     };
     let effects = update(
         &mut model,
@@ -294,11 +295,15 @@ fn a_asks_the_source_then_takes_over_the_selected_agent() {
             result: Ok(take_over.clone()),
         },
     );
+    let said = TakeOver {
+        hint: Some("Taking over invoice-schema. Press Ctrl+Z to come back.".into()),
+        ..take_over
+    };
     assert_eq!(
         effects,
         [Effect::TakeOver {
             agent: schema,
-            take_over
+            take_over: said
         }]
     );
     let effects = update(
@@ -494,7 +499,10 @@ fn d_shows_the_changes_and_f_switches_to_the_patch() {
         Msg::DiffLoaded {
             agent: page,
             full: false,
-            result: Ok("line\n".repeat(80)),
+            result: Ok(Changes {
+                text: "line\n".repeat(80),
+                truncated: false,
+            }),
         },
     );
     let scroll = |model: &Model| match &model.overlay {
@@ -522,13 +530,13 @@ fn d_shows_the_changes_and_f_switches_to_the_patch() {
         Msg::DiffLoaded {
             agent: page,
             full: false,
-            result: Ok("summary".into()),
+            result: Ok(Changes::default()),
         },
     );
     let Some(Overlay::Diff(diff)) = &model.overlay else {
         panic!("closed");
     };
-    assert_eq!(diff.text, None);
+    assert_eq!(diff.changes, None);
     update(
         &mut model,
         Msg::DiffLoaded {

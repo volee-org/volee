@@ -316,6 +316,9 @@ impl Screen for TerminalScreen {
         if let Some(cwd) = &take_over.cwd {
             command.current_dir(cwd);
         }
+        for name in &take_over.env_remove {
+            command.env_remove(name);
+        }
         with_suspended(self, command, take_over.hint.as_deref()).await
     }
 }
@@ -339,7 +342,7 @@ async fn with_suspended(
             stdout(),
             Print("\n"),
             SetAttribute(Attribute::Dim),
-            Print(format!("volee: {hint}")),
+            Print(hint),
             SetAttribute(Attribute::Reset),
             Print("\n\n"),
         )?;

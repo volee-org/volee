@@ -48,7 +48,7 @@ pub use clock::{Clock, ManualClock, SystemClock};
 pub use daemon::DaemonSource;
 pub use demo::DemoSource;
 pub use keymap::{Keymap, KeymapError};
-pub use source::{Outgoing, Source, SourceError, Subscription, TakeOver};
+pub use source::{Changes, Outgoing, Source, SourceError, Subscription, TakeOver};
 pub use theme::{ColorDepth, Theme, ThemeError};
 
 use crate::app::{Model, Msg};

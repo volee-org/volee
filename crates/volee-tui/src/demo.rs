@@ -22,7 +22,7 @@ use volee_core::time::Timestamp;
 use volee_core::{AgentId, MessageId, Registry, ThreadId};
 
 use crate::clock::Clock;
-use crate::source::{Outgoing, Source, SourceError, Subscription, TakeOver};
+use crate::source::{Changes, Outgoing, Source, SourceError, Subscription, TakeOver};
 
 /// A [`Source`] with a simulated team of agents, for `volee demo`,
 /// screenshots and tests.
@@ -130,8 +130,12 @@ impl Source for DemoSource {
         &self,
         agent: AgentId,
         full: bool,
-    ) -> impl Future<Output = Result<String, SourceError>> + Send {
-        std::future::ready(self.diff_at(agent, full, self.clock.now()))
+    ) -> impl Future<Output = Result<Changes, SourceError>> + Send {
+        let text = self.diff_at(agent, full, self.clock.now());
+        std::future::ready(text.map(|text| Changes {
+            text,
+            truncated: false,
+        }))
     }
 
     async fn send_message(&self, message: Outgoing) -> Result<(), SourceError> {
@@ -184,6 +188,7 @@ impl DemoSource {
                 cast.name.to_owned(),
             ],
             cwd: None,
+            env_remove: Vec::new(),
             // The stand-in says it itself.
             hint: None,
         })
@@ -421,16 +426,14 @@ mod tests {
         let (demo, _clock) = demo();
         let page = agent_id(start(), INVOICE_PAGE);
         let stat = demo.diff(page, false).await.unwrap();
-        assert!(stat.contains("9 files changed, 163 insertions(+), 43 deletions(-)"));
         assert!(
-            demo.diff(page, true)
-                .await
-                .unwrap()
-                .starts_with("diff --git")
+            stat.text
+                .contains("9 files changed, 163 insertions(+), 43 deletions(-)")
         );
-        assert_eq!(
-            demo.diff(agent_id(start(), TOWER), false).await.unwrap(),
-            ""
-        );
+        assert!(!stat.truncated);
+        let patch = demo.diff(page, true).await.unwrap();
+        assert!(patch.text.starts_with("diff --git"));
+        let tower = demo.diff(agent_id(start(), TOWER), false).await.unwrap();
+        assert_eq!(tower, Changes::default());
     }
 }

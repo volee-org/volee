@@ -28,10 +28,19 @@ fn window(size: (u16, u16), lines: usize) -> Rect {
     )
 }
 
+/// What the window says when the diff goes on beyond what it holds.
+const TRUNCATED: &str = "… the diff goes on: see the rest in the agent's worktree.";
+
 /// The lines the window shows.
 fn lines(diff: &DiffView) -> Vec<&str> {
-    match (&diff.text, &diff.error) {
-        (Some(text), _) if !text.trim().is_empty() => text.lines().collect(),
+    match &diff.changes {
+        Some(changes) if !changes.text.trim().is_empty() => {
+            let mut lines: Vec<&str> = changes.text.lines().collect();
+            if changes.truncated {
+                lines.push(TRUNCATED);
+            }
+            lines
+        }
         _ => Vec::new(),
     }
 }
@@ -72,7 +81,7 @@ pub(crate) fn render(model: &Model, diff: &DiffView, area: Rect, buf: &mut Buffe
     let inner = panel(buf, window, title, true, theme);
     let x = inner.x + 1;
     let room = inner.width.saturating_sub(2);
-    let message = match (&diff.text, &diff.error) {
+    let message = match (&diff.changes, &diff.error) {
         (_, Some(error)) => Some(format!("No changes to show: {error}")),
         (Some(_), None) if lines.is_empty() => {
             Some("No changes against the base branch.".to_owned())
@@ -118,6 +127,9 @@ fn colored<'a>(line: &'a str, theme: &Theme) -> Vec<Span<'a>> {
     if line.starts_with("@@") {
         return vec![Span::styled(line, style(StyleRole::TextDim))];
     }
+    if line == TRUNCATED {
+        return vec![Span::styled(line, style(StyleRole::Placeholder))];
+    }
     if line.starts_with('+') {
         return vec![Span::styled(line, style(StyleRole::DiffAdded))];
     }
@@ -145,6 +157,7 @@ fn colored<'a>(line: &'a str, theme: &Theme) -> Vec<Span<'a>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::Changes;
 
     fn texts(line: &str) -> Vec<String> {
         colored(line, &Theme::default())
@@ -170,10 +183,13 @@ mod tests {
 
     #[test]
     fn the_window_scrolls_only_as_far_as_the_text_goes() {
-        let diff = DiffView {
+        let mut diff = DiffView {
             agent: volee_core::AgentId::from_ulid(ulid::Ulid::from_parts(1, 1)),
             full: true,
-            text: Some("line\n".repeat(30)),
+            changes: Some(Changes {
+                text: "line\n".repeat(30),
+                truncated: false,
+            }),
             error: None,
             loading: false,
             scroll: 0,
@@ -181,5 +197,9 @@ mod tests {
         // 24 rows: a window of 20, 18 inside.
         assert_eq!(max_scroll(&diff, (80, 24)), 12);
         assert_eq!(max_scroll(&diff, (80, 60)), 0);
+        // A cut diff says so on one more line.
+        diff.changes.as_mut().unwrap().truncated = true;
+        assert_eq!(max_scroll(&diff, (80, 24)), 13);
+        assert_eq!(lines(&diff).last(), Some(&TRUNCATED));
     }
 }

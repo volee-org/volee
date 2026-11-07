@@ -18,7 +18,7 @@ use volee_proto::methods::{
 use volee_proto::replica::{self, Feed, FeedEnd, ReplicaError, Updates};
 use volee_proto::rpc;
 
-use crate::source::{Outgoing, Source, SourceError, Subscription, TakeOver};
+use crate::source::{Changes, Outgoing, Source, SourceError, Subscription, TakeOver};
 
 /// What the interface says once the daemon is gone.
 const LOST: &str = "lost the connection to the volee daemon";
@@ -98,11 +98,14 @@ impl Source for DaemonSource {
             .map_err(|error| failure(error, "this volee daemon cannot show agent screens yet"))
     }
 
-    async fn diff(&self, agent: AgentId, full: bool) -> Result<String, SourceError> {
+    async fn diff(&self, agent: AgentId, full: bool) -> Result<Changes, SourceError> {
         self.client
             .call::<Diff>(DiffParams { agent, full })
             .await
-            .map(|diff| diff.text)
+            .map(|diff| Changes {
+                text: diff.text,
+                truncated: diff.truncated,
+            })
             .map_err(|error| failure(error, "this volee daemon cannot show changes yet"))
     }
 
@@ -133,6 +136,7 @@ impl Source for DaemonSource {
             program: command.program,
             args: command.args,
             cwd: command.cwd.map(PathBuf::from),
+            env_remove: command.env_remove,
             hint: Some(command.hint).filter(|hint| !hint.trim().is_empty()),
         })
     }
@@ -180,9 +184,10 @@ fn failure(error: ClientError, missing: &str) -> SourceError {
     match error {
         ClientError::Rpc(error) => match error.code {
             rpc::METHOD_NOT_FOUND => SourceError::Unsupported(missing.to_owned()),
-            // A program is missing, or a rule says no: asking again will
-            // not help.
-            rpc::UNAVAILABLE | rpc::REFUSED => SourceError::Unsupported(error.message),
+            // A rule says no, such as a session in a terminal of its own:
+            // asking again will not help. Anything else (a program missing,
+            // a session not listed yet) may pass later.
+            rpc::REFUSED => SourceError::Unsupported(error.message),
             _ => SourceError::Failed(error.message),
         },
         ClientError::Connect { .. } | ClientError::Io(_) | ClientError::Closed => {
@@ -199,7 +204,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn missing_methods_and_unavailable_programs_are_unsupported() {
+    fn missing_methods_and_refusals_are_unsupported() {
         let rpc = |code, message: &str| ClientError::Rpc(RpcError::new(code, message));
         assert_eq!(
             failure(
@@ -209,8 +214,12 @@ mod tests {
             SourceError::Unsupported("no screens yet".into())
         );
         assert_eq!(
-            failure(rpc(rpc::UNAVAILABLE, "claude is not installed"), "x"),
-            SourceError::Unsupported("claude is not installed".into())
+            failure(rpc(rpc::REFUSED, "api runs in a terminal of its own"), "x"),
+            SourceError::Unsupported("api runs in a terminal of its own".into())
+        );
+        assert_eq!(
+            failure(rpc(rpc::UNAVAILABLE, "try again in a moment"), "x"),
+            SourceError::Failed("try again in a moment".into())
         );
         assert_eq!(
             failure(rpc(rpc::NOT_FOUND, "no agent ag_1"), "x"),

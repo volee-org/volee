@@ -37,7 +37,7 @@ pub trait Source: Send + Sync + 'static {
         &self,
         agent: AgentId,
         full: bool,
-    ) -> impl Future<Output = Result<String, SourceError>> + Send;
+    ) -> impl Future<Output = Result<Changes, SourceError>> + Send;
 
     /// Sends a message from the person using volee to an agent. The message
     /// comes back as an event.
@@ -76,6 +76,15 @@ pub struct Outgoing {
     pub in_reply_to: Option<MessageId>,
 }
 
+/// An agent's changes against its base branch.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Changes {
+    /// `git diff --stat` output, or a unified diff.
+    pub text: String,
+    /// Whether `text` holds only the beginning of a longer diff.
+    pub truncated: bool,
+}
+
 /// How to take over an agent: a program that runs in this terminal until
 /// the person comes back to volee.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,6 +95,9 @@ pub struct TakeOver {
     pub args: Vec<String>,
     /// Where it runs; volee's own directory when absent.
     pub cwd: Option<PathBuf>,
+    /// Environment variables to remove before it starts: the ones that
+    /// would tie it to another agent's session.
+    pub env_remove: Vec<String>,
     /// A sentence telling the person how to come back, printed before the
     /// program starts.
     pub hint: Option<String>,

@@ -24,20 +24,21 @@ up within a couple of seconds; nothing needs to be configured first.
 
 Everything on the screen comes from the daemon, and so do the actions:
 
-| What | Needs from the daemon |
+| What | What the daemon uses |
 | --- | --- |
-| The agents, their states and messages | Its event stream, which every daemon has. |
-| Writing to an agent (`m`) | The `messages.send` method, which every daemon has. |
-| The preview of an agent's screen | The `agents.preview` method. |
-| An agent's changes (`d`) | The `agents.diff` method. |
-| Taking over an agent (`a`) | The `agents.attach` method. |
+| The agents, their states and messages | Its own records, kept up to date as sessions come and go. |
+| The preview of an agent's screen | Claude Code, which replays the session's output (`claude logs`). |
+| An agent's changes (`d`) | git, in the agent's worktree or folder. |
+| Taking over an agent (`a`) | Claude Code, which attaches the session (`claude attach`). |
+| Writing to an agent (`m`) | Its own records and the agent's hooks. |
 
-When the daemon cannot do something, because it does not have the method
-yet or because a program it needs (Claude Code, git) is missing, volee says
-so in a sentence where the result would be, such as "No preview: this volee
-daemon cannot show agent screens yet", and goes on working. If the daemon
-stops while volee runs, the top bar shows `offline` and the screen stops
-changing; start `volee` again to reconnect.
+When the daemon cannot do something, because Claude Code or git is
+missing, because the agent runs in a terminal of its own, or because the
+daemon is older than the interface, volee says so in a sentence where the
+result would be, such as "No preview: dashboard runs in a terminal of its
+own: switch to that terminal to see or control it", and goes on working. If
+the daemon stops while volee runs, the top bar shows `offline` and the
+screen stops changing; start `volee` again to reconnect.
 
 The theme and the keys come from the `[tui]` table of the
 [configuration](configuration.md), as for the demo.
@@ -166,9 +167,11 @@ selected then. Quitting with a draft asks first.
 
 ## Changes
 
-`d` shows the selected agent's changes against its base branch: first a
-summary (`git diff --stat`), then the full patch with `f`. `j` and `k`
-scroll, `r` loads them again, and `Esc` or `d` closes the window.
+`d` shows the selected agent's changes against the branch it started
+from: first a summary (`git diff --stat`), then the full patch with `f`. `j`
+and `k` scroll, `r` loads them again, and `Esc` or `d` closes the window. A
+very long patch stops at a line that says so; the rest is in the agent's
+worktree.
 
 ## Taking over an agent
 
