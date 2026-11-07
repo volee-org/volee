@@ -107,6 +107,13 @@ pub trait Multiplexer: fmt::Debug + Send + Sync {
     /// is a program and its arguments. The client runs them in its own
     /// environment, so that the multiplexer acts on the person's own client.
     fn focus_steps(&self, target: &str) -> Result<Vec<Vec<String>>, MuxError>;
+
+    /// The command a person runs to see the session that holds the pane at
+    /// `target`, when no client of the multiplexer shows it; none when the
+    /// multiplexer has no such command.
+    fn attach_command(&self, _target: &str) -> Option<Vec<String>> {
+        None
+    }
 }
 
 /// Splits a pane address into its session and its pane. The pane part is the

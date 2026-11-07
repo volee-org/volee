@@ -220,6 +220,7 @@ async fn an_agent_in_a_pane_is_shown_and_brought_forward() {
             multiplexer: "tuios".into(),
             session: "work".into(),
             steps: vec![vec!["tuios".into(), "focus".into(), "work:c434b5b6".into()]],
+            attach: Vec::new(),
         })
     );
     let status = client

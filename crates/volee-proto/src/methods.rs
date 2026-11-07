@@ -479,6 +479,11 @@ pub struct PaneFocus {
     pub session: String,
     /// The commands to run, in order: each is a program and its arguments.
     pub steps: Vec<Vec<String>>,
+    /// The command that shows the pane's session in a terminal, for when the
+    /// first step focused the pane but no client of the multiplexer shows
+    /// its session, such as `tuios attach work`; empty when unknown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attach: Vec<String>,
 }
 
 method!(

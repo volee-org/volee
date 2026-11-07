@@ -173,6 +173,7 @@ impl Source for DaemonSource {
                 multiplexer: focus.multiplexer,
                 session: focus.session,
                 steps: focus.steps,
+                attach: focus.attach,
             }),
         })
     }

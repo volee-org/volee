@@ -196,8 +196,12 @@ pub struct PaneFocus {
     /// Its session that holds the pane, said for people.
     pub session: String,
     /// The commands to run, in order, in volee's own environment: each is a
-    /// program and its arguments.
+    /// program and its arguments. The first focuses the pane in its session.
     pub steps: Vec<Vec<String>>,
+    /// The command that shows the pane's session in a terminal, for when no
+    /// window of the multiplexer shows it, such as `tuios attach work`;
+    /// empty when unknown.
+    pub attach: Vec<String>,
 }
 
 /// Why a request to the source failed.

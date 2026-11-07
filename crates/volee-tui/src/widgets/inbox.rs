@@ -50,18 +50,25 @@ fn name(registry: &Registry, party: Party) -> String {
     }
 }
 
-/// A thread's name in the list: the mission's title, else the thread's.
+/// A thread's name in the list: the mission's title; for a thread between
+/// the person and one agent, that agent, from the person's side (the daemon
+/// titles it for agents: "the human, api (worker)"); else the thread's.
 fn title(registry: &Registry, thread: ThreadId) -> String {
     let Some(record) = registry.thread(thread) else {
         return thread.short();
     };
-    record
-        .mission
-        .and_then(|mission| registry.mission(mission))
-        .map_or_else(
-            || record.title.clone(),
-            |mission| format!("◆ {}", mission.title),
-        )
+    if let Some(mission) = record.mission.and_then(|mission| registry.mission(mission)) {
+        return format!("◆ {}", mission.title);
+    }
+    match record.participants.as_slice() {
+        [Party::Human, Party::Agent(agent)] | [Party::Agent(agent), Party::Human] => {
+            let name = registry
+                .agent(*agent)
+                .map_or_else(|| agent.short(), |agent| agent.name.clone());
+            format!("You and {name}")
+        }
+        _ => record.title.clone(),
+    }
 }
 
 /// The style of a message kind.
@@ -363,4 +370,65 @@ fn message_lines(
         }
     }
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use volee_core::event::{Event, EventKind};
+    use volee_core::harness::HarnessKind;
+    use volee_core::message::Thread;
+    use volee_core::role::{LaunchedBy, Role};
+    use volee_core::time::Timestamp;
+    use volee_core::workspace::{Location, Workspace};
+    use volee_core::{AgentId, ThreadId};
+
+    use super::*;
+
+    fn opened(id: u128, title: &str, participants: Vec<Party>) -> Event {
+        Event::new(
+            Timestamp::from_millis(2),
+            EventKind::ThreadOpened {
+                thread: Thread {
+                    id: ThreadId::from_ulid(ulid::Ulid::from_parts(2, id)),
+                    title: title.to_owned(),
+                    mission: None,
+                    participants,
+                    opened_at: Timestamp::from_millis(2),
+                },
+            },
+        )
+    }
+
+    #[test]
+    fn a_thread_with_one_agent_reads_from_the_person_s_side() {
+        let api = AgentId::from_ulid(ulid::Ulid::from_parts(1, 1));
+        let registry = Registry::from_events(&[
+            Event::new(
+                Timestamp::from_millis(1),
+                EventKind::AgentRegistered {
+                    agent: api,
+                    name: "api".into(),
+                    role: Role::Worker,
+                    harness: HarnessKind::ClaudeCode,
+                    launched_by: LaunchedBy::Human,
+                    parent: None,
+                    mission: None,
+                    workspace: Workspace::at("/work/api"),
+                    location: Location::Background,
+                },
+            ),
+            opened(
+                1,
+                "the human, api (worker)",
+                vec![Party::Human, Party::Agent(api)],
+            ),
+            opened(2, "Inbox", vec![Party::Human]),
+            opened(3, "volee", vec![Party::System, Party::Human]),
+        ])
+        .unwrap();
+        let thread = |id| ThreadId::from_ulid(ulid::Ulid::from_parts(2, id));
+        assert_eq!(title(&registry, thread(1)), "You and api");
+        assert_eq!(title(&registry, thread(2)), "Inbox");
+        assert_eq!(title(&registry, thread(3)), "volee");
+    }
 }

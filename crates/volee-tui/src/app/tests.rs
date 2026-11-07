@@ -358,6 +358,7 @@ fn an_agent_in_a_pane_is_brought_forward_instead_of_taken_over() {
         multiplexer: "tuios".into(),
         session: "work".into(),
         steps: vec![vec!["tuios".into(), "switch-session".into(), "work".into()]],
+        attach: vec!["tuios".into(), "attach".into(), "work".into()],
     };
     let effects = update(
         &mut model,
@@ -394,12 +395,37 @@ fn an_agent_in_a_pane_is_brought_forward_instead_of_taken_over() {
         notice.text,
         "invoice-schema is in front: tuios pane, session work."
     );
+    // The pane is focused in its session, but no tuios window shows it: say
+    // where it is, and how to see it.
+    update(
+        &mut model,
+        Msg::PaneFocused {
+            agent: schema,
+            focus: focus.clone(),
+            result: Err(FocusFailure {
+                done: 1,
+                program: "tuios".into(),
+                reason: "switch-session failed: no client is attached to switch".into(),
+            }),
+        },
+    );
+    let notice = model.notice.as_ref().unwrap();
+    assert!(!notice.error);
+    assert_eq!(
+        notice.text,
+        "invoice-schema is in front in tuios session work: run `tuios attach work` to see it."
+    );
+    // The pane itself could not be focused.
     update(
         &mut model,
         Msg::PaneFocused {
             agent: schema,
             focus,
-            result: Err("tuios says: no window named 3f2a in session work".into()),
+            result: Err(FocusFailure {
+                done: 0,
+                program: "tuios".into(),
+                reason: "no window named 3f2a in session work".into(),
+            }),
         },
     );
     let notice = model.notice.as_ref().unwrap();

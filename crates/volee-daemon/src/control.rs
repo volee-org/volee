@@ -260,6 +260,7 @@ pub(crate) async fn attach(
                 multiplexer: adapter.name().to_owned(),
                 session,
                 steps,
+                attach: adapter.attach_command(&target).unwrap_or_default(),
             }),
         });
     }

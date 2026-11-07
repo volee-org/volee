@@ -113,9 +113,12 @@ An agent whose session runs in a multiplexer pane the daemon found
 ([ADR 0015](../adr/0015-tuios-location-adapter.md)) is not refused:
 `agents.preview` returns what the pane shows, each row placed with a cursor
 move, and `agents.attach` returns an empty `program` and a `focus` object
-(`multiplexer`, `session`, `steps`). The client runs each step, a program and
-its arguments, in order, in its own environment and without giving up its
-terminal, so that the multiplexer acts on the person's own client.
+(`multiplexer`, `session`, `steps`, `attach`). The client runs each step, a
+program and its arguments, in order, in its own environment and without
+giving up its terminal, so that the multiplexer acts on the person's own
+client. The first step focuses the pane in its session; when a later one
+fails, `attach` is the command that shows that session in a terminal (such
+as `tuios attach work`), for the client to suggest.
 `daemon.status` lists the multiplexers the daemon uses in `multiplexers`,
 with whether each answers now.
 
