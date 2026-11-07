@@ -268,7 +268,7 @@ pub(crate) const CAST: [Member; 12] = [
         parent: None,
         mission: None,
         repo: Some("infra"),
-        branch: Some("main"),
+        branch: Some("chore/load-balancer"),
         background: false,
         model: "opus",
         born: 1_800,
@@ -326,21 +326,52 @@ fn thread_id(start: Timestamp, thread: usize) -> ThreadId {
     ThreadId::from_ulid(ulid_at(start, 0x0c00 + thread as u128))
 }
 
+/// The identifier of the message numbered `id` and sent `seconds` after
+/// the start, as [`Script::message`] makes it.
+fn message_id(start: Timestamp, seconds: i64, id: u128) -> MessageId {
+    MessageId::from_ulid(ulid_at(start.plus_millis(seconds * 1_000), 0x0d00 + id))
+}
+
 /// The inbox thread, where questions to the person land.
 const INBOX: usize = 2;
+
+/// Direct threads between two agents, outside missions.
+const LOAD_BALANCER: usize = 3;
+const INVOICES_URL: usize = 4;
+const TOKEN_CALLS: usize = 5;
+
+/// Questions answered after the start, as (seconds, number): the question
+/// to the person about a draft flag, and the question from the latency
+/// audit to Invoicing about token calls.
+const DRAFT_QUESTION: (i64, u128) = (-60, 6);
+const TOKEN_QUESTION: (i64, u128) = (-30, 13);
+
+/// The harness of a member. Every agent runs in Claude Code but infra, a
+/// Codex CLI session in another terminal: agents of two AIs talk to each
+/// other through volee.
+fn harness_of(member: usize) -> HarnessKind {
+    if member == INFRA {
+        HarnessKind::Other("codex".to_owned())
+    } else {
+        HarnessKind::ClaudeCode
+    }
+}
 
 fn ulid_at(at: Timestamp, random: u128) -> Ulid {
     Ulid::from_parts(u64::try_from(at.as_millis()).unwrap_or(0), SEED | random)
 }
 
-/// The harness session of a member, shaped like a Claude Code session id.
+/// The harness session of a member, shaped like a session id.
 pub(crate) fn session_of(member: usize) -> SessionKey {
     let n = member as u64;
-    SessionKey::claude(format!(
-        "{:08x}-7a1c-4e2b-9d3f-{:012x}",
-        0x5eed_0a00 + n,
-        0x00c0_ffee_0000 + n * 0x1111
-    ))
+    SessionKey {
+        harness: harness_of(member),
+        id: format!(
+            "{:08x}-7a1c-4e2b-9d3f-{:012x}",
+            0x5eed_0a00 + n,
+            0x00c0_ffee_0000 + n * 0x1111
+        ),
+    }
 }
 
 /// The cast member an agent identifier belongs to.
@@ -348,7 +379,8 @@ pub(crate) fn member_of(start: Timestamp, agent: AgentId) -> Option<usize> {
     (0..CAST.len()).find(|member| agent_id(start, *member) == agent)
 }
 
-fn workspace(member: &Member) -> Workspace {
+fn workspace(index: usize) -> Workspace {
+    let member = &CAST[index];
     match (member.repo, member.branch) {
         (Some(repo), Some(branch)) if member.role == Role::Lead => Workspace {
             cwd: PathBuf::from(format!("{HOME}/code/{repo}")),
@@ -360,10 +392,17 @@ fn workspace(member: &Member) -> Workspace {
             start_commit: None,
         },
         (Some(repo), Some(branch)) => {
-            let worktree = PathBuf::from(format!(
-                "{HOME}/.local/share/volee/worktrees/{repo}/{}",
-                branch.replace('/', "-")
-            ));
+            // Worktrees live in their repository, under .claude/worktrees
+            // (ADR 0013); the infra session works in one its person made by
+            // hand, next to the repository.
+            let worktree = if index == INFRA {
+                PathBuf::from(format!("{HOME}/code/{repo}-lb"))
+            } else {
+                PathBuf::from(format!(
+                    "{HOME}/code/{repo}/.claude/worktrees/{}",
+                    branch.replace('/', "-")
+                ))
+            };
             Workspace {
                 cwd: worktree.clone(),
                 repo: Some(repo.to_owned()),
@@ -424,9 +463,26 @@ impl Script {
         );
     }
 
-    fn delivery(&mut self, seconds: i64, member: usize, delivery: Delivery) {
+    /// New delivery evidence, checked from git and the forge as it is
+    /// recorded.
+    fn delivery(&mut self, seconds: i64, member: usize, mut delivery: Delivery) {
         let agent = self.id(member);
+        delivery
+            .checked_at
+            .get_or_insert(self.start.plus_millis(seconds * 1_000));
         self.at(seconds, EventKind::DeliveryUpdated { agent, delivery });
+    }
+
+    /// Opens the direct thread of two agents, outside missions.
+    fn direct_thread(&mut self, seconds: i64, thread: usize, a: usize, b: usize) {
+        let thread = Thread {
+            id: thread_id(self.start, thread),
+            title: format!("{} and {}", CAST[a].name, CAST[b].name),
+            mission: None,
+            participants: vec![Party::Agent(self.id(a)), Party::Agent(self.id(b))],
+            opened_at: self.start.plus_millis(seconds * 1_000),
+        };
+        self.at(seconds, EventKind::ThreadOpened { thread });
     }
 
     /// The mission supervisor's verdict on a worker.
@@ -593,14 +649,14 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
             None if outside => LaunchedBy::Outside,
             None => LaunchedBy::Human,
         };
-        let full = workspace(member);
+        let full = workspace(index);
         script.at(
             -member.born,
             EventKind::AgentRegistered {
                 agent,
                 name: member.name.to_owned(),
                 role: member.role,
-                harness: HarnessKind::ClaudeCode,
+                harness: harness_of(index),
                 launched_by,
                 parent: member.parent.map(|parent| script.id(parent)),
                 mission: member.mission.map(|mission| mission_id(start, mission)),
@@ -794,6 +850,37 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
             ..Delivery::default()
         },
     );
+    // The infra session's load balancer change went through pull request
+    // #12, which a person merged: its worktree is safe to tidy.
+    let lb = |state, checks| PullRequest {
+        number: 12,
+        url: "https://git.example.com/infra/pull/12".to_owned(),
+        state,
+        checks,
+    };
+    let opened = |checks| Delivery {
+        commits: 2,
+        diff: DiffStat {
+            files: 3,
+            insertions: 58,
+            deletions: 21,
+        },
+        push: PushState::UpToDate,
+        pull_request: Some(lb(PrState::Open, checks)),
+        ..Delivery::default()
+    };
+    script.delivery(-1_620, INFRA, opened(ChecksState::Pending));
+    script.delivery(-1_590, INFRA, opened(ChecksState::Passing));
+    script.delivery(
+        -1_200,
+        INFRA,
+        Delivery {
+            push: PushState::UpToDate,
+            merged_into_base: true,
+            pull_request: Some(lb(PrState::Merged, ChecksState::Passing)),
+            ..Delivery::default()
+        },
+    );
 
     // Conversations.
     let workers = [INVOICE_SCHEMA, INVOICE_TOOLS, INVOICE_PAGE].map(|m| party(&script, m));
@@ -853,8 +940,8 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         None,
     );
     script.message(
-        -60,
-        6,
+        DRAFT_QUESTION.0,
+        DRAFT_QUESTION.1,
         INBOX,
         party(&script, INVOICE_TOOLS),
         &[Party::Human],
@@ -862,6 +949,92 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         "Should create_invoice accept a draft flag, or always issue a final invoice?",
         None,
     );
+
+    // Across missions and harnesses: the infra session, a Codex CLI agent
+    // volee did not launch, asks a worker of the latency audit; a session
+    // started by hand asks a worker of Invoicing; a worker of one mission
+    // asks a worker of the other, and waits for the answer at the start.
+    script.direct_thread(-650, LOAD_BALANCER, INFRA, TRACE_GATEWAY);
+    let load_balancer = script.message(
+        -650,
+        7,
+        LOAD_BALANCER,
+        party(&script, INFRA),
+        &[party(&script, TRACE_GATEWAY)],
+        MessageKind::Question,
+        "Could the new load balancer explain the p95 change? The gateway moved behind it on \
+         Nov 4 (infra PR #12).",
+        None,
+    );
+    script.message(
+        -610,
+        8,
+        LOAD_BALANCER,
+        party(&script, TRACE_GATEWAY),
+        &[party(&script, INFRA)],
+        MessageKind::Answer,
+        "Checked the traces: the load balancer adds 2 ms at p95. The regression is elsewhere; \
+         I will send you the report.",
+        Some(load_balancer),
+    );
+    script.direct_thread(-450, INVOICES_URL, BROKEN_LINKS, INVOICE_PAGE);
+    let url = script.message(
+        -450,
+        9,
+        INVOICES_URL,
+        party(&script, BROKEN_LINKS),
+        &[party(&script, INVOICE_PAGE)],
+        MessageKind::Question,
+        "The docs link to /billing/invoices. Is that the final URL of the new invoices page?",
+        None,
+    );
+    script.message(
+        -420,
+        12,
+        INVOICES_URL,
+        party(&script, INVOICE_PAGE),
+        &[party(&script, BROKEN_LINKS)],
+        MessageKind::Answer,
+        "It is /invoices; /billing/invoices redirects there.",
+        Some(url),
+    );
+    script.direct_thread(TOKEN_QUESTION.0, TOKEN_CALLS, TRACE_GATEWAY, INVOICE_TOOLS);
+    script.message(
+        TOKEN_QUESTION.0,
+        TOKEN_QUESTION.1,
+        TOKEN_CALLS,
+        party(&script, TRACE_GATEWAY),
+        &[party(&script, INVOICE_TOOLS)],
+        MessageKind::Question,
+        "Does create_invoice fetch a token from /auth/token on every call? That call is where \
+         search p95 doubled.",
+        None,
+    );
+
+    // The supervisor tells the coordinator what it concluded, from volee.
+    let invoicing = [party(&script, INVOICING)];
+    for (seconds, id, kind, body) in [
+        (
+            -329,
+            14,
+            MessageKind::Report,
+            "invoice-page delivered: 3 commits · pushed · PR #42 open, checks passing.",
+        ),
+        (
+            -119,
+            15,
+            MessageKind::Alert,
+            "invoice-schema waits for a person: Bash: bun run db:migrate.",
+        ),
+        (
+            -59,
+            16,
+            MessageKind::Alert,
+            "invoice-tools waits for a person: should create_invoice accept a draft flag?",
+        ),
+    ] {
+        script.message(seconds, id, 0, Party::System, &invoicing, kind, body, None);
+    }
 
     let mut events = script.events;
     // A stable sort keeps the order of events written at the same second.
@@ -936,7 +1109,7 @@ fn beat(start: Timestamp, cycle: i64, offset: i64) -> Vec<Event> {
                     &[to],
                     MessageKind::Answer,
                     "Accept a draft flag, false by default.",
-                    None,
+                    Some(message_id(start, DRAFT_QUESTION.0, DRAFT_QUESTION.1)),
                 );
             }
             script.state(base, INVOICE_TOOLS, AgentState::Working, None);
@@ -1014,11 +1187,195 @@ fn beat(start: Timestamp, cycle: i64, offset: i64) -> Vec<Event> {
         36 => script.activity(base * 1_000, TOWER, "Bash volee ls"),
         _ => script.activity(base * 1_000, TRACE_GATEWAY, "Grep \"p95\" src/"),
     }
+    conversations(&mut script, cycle, offset);
     // Receipts come a second after their message, after the other events of
     // the beat; a stable sort keeps the rest in writing order.
     let mut events = script.events;
     events.sort_by_key(|event| event.at);
     events
+}
+
+/// The thread of the two coordinators, opened in the first loop.
+const COORDINATORS: usize = 6;
+
+/// What agents tell each other at a beat, so messages keep moving on the
+/// network in every loop, and what the first loop delivers: the latency
+/// audit's answer to Invoicing, pull request #42 merged, and pull request #7
+/// opened by the session started by hand.
+#[allow(clippy::too_many_lines)] // One arm per beat reads best as one table.
+fn conversations(script: &mut Script, cycle: i64, offset: i64) {
+    let base = cycle * PERIOD_SECS + offset;
+    let first = cycle == 0;
+    let start = script.start;
+    let party = |script: &Script, member| Party::Agent(script.id(member));
+    match offset {
+        16 => {
+            let (from, to) = (party(script, TRACE_GATEWAY), party(script, LATENCY_AUDIT));
+            script.message(
+                base,
+                20,
+                1,
+                from,
+                &[to],
+                MessageKind::Note,
+                "Three slow spans in the auth middleware so far; writing them up with traces.",
+                None,
+            );
+        }
+        20 if !first => {
+            let (from, to) = (party(script, TRACE_SEARCH), party(script, LATENCY_AUDIT));
+            script.message(
+                base,
+                21,
+                1,
+                from,
+                &[to],
+                MessageKind::Note,
+                "Re-ran the query benchmark: search p95 stays at 12 ms on its own.",
+                None,
+            );
+        }
+        22 => {
+            let (from, to) = (party(script, INVOICE_TOOLS), party(script, INVOICE_SCHEMA));
+            script.message(
+                base,
+                22,
+                0,
+                from,
+                &[to],
+                MessageKind::Question,
+                "Is invoices.number unique per customer, or across the whole company?",
+                None,
+            );
+            if first {
+                // Woken by the search report, the latency audit's coordinator
+                // warns the other mission.
+                script.state(
+                    base,
+                    LATENCY_AUDIT,
+                    AgentState::Working,
+                    Some("Reading the search report"),
+                );
+                script.direct_thread(base, COORDINATORS, LATENCY_AUDIT, INVOICING);
+                let (from, to) = (party(script, LATENCY_AUDIT), party(script, INVOICING));
+                script.message(
+                    base,
+                    23,
+                    COORDINATORS,
+                    from,
+                    &[to],
+                    MessageKind::Note,
+                    "Heads-up from the latency audit: the gateway's auth middleware calls \
+                     /auth/token on every request, and your MCP tools go through the gateway.",
+                    None,
+                );
+            }
+        }
+        24 if first => {
+            let (from, to) = (party(script, INVOICE_TOOLS), party(script, TRACE_GATEWAY));
+            script.message(
+                base,
+                24,
+                TOKEN_CALLS,
+                from,
+                &[to],
+                MessageKind::Answer,
+                "No: one token per session, cached for 10 minutes. create_invoice never calls \
+                 /auth/token itself.",
+                Some(message_id(start, TOKEN_QUESTION.0, TOKEN_QUESTION.1)),
+            );
+            script.state(
+                base,
+                LATENCY_AUDIT,
+                AgentState::Idle,
+                Some("Waiting for 1 worker"),
+            );
+        }
+        26 => {
+            let (from, to) = (party(script, INVOICE_SCHEMA), party(script, INVOICE_TOOLS));
+            script.message(
+                base,
+                25,
+                0,
+                from,
+                &[to],
+                MessageKind::Answer,
+                "Across the company: numbers look like INV-2026-0042, with a unique index.",
+                Some(message_id(start, base - 4, 22)),
+            );
+            if first {
+                script.delivery(
+                    base,
+                    INVOICE_PAGE,
+                    Delivery {
+                        push: PushState::UpToDate,
+                        merged_into_base: true,
+                        pull_request: Some(PullRequest {
+                            number: 42,
+                            url: "https://git.example.com/dashboard/pull/42".to_owned(),
+                            state: PrState::Merged,
+                            checks: ChecksState::Passing,
+                        }),
+                        ..Delivery::default()
+                    },
+                );
+                script.verdict(base, INVOICE_PAGE, Verdict::Delivered, "PR #42 merged");
+                let to = party(script, INVOICING);
+                script.message(
+                    base,
+                    26,
+                    0,
+                    Party::System,
+                    &[to],
+                    MessageKind::Report,
+                    "invoice-page delivered: PR #42 merged.",
+                    None,
+                );
+            }
+        }
+        30 | 38 if first => {
+            let checks = if offset == 30 {
+                ChecksState::Pending
+            } else {
+                ChecksState::Passing
+            };
+            script.delivery(
+                base,
+                BROKEN_LINKS,
+                Delivery {
+                    commits: 1,
+                    diff: DiffStat {
+                        files: 4,
+                        insertions: 12,
+                        deletions: 9,
+                    },
+                    push: PushState::UpToDate,
+                    pull_request: Some(PullRequest {
+                        number: 7,
+                        url: "https://git.example.com/website/pull/7".to_owned(),
+                        state: PrState::Open,
+                        checks,
+                    }),
+                    ..Delivery::default()
+                },
+            );
+        }
+        36 => {
+            let from = party(script, TOWER);
+            script.message(
+                base,
+                27,
+                INBOX,
+                from,
+                &[Party::Human],
+                MessageKind::Note,
+                "Status: invoice-page delivered; invoice-schema waits for your permission to \
+                 migrate; the latency audit points at the gateway's token calls.",
+                None,
+            );
+        }
+        _ => {}
+    }
 }
 
 /// Every event after the start, in order, forever.

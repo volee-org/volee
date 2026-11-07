@@ -21,7 +21,6 @@ wake_timeout = 3600
 # path = "~/code/billing"
 # base = "develop"         # the repository's default branch when unset
 # model = "sonnet"         # overrides [agents] model for this repository
-# setup = "bun install"    # first step the agent runs in a new worktree
 
 [messages]
 # Summaries of long threads, written by a model when you ask for one
@@ -35,6 +34,10 @@ wake_timeout = 3600
 # "catppuccin-latte", "terminal", or the name of a file in
 # ~/.config/volee/themes/ without its .toml extension.
 # theme = "catppuccin-mocha"
+
+# Stop animations: messages light up their line on the network instead of
+# travelling along it, and spinners stop.
+# reduced_motion = true
 
 # Key overrides, by action name. See the interface guide for the actions.
 # [tui.keys]

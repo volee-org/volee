@@ -16,6 +16,11 @@ harness can use it too:
 The server speaks for one agent, given by `--agent`. It starts the volee
 daemon if needed.
 
+Agents volee launches may call every tool below without a permission
+prompt: their settings allow `mcp__volee`, so that a background agent never
+stalls on asking to send a message. Only a mission's coordinator may call
+`spawn_worker` and `close_mission`.
+
 ## Tools
 
 ### `whoami`
@@ -45,8 +50,14 @@ parent, the harness, and `can_message`: whether the caller may write to it.
 
 Routing follows ADR 0006: inside a mission every member writes to every
 member; otherwise an agent writes to its parent, its children, its mission's
-coordinator and the human. A refusal comes back as a tool error that explains
-why, so the model can correct itself.
+coordinator, the agent that requested its mission, and the human. A refusal
+comes back as a tool error that explains why, so the model can correct
+itself.
+
+A message to an agent whose session ended resumes it, unless the human
+stopped that agent or its mission is over: then the message waits. When the
+human stops a worker of a running mission, volee tells the coordinator in the
+mission's thread, so that it plans without that worker.
 
 ### `read_messages`
 

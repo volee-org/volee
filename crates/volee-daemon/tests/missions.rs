@@ -4,6 +4,8 @@
 // In tests, a failed unwrap is a failed test with a clear location.
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,19 +13,23 @@ use std::sync::Arc;
 use tokio::net::UnixListener;
 use tokio::task::JoinHandle;
 use ulid::Ulid;
+use volee_core::agent::Hold;
 use volee_core::delivery::{ChecksState, Delivery, PrState, PullRequest, PushState};
 use volee_core::harness::HarnessKind;
 use volee_core::message::{MessageKind, Party, Thread};
 use volee_core::mission::{Mission, MissionKind, MissionStatus, Verdict};
 use volee_core::role::{LaunchedBy, Role};
+use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
 use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, MissionId, Registry, ThreadId};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
+use volee_harness::Harness;
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    AbortMission, AbortParams, CloseMission, CloseParams, CreateMission, CreateMissionParams,
-    EventsSince, HookIngest, HookParams, SendMessage, SendParams, SinceParams,
+    AbortMission, AbortParams, AgentParams, CloseMission, CloseParams, CreateMission,
+    CreateMissionParams, EventsSince, HookIngest, HookParams, SendMessage, SendParams, SinceParams,
+    Stop,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
@@ -142,6 +148,10 @@ struct Running {
 }
 
 fn start(events: Vec<Event>) -> Running {
+    start_with(events, None)
+}
+
+fn start_with(events: Vec<Event>, harness: Option<Arc<dyn Harness>>) -> Running {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::rooted(dir.path());
     let socket = paths.socket.clone();
@@ -152,7 +162,7 @@ fn start(events: Vec<Event>) -> Running {
         clock: Arc::new(ManualClock::at(10_000)),
         harnesses: vec![],
         spool: None,
-        harness: None,
+        harness,
         discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
@@ -481,8 +491,15 @@ async fn the_human_can_force_a_mission_closed() {
 }
 
 #[tokio::test]
-async fn aborting_tells_every_agent_and_stops_supervision() {
-    let daemon = start(mission_with_workers());
+async fn aborting_tells_every_live_agent_and_holds_them_all() {
+    let mut events = mission_with_workers();
+    // `api`'s session already ended: nothing to tell it, nothing to resume.
+    events.push(at(EventKind::StateChanged {
+        agent: agent(API),
+        state: AgentState::Stopped,
+        detail: None,
+    }));
+    let daemon = start(events);
     let client = connect(&daemon).await;
     client
         .call::<AbortMission>(AbortParams {
@@ -496,11 +513,24 @@ async fn aborting_tells_every_agent_and_stops_supervision() {
         registry_now.mission(mission_id()).unwrap().status,
         MissionStatus::Aborted
     );
+    // The coordinator also heard that `api` stopped without delivering.
+    for n in [COORDINATOR, BILLING] {
+        let aborts = registry_now
+            .pending_for(agent(n))
+            .into_iter()
+            .filter(|m| m.kind == MessageKind::Alert && m.body.contains("wrong approach"))
+            .count();
+        assert_eq!(aborts, 1, "agent {n}");
+    }
+    assert!(registry_now.pending_for(agent(API)).is_empty(), "stopped");
     for n in [COORDINATOR, BILLING, API] {
-        let pending = registry_now.pending_for(agent(n));
-        assert_eq!(pending.len(), 1, "agent {n}");
-        assert_eq!(pending[0].kind, MessageKind::Alert);
-        assert!(pending[0].body.contains("wrong approach"));
+        assert!(
+            matches!(
+                registry_now.agent(agent(n)).unwrap().hold,
+                Some(Hold::MissionOver { .. })
+            ),
+            "agent {n} is never resumed on its own"
+        );
     }
     assert!(
         texts(&registry_now, Party::Human)
@@ -511,7 +541,13 @@ async fn aborting_tells_every_agent_and_stops_supervision() {
     // A worker stopping after the abort gets no verdict.
     stops(&client, BILLING).await;
     let after = registry(&client).await;
-    assert!(after.mission(mission_id()).unwrap().assessments.is_empty());
+    assert!(
+        !after
+            .mission(mission_id())
+            .unwrap()
+            .assessments
+            .contains_key(&agent(BILLING))
+    );
 
     let again = client
         .call::<AbortMission>(AbortParams {
@@ -521,6 +557,36 @@ async fn aborting_tells_every_agent_and_stops_supervision() {
         .await
         .unwrap_err();
     assert_eq!(rpc_error(again).code, rpc::REFUSED);
+}
+
+#[tokio::test]
+async fn stopping_a_worker_tells_the_coordinator_once() {
+    let mut events = mission_with_workers();
+    events.push(at(EventKind::StateChanged {
+        agent: agent(API),
+        state: AgentState::Stopped,
+        detail: None,
+    }));
+    let daemon = start_with(events, Some(Arc::new(common::FakeHarness::default())));
+    let client = connect(&daemon).await;
+    for _ in 0..2 {
+        client
+            .call::<Stop>(AgentParams { agent: agent(API) })
+            .await
+            .unwrap();
+    }
+    let registry_now = registry(&client).await;
+    let notes: Vec<_> = registry_now
+        .pending_for(agent(COORDINATOR))
+        .into_iter()
+        .filter(|m| m.kind == MessageKind::Note && m.body.contains("The human stopped api"))
+        .collect();
+    assert_eq!(notes.len(), 1, "told once");
+    assert_eq!(notes[0].thread, thread_id(), "in the mission's thread");
+    assert!(matches!(
+        registry_now.agent(agent(API)).unwrap().hold,
+        Some(Hold::StoppedByHuman { .. })
+    ));
 }
 
 #[tokio::test]

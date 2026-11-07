@@ -38,7 +38,10 @@ background session. Probes on 2026-11-06 established what works:
      repository's main checkout with `--worktree` (ADR 0013), carries the
      pending messages as its prompt and the agent's instructions again, and
      the daemon links the new session by the handle the harness printed,
-     before any listing could take it for a stranger.
+     before any listing could take it for a stranger. Two holds prevent a
+     resume: the human stopped the agent (lifted by the human's next message
+     to it, never by an agent's), or its mission is over (never lifted). An
+     aborted mission's notice goes only to its live agents.
 - Agents that volee did not launch can be messaged only through an explicit
   "wake" action by the human, because it forks their session.
 - Thread summaries by an LLM are opt-in and show their cost.

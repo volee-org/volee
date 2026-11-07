@@ -27,7 +27,7 @@ expression: draw(&model)
 "│▌n · invoicing           14 min ││                           │ dashboard › feat/invoices-p… │                         │"
 "│    idle · ◆ Invoicing          ││                           │ PR #42 is ready for review   │                         │"
 "│ i · infra               25 min ││                           │ 3 commits · PR #42 ✓         │                         │"
-"│    idle · infra › main         ││                           ╰──────────────────────────────╯                         │"
+"│    idle · infra › chore/load-… ││                           ╰──────────────────────────────╯                         │"
 "╰────────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────╯"
 "╭ Detail ────────────────────────╮╭ Preview · invoicing ───────────────────────────────────────────────────────────────╮"
 "│ invoicing · coordinator        ││   ⎿  Worker invoice-page started                                                   │"

@@ -10,6 +10,7 @@ use volee_proto::client::Client;
 use volee_proto::methods::{EventsSince, SinceParams};
 
 use crate::connect::paths;
+use crate::text;
 
 /// The shortest identifier ending accepted, so that a typo rarely matches.
 const MIN_SUFFIX: usize = 4;
@@ -52,7 +53,7 @@ pub(crate) fn agent(registry: &Registry, input: &str) -> Result<AgentId> {
             "`{input}` could be {}; use the id",
             several
                 .iter()
-                .map(|(id, name)| format!("{name} ({})", id.short()))
+                .map(|(id, name)| format!("{} ({})", text::one_line(name), id.short()))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -90,7 +91,7 @@ pub(crate) fn mission(registry: &Registry, input: &str) -> Result<MissionId> {
             "`{input}` could be {}; use the id",
             several
                 .iter()
-                .map(|(id, title)| format!("\"{title}\" ({})", id.short()))
+                .map(|(id, title)| format!("\"{}\" ({})", text::one_line(title), id.short()))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),

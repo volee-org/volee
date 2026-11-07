@@ -122,10 +122,14 @@ style_roles! {
     RoleSubagent => "role.subagent",
     /// A session volee did not launch.
     RoleIndependent => "role.independent",
-    /// Lines between cards.
+    /// Lines between cards, and who launched whom in the network view.
     Edge => "edge",
-    /// A message moving along an edge (used by the network view).
+    /// A message moving along an edge of the network view.
     EdgePulse => "edge.pulse",
+    /// Agents that exchanged messages, in the network view.
+    EdgeMessage => "edge.message",
+    /// A question that waits for its answer, in the network view.
+    EdgeQuestion => "edge.question",
     /// Added lines.
     DiffAdded => "diff.added",
     /// Removed lines.
@@ -150,7 +154,7 @@ style_roles! {
     NoticeError => "notice.error",
     /// Text being typed, such as a filter.
     Input => "input",
-    /// Views that arrive in a later version.
+    /// Words that stand in for missing content, such as an empty view.
     Placeholder => "placeholder",
 }
 
