@@ -26,9 +26,9 @@ never edited after it is accepted: a later ADR supersedes it.
 Some decisions describe more than volee 0.1.0 does. These parts are still to
 come:
 
-- [0004](0004-sources-and-reconciliation.md): listing Claude Code sessions
-  faster while a client is connected, and a setting for it. 0.1.0 lists them
-  every two seconds.
+- [0004](0004-sources-and-reconciliation.md): a setting for how often volee
+  lists Claude Code sessions. 0.1.0 lists them every two seconds while the
+  interface is open, and every thirty seconds otherwise.
 - [0005](0005-harness-neutral-agent-protocol.md): CLI commands that give
   harnesses without MCP the operations of the MCP tools.
 - [0006](0006-messaging.md): configurable routing policies, and a wake
