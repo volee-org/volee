@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 It is generated from the commit history with [git-cliff](https://git-cliff.org):
 see [RELEASING.md](RELEASING.md).
 
+## [0.4.0] - 2026-11-07
+
+### Added
+
+- **mux**: Show and reach Claude Code sessions in tmux panes ([#87](https://github.com/volee-org/volee/pull/87))
+- **daemon**: Show the setup log as the preview of an agent with no session yet ([#91](https://github.com/volee-org/volee/pull/91))
+
+### Fixed
+
+- **cli**: Align volee config check on the longest repository name ([#88](https://github.com/volee-org/volee/pull/88))
+- **mux**: Say that no tmux server is running in volee daemon status ([#89](https://github.com/volee-org/volee/pull/89))
+
+### Documentation
+
+- Present setup commands and tuios and tmux panes in the README ([#90](https://github.com/volee-org/volee/pull/90))
+
 ## [0.3.0] - 2026-11-07
 
 ### Added
@@ -105,6 +121,7 @@ see [RELEASING.md](RELEASING.md).
 - Mark the interface, messaging and views milestones done ([#52](https://github.com/volee-org/volee/pull/52))
 - Start the daemon in the first step of the guide, and say what tidy removes ([#56](https://github.com/volee-org/volee/pull/56))
 
+[0.4.0]: https://github.com/volee-org/volee/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/volee-org/volee/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/volee-org/volee/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/volee-org/volee/releases/tag/v0.1.0
