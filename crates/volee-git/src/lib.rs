@@ -72,10 +72,12 @@ use volee_core::delivery::Delivery;
 mod cli;
 mod command;
 mod error;
+mod forge;
 mod parse;
 
 pub use cli::GitCli;
 pub use error::{GitError, RemovalRefusal};
+pub use forge::{Forge, ForgeStatus, GhCli};
 
 /// Everything volee asks of git.
 ///

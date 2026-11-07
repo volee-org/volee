@@ -11,6 +11,7 @@
 mod clock;
 mod delivery;
 mod error;
+mod evidence;
 mod handlers;
 mod log;
 mod missions;
@@ -20,6 +21,7 @@ mod state;
 
 pub use clock::{Clock, ManualClock, SystemClock};
 pub use error::DaemonError;
+pub use evidence::EvidenceSources;
 pub use log::{EventLog, LogError, MemoryLog};
 pub use server::{Config, Daemon};
 pub use sqlite::SqliteLog;

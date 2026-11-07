@@ -18,7 +18,7 @@ use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
 use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, Registry};
-use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
+use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_proto::client::{Client, ClientError, appended_event};
 use volee_proto::methods::{
     AgentParams, Empty, EventsSince, Forget, HookIngest, HookParams, HookWait, SendMessage,
@@ -77,6 +77,7 @@ fn start() -> Running {
         clock: Arc::new(ManualClock::at(10_000)),
         harnesses: vec![],
         spool: None,
+        evidence: EvidenceSources::default(),
     };
     let task = tokio::spawn(Daemon::serve(listener, config));
     Running {

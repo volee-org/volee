@@ -11,13 +11,14 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, broadcast, mpsc, watch};
 use tokio::task::JoinSet;
 use volee_proto::methods::{
-    EVENTS_APPENDED, EventBatch, HarnessStatus, Method, SeqEvent, Subscribe,
+    EVENTS_APPENDED, EventBatch, ForgeStatus, HarnessStatus, Method, SeqEvent, Subscribe,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc::{self, Id, Notification, Outcome, Request, Response, RpcError, Version2};
 
 use crate::clock::Clock;
 use crate::error::DaemonError;
+use crate::evidence::EvidenceSources;
 use crate::handlers::{dispatch, parse};
 use crate::log::EventLog;
 use crate::state::State;
@@ -35,6 +36,9 @@ pub struct Config {
     /// The spool written by hooks while the daemon was down; drained and
     /// replayed at start.
     pub spool: Option<PathBuf>,
+    /// Where workspaces and delivery evidence are read from:
+    /// [`EvidenceSources::default()`] reads nothing.
+    pub evidence: EvidenceSources,
 }
 
 impl std::fmt::Debug for Config {
@@ -42,6 +46,7 @@ impl std::fmt::Debug for Config {
         f.debug_struct("Config")
             .field("paths", &self.paths)
             .field("clock", &self.clock)
+            .field("evidence", &self.evidence)
             .finish_non_exhaustive()
     }
 }
@@ -50,12 +55,30 @@ impl std::fmt::Debug for Config {
 pub(crate) struct Shared {
     pub(crate) state: Mutex<State>,
     pub(crate) harnesses: Vec<HarnessStatus>,
+    /// What the evidence refresher learned about the forge, once it checked.
+    forge: std::sync::Mutex<Option<ForgeStatus>>,
     shutdown: watch::Sender<bool>,
 }
 
 impl Shared {
     pub(crate) fn request_shutdown(&self) {
         let _ = self.shutdown.send(true);
+    }
+
+    pub(crate) fn forge_status(&self) -> Option<ForgeStatus> {
+        // A plain value that is never left half-written: a poisoned lock
+        // still holds a valid one.
+        self.forge
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub(crate) fn set_forge_status(&self, status: ForgeStatus) {
+        *self
+            .forge
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(status);
     }
 }
 
@@ -88,11 +111,13 @@ impl Daemon {
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
             harnesses: config.harnesses,
+            forge: std::sync::Mutex::new(None),
             shutdown,
         });
         if let Some(dir) = config.spool {
             replay_spool(&shared, dir).await;
         }
+        let refresher = crate::evidence::spawn(&shared, config.evidence);
         tracing::info!(socket = ?listener.local_addr().ok(), "volee daemon ready");
         let mut connections = JoinSet::new();
         loop {
@@ -109,6 +134,9 @@ impl Daemon {
         }
         tracing::info!("volee daemon stopping");
         connections.abort_all();
+        if let Some(refresher) = refresher {
+            refresher.abort();
+        }
         Ok(())
     }
 }

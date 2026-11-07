@@ -60,21 +60,52 @@ const MAX_POLL_PAUSE: Duration = Duration::from_millis(20);
 /// before SIGKILL.
 const TERMINATION_GRACE: Duration = Duration::from_secs(2);
 
-/// Starts git processes for [`GitCli`](crate::GitCli).
+/// How a program learns which directory a command is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Style {
+    /// git: `git -C <dir> --no-optional-locks <args>`.
+    Git,
+    /// Any other program, such as `gh`: run with `<dir>` as its current
+    /// directory.
+    InDirectory,
+}
+
+/// Starts the processes of a git tool: git for [`GitCli`](crate::GitCli),
+/// the GitHub CLI for [`GhCli`](crate::GhCli).
 #[derive(Debug)]
 pub(crate) struct Runner {
     program: PathBuf,
+    style: Style,
     envs: Vec<(OsString, OsString)>,
     limiter: Limiter,
 }
 
 impl Runner {
-    pub(crate) fn new(program: PathBuf, max_concurrent: NonZeroUsize) -> Self {
+    /// Runs git.
+    pub(crate) fn git(program: PathBuf, max_concurrent: NonZeroUsize) -> Self {
+        Self::with_style(program, Style::Git, max_concurrent)
+    }
+
+    /// Runs another program in the directory each command is about.
+    pub(crate) fn in_directory(program: PathBuf, max_concurrent: NonZeroUsize) -> Self {
+        Self::with_style(program, Style::InDirectory, max_concurrent)
+    }
+
+    fn with_style(program: PathBuf, style: Style, max_concurrent: NonZeroUsize) -> Self {
         Self {
             program,
+            style,
             envs: Vec::new(),
             limiter: Limiter::new(max_concurrent),
         }
+    }
+
+    /// The program's file name, for messages: `git` or `gh`.
+    pub(crate) fn program_name(&self) -> String {
+        self.program.file_name().map_or_else(
+            || self.program.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        )
     }
 
     /// Sets a variable for every command, over the ones set by default.
@@ -105,15 +136,20 @@ impl Runner {
         }
     }
 
-    /// The process for `git -C <dir> --no-optional-locks <args>`, ready to
-    /// spawn. Variables set with [`Runner::set_env`] win over `envs`, which
-    /// win over the fixed ones.
+    /// The process for `git -C <dir> --no-optional-locks <args>` (or
+    /// `<program> <args>` run in `<dir>`), ready to spawn. Variables set with
+    /// [`Runner::set_env`] win over `envs`, which win over the fixed ones.
     fn command(&self, dir: &Path, args: &[OsString], envs: &[(OsString, OsString)]) -> Command {
         let mut command = Command::new(&self.program);
+        match self.style {
+            Style::Git => {
+                command.arg("-C").arg(dir).arg("--no-optional-locks");
+            }
+            Style::InDirectory => {
+                command.current_dir(dir);
+            }
+        }
         command
-            .arg("-C")
-            .arg(dir)
-            .arg("--no-optional-locks")
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -598,13 +634,22 @@ mod tests {
     use super::*;
 
     fn runner() -> Runner {
-        let mut runner = Runner::new(PathBuf::from("git"), NonZeroUsize::MIN);
+        let mut runner = Runner::git(PathBuf::from("git"), NonZeroUsize::MIN);
         runner.set_env("GIT_CONFIG_GLOBAL".into(), "/dev/null".into());
         runner
     }
 
     fn envs_of(command: &Command) -> Vec<(&OsStr, Option<&OsStr>)> {
         command.get_envs().collect()
+    }
+
+    #[test]
+    fn other_programs_run_in_the_directory() {
+        let runner = Runner::in_directory(PathBuf::from("/usr/bin/gh"), NonZeroUsize::MIN);
+        let command = runner.command(Path::new("/work/volee"), &["pr".into()], &[]);
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["pr"]);
+        assert_eq!(command.get_current_dir(), Some(Path::new("/work/volee")));
+        assert_eq!(runner.program_name(), "gh");
     }
 
     #[test]

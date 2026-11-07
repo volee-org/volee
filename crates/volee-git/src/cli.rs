@@ -95,7 +95,7 @@ impl GitCli {
     /// Runs the given git executable.
     pub fn with_program(program: impl Into<PathBuf>) -> Self {
         Self {
-            runner: Runner::new(program.into(), Self::DEFAULT_MAX_CONCURRENT),
+            runner: Runner::git(program.into(), Self::DEFAULT_MAX_CONCURRENT),
             timeout: Self::DEFAULT_TIMEOUT,
             write_timeout: Self::DEFAULT_WRITE_TIMEOUT,
             fetch_timeout: Self::DEFAULT_FETCH_TIMEOUT,

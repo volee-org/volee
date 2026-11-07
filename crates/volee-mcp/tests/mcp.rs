@@ -22,7 +22,7 @@ use volee_core::role::{LaunchedBy, Role};
 use volee_core::time::Timestamp;
 use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, MissionId, Registry, ThreadId};
-use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
+use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_mcp::VoleeMcp;
 use volee_mcp::tools::{ListArgs, OutcomeArg, ReportArgs};
 use volee_proto::client::Client;
@@ -84,6 +84,7 @@ fn start_with(events: Vec<Event>) -> Fixture {
             clock: Arc::new(ManualClock::at(5_000)),
             harnesses: vec![],
             spool: None,
+            evidence: EvidenceSources::default(),
         },
     ));
     Fixture { socket, _dir: dir }

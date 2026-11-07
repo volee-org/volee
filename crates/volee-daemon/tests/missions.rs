@@ -19,7 +19,7 @@ use volee_core::role::{LaunchedBy, Role};
 use volee_core::time::Timestamp;
 use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, MissionId, Registry, ThreadId};
-use volee_daemon::{Config, Daemon, ManualClock, MemoryLog};
+use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     AbortMission, AbortParams, CloseMission, CloseParams, CreateMission, CreateMissionParams,
@@ -149,6 +149,7 @@ fn start(events: Vec<Event>) -> Running {
         clock: Arc::new(ManualClock::at(10_000)),
         harnesses: vec![],
         spool: None,
+        evidence: EvidenceSources::default(),
     };
     let task = tokio::spawn(Daemon::serve(listener, config));
     Running {
