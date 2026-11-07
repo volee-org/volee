@@ -34,7 +34,7 @@ setup = "bun install"
 theme = "catppuccin-mocha"
 
 [tui.keys]
-attach = "a"
+take-over = "ctrl-a"
 ```
 
 ## `[agents]`
@@ -68,5 +68,5 @@ and `.`.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `theme` | `catppuccin-mocha` | A built-in theme or a file in `~/.config/volee/themes/`. |
-| `keys` | none | Key overrides by action name; see the interface guide. |
+| `theme` | `catppuccin-mocha` | A built-in theme or a file in `~/.config/volee/themes/`; see [Themes](themes.md). |
+| `keys` | none | Key overrides by action name, such as `take-over = "ctrl-a"`; the [interface guide](interface.md#keys) lists the actions. |

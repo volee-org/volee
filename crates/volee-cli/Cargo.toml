@@ -31,6 +31,7 @@ volee-harness.workspace = true
 volee-mcp.workspace = true
 volee-proto.workspace = true
 volee-store.workspace = true
+volee-tui.workspace = true
 
 [dev-dependencies]
 ulid.workspace = true

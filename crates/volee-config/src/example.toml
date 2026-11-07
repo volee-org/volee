@@ -35,4 +35,4 @@ wake_timeout = 3600
 
 # Key overrides, by action name. See the interface guide for the actions.
 # [tui.keys]
-# attach = "a"
+# take-over = "ctrl-a"
