@@ -310,6 +310,7 @@ fn start(events: Vec<Event>, clock: Arc<ManualClock>, evidence: EvidenceSources)
         spool: None,
         harness: None,
         discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
+        max_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence,
         volee_bin: None,

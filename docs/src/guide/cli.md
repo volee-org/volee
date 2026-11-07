@@ -28,7 +28,7 @@ it waits for you, and none of it changes your work:
 
 | What | How often | What it runs |
 | --- | --- | --- |
-| Find sessions | Every two seconds while the [interface](interface.md) is open, every thirty seconds otherwise, and at once when the interface opens or `volee ls` asks | `claude agents --json --all` |
+| Find sessions | While the [interface](interface.md) is open, every two seconds while sessions change, slowing down to every ten seconds while nothing does; every thirty seconds when no interface is open; at once when the interface opens or `volee ls` asks | `claude agents --json --all` |
 | Read each agent's work | When it finishes a turn or stops, and every minute while it runs | git queries in its directory, which never change the repository |
 | Fetch | At most every five minutes per repository, for the repositories of agents volee launched | `git fetch --prune origin`; the [`[git] fetch`](configuration.md#git) setting chooses which repositories, or none |
 | Look up pull requests | At most once a minute per branch, and right after its agent stops | `gh pr list`, with your own `gh` sign-in, when the GitHub CLI is installed and signed in |
@@ -47,10 +47,13 @@ volee ls --json   # the same, as JSON for scripts
 The list includes every live Claude Code session on the machine, in a
 terminal or in the background, whoever started it. Agents volee launched
 report through their hooks the moment something happens. The daemon finds
-the other sessions by listing them: every two seconds while the
-[interface](interface.md) is open, and every thirty seconds otherwise, so an
-idle daemon costs next to nothing. Opening the interface lists them at once,
-and so does `volee ls`, which waits for that listing (three seconds at most)
+the other sessions by listing them, and each listing costs a little CPU, so
+it lists as often as things change. While the [interface](interface.md) is
+open, it lists every two seconds after a listing that found something new,
+and waits twice as long after each listing that found nothing, up to ten
+seconds. With no interface open, it lists every thirty seconds, so an idle
+daemon costs next to nothing. Opening the interface lists them at once, and
+so does `volee ls`, which waits for that listing (three seconds at most)
 before it prints. Finished sessions you never saw through volee are left
 out; `volee daemon status` tells you whether Claude Code was found.
 

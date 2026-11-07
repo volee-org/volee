@@ -110,6 +110,7 @@ fn start_with(extra: &str) -> Running {
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
         // Discovery is not under test: list rarely.
         discovery_interval: std::time::Duration::from_secs(3_600),
+        max_discovery_interval: std::time::Duration::from_secs(3_600),
         idle_discovery_interval: std::time::Duration::from_secs(3_600),
         evidence: EvidenceSources {
             git: Some(Arc::new(git)),

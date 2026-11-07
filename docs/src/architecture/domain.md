@@ -79,20 +79,31 @@ group.
   background). It never becomes `done` because it disappeared.
 
 The daemon runs it (module `discovery` of `volee-daemon`) against `claude
-agents --json --all`: when it starts, then every two seconds while an
-interactive client (the interface) is subscribed, and every thirty seconds
-otherwise (`discovery_interval` and `idle_discovery_interval` of its
-configuration). A new interactive subscription triggers a listing at once,
-so the interface opens on fresh data, and so does a `discovery.refresh`
-request, which answers once a listing that started after it is applied
-(`volee ls` sends one; requests made meanwhile share the listing). Each wait
-starts when the previous listing ends, so a slow listing on a loaded machine
-never runs back to back.
-Agents volee launched report through their hooks in real time either way;
-only sessions started elsewhere, and sessions that end without a word, show
-up later while nobody watches. The listing runs outside the state lock, so a
-slow `claude` never blocks requests; a failing listing changes nothing and is
-logged once, then again when it works. When Claude Code is missing or too
+agents --json --all`, which costs about 0.17 s of CPU and starts a Node
+process each time, so the cadence follows who watches and what changes:
+
+- when the daemon starts, it lists at once;
+- while an interactive client (the interface) is subscribed, it waits two
+  seconds after a listing that changed something (a session linked to its
+  agent, or reconciled events), and twice as long after each listing that
+  changed nothing, up to ten seconds (`discovery_interval` and
+  `max_discovery_interval` of its configuration);
+- with no interactive client, it waits thirty seconds
+  (`idle_discovery_interval`);
+- a new interactive subscription lists at once, so the interface opens on
+  fresh data, and so does a `discovery.refresh` request, which answers once
+  a listing that started after it is applied (`volee ls` sends one; requests
+  made meanwhile share the listing). Both bring the two-second wait back.
+
+Hook events never shorten the wait: agents volee launched report through
+their hooks in real time whatever discovery does, and resetting on them
+would keep the shortest wait exactly while agents work. Only sessions
+started elsewhere, and sessions that end without a word, show up later
+while nothing changes or nobody watches. Each wait starts when the previous
+listing ends, so a slow listing on a loaded machine never runs back to back.
+The listing runs outside the state lock, so a slow `claude` never blocks
+requests; a failing listing changes nothing (so the wait keeps growing) and
+is logged once, then again when it works. When Claude Code is missing or too
 old, `volee daemon status` says why and discovery stays off.
 
 ## The mission supervisor

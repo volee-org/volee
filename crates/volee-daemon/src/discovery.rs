@@ -7,13 +7,17 @@
 //! a richer, faster picture; discovery is what makes every other session
 //! visible, and what notices sessions that ended without a word.
 //!
-//! A listing costs CPU, so its cadence follows who watches: every few
-//! seconds while an interactive client (the interface) is subscribed, rarely
-//! otherwise, and at once when a new interactive client subscribes, so that
-//! it opens on fresh data. Each wait starts when the previous listing ends,
-//! so a slow listing on a loaded machine never runs back to back. A one-off
-//! command (`volee ls`) asks for a listing now with `discovery.refresh`, and
-//! waits for it.
+//! A listing costs CPU (Claude Code starts a Node process for each), so its
+//! cadence follows who watches and what changes. Nobody watching: rarely.
+//! An interactive client (the interface) subscribed: every two seconds after
+//! a listing that changed something, then twice as long after each listing
+//! that changed nothing, up to ten seconds. A new interactive client, or a
+//! one-off command asking with `discovery.refresh` (`volee ls`), gets a
+//! listing at once and the short wait again. Hooks never shorten the wait:
+//! agents volee launched report through them whatever discovery does, and
+//! resetting on them would keep the short wait exactly while agents work.
+//! Each wait starts when the previous listing ends, so a slow listing on a
+//! loaded machine never runs back to back.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -93,9 +97,13 @@ pub(crate) async fn refresh(
     Ok(Refreshed { listed })
 }
 
-/// How often the harness is listed while an interactive client watches,
-/// when the configuration says nothing.
+/// The shortest wait between two listings, while an interactive client
+/// watches and sessions change, when the configuration says nothing.
 pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(2);
+
+/// The longest wait between two listings while an interactive client
+/// watches and nothing changes, when the configuration says nothing.
+pub const DEFAULT_MAX_INTERVAL: Duration = Duration::from_secs(10);
 
 /// How often the harness is listed while no interactive client watches,
 /// when the configuration says nothing.
@@ -104,20 +112,66 @@ pub const DEFAULT_IDLE_INTERVAL: Duration = Duration::from_secs(30);
 /// How long discovery waits between two listings.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Cadence {
-    /// While at least one interactive client is subscribed.
+    /// While at least one interactive client is subscribed: the wait after
+    /// a listing that changed something.
     pub(crate) watched: Duration,
+    /// While at least one interactive client is subscribed: the longest
+    /// wait, reached while nothing changes.
+    pub(crate) watched_max: Duration,
     /// While none is.
     pub(crate) idle: Duration,
 }
 
 impl Cadence {
-    fn wait(self, watching: Watching) -> Duration {
+    /// The wait before the next listing: the backoff's while someone
+    /// watches, the idle one otherwise.
+    fn wait(self, watching: Watching, backoff: Backoff) -> Duration {
         if watching.open > 0 {
-            self.watched
+            backoff.current
         } else {
             self.idle
         }
     }
+}
+
+/// The wait between two listings while someone watches: the shortest after
+/// a listing that changed something or answered someone, twice as long
+/// after each listing that changed nothing, up to the longest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Backoff {
+    shortest: Duration,
+    longest: Duration,
+    current: Duration,
+}
+
+impl Backoff {
+    fn new(shortest: Duration, longest: Duration) -> Self {
+        Self {
+            shortest,
+            longest: longest.max(shortest),
+            current: shortest,
+        }
+    }
+
+    /// The wait after a listing: the shortest when it changed something or
+    /// answered someone (`reset`), otherwise twice the last one, capped.
+    fn after(&mut self, reset: bool) -> Duration {
+        self.current = if reset {
+            self.shortest
+        } else {
+            self.current.saturating_mul(2).min(self.longest)
+        };
+        self.current
+    }
+}
+
+/// What a listing did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Listed {
+    /// The harness answered and its listing was applied.
+    succeeded: bool,
+    /// It linked a session or changed the registry.
+    changed: bool,
 }
 
 /// Lists `harness` at once, then again after each wait the cadence gives,
@@ -137,9 +191,13 @@ pub(crate) async fn run(
     let mut served = watching.borrow_and_update().opened;
     // When the last listing ended; none yet, so the first runs at once.
     let mut last: Option<Instant> = None;
+    let mut backoff = Backoff::new(cadence.watched, cadence.watched_max);
+    // Whether the next listing answers someone (the daemon starting, a new
+    // watcher, a refresh request), which brings the short wait back.
+    let mut asked = true;
     let mut failing = false;
     loop {
-        let wait = cadence.wait(*watching.borrow());
+        let wait = cadence.wait(*watching.borrow(), backoff);
         let next = last.map_or_else(Instant::now, |last| last + wait);
         tokio::select! {
             () = tokio::time::sleep_until(next) => {}
@@ -152,11 +210,13 @@ pub(crate) async fn run(
                 if watching.borrow_and_update().opened == served {
                     continue;
                 }
+                asked = true;
             }
             changed = requests.changed() => {
                 if changed.is_err() {
                     return;
                 }
+                asked = true;
             }
             _ = stop.changed() => return,
         }
@@ -167,19 +227,25 @@ pub(crate) async fn run(
             .refreshes
             .progress
             .send_modify(|progress| progress.started += 1);
-        let succeeded = list(&shared, &harness, &mut failing).await;
+        let listed = list(&shared, &harness, &mut failing).await;
         shared.refreshes.progress.send_modify(|progress| {
             progress.finished = progress.started;
-            progress.succeeded = succeeded;
+            progress.succeeded = listed.succeeded;
         });
+        let next_wait = backoff.after(asked || listed.changed);
+        asked = false;
+        tracing::debug!(
+            changed = listed.changed,
+            next_if_watched_ms = next_wait.as_millis(),
+            "listed sessions"
+        );
         last = Some(Instant::now());
     }
 }
 
-/// Lists the harness once and applies what changed; `false` when the
-/// listing failed. `failing` remembers whether the previous listing failed,
-/// so that a failure is logged once.
-async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bool) -> bool {
+/// Lists the harness once and applies what changed. `failing` remembers
+/// whether the previous listing failed, so that a failure is logged once.
+async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bool) -> Listed {
     let lister = Arc::clone(harness);
     let mut listing = match tokio::task::spawn_blocking(move || lister.list()).await {
         Ok(Ok(listing)) => {
@@ -195,11 +261,11 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
                 tracing::warn!(harness = ?harness.kind(), %error, "cannot list sessions");
                 *failing = true;
             }
-            return false;
+            return Listed::default();
         }
         Err(error) => {
             tracing::error!(%error, "the listing task panicked");
-            return false;
+            return Listed::default();
         }
     };
     // volee's own one-off runs (thread summaries) are never agents.
@@ -209,25 +275,36 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
     let mut state = shared.state.lock().await;
     let now = state.now();
     let claimed = claim_expected(&mut state, &listing, now);
-    if !claimed.is_empty()
-        && let Err(error) = state.commit(claimed)
-    {
-        tracing::error!(%error, "cannot link sessions started by volee");
+    let mut linked = false;
+    if !claimed.is_empty() {
+        match state.commit(claimed) {
+            Ok(_) => linked = true,
+            Err(error) => tracing::error!(%error, "cannot link sessions started by volee"),
+        }
     }
     state.sessions_mut().record(&listing);
     let events = reconcile(state.registry(), &listing, now, || state.new_agent_id());
     if events.is_empty() {
-        return true;
+        return Listed {
+            succeeded: true,
+            changed: linked,
+        };
     }
     let count = events.len();
     match state.commit(events) {
         Ok(_) => {
             tracing::debug!(events = count, "discovery applied");
-            true
+            Listed {
+                succeeded: true,
+                changed: true,
+            }
         }
         Err(error) => {
             tracing::error!(%error, "cannot apply discovered sessions");
-            false
+            Listed {
+                succeeded: false,
+                changed: linked,
+            }
         }
     }
 }
@@ -265,15 +342,46 @@ fn claim_expected(state: &mut State, listing: &Listing, now: Timestamp) -> Vec<E
 mod tests {
     use super::*;
 
+    fn secs(n: u64) -> Duration {
+        Duration::from_secs(n)
+    }
+
     #[test]
-    fn the_cadence_is_fast_only_while_someone_watches() {
+    fn the_cadence_follows_the_backoff_only_while_someone_watches() {
         let cadence = Cadence {
-            watched: Duration::from_secs(2),
-            idle: Duration::from_secs(30),
+            watched: secs(2),
+            watched_max: secs(10),
+            idle: secs(30),
         };
+        let mut backoff = Backoff::new(cadence.watched, cadence.watched_max);
         let nobody = Watching { open: 0, opened: 3 };
         let someone = Watching { open: 1, opened: 4 };
-        assert_eq!(cadence.wait(nobody), Duration::from_secs(30));
-        assert_eq!(cadence.wait(someone), Duration::from_secs(2));
+        assert_eq!(cadence.wait(nobody, backoff), secs(30));
+        assert_eq!(cadence.wait(someone, backoff), secs(2));
+        backoff.after(false);
+        assert_eq!(cadence.wait(someone, backoff), secs(4));
+        assert_eq!(cadence.wait(nobody, backoff), secs(30), "idle stays idle");
+    }
+
+    #[test]
+    fn the_wait_doubles_while_nothing_changes_up_to_the_longest() {
+        let mut backoff = Backoff::new(secs(2), secs(10));
+        let waits: Vec<Duration> = (0..5).map(|_| backoff.after(false)).collect();
+        assert_eq!(waits, [secs(4), secs(8), secs(10), secs(10), secs(10)]);
+    }
+
+    #[test]
+    fn a_change_or_a_request_brings_the_shortest_wait_back() {
+        let mut backoff = Backoff::new(secs(2), secs(10));
+        backoff.after(false);
+        backoff.after(false);
+        assert_eq!(backoff.after(true), secs(2));
+        assert_eq!(backoff.after(false), secs(4));
+    }
+
+    #[test]
+    fn a_longest_wait_below_the_shortest_means_no_backoff() {
+        let mut backoff = Backoff::new(secs(2), secs(1));
+        assert_eq!(backoff.after(false), secs(2));
     }
 }

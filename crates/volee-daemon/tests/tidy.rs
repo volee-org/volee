@@ -68,6 +68,7 @@ fn start() -> Running {
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
         discovery_interval: Duration::from_millis(10),
+        max_discovery_interval: Duration::from_millis(10),
         idle_discovery_interval: Duration::from_millis(10),
         evidence: EvidenceSources {
             git: Some(Arc::new(git)),

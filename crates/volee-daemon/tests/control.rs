@@ -70,6 +70,7 @@ fn start_with(every: Duration, tools: bool) -> Running {
         spool: None,
         harness: tools.then(|| Arc::clone(&harness) as Arc<dyn Harness>),
         discovery_interval: every,
+        max_discovery_interval: every,
         idle_discovery_interval: every,
         evidence: EvidenceSources {
             git: tools.then(|| Arc::new(git) as Arc<dyn volee_git::Git>),

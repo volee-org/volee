@@ -48,8 +48,18 @@ fn start() -> Running {
 }
 
 /// A daemon that lists every `watched` while an interactive client is
-/// subscribed, and every `idle` otherwise.
+/// subscribed (changes or not), and every `idle` otherwise.
 fn start_with(watched: Duration, idle: Duration) -> Running {
+    start_cadence(watched, watched, idle)
+}
+
+/// A daemon whose watched wait is `shortest` after a change and doubles up
+/// to `longest` while nothing changes; nobody watching, it waits an hour.
+fn start_backing_off(shortest: Duration, longest: Duration) -> Running {
+    start_cadence(shortest, longest, HOUR)
+}
+
+fn start_cadence(watched: Duration, longest: Duration, idle: Duration) -> Running {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::rooted(dir.path());
     let socket = paths.socket.clone();
@@ -63,6 +73,7 @@ fn start_with(watched: Duration, idle: Duration) -> Running {
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
         discovery_interval: watched,
+        max_discovery_interval: longest,
         idle_discovery_interval: idle,
         evidence: EvidenceSources::default(),
         volee_bin: None,
@@ -375,6 +386,7 @@ async fn without_a_harness_a_refresh_answers_at_once() {
         spool: None,
         harness: None,
         discovery_interval: HOUR,
+        max_discovery_interval: HOUR,
         idle_discovery_interval: HOUR,
         evidence: EvidenceSources::default(),
         volee_bin: None,
@@ -383,4 +395,79 @@ async fn without_a_harness_a_refresh_answers_at_once() {
     let asked = tokio::time::Instant::now();
     assert!(!refresh(&socket, Some(5_000)).await);
     assert!(asked.elapsed() < Duration::from_secs(4), "no waiting");
+}
+
+fn ms(millis: u64) -> Duration {
+    Duration::from_millis(millis)
+}
+
+/// How many listings happen during `window`, from now.
+async fn listings_during(harness: &FakeHarness, window: Duration) -> usize {
+    let before = harness.listings();
+    tokio::time::sleep(window).await;
+    harness.listings() - before
+}
+
+#[tokio::test]
+async fn while_nothing_changes_the_watched_wait_grows_to_its_cap() {
+    // 10 ms after a change, doubling up to 200 ms while nothing changes.
+    let daemon = start_backing_off(ms(10), ms(200));
+    eventually("the daemon lists once when it starts", || {
+        daemon.harness.listings() == 1
+    })
+    .await;
+    let _interface = subscribe(&daemon.socket, true).await;
+    // At a fixed 10 ms, a second and a half holds about 150 listings;
+    // backing off (10, 20, 40, 80, 160, then 200 ms) holds about a dozen.
+    let early = listings_during(&daemon.harness, ms(1_500)).await;
+    assert!(early < 40, "{early} listings in 1.5 s");
+    // Capped, not doubling for ever: at 200 ms, two seconds hold about ten
+    // listings; uncapped (320, 640, 1,280 ms...), one at most.
+    let capped = listings_during(&daemon.harness, ms(2_000)).await;
+    assert!(capped >= 4, "{capped} listings in 2 s");
+}
+
+#[tokio::test]
+async fn a_change_brings_the_short_wait_back() {
+    let daemon = start_backing_off(ms(10), ms(1_000));
+    eventually("the daemon lists once when it starts", || {
+        daemon.harness.listings() == 1
+    })
+    .await;
+    let _interface = subscribe(&daemon.socket, true).await;
+    // Nothing changes for a second and a half: the wait reaches a second.
+    tokio::time::sleep(ms(1_500)).await;
+    daemon.harness.set(vec![session(
+        "ffff6666-0000",
+        "rebase",
+        AgentState::Working,
+        true,
+    )]);
+    until(&daemon.socket, |r| r.agents().count() == 1).await;
+    // After the listing that found it: 10, 20, 40 ms again, where a backed
+    // off discovery would wait a second.
+    let after = listings_during(&daemon.harness, ms(500)).await;
+    assert!(after >= 3, "{after} listings in 0.5 s after a change");
+}
+
+#[tokio::test]
+async fn a_new_watcher_and_a_refresh_bring_the_short_wait_back() {
+    let daemon = start_backing_off(ms(10), ms(1_000));
+    eventually("the daemon lists once when it starts", || {
+        daemon.harness.listings() == 1
+    })
+    .await;
+    let _interface = subscribe(&daemon.socket, true).await;
+    tokio::time::sleep(ms(1_500)).await;
+
+    // A second interface opens: a listing at once, then the short wait.
+    let _second = subscribe(&daemon.socket, true).await;
+    let after = listings_during(&daemon.harness, ms(500)).await;
+    assert!(after >= 3, "{after} listings in 0.5 s after a new watcher");
+
+    // Backed off again, then `volee ls` asks for a listing.
+    tokio::time::sleep(ms(1_500)).await;
+    assert!(refresh(&daemon.socket, None).await);
+    let after = listings_during(&daemon.harness, ms(500)).await;
+    assert!(after >= 3, "{after} listings in 0.5 s after a refresh");
 }

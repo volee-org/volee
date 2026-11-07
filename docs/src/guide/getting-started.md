@@ -26,9 +26,10 @@ without stopping anything. `volee ls` prints the same list without the
 interface.
 
 Nothing here depends on how you started the sessions: volee reads Claude
-Code's own list of sessions (every two seconds while the interface is open,
-every thirty seconds otherwise), and the hooks of the agents it launches
-itself, which report at once.
+Code's own list of sessions (at once when the interface opens, then every two
+to ten seconds while it is open, more often while sessions change, and every
+thirty seconds otherwise), and the hooks of the agents it launches itself,
+which report at once.
 
 ## 3. Tell volee about your repositories
 
