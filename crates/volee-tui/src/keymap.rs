@@ -303,6 +303,30 @@ actions! {
     ToggleFull => "toggle-full",
     /// Answer yes to the question on the bottom line.
     Confirm => "confirm",
+    /// Show your messages and the questions waiting for you.
+    Messages => "messages",
+    /// Reply in the open thread.
+    Reply => "reply",
+    /// Summarize the open thread with a model.
+    Summarize => "summarize",
+    /// Open the agent's worktree in another program.
+    OpenWith => "open-with",
+    /// Open the worktree in your editor.
+    OpenEditor => "open-editor",
+    /// Open the changes in your diff viewer.
+    OpenDiff => "open-diff",
+    /// Open the worktree in your git interface.
+    OpenGit => "open-git",
+    /// Open the worktree in an editor with a window of its own.
+    OpenIde => "open-ide",
+    /// Launch an agent in a new worktree.
+    NewAgent => "new-agent",
+    /// Create a mission.
+    NewMission => "new-mission",
+    /// The next field of a dialog.
+    NextField => "next-field",
+    /// The previous field of a dialog.
+    PreviousField => "previous-field",
 }
 
 impl FromStr for Action {
@@ -344,13 +368,19 @@ pub(crate) enum Context {
     Diff,
     /// A yes or no question on the bottom line.
     Confirm,
+    /// The messages window.
+    Inbox,
+    /// The menu of programs to open a worktree with.
+    Tools,
+    /// A dialog that launches an agent or a mission.
+    Dialog,
     /// The help overlay.
     Help,
 }
 
 impl Context {
     /// Contexts in the order of the help and of the user guide.
-    pub(crate) const ALL: [Self; 12] = [
+    pub(crate) const ALL: [Self; 15] = [
         Self::Global,
         Self::Agents,
         Self::Hierarchy,
@@ -362,6 +392,9 @@ impl Context {
         Self::Composer,
         Self::Diff,
         Self::Confirm,
+        Self::Inbox,
+        Self::Tools,
+        Self::Dialog,
         Self::Help,
     ];
 
@@ -379,6 +412,9 @@ impl Context {
             Self::Composer => "Message composer",
             Self::Diff => "Changes",
             Self::Confirm => "Questions",
+            Self::Inbox => "Messages",
+            Self::Tools => "Open with",
+            Self::Dialog => "Launch dialogs",
             Self::Help => "Help",
         }
     }
@@ -636,7 +672,11 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &[ch('m')], A::Message, "write a message to the selected agent", Some("message")),
         bind(C::Global, &[ch('d')], A::Diff, "show the selected agent's changes", Some("diff")),
         bind(C::Global, &[ch('a')], A::TakeOver, "take over the selected agent in this terminal", Some("take over")),
-        bind(C::Global, &[key(K::Tab)], A::NextPane, "focus the next panel", Some("panel")),
+        bind(C::Global, &[ch('i')], A::Messages, "your messages, questions waiting for you first", Some("messages")),
+        bind(C::Global, &[ch('o')], A::OpenWith, "open the selected agent's worktree in your editor, diff viewer or git tool", None),
+        bind(C::Global, &[ch('n')], A::NewAgent, "launch an agent in a new worktree", None),
+        bind(C::Global, &[ch('N')], A::NewMission, "create a mission, which launches its coordinator", None),
+        bind(C::Global, &[key(K::Tab)], A::NextPane, "focus the next panel", None),
         bind(C::Global, &[key(K::BackTab)], A::PreviousPane, "focus the previous panel", None),
         bind(C::Global, &[ch('1')], A::ShowHierarchy, "show the hierarchy", None),
         bind(C::Global, &[ch('2')], A::ShowNetwork, "show the network", None),
@@ -718,12 +758,37 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Diff, &[ch('G'), key(K::End)], A::Last, "bottom", None),
         bind(C::Diff, &[ch('f')], A::ToggleFull, "switch between the summary and the full patch", Some("summary/patch")),
         bind(C::Diff, &[ch('r')], A::Refresh, "load the changes again", Some("refresh")),
+        bind(C::Diff, &[ch('o')], A::OpenWith, "open the worktree in your editor, diff viewer or git tool", Some("open with")),
         bind(C::Diff, &[key(K::Esc), ch('d'), ch('q')], A::Back, "close the changes", Some("close")),
         bind(C::Diff, &[ctrl('c')], A::Quit, "quit volee", None),
 
         bind(C::Confirm, &[ch('y')], A::Confirm, "yes", Some("yes")),
         bind(C::Confirm, &[ch('n'), key(K::Esc)], A::Back, "no", Some("no")),
         bind(C::Confirm, &[ctrl('c')], A::Quit, "quit volee without asking again", None),
+
+        bind(C::Inbox, &[ch('j'), key(K::Down)], A::Down, "next row, or further down the thread you read", Some("move")),
+        bind(C::Inbox, &[ch('k'), key(K::Up)], A::Up, "previous row, or further up the thread you read", Some("move")),
+        bind(C::Inbox, &[ch('g'), key(K::Home)], A::First, "first row, or the start of the thread", None),
+        bind(C::Inbox, &[ch('G'), key(K::End)], A::Last, "last row, or the end of the thread", None),
+        bind(C::Inbox, &[key(K::Enter)], A::Apply, "read the thread, which marks its messages read", Some("read")),
+        bind(C::Inbox, &[ch('r')], A::Reply, "reply: the answer to the question, else a note to the agent", Some("reply")),
+        bind(C::Inbox, &[ch('s')], A::Summarize, "summarize the thread with a model, when summaries are on", Some("summarize")),
+        bind(C::Inbox, &[key(K::Esc), ch('q'), ch('i')], A::Back, "leave the thread, then close the messages", Some("close")),
+        bind(C::Inbox, &[ctrl('c')], A::Quit, "quit volee", None),
+
+        bind(C::Tools, &[ch('e')], A::OpenEditor, "your editor ($VISUAL, $EDITOR or [tui.tools] editor)", Some("editor")),
+        bind(C::Tools, &[ch('d')], A::OpenDiff, "your diff viewer (Neovim with diffview, or [tui.tools] diff)", Some("diff")),
+        bind(C::Tools, &[ch('g')], A::OpenGit, "your git tool (lazygit, or [tui.tools] git)", Some("git")),
+        bind(C::Tools, &[ch('w')], A::OpenIde, "an editor with its own window (VS Code, or [tui.tools] ide)", Some("window")),
+        bind(C::Tools, &[key(K::Esc), ch('q'), ch('o')], A::Back, "close the menu", Some("close")),
+        bind(C::Tools, &[ctrl('c')], A::Quit, "quit volee", None),
+
+        bind(C::Dialog, &[key(K::Tab)], A::NextField, "next field", Some("field")),
+        bind(C::Dialog, &[key(K::BackTab)], A::PreviousField, "previous field", Some("field")),
+        bind(C::Dialog, &[key(K::Enter)], A::Apply, "launch", Some("launch")),
+        bind(C::Dialog, &[alt_enter, ctrl('j')], A::NewLine, "start a new line in the task or the goal", None),
+        bind(C::Dialog, &[key(K::Esc)], A::Back, "cancel", Some("cancel")),
+        bind(C::Dialog, &[ctrl('c')], A::Quit, "quit volee", None),
 
         bind(C::Help, &[ch('j'), key(K::Down)], A::Down, "scroll down", Some("scroll")),
         bind(C::Help, &[ch('k'), key(K::Up)], A::Up, "scroll up", Some("scroll")),
@@ -904,7 +969,7 @@ mod tests {
         assert_eq!(
             line(&[Context::Hierarchy, Context::Global]),
             "h/j/k/l move · enter subtree · +/_ zoom · ' jump · / filter · m message · d diff · \
-             a take over · tab panel · ? help · q quit"
+             a take over · i messages · ? help · q quit"
         );
         assert_eq!(line(&[Context::Help]), "j/k scroll · esc close");
         assert_eq!(line(&[Context::Filter]), "enter apply · esc cancel");
@@ -914,7 +979,7 @@ mod tests {
         );
         assert_eq!(
             line(&[Context::Diff]),
-            "j/k scroll · f summary/patch · r refresh · esc close"
+            "j/k scroll · f summary/patch · r refresh · o open with · esc close"
         );
         assert_eq!(line(&[Context::Confirm]), "y yes · n no");
     }

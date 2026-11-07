@@ -13,15 +13,18 @@ use tokio::task::JoinHandle;
 use ulid::Ulid;
 use volee_core::harness::HarnessKind;
 use volee_core::message::{MessageKind, Party};
+use volee_core::mission::MissionKind;
 use volee_core::role::{LaunchedBy, Role};
 use volee_core::time::Timestamp;
 use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, Registry};
 use volee_daemon::{Config, Daemon, DaemonError, EvidenceSources, ManualClock, MemoryLog};
 use volee_proto::client::Client;
-use volee_proto::methods::{Empty, Shutdown};
+use volee_proto::methods::{Empty, SendMessage, SendParams, Shutdown};
 use volee_proto::paths::Paths;
-use volee_tui::{DaemonSource, Outgoing, Source, SourceError, Subscription};
+use volee_tui::{
+    DaemonSource, MissionRequest, Outgoing, Source, SourceError, SpawnRequest, Subscription,
+};
 
 fn agent(n: u128) -> AgentId {
     AgentId::from_ulid(Ulid::from_parts(1_000, n))
@@ -121,6 +124,7 @@ async fn the_snapshot_and_the_updates_build_the_daemons_registry() {
             kind: MessageKind::Question,
             body: "Which port does the API listen on?".to_owned(),
             in_reply_to: None,
+            thread: None,
         })
         .await
         .unwrap();
@@ -139,6 +143,82 @@ async fn the_snapshot_and_the_updates_build_the_daemons_registry() {
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].body, "Which port does the API listen on?");
     assert_eq!(messages[0].kind, MessageKind::Question);
+}
+
+#[tokio::test]
+async fn the_person_reads_and_a_daemon_without_claude_code_says_what_it_cannot_do() {
+    let daemon = start();
+    let source = source(&daemon).await;
+    let Subscription {
+        snapshot,
+        mut updates,
+    } = source.subscribe().await.unwrap();
+    let mut registry = Registry::from_events(&snapshot).unwrap();
+    // The worker asks the person something.
+    let agent_side = Client::connect(&daemon.socket).await.unwrap();
+    let sent = agent_side
+        .call::<SendMessage>(SendParams {
+            from: Party::Agent(agent(2)),
+            to: vec![Party::Human],
+            kind: MessageKind::Question,
+            body: "May I drop the old endpoint?".to_owned(),
+            refs: vec![],
+            in_reply_to: None,
+            thread: None,
+        })
+        .await
+        .unwrap();
+    while registry.message(sent.message).is_none() {
+        registry.apply(&next(&mut updates).await.unwrap()).unwrap();
+    }
+    source.mark_read(sent.message).await.unwrap();
+    loop {
+        let event = next(&mut updates).await.unwrap();
+        registry.apply(&event).unwrap();
+        if matches!(event.kind, EventKind::MessageRead { .. }) {
+            break;
+        }
+    }
+    let receipt = registry
+        .message(sent.message)
+        .unwrap()
+        .receipt(Party::Human);
+    assert!(receipt.unwrap().read_at.is_some());
+
+    // Summaries are off unless the person turns them on: the daemon says
+    // which setting to change, and the interface shows it as is.
+    match source.summarize(sent.thread).await {
+        Err(SourceError::Unsupported(message)) => {
+            assert!(message.contains("summaries = true"), "{message}");
+        }
+        other => panic!("summaries should be off: {other:?}"),
+    }
+    let no_claude = "Claude Code is not available to this daemon; see `volee daemon status`";
+    assert_eq!(
+        source
+            .spawn(SpawnRequest {
+                repo: "/work".to_owned(),
+                branch: "feat/export".to_owned(),
+                task: "Export invoices.".to_owned(),
+                model: None,
+            })
+            .await,
+        Err(SourceError::Failed(no_claude.to_owned()))
+    );
+    // A mission is created even without Claude Code; its coordinator waits.
+    let created = source
+        .create_mission(MissionRequest {
+            title: "Invoice export".to_owned(),
+            kind: MissionKind::Change,
+            repos: vec!["billing".to_owned()],
+            goal: "Export invoices as CSV.".to_owned(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(created.coordinator, None);
+    while registry.mission(created.mission).is_none() {
+        registry.apply(&next(&mut updates).await.unwrap()).unwrap();
+    }
 }
 
 #[tokio::test]
@@ -169,6 +249,7 @@ async fn what_the_daemon_cannot_do_is_said_plainly() {
                 kind: MessageKind::Note,
                 body: "hello?".to_owned(),
                 in_reply_to: None,
+                thread: None,
             })
             .await
             .is_err()

@@ -15,7 +15,8 @@ use std::path::PathBuf;
 
 use tokio::sync::mpsc;
 use volee_core::message::MessageKind;
-use volee_core::{AgentId, Event, MessageId};
+use volee_core::mission::MissionKind;
+use volee_core::{AgentId, Event, MessageId, MissionId, ThreadId};
 
 /// The data side of the interface.
 ///
@@ -51,6 +52,32 @@ pub trait Source: Send + Sync + 'static {
     /// agent cannot be taken over from here, for example a session running
     /// in another terminal.
     fn attach(&self, agent: AgentId) -> impl Future<Output = Result<TakeOver, SourceError>> + Send;
+
+    /// Marks a message to the person as read. The change comes back as an
+    /// event.
+    fn mark_read(&self, message: MessageId)
+    -> impl Future<Output = Result<(), SourceError>> + Send;
+
+    /// A summary of a thread, written by a model. Fails with
+    /// [`SourceError::Unsupported`] when summaries are off, with the setting
+    /// to change.
+    fn summarize(
+        &self,
+        thread: ThreadId,
+    ) -> impl Future<Output = Result<Summary, SourceError>> + Send;
+
+    /// Launches an agent in a new worktree. The agent comes back as events.
+    fn spawn(
+        &self,
+        request: SpawnRequest,
+    ) -> impl Future<Output = Result<AgentId, SourceError>> + Send;
+
+    /// Creates a mission, which launches its coordinator. Both come back as
+    /// events.
+    fn create_mission(
+        &self,
+        request: MissionRequest,
+    ) -> impl Future<Output = Result<NewMission, SourceError>> + Send;
 }
 
 /// The state at subscription time and the events that follow it.
@@ -74,6 +101,55 @@ pub struct Outgoing {
     pub body: String,
     /// The question it answers, if any.
     pub in_reply_to: Option<MessageId>,
+    /// The thread it goes to; the source picks one when absent (the
+    /// mission's thread, or the thread between the person and the agent).
+    pub thread: Option<ThreadId>,
+}
+
+/// A thread's summary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Summary {
+    /// The summary, as plain text.
+    pub text: String,
+    /// How many messages it covers.
+    pub messages: usize,
+    /// The model that wrote it.
+    pub model: String,
+}
+
+/// An agent to launch, as the person describes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpawnRequest {
+    /// A repository name from the configuration, or a path to a checkout.
+    pub repo: String,
+    /// The branch to create.
+    pub branch: String,
+    /// The task, the agent's first prompt.
+    pub task: String,
+    /// The model; the configured default when absent.
+    pub model: Option<String>,
+}
+
+/// A mission to create, as the person describes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MissionRequest {
+    /// A short title.
+    pub title: String,
+    /// What it delivers.
+    pub kind: MissionKind,
+    /// The repositories involved, by configuration name.
+    pub repos: Vec<String>,
+    /// The goal, as the coordinator will read it.
+    pub goal: String,
+}
+
+/// A mission just created.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NewMission {
+    /// The mission.
+    pub mission: MissionId,
+    /// Its coordinator, when one could be launched.
+    pub coordinator: Option<AgentId>,
 }
 
 /// An agent's changes against its base branch.

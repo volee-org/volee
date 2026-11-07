@@ -6,6 +6,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::Span;
 use volee_core::Agent;
+use volee_core::agent::Hold;
 use volee_core::time::Elapsed;
 use volee_core::workspace::Location;
 
@@ -129,6 +130,18 @@ fn facts(model: &Model, agent: &Agent) -> Vec<(&'static str, String)> {
         None => location,
     };
     facts.push(("runs in", runs));
+    // volee will not resume a held agent on its own.
+    if let Some(hold) = agent.hold {
+        let (Hold::StoppedByHuman { at } | Hold::MissionOver { at }) = hold;
+        facts.push((
+            "held",
+            format!(
+                "{} · {} ago",
+                hold.describe(),
+                Elapsed::between(at, model.now)
+            ),
+        ));
+    }
     let delivery = &agent.delivery;
     let nothing = delivery.commits == 0
         && delivery.pull_request.is_none()
@@ -206,4 +219,30 @@ pub(crate) fn render_preview(model: &Model, area: Rect, buf: &mut Buffer) {
         &[Span::styled(message, theme.style(StyleRole::Placeholder))],
         inner.width.saturating_sub(1),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::demo::INVOICE_PAGE;
+    use crate::test_support::{id, model, start};
+
+    #[test]
+    fn a_held_agent_says_why_volee_leaves_it_alone() {
+        let model = model(120, 40);
+        let mut agent = model.registry.agent(id(INVOICE_PAGE)).unwrap().clone();
+        assert!(
+            !facts(&model, &agent)
+                .iter()
+                .any(|(name, _)| *name == "held")
+        );
+        agent.hold = Some(Hold::StoppedByHuman {
+            at: start().plus_millis(-120_000),
+        });
+        let held = facts(&model, &agent)
+            .into_iter()
+            .find(|(name, _)| *name == "held")
+            .map(|(_, value)| value);
+        assert_eq!(held.as_deref(), Some("stopped by the human · 2 min ago"));
+    }
 }

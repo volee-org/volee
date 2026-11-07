@@ -35,6 +35,7 @@ volee-store.workspace = true
 volee-tui.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 ulid.workspace = true
 
 [lints]
