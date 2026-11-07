@@ -29,9 +29,13 @@ volee ls --json   # the same, as JSON for scripts
 ```
 
 The list includes every live Claude Code session on the machine, in a
-terminal or in the background, whoever started it: the daemon discovers them
-within two seconds. Finished sessions you never saw through volee are left
-out; `volee daemon status` tells you whether Claude Code was found.
+terminal or in the background, whoever started it. Agents volee launched
+report through their hooks the moment something happens. The daemon finds
+the other sessions by listing them: every two seconds while the
+[interface](interface.md) is open, and every thirty seconds otherwise, so an
+idle daemon costs next to nothing. Opening the interface lists them at once.
+Finished sessions you never saw through volee are left out; `volee daemon
+status` tells you whether Claude Code was found.
 
 Each line shows a symbol and a word for the state, so the list reads without
 color:
