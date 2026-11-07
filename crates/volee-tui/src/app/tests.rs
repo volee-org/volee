@@ -349,6 +349,82 @@ fn a_asks_the_source_then_takes_over_the_selected_agent() {
 }
 
 #[test]
+fn forgetting_an_agent_asks_first_and_says_how_it_went() {
+    let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    press(&mut model, "'s");
+    // F asks; n and Esc leave everything as it was.
+    assert_eq!(press(&mut model, "F"), []);
+    assert_eq!(model.prompt, Some(Prompt::Forget(schema)));
+    assert_eq!(model.contexts(), [Context::Confirm]);
+    assert_eq!(press(&mut model, "n"), []);
+    assert_eq!(model.prompt, None);
+    press(&mut model, "F");
+    assert_eq!(key(&mut model, KeyCode::Esc), []);
+    assert_eq!(model.prompt, None);
+    // y asks the source, with the name for the notice that follows.
+    press(&mut model, "F");
+    assert_eq!(
+        press(&mut model, "y"),
+        [Effect::Forget {
+            agent: schema,
+            name: "invoice-schema".into()
+        }]
+    );
+    assert_eq!(model.prompt, None);
+    update(
+        &mut model,
+        Msg::Forgot {
+            name: "invoice-schema".into(),
+            result: Ok(()),
+        },
+    );
+    let notice = model.notice.as_ref().unwrap();
+    assert!(!notice.error);
+    assert_eq!(
+        notice.text,
+        "Forgot invoice-schema: volee no longer lists it. Its sessions, worktree and branch stay \
+         as they are."
+    );
+    // The daemon's refusal, in its own words.
+    update(
+        &mut model,
+        Msg::Forgot {
+            name: "invoice-schema".into(),
+            result: Err(SourceError::Unsupported(
+                "invoice-schema is still running: stop it first (`volee stop invoice-schema`), \
+                 then forget it"
+                    .into(),
+            )),
+        },
+    );
+    let notice = model.notice.as_ref().unwrap();
+    assert!(notice.error);
+    assert_eq!(
+        notice.text,
+        "Could not forget invoice-schema: invoice-schema is still running: stop it first (`volee \
+         stop invoice-schema`), then forget it."
+    );
+    // Ctrl+C still quits from the question.
+    press(&mut model, "F");
+    assert_eq!(ctrl(&mut model, 'c'), [Effect::Quit]);
+}
+
+#[test]
+fn the_preview_empties_when_the_last_agent_leaves() {
+    let mut model = model(120, 40);
+    let ids: Vec<AgentId> = model.registry.agents().map(|agent| agent.id).collect();
+    assert!(model.preview.agent.is_some());
+    let gone: Vec<Event> = ids
+        .into_iter()
+        .map(|agent| Event::new(start(), EventKind::AgentForgotten { agent }))
+        .collect();
+    update(&mut model, Msg::Events(gone));
+    assert_eq!(model.selected, None);
+    assert_eq!(model.preview.agent, None, "no screen of an agent that left");
+}
+
+#[test]
 fn an_agent_in_a_pane_is_brought_forward_instead_of_taken_over() {
     let mut model = model(120, 40);
     let schema = id(INVOICE_SCHEMA);

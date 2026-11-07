@@ -78,6 +78,12 @@ pub trait Source: Send + Sync + 'static {
         &self,
         request: MissionRequest,
     ) -> impl Future<Output = Result<NewMission, SourceError>> + Send;
+
+    /// Forgets an agent: the source stops listing it and ignores its
+    /// sessions; nothing is stopped or deleted. The removal comes back as an
+    /// event. Fails with [`SourceError::Unsupported`] when a rule refuses,
+    /// such as an agent volee launched that still runs.
+    fn forget(&self, agent: AgentId) -> impl Future<Output = Result<(), SourceError>> + Send;
 }
 
 /// The state at subscription time and the events that follow it.

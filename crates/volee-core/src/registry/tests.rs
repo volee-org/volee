@@ -192,6 +192,66 @@ fn forgetting_an_agent_makes_its_children_roots() {
     assert_eq!(roots, [agent_id(2)]);
 }
 
+#[test]
+fn only_agents_that_stopped_or_came_from_outside_are_forgotten() {
+    let mut registry = Registry::new();
+    // Launched by the person, still starting: stop it first.
+    register(&mut registry, agent_id(1), Role::Lead, None);
+    let name = registry.agent(agent_id(1)).unwrap().name.clone();
+    assert_eq!(
+        registry.forget_refusal(agent_id(1)),
+        Some(format!(
+            "{name} is still running: stop it first (`volee stop {name}`), then forget it"
+        ))
+    );
+    set_state(&mut registry, agent_id(1), AgentState::Failed, 2);
+    assert_eq!(registry.forget_refusal(agent_id(1)), None);
+    // A member of an open mission waits for the mission to end, even
+    // stopped. (Done is still live: its session runs.)
+    let mission = create_mission(&mut registry, None);
+    join_mission(&mut registry, agent_id(2), mission, Role::Worker);
+    set_state(&mut registry, agent_id(2), AgentState::Stopped, 3);
+    let refusal = registry.forget_refusal(agent_id(2)).unwrap();
+    assert!(
+        refusal.ends_with(
+            "belongs to the open mission \"Invoices\": close or abort the mission first"
+        ),
+        "{refusal}"
+    );
+    registry
+        .apply(&Event::new(
+            at(4),
+            EventKind::MissionUpdated {
+                mission,
+                status: MissionStatus::Closed,
+                coordinator: None,
+                report: None,
+            },
+        ))
+        .unwrap();
+    assert_eq!(registry.forget_refusal(agent_id(2)), None);
+    // A session found outside volee is forgotten even while it runs.
+    registry
+        .apply(&Event::new(
+            at(5),
+            EventKind::AgentRegistered {
+                agent: agent_id(3),
+                name: "notes".into(),
+                role: Role::Lead,
+                harness: HarnessKind::ClaudeCode,
+                launched_by: LaunchedBy::Outside,
+                parent: None,
+                mission: None,
+                workspace: Workspace::at("/work"),
+                location: Location::Background,
+            },
+        ))
+        .unwrap();
+    set_state(&mut registry, agent_id(3), AgentState::Working, 6);
+    assert_eq!(registry.forget_refusal(agent_id(3)), None);
+    assert_eq!(registry.forget_refusal(agent_id(9)), None, "unknown");
+}
+
 fn open_thread(
     registry: &mut Registry,
     n: u128,

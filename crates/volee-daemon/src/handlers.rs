@@ -10,7 +10,6 @@ use serde_json::Value;
 use volee_core::harness::{SessionKey, SessionOrigin};
 use volee_core::ids::ThreadId;
 use volee_core::message::{Message, Party, Receipt, Thread};
-use volee_core::role::LaunchedBy;
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
 use volee_core::{Agent, AgentId, Event, EventKind, Registry};
@@ -147,22 +146,14 @@ async fn events_since(
 async fn forget(shared: &Arc<Shared>, params: AgentParams) -> Result<Empty, DaemonError> {
     let mut state = shared.state.lock().await;
     let registry = state.registry();
-    let record = registry
-        .agent(params.agent)
-        .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {}", params.agent)))?;
-    let name = &record.name;
-    if record.launched_by != LaunchedBy::Outside && record.state.is_live() {
-        return Err(DaemonError::Refused(format!(
-            "{name} is still running: stop it first (`volee stop {name}`), then forget it"
+    if registry.agent(params.agent).is_none() {
+        return Err(DaemonError::NotFound(format!(
+            "unknown agent {}",
+            params.agent
         )));
     }
-    if let Some(mission) = record.mission.and_then(|id| registry.mission(id))
-        && !mission.status.is_over()
-    {
-        return Err(DaemonError::Refused(format!(
-            "{name} belongs to the open mission \"{}\": close or abort the mission first",
-            mission.title
-        )));
+    if let Some(refusal) = registry.forget_refusal(params.agent) {
+        return Err(DaemonError::Refused(refusal));
     }
     let now = state.now();
     state.commit(vec![Event::new(

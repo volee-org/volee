@@ -55,6 +55,29 @@ pub(crate) fn read(
 
 /// A summary written without a model: who said what last, which is enough
 /// to show where summaries appear.
+/// Forgetting `agent` in the demo: volee's own refusals, then the demo
+/// keeps the agents of its story, whose later events would name an agent the
+/// interface no longer knows.
+pub(crate) fn forget(
+    registry: &Registry,
+    agent: AgentId,
+    scripted: bool,
+    at: Timestamp,
+) -> Result<Event, SourceError> {
+    if registry.agent(agent).is_none() {
+        return Err(SourceError::UnknownAgent(agent));
+    }
+    if let Some(refusal) = registry.forget_refusal(agent) {
+        return Err(SourceError::Unsupported(refusal));
+    }
+    if scripted {
+        return Err(SourceError::Unsupported(
+            "the demo keeps the agents of its story; volee itself would forget this one".to_owned(),
+        ));
+    }
+    Ok(Event::new(at, EventKind::AgentForgotten { agent }))
+}
+
 pub(crate) fn summary(registry: &Registry, thread: ThreadId) -> Result<Summary, SourceError> {
     let found = registry
         .thread(thread)

@@ -296,6 +296,13 @@ impl Source for DemoSource {
         self.emit(events).await?;
         Ok(created)
     }
+
+    async fn forget(&self, agent: AgentId) -> Result<(), SourceError> {
+        let registry = self.registry_now()?;
+        let scripted = scenario::member_of(self.start, agent).is_some();
+        let event = requests::forget(&registry, agent, scripted, self.clock.now())?;
+        self.emit(vec![event]).await
+    }
 }
 
 impl DemoSource {
@@ -698,6 +705,16 @@ mod tests {
             take_over.args.last().map(String::as_str),
             Some("billing-feat-export")
         );
+        // volee's own rule: an agent it launched that still runs is not
+        // forgotten.
+        assert_eq!(
+            demo.forget(agent).await,
+            Err(SourceError::Unsupported(
+                "billing-feat-export is still running: stop it first (`volee stop \
+                 billing-feat-export`), then forget it"
+                    .into()
+            ))
+        );
         assert_eq!(
             demo.spawn(request).await,
             Err(SourceError::Failed(
@@ -723,6 +740,33 @@ mod tests {
         assert_eq!(coordinator.name, "coordinator-invoice-export");
         let mission = registry.mission(created.mission).unwrap();
         assert_eq!(mission.coordinator, Some(coordinator.id));
+    }
+
+    #[tokio::test]
+    async fn the_demo_keeps_the_agents_of_its_story() {
+        let (demo, _clock) = demo();
+        let Subscription { snapshot, .. } = demo.subscribe().await.unwrap();
+        let registry = Registry::from_events(&snapshot).unwrap();
+        let mut known = 0;
+        for member in 0..scenario::CAST.len() {
+            let agent = agent_id(start(), member);
+            if registry.agent(agent).is_none() {
+                // It arrives later in the story.
+                continue;
+            }
+            known += 1;
+            // volee's refusal when one applies, else the demo's.
+            let expected = registry.forget_refusal(agent).unwrap_or_else(|| {
+                "the demo keeps the agents of its story; volee itself would forget this one"
+                    .to_owned()
+            });
+            assert_eq!(
+                demo.forget(agent).await,
+                Err(SourceError::Unsupported(expected)),
+                "member {member}"
+            );
+        }
+        assert!(known > 0);
     }
 
     #[tokio::test]
