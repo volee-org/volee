@@ -459,7 +459,8 @@ impl<R: CommandRunner> Harness for ClaudeCode<R> {
         Ok(hooks::mcp_config(volee_bin, agent)?)
     }
 
-    /// Runs `claude -p` with [`launch::completion_args`] in `request.cwd`.
+    /// Runs `claude -p` in `request.cwd`, with no tools, no MCP server, none of
+    /// the person's hooks and no saved session.
     fn complete(&self, request: &Completion) -> Result<String, HarnessError> {
         if !request.cwd.is_absolute() {
             return Err(crate::RequestError::RelativePath {

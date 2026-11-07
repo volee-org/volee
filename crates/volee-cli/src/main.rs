@@ -85,7 +85,7 @@ enum Command {
     #[command(subcommand)]
     Msg(MsgCommand),
     /// Summarize a mission's thread, or your thread with an agent, with a
-    /// model. Off unless `summaries = true` under [messages].
+    /// model. Off unless `summaries = true` under `[messages]`.
     Summary {
         /// A mission (title, short id or id) or an agent (name, short id or
         /// id).
