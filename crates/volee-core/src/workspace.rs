@@ -119,10 +119,7 @@ mod tests {
             multiplexer: "tuios".into(),
             target: target.into(),
         };
-        assert_eq!(
-            pane("main-session:475fc3f0").label(),
-            "tuios · main-session"
-        );
+        assert_eq!(pane("work:0a1b2c3d").label(), "tuios · work");
         assert_eq!(pane("build:api:3f2a").label(), "tuios · build:api");
         assert_eq!(pane("plain").label(), "tuios · plain");
         assert_eq!(Location::Terminal.label(), "a terminal");
