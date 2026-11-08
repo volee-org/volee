@@ -15,7 +15,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use volee_core::delivery::{ChecksState, Delivery, PrState, PushState};
 use volee_core::mission::Verdict;
-use volee_core::role::Role;
+use volee_core::role::{LaunchedBy, Role};
 use volee_core::state::StateCategory;
 use volee_core::time::Elapsed;
 use volee_core::{Agent, AgentState};
@@ -463,12 +463,15 @@ fn doing_spans<'a>(agent: &'a Agent, context: &CardContext<'_>) -> Vec<Span<'a>>
         }
         _ => (activity.or(detail), theme.style(StyleRole::Text)),
     };
+    let dim = theme.style(StyleRole::TextDim);
     match text {
         Some(text) => vec![Span::styled(text, style)],
-        None => vec![Span::styled(
-            "no activity yet",
-            theme.style(StyleRole::TextDim),
-        )],
+        // volee hears what an agent does through the hooks of the agents it
+        // launches: a session started elsewhere never reports any.
+        None if agent.launched_by == LaunchedBy::Outside => {
+            vec![Span::styled("activity not reported", dim)]
+        }
+        None => vec![Span::styled("no activity yet", dim)],
     }
 }
 
@@ -618,4 +621,32 @@ pub(crate) fn delivery_spans(delivery: &Delivery, context: &CardContext<'_>) -> 
         spans.extend(part);
     }
     spans
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::demo::INVOICE_PAGE;
+    use crate::test_support::{id, model};
+
+    fn doing(agent: &Agent, model: &Model) -> String {
+        let context = CardContext::new(model);
+        doing_spans(agent, &context)
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn a_session_started_outside_volee_reports_no_activity() {
+        let model = model(120, 40);
+        let mut agent = model.registry.agent(id(INVOICE_PAGE)).unwrap().clone();
+        agent.last_activity = None;
+        agent.detail = None;
+        agent.state = AgentState::Working;
+        agent.launched_by = LaunchedBy::Human;
+        assert_eq!(doing(&agent, &model), "no activity yet");
+        agent.launched_by = LaunchedBy::Outside;
+        assert_eq!(doing(&agent, &model), "activity not reported");
+    }
 }
