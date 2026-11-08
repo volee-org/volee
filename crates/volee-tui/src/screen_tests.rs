@@ -109,6 +109,13 @@ fn help_overlay() {
 }
 
 #[test]
+fn an_agent_screen_full_size() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    type_text(&demo, &mut model, "z");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
 fn zoom_cards_with_scrolling() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     keys(&demo, &mut model, &[KeyCode::Tab, KeyCode::Char('+')]);

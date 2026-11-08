@@ -79,6 +79,7 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
         Some(Overlay::Inbox(inbox)) => inbox::render(model, inbox, area, buf),
         Some(Overlay::Tools(menu)) => tools::render(model, *menu, area, buf),
         Some(Overlay::Launch(dialog)) => launch::render(model, dialog, area, buf),
+        Some(Overlay::Screen) => detail::render_full_screen(model, area, buf),
         None => {}
     }
 }

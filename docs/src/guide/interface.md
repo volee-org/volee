@@ -68,7 +68,7 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
 │ invoice-tools        ││ ⏺ Before I go on, one question:                                       │
 │ ! needs you · 1 min  ││   Should create_invoice accept a draft flag?                          │
 ╰──────────────────────╯╰───────────────────────────────────────────────────────────────────────╯
- h/j/k/l move   enter subtree   ' jump   / filter   m message   a take over   q quit     ? help
+ h/j/k/l move   enter subtree   ' jump   / filter   m message   a take over   z full screen   ? help
 ```
 
 - **Top bar.** The views, numbered (press the number to switch), and
@@ -91,7 +91,10 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   its own), delivery evidence, last activity and session.
 - **Preview.** The selected agent's terminal screen, kept up to date while
   it works. The bottom of the screen, where the latest output is, stays in
-  view; scroll it with `j` and `k` when the panel has the keyboard.
+  view; scroll it with `j` and `k` when the panel has the keyboard. `z`
+  (or `enter` in the preview) shows that screen full size, its whole
+  conversation in view: `j` and `k` scroll it, `a` takes the agent over, and
+  `z` or `esc` comes back.
 - **Hints.** The keys that apply to the panel that has the keyboard. They
   come from the same table as the help (`?`), so they are always right.
 
@@ -453,6 +456,7 @@ take-over = "ctrl-a"
 | `m` | write a message to the selected agent | `message` |
 | `d` | show the selected agent's changes | `diff` |
 | `a` | take over the selected agent in this terminal | `take-over` |
+| `z` | show the selected agent's screen full size | `full-screen` |
 | `i` | your messages, questions waiting for you first | `messages` |
 | `o` | open the selected agent's worktree in your editor, diff viewer or git tool | `open-with` |
 | `n` | launch an agent in a new worktree | `new-agent` |
@@ -549,6 +553,20 @@ take-over = "ctrl-a"
 | `j`, `↓` | scroll the preview down | `down` |
 | `k`, `↑` | scroll the preview up | `up` |
 | `r` | refresh the preview | `refresh` |
+| `enter` | show the agent's screen full size | `full-screen` |
+
+### Full screen
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `k`, `↑` | scroll up, to older lines | `up` |
+| `j`, `↓` | scroll down, to newer lines | `down` |
+| `g`, `home` | the top of the screen | `first` |
+| `G`, `end` | the bottom, the newest lines | `last` |
+| `r` | refresh the screen | `refresh` |
+| `a` | take over the agent in this terminal | `take-over` |
+| `z`, `esc`, `q` | come back to the interface | `back` |
+| `ctrl-c` | quit volee | `quit` |
 
 ### Filter prompt
 
