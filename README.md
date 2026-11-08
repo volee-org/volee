@@ -61,7 +61,7 @@ and the [design decisions](https://volee-org.github.io/volee/adr/README.html).
 
 ## Install
 
-The latest release is v0.4.0. Each [release](https://github.com/volee-org/volee/releases)
+The latest release is v0.4.1. Each [release](https://github.com/volee-org/volee/releases)
 has prebuilt binaries for macOS (Apple Silicon and Intel) and Linux (x86_64
 and ARM64), and an installer that checks the download and puts `volee` in
 `~/.local/bin`:
@@ -73,7 +73,7 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/volee-org/volee/release
 Or build it from source with Cargo (Rust 1.89 or later):
 
 ```sh
-cargo install --locked --git https://github.com/volee-org/volee --tag v0.4.0 volee-cli
+cargo install --locked --git https://github.com/volee-org/volee --tag v0.4.1 volee-cli
 ```
 
 volee supports macOS and Linux and needs [Claude Code](https://code.claude.com)
