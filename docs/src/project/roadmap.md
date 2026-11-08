@@ -38,7 +38,17 @@ deliberately out of scope. Dates are targets, not promises.
 
 | Milestone | Content | Status |
 | --- | --- | --- |
-| tmux panes | Claude Code sessions in tmux panes are shown, previewed and reached from the interface, like tuios panes | Done |
+| tmux panes | Claude Code sessions in tmux panes are shown, previewed and reached from the interface, like tuios panes | Done: v0.4.0 |
+| Setup in sight | The preview of an agent whose session has not started shows the end of its setup log | Done: v0.4.0 |
+| Stalled launches | A launch whose session can never start ends as failed, ready to run again, instead of launching forever | Done: v0.4.1 |
+
+## 0.5 and 0.6: reading an agent's conversation
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| Full screen | `z` shows an agent's screen across the whole window, scrolled with `j` and `k`; `a` takes it over from there | Done: v0.5.0 |
+| Wide sessions | The preview of a Claude Code session wider than 200 columns replays without garbling, and the end of its conversation stays in view | Done: v0.5.1 |
+| Long lines | The full-screen view wraps lines wider than the window; the preview keeps cutting them | Done: v0.6.0 |
 
 ## Later
 
