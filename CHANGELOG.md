@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 It is generated from the commit history with [git-cliff](https://git-cliff.org):
 see [RELEASING.md](RELEASING.md).
 
+## [0.4.1] - 2026-11-08
+
+### Fixed
+
+- **daemon**: Fail a launch that can never start its session ([#93](https://github.com/volee-org/volee/pull/93))
+- **tui**: Say that a session started outside volee reports no activity ([#95](https://github.com/volee-org/volee/pull/95))
+
+### Documentation
+
+- Add setup recipes and say what package-manager scripts change ([#94](https://github.com/volee-org/volee/pull/94))
+
 ## [0.4.0] - 2026-11-07
 
 ### Added
@@ -121,6 +132,7 @@ see [RELEASING.md](RELEASING.md).
 - Mark the interface, messaging and views milestones done ([#52](https://github.com/volee-org/volee/pull/52))
 - Start the daemon in the first step of the guide, and say what tidy removes ([#56](https://github.com/volee-org/volee/pull/56))
 
+[0.4.1]: https://github.com/volee-org/volee/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/volee-org/volee/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/volee-org/volee/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/volee-org/volee/compare/v0.1.0...v0.2.0
