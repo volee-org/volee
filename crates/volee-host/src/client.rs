@@ -106,7 +106,7 @@ impl HostSender {
         proto::write_frame(&self.stream, Kind::Stop, &[])
     }
 
-    /// Closes the connection, which ends a blocked [`Connection::next`].
+    /// Closes the connection, which ends a blocked [`Connection::next_update`].
     pub fn close(&self) {
         let _ = self.stream.shutdown(Shutdown::Both);
     }
