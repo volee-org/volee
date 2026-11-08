@@ -168,9 +168,29 @@ fn facts(model: &Model, agent: &Agent) -> Vec<(&'static str, String)> {
 
 /// Draws the selected agent's screen.
 pub(crate) fn render_preview(model: &Model, area: Rect, buf: &mut Buffer) {
-    let theme = &model.theme;
     let focused = model.focus == Pane::Detail && model.overlay.is_none();
-    let mut title = vec![Span::raw("Preview")];
+    draw_screen(model, area, buf, "Preview", focused);
+}
+
+/// Draws the selected agent's screen over the whole interface but its hint
+/// line (`z`).
+pub(crate) fn render_full_screen(model: &Model, area: Rect, buf: &mut Buffer) {
+    let window = Rect {
+        height: area.height.saturating_sub(1),
+        ..area
+    };
+    if window.width < 10 || window.height < 3 {
+        return;
+    }
+    ratatui::widgets::Widget::render(ratatui::widgets::Clear, window, buf);
+    buf.set_style(window, model.theme.style(StyleRole::Background));
+    draw_screen(model, window, buf, "Screen", true);
+}
+
+/// The panel of an agent's screen, titled `name`.
+fn draw_screen(model: &Model, area: Rect, buf: &mut Buffer, name: &'static str, focused: bool) {
+    let theme = &model.theme;
+    let mut title = vec![Span::raw(name)];
     if let Some(agent) = model.preview.agent.and_then(|id| model.registry.agent(id)) {
         title.push(Span::styled(
             format!(" · {}", agent.name),

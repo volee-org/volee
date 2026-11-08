@@ -263,6 +263,8 @@ actions! {
     Message => "message",
     /// Show the selected agent's changes.
     Diff => "diff",
+    /// Show the selected agent's screen full size.
+    FullScreen => "full-screen",
     /// Forget the selected agent: stop listing it, after asking.
     Forget => "forget",
     /// Move down.
@@ -364,6 +366,8 @@ pub(crate) enum Context {
     Timeline,
     /// The detail panel and its preview.
     Detail,
+    /// The selected agent's screen, full size.
+    Screen,
     /// The filter prompt.
     Filter,
     /// The message composer.
@@ -384,7 +388,7 @@ pub(crate) enum Context {
 
 impl Context {
     /// Contexts in the order of the help and of the user guide.
-    pub(crate) const ALL: [Self; 15] = [
+    pub(crate) const ALL: [Self; 16] = [
         Self::Global,
         Self::Agents,
         Self::Hierarchy,
@@ -392,6 +396,7 @@ impl Context {
         Self::Repos,
         Self::Timeline,
         Self::Detail,
+        Self::Screen,
         Self::Filter,
         Self::Composer,
         Self::Diff,
@@ -412,6 +417,7 @@ impl Context {
             Self::Repos => "Repositories",
             Self::Timeline => "Timeline",
             Self::Detail => "Detail and preview",
+            Self::Screen => "Full screen",
             Self::Filter => "Filter prompt",
             Self::Composer => "Message composer",
             Self::Diff => "Changes",
@@ -676,6 +682,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &[ch('m')], A::Message, "write a message to the selected agent", Some("message")),
         bind(C::Global, &[ch('d')], A::Diff, "show the selected agent's changes", Some("diff")),
         bind(C::Global, &[ch('a')], A::TakeOver, "take over the selected agent in this terminal", Some("take over")),
+        bind(C::Global, &[ch('z')], A::FullScreen, "show the selected agent's screen full size", Some("full screen")),
         bind(C::Global, &[ch('i')], A::Messages, "your messages, questions waiting for you first", Some("messages")),
         bind(C::Global, &[ch('o')], A::OpenWith, "open the selected agent's worktree in your editor, diff viewer or git tool", None),
         bind(C::Global, &[ch('n')], A::NewAgent, "launch an agent in a new worktree", None),
@@ -750,6 +757,16 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Detail, &[ch('j'), key(K::Down)], A::Down, "scroll the preview down", Some("scroll")),
         bind(C::Detail, &[ch('k'), key(K::Up)], A::Up, "scroll the preview up", Some("scroll")),
         bind(C::Detail, &[ch('r')], A::Refresh, "refresh the preview", Some("refresh")),
+        bind(C::Detail, &[key(K::Enter)], A::FullScreen, "show the agent's screen full size", Some("full screen")),
+
+        bind(C::Screen, &[ch('k'), key(K::Up)], A::Up, "scroll up, to older lines", Some("scroll")),
+        bind(C::Screen, &[ch('j'), key(K::Down)], A::Down, "scroll down, to newer lines", Some("scroll")),
+        bind(C::Screen, &[ch('g'), key(K::Home)], A::First, "the top of the screen", None),
+        bind(C::Screen, &[ch('G'), key(K::End)], A::Last, "the bottom, the newest lines", None),
+        bind(C::Screen, &[ch('r')], A::Refresh, "refresh the screen", Some("refresh")),
+        bind(C::Screen, &[ch('a')], A::TakeOver, "take over the agent in this terminal", Some("take over")),
+        bind(C::Screen, &[ch('z'), key(K::Esc), ch('q')], A::Back, "come back to the interface", Some("back")),
+        bind(C::Screen, &[ctrl('c')], A::Quit, "quit volee", None),
 
         bind(C::Filter, &[key(K::Enter)], A::Apply, "keep the filter and close the prompt", Some("apply")),
         bind(C::Filter, &[key(K::Esc)], A::Back, "clear the filter and close the prompt", Some("cancel")),
@@ -985,7 +1002,7 @@ mod tests {
         assert_eq!(
             line(&[Context::Hierarchy, Context::Global]),
             "h/j/k/l move · enter subtree · +/_ zoom · ' jump · / filter · m message · d diff · \
-             a take over · i messages · ? help · q quit"
+             a take over · z full screen · i messages · ? help · q quit"
         );
         assert_eq!(line(&[Context::Help]), "j/k scroll · esc close");
         assert_eq!(line(&[Context::Filter]), "enter apply · esc cancel");
@@ -998,6 +1015,10 @@ mod tests {
             "j/k scroll · f summary/patch · r refresh · o open with · esc close"
         );
         assert_eq!(line(&[Context::Confirm]), "y yes · n no");
+        assert_eq!(
+            line(&[Context::Screen]),
+            "k/j scroll · r refresh · a take over · z back"
+        );
     }
 
     #[test]

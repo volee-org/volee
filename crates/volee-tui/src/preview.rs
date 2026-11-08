@@ -132,6 +132,11 @@ impl PreviewScreen {
         }
     }
 
+    /// How many rows the screen has.
+    pub(crate) fn height(&self) -> u16 {
+        u16::try_from(self.rows.len()).unwrap_or(u16::MAX)
+    }
+
     /// Draws the screen in `area`, bottom-anchored, `scroll` rows up.
     pub(crate) fn render(&self, area: Rect, buf: &mut Buffer, scroll: u16, theme: &Theme) {
         let base = theme.style(StyleRole::Text);

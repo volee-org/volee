@@ -97,6 +97,8 @@ pub(crate) enum Overlay {
     Tools(ToolMenu),
     /// A dialog that launches an agent or a mission.
     Launch(Box<LaunchDialog>),
+    /// The selected agent's screen, full size.
+    Screen,
 }
 
 /// What the interface knows from the configuration and the machine.
@@ -651,6 +653,7 @@ impl Model {
             Some(Overlay::Inbox(_)) => return vec![Context::Inbox],
             Some(Overlay::Tools(_)) => return vec![Context::Tools],
             Some(Overlay::Launch(_)) => return vec![Context::Dialog],
+            Some(Overlay::Screen) => return vec![Context::Screen],
             None => {}
         }
         if self.filter.editing {
@@ -1525,6 +1528,7 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
             }
         }
         Action::Message => open_composer(model),
+        Action::FullScreen => open_full_screen(model, effects),
         Action::Forget => {
             if let Some(agent) = model.selected {
                 model.prompt = Some(Prompt::Forget(agent));
@@ -1648,6 +1652,14 @@ fn zoom(model: &mut Model, context: Context, action: Action) {
             _ => model.timeline.reset(),
         },
         _ => step(&mut model.zoom, model.scene.zoom),
+    }
+}
+
+/// Shows the selected agent's screen full size, refreshed.
+fn open_full_screen(model: &mut Model, effects: &mut Vec<Effect>) {
+    if let Some(agent) = model.selected {
+        model.overlay = Some(Overlay::Screen);
+        model.request_preview(agent, effects);
     }
 }
 
@@ -1857,6 +1869,23 @@ fn navigate(model: &mut Model, context: Context, action: Action, effects: &mut V
             let scroll = &mut model.preview.scroll;
             *scroll = match action {
                 Action::Up => scroll.saturating_add(1),
+                _ => scroll.saturating_sub(1),
+            };
+        }
+        Context::Screen => {
+            // The screen fills the terminal but its top line and the hint
+            // line: it scrolls until its first row is in sight.
+            let rows = model
+                .preview
+                .screen
+                .as_ref()
+                .map_or(0, PreviewScreen::height);
+            let most = rows.saturating_sub(model.size.1.saturating_sub(3));
+            let scroll = &mut model.preview.scroll;
+            *scroll = match action {
+                Action::Up => scroll.saturating_add(1).min(most),
+                Action::First => most,
+                Action::Last => 0,
                 _ => scroll.saturating_sub(1),
             };
         }

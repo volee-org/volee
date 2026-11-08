@@ -349,6 +349,28 @@ fn a_asks_the_source_then_takes_over_the_selected_agent() {
 }
 
 #[test]
+fn z_shows_the_agent_screen_full_size_and_comes_back() {
+    let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    press(&mut model, "'s");
+    assert_eq!(press(&mut model, "z"), [Effect::LoadPreview(schema)]);
+    assert_eq!(model.overlay, Some(Overlay::Screen));
+    assert_eq!(model.contexts(), [Context::Screen]);
+    // Scrolling stays within the screen; G goes back to the newest lines.
+    let before = model.preview.scroll;
+    press(&mut model, "k");
+    assert!(model.preview.scroll >= before);
+    press(&mut model, "G");
+    assert_eq!(model.preview.scroll, 0);
+    // z, q or esc come back.
+    press(&mut model, "z");
+    assert_eq!(model.overlay, None);
+    press(&mut model, "z");
+    assert_eq!(key(&mut model, KeyCode::Esc), []);
+    assert_eq!(model.overlay, None);
+}
+
+#[test]
 fn forgetting_an_agent_asks_first_and_says_how_it_went() {
     let mut model = model(120, 40);
     let schema = id(INVOICE_SCHEMA);
