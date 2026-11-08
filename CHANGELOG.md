@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 It is generated from the commit history with [git-cliff](https://git-cliff.org):
 see [RELEASING.md](RELEASING.md).
 
+## [0.6.2] - 2026-11-08
+
+### Fixed
+
+- **tui**: Let an independent session's name take the room of its role ([#110](https://github.com/volee-org/volee/pull/110))
+
+### Documentation
+
+- Say where an agent's screen comes from and what a replay can miss ([#109](https://github.com/volee-org/volee/pull/109))
+
 ## [0.6.1] - 2026-11-08
 
 ### Fixed
@@ -169,6 +179,7 @@ see [RELEASING.md](RELEASING.md).
 - Mark the interface, messaging and views milestones done ([#52](https://github.com/volee-org/volee/pull/52))
 - Start the daemon in the first step of the guide, and say what tidy removes ([#56](https://github.com/volee-org/volee/pull/56))
 
+[0.6.2]: https://github.com/volee-org/volee/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/volee-org/volee/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/volee-org/volee/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/volee-org/volee/compare/v0.5.0...v0.5.1
