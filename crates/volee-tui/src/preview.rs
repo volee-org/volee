@@ -4,15 +4,16 @@
 //! Claude Code, `claude logs`, with cursor addressing and colors), drawn for
 //! the session's own terminal, which can be much larger than volee's panel.
 //! That output goes through a terminal emulator of the size its cursor
-//! addressing tells (at least 200x50), and the resulting cells are drawn,
-//! cropped to the panel: the bottom of the screen stays in view, since that
-//! is where the latest output and the prompt are.
+//! addressing and its text tell (at least 200x50), and the resulting cells
+//! are drawn, cropped to the panel: the bottom of the screen stays in view,
+//! since that is where the latest output and the prompt are.
 
 use std::num::NonZeroU16;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
+use unicode_width::UnicodeWidthChar;
 
 use crate::theme::{ColorDepth, StyleRole, Theme};
 
@@ -24,48 +25,146 @@ const COLUMNS: u16 = 200;
 const MAX_ROWS: u16 = 200;
 const MAX_COLUMNS: u16 = 500;
 
-/// Room after a forward move for the short text it places, such as the
-/// counters Claude Code right-aligns at the edge of its screen.
-const RIGHT_TEXT: u16 = 10;
+/// Columns between two tab stops.
+const TAB_STOP: u16 = 8;
 
-/// The size the output was drawn for, as far as its cursor addressing
-/// tells. Replayed in a smaller terminal, its lines wrap and its moves stop
-/// at the edges, which turns the screen into a jumble.
+/// The size the output was drawn for, as far as its cursor addressing and
+/// the text it writes tell. Replayed in a narrower terminal, its lines wrap
+/// and its moves stop at the edges, which turns the screen into a jumble;
+/// replayed in a wider one, everything stays in place, since the output
+/// places its rows with cursor moves. The text counts as much as the moves:
+/// Claude Code pads some rows, such as the lines of a diff, to the full
+/// width of its terminal, far past the last column any move names.
 fn screen_size(output: &str) -> (u16, u16) {
-    let number = |text: &str| -> u16 {
-        if text.is_empty() {
-            1
-        } else {
-            text.parse().unwrap_or(u16::MAX)
-        }
+    let mut extent = Extent {
+        rows: ROWS,
+        columns: COLUMNS,
+        column: 1,
     };
-    let (mut rows, mut columns) = (ROWS, COLUMNS);
     let mut rest = output;
-    while let Some(start) = rest.find("\x1b[") {
-        let after = &rest[start + 2..];
-        let length = after
-            .find(|c: char| !(c.is_ascii_digit() || c == ';'))
-            .unwrap_or(after.len());
-        let (parameters, tail) = after.split_at(length);
-        let Some(command) = tail.chars().next() else {
+    loop {
+        let start = rest.find('\x1b').unwrap_or(rest.len());
+        extent.write(&rest[..start]);
+        let Some(sequence) = rest[start..].strip_prefix('\x1b') else {
             break;
+        };
+        let Some(after) = extent.escape(sequence) else {
+            break;
+        };
+        rest = after;
+    }
+    (extent.rows.min(MAX_ROWS), extent.columns.min(MAX_COLUMNS))
+}
+
+/// What an output tells, so far, of the terminal it was drawn for.
+struct Extent {
+    rows: u16,
+    columns: u16,
+    /// The cursor's column, from 1, as far as the output lets it be followed.
+    column: u16,
+}
+
+impl Extent {
+    /// Text written at the cursor: each character takes its width.
+    fn write(&mut self, text: &str) {
+        for character in text.chars() {
+            match character {
+                '\r' => self.column = 1,
+                '\t' => {
+                    let stop = self.column.saturating_sub(1) / TAB_STOP + 1;
+                    self.column = stop.saturating_mul(TAB_STOP).saturating_add(1);
+                }
+                '\u{8}' => self.column = self.column.saturating_sub(1).max(1),
+                character if character.is_control() => {}
+                character => {
+                    let width = character
+                        .width()
+                        .and_then(|width| u16::try_from(width).ok())
+                        .unwrap_or(0);
+                    if width > 0 {
+                        self.columns = self.columns.max(self.column.saturating_add(width - 1));
+                        self.column = self.column.saturating_add(width);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Follows the escape sequence `sequence` starts with (after its ESC) and
+    /// returns what comes after it; `None` when the output cuts it short.
+    fn escape<'a>(&mut self, sequence: &'a str) -> Option<&'a str> {
+        let mut characters = sequence.chars();
+        match characters.next()? {
+            '[' => {
+                // Parameter bytes, intermediate bytes, then the command.
+                let body = characters.as_str();
+                let end = body
+                    .find(|c: char| !('\x30'..='\x3f').contains(&c))
+                    .unwrap_or(body.len());
+                let (parameters, after) = body.split_at(end);
+                let after = after.trim_start_matches(|c: char| ('\x20'..='\x2f').contains(&c));
+                let command = after.chars().next()?;
+                self.control(parameters, command);
+                Some(&after[command.len_utf8()..])
+            }
+            // Strings, such as a window title or a link, end at BEL or ST.
+            ']' | 'P' | '_' | '^' | 'X' => {
+                let body = characters.as_str();
+                let end = body.find(['\x07', '\x1b'])?;
+                let terminator = if body[end..].starts_with('\x07') {
+                    1
+                } else if body[end..].starts_with("\x1b\\") {
+                    2
+                } else {
+                    0
+                };
+                Some(&body[end + terminator..])
+            }
+            // A character set designation names its set in one more character.
+            '(' | ')' | '*' | '+' | '#' | '%' => {
+                characters.next()?;
+                Some(characters.as_str())
+            }
+            _ => Some(characters.as_str()),
+        }
+    }
+
+    /// A control sequence, `ESC [ parameters command`.
+    fn control(&mut self, parameters: &str, command: char) {
+        if parameters.starts_with(['<', '=', '>', '?']) {
+            // Private modes, such as hiding the cursor, move nothing.
+            return;
+        }
+        let number = |text: &str| -> u16 {
+            if text.is_empty() {
+                1
+            } else {
+                text.parse().unwrap_or(u16::MAX)
+            }
         };
         let mut numbers = parameters.split(';').map(number);
         let first = numbers.next().unwrap_or(1);
         match command {
             'H' | 'f' => {
-                rows = rows.max(first);
-                columns = columns.max(numbers.next().unwrap_or(1));
+                self.rows = self.rows.max(first);
+                self.column = numbers.next().unwrap_or(1);
+                self.columns = self.columns.max(self.column);
             }
-            'd' => rows = rows.max(first),
-            'G' | '`' => columns = columns.max(first),
-            'B' | 'E' => rows = rows.max(first.saturating_add(1)),
-            'C' => columns = columns.max(first.saturating_add(1 + RIGHT_TEXT)),
+            'd' => self.rows = self.rows.max(first),
+            'G' | '`' => {
+                self.column = first;
+                self.columns = self.columns.max(first);
+            }
+            'B' => self.rows = self.rows.max(first.saturating_add(1)),
+            'E' => {
+                self.rows = self.rows.max(first.saturating_add(1));
+                self.column = 1;
+            }
+            'C' | 'a' => self.column = self.column.saturating_add(first),
+            'D' => self.column = self.column.saturating_sub(first).max(1),
             _ => {}
         }
-        rest = &tail[command.len_utf8()..];
     }
-    (rows.min(MAX_ROWS), columns.min(MAX_COLUMNS))
 }
 
 /// One cell of the screen.
@@ -80,7 +179,7 @@ struct PreviewCell {
 /// A parsed screen.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PreviewScreen {
-    /// Rows of cells, without trailing blanks.
+    /// Rows of cells, without trailing blanks; a run of blank rows is one.
     rows: Vec<Vec<PreviewCell>>,
     /// The last row worth showing: the cursor's or the last with text.
     anchor: u16,
@@ -126,9 +225,26 @@ impl PreviewScreen {
             parsed.push(cells);
         }
         let (cursor_row, _) = screen.cursor_position();
+        let anchor = usize::from(last_text.max(cursor_row).min(height - 1));
+        // A replay leaves blank what it never redrew: on a tall Claude Code
+        // screen, rows of nothing between the conversation and the status
+        // line, where the frame of the prompt was drawn before the replay
+        // starts. A run of blank rows is kept as one, so that the end of the
+        // conversation stays in view.
+        let mut rows: Vec<Vec<PreviewCell>> = Vec::with_capacity(parsed.len());
+        let mut kept_anchor = 0;
+        for (index, cells) in parsed.into_iter().enumerate() {
+            let repeated_blank = cells.is_empty() && rows.last().is_some_and(Vec::is_empty);
+            if !repeated_blank {
+                rows.push(cells);
+            }
+            if index == anchor {
+                kept_anchor = rows.len().saturating_sub(1);
+            }
+        }
         Self {
-            rows: parsed,
-            anchor: last_text.max(cursor_row).min(height - 1),
+            rows,
+            anchor: u16::try_from(kept_anchor).unwrap_or(u16::MAX),
         }
     }
 
@@ -252,7 +368,8 @@ mod tests {
         use std::fmt::Write as _;
         let mut output = String::from("\x1b[10;5Hhere");
         let screen = PreviewScreen::parse(&output, ColorDepth::TrueColor);
-        assert_eq!(screen.text()[9], "    here");
+        // The nine blank rows above it are kept as one.
+        assert_eq!(screen.text()[..2], ["", "    here"]);
         for line in 0..60 {
             write!(output, "\r\nline {line}").unwrap();
         }
@@ -281,17 +398,74 @@ mod tests {
         // A counter right-aligned on a wide screen, below row 50, then the
         // cursor parked on the prompt.
         let output = "\x1b[H\r\x1b[293C\x1b[70B42\x1b[73;1Hprompt";
-        assert_eq!(screen_size(output), (73, 304));
+        assert_eq!(screen_size(output), (73, 295));
         let screen = PreviewScreen::parse(output, ColorDepth::TrueColor);
         let text = screen.text();
-        assert_eq!(text[70], format!("{}42", " ".repeat(293)));
-        assert_eq!(text[72], "prompt");
-        assert_eq!(screen.anchor, 72);
+        // The 70 blank rows above the counter are kept as one.
+        assert_eq!(text[1], format!("{}42", " ".repeat(293)));
+        assert_eq!(text[3], "prompt");
+        assert_eq!(screen.anchor, 3);
         assert_eq!(screen_size("\x1b[10;5Hhere\x1b[?25l"), (ROWS, COLUMNS));
         assert_eq!(
             screen_size("\x1b[9999;99999H\x1b["),
             (MAX_ROWS, MAX_COLUMNS)
         );
+    }
+
+    #[test]
+    fn rows_padded_past_every_move_set_the_width() {
+        // How Claude Code replays a diff in a 308-column terminal: each
+        // line placed by moves from the top left, then padded with colored
+        // blanks to the edge, far past any column a move names. A narrower
+        // emulator wraps each line onto the next one.
+        let padded = |text: &str| format!("{text}{}", " ".repeat(303 - text.len()));
+        let output = format!(
+            "\x1b[H\r\x1b[5C\x1b[1B\x1b[48;5;52m{}\x1b[0m\
+             \r\x1b[5C\x1b[1B\x1b[48;5;22m{}\x1b[0m\
+             \r\x1b[1B  next\x1b[73;1H\x1b[69;3H",
+            padded(" 5 -old"),
+            padded(" 5 +new"),
+        );
+        assert_eq!(screen_size(&output), (73, 308));
+        let text = PreviewScreen::parse(&output, ColorDepth::TrueColor).text();
+        assert_eq!(text[1].trim_end(), "      5 -old");
+        assert_eq!(text[2].trim_end(), "      5 +new");
+        assert_eq!(text[3], "  next");
+    }
+
+    #[test]
+    fn runs_of_blank_rows_shrink_to_one() {
+        // A tall Claude Code screen as its replay leaves it: the
+        // conversation at the top, the status line at the bottom, and blank
+        // between them where the frame of the prompt was drawn earlier.
+        let output = "\x1b[1;1Hfirst\x1b[3;1Hsecond\x1b[40;1Hlast\x1b[73;1H18%\x1b[69;3H";
+        let screen = PreviewScreen::parse(output, ColorDepth::TrueColor);
+        assert_eq!(screen.anchor, 6);
+        assert_eq!(screen_text(output), "first\n\nsecond\n\nlast\n\n18%");
+        let area = Rect::new(0, 0, 6, 3);
+        let mut buf = Buffer::empty(area);
+        screen.render(area, &mut buf, 0, &Theme::default());
+        let row = |y: u16| -> String { (0..6).map(|x| buf[(x, y)].symbol().to_owned()).collect() };
+        assert_eq!([row(0), row(1), row(2)], ["last  ", "      ", "18%   "]);
+    }
+
+    #[test]
+    fn titles_links_and_private_modes_are_not_text() {
+        let title = "t".repeat(400);
+        let output = format!(
+            "\x1b]0;{title}\x07\x1b[?25l\x1b[?2004h\x1b(B\
+             \x1b]8;;https://example.com/{title}\x1b\\link\x1b]8;;\x1b\\> "
+        );
+        assert_eq!(screen_size(&output), (ROWS, COLUMNS));
+        assert_eq!(screen_text(&output), "link>");
+    }
+
+    #[test]
+    fn wide_characters_and_tabs_take_their_columns() {
+        assert_eq!(screen_size("\x1b[1;250H\u{754c}"), (ROWS, 251));
+        let tabbed = format!("{}\tx", "a".repeat(250));
+        assert_eq!(screen_size(&tabbed), (ROWS, 257));
+        assert_eq!(screen_size("\x1b[1;300H\x1b[10Dx"), (ROWS, 300));
     }
 
     #[test]

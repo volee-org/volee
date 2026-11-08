@@ -30,6 +30,17 @@ shows them but cannot stop or delete them, and previews and takes over only
 the ones that run in a tuios pane, through tuios
 ([ADR 0015](../adr/0015-tuios-location-adapter.md)).
 
+`claude logs` replays the session's recent drawing, not a log of its text:
+rows placed by cursor moves from the top left of the session's own terminal,
+which can be far wider than 200 columns, some of them (the lines of a diff)
+padded with colored blanks to its right edge, and nothing for what was drawn
+before the replay starts, such as the frame of the prompt. The interface
+replays it in a terminal emulator at least as wide as the widest row it
+writes, so that no row wraps onto the next, and keeps a run of blank rows as
+one, so that the end of the conversation stays in view
+(`crates/volee-tui/src/preview.rs`; measured on 2.1.319 with a session 308
+columns wide).
+
 Every launch passes the agent's settings file (`--settings`: volee's hooks,
 and a rule that allows volee's own MCP tools) and its MCP configuration
 (`--mcp-config` with `--strict-mcp-config`, so the agent loads volee's tools
