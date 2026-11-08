@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.7.0"
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.90"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/volee-org/volee"
 homepage = "https://volee-org.github.io/volee/"
@@ -24,6 +24,7 @@ volee-mcp = { path = "crates/volee-mcp", version = "0.7.0" }
 volee-mux = { path = "crates/volee-mux", version = "0.7.0" }
 volee-proto = { path = "crates/volee-proto", version = "0.7.0" }
 volee-store = { path = "crates/volee-store", version = "0.7.0" }
+volee-term = { path = "crates/volee-term", version = "0.7.0" }
 volee-tui = { path = "crates/volee-tui", version = "0.7.0" }
 
 # External crates. Keep this list sorted.
@@ -35,6 +36,9 @@ clap_complete = "4.6.11"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 insta = { version = "1.49.0", features = ["json"] }
+# Pinned exactly: libghostty-vt is pre-1.0 and its build script pins one
+# Ghostty commit, built with Zig 0.17 (ADR 0020).
+libghostty-vt = { version = "=0.2.2", default-features = false }
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache"] }
 rmcp = { version = "3.9.0", default-features = false }
 rusqlite = { version = "0.41.1", features = ["bundled"] }

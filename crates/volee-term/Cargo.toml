@@ -1,0 +1,20 @@
+[package]
+name = "volee-term"
+description = "Terminal emulation for volee: an agent's screen kept by libghostty-vt, replayed as VT sequences or drawn into a ratatui buffer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["command-line-interface"]
+
+[dependencies]
+libghostty-vt.workspace = true
+ratatui.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
