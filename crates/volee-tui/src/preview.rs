@@ -296,10 +296,12 @@ impl PreviewScreen {
     /// The lines the screen takes in `width` columns, down to its last row
     /// worth showing, each as a row and a range of its cells. With
     /// [`Fit::Wrap`], a row with text past `width` goes on over as many
-    /// lines as it needs, cut as a terminal wraps a long line, never inside
-    /// a wide character. What a row ends with that is only blanks and box
-    /// lines, such as the padding of a diff line or the right side of a
-    /// frame, does not count: such a row stays one line, cut at the edge.
+    /// lines as it needs, never inside a wide character. A line ends after
+    /// its last blank, between two words, when that keeps at least half of
+    /// it; otherwise, as for a long path, inside the word, as a terminal
+    /// wraps. What a row ends with that is only blanks and box lines, such
+    /// as the padding of a diff line or the right side of a frame, does not
+    /// count: such a row stays one line, cut at the edge.
     fn lines(&self, width: u16, fit: Fit) -> Vec<(usize, Range<usize>)> {
         let width = usize::from(width.max(1));
         let mut lines = Vec::new();
@@ -313,16 +315,31 @@ impl PreviewScreen {
                     .map_or(0, |last| last + 1),
             };
             let (mut start, mut used) = (0, 0);
+            // The cell after the line's last blank, and the line's width up
+            // to that cell.
+            let mut after_blank: Option<(usize, usize)> = None;
             for (position, cell) in cells.iter().enumerate().take(text_end) {
                 if cell.continuation {
                     continue;
                 }
                 let cell_width = crate::text::width(&cell.symbol).max(1);
                 if used > 0 && used + cell_width > width {
-                    lines.push((row, start..position));
-                    (start, used) = (position, 0);
+                    match after_blank {
+                        Some((next, before)) if before * 2 >= width => {
+                            lines.push((row, start..next));
+                            (start, used) = (next, used - before);
+                        }
+                        _ => {
+                            lines.push((row, start..position));
+                            (start, used) = (position, 0);
+                        }
+                    }
+                    after_blank = None;
                 }
                 used += cell_width;
+                if cell.symbol == " " {
+                    after_blank = Some((position + 1, used));
+                }
             }
             lines.push((row, start..cells.len()));
         }
@@ -582,6 +599,26 @@ mod tests {
         screen.render(area, &mut buf, 40, Fit::Wrap, &Theme::default());
         assert_eq!(row(&buf, 0), "aaaaaaaaaa");
         assert_eq!(row(&buf, 1), "          ");
+    }
+
+    #[test]
+    fn wrapped_lines_end_between_words() {
+        let screen = PreviewScreen::parse(
+            "hello world again\r\na bcdefghijklmnop",
+            ColorDepth::TrueColor,
+        );
+        assert_eq!(screen.line_count(10, Fit::Wrap), 5);
+        let area = Rect::new(0, 0, 10, 5);
+        let mut buf = Buffer::empty(area);
+        screen.render(area, &mut buf, 0, Fit::Wrap, &Theme::default());
+        let row = |y: u16| -> String { (0..10).map(|x| buf[(x, y)].symbol().to_owned()).collect() };
+        // Between two words when that keeps half a line or more...
+        assert_eq!(row(0), "hello     ");
+        assert_eq!(row(1), "world     ");
+        assert_eq!(row(2), "again     ");
+        // ...inside the word otherwise, as a terminal wraps.
+        assert_eq!(row(3), "a bcdefghi");
+        assert_eq!(row(4), "jklmnop   ");
     }
 
     #[test]
