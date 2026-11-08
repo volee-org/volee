@@ -3,7 +3,7 @@
 #
 #   vhs docs/tapes/demo.tape
 #
-# The terminal is 120 columns by 34 rows; the recording lasts about 12 seconds.
+# The terminal is 120 columns by 34 rows; the recording lasts about 16 seconds.
 
 Output docs/src/images/demo.gif
 
@@ -29,6 +29,12 @@ Show
 Sleep 2s
 Type "j"
 Sleep 2s
+
+# z shows that agent's whole screen; z again comes back.
+Type "z"
+Sleep 3s
+Type "z"
+Sleep 1s
 
 # Two keys reach any agent: ' then its letter.
 Type "'p"
