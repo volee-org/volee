@@ -39,7 +39,10 @@ replays it in a terminal emulator at least as wide as the widest row it
 writes, so that no row wraps onto the next, and keeps a run of blank rows as
 one, so that the end of the conversation stays in view
 (`crates/volee-tui/src/preview.rs`; measured on 2.1.319 with a session 308
-columns wide).
+columns wide). When a tuios pane shows the session (`claude agents` or
+`claude attach`, which title the terminal with the session's name), the
+preview reads that pane instead, which holds the whole screen
+([ADR 0018](../adr/0018-panes-that-show-background-sessions.md)).
 
 Every launch passes the agent's settings file (`--settings`: volee's hooks,
 and a rule that allows volee's own MCP tools) and its MCP configuration

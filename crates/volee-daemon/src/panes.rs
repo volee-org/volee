@@ -8,7 +8,14 @@
 //! `volee daemon status`. The preview of an agent in a pane captures the
 //! pane, and its take over brings the pane forward ([`crate::control`]).
 //!
+//! A background session runs in no pane, but a pane may show it: `claude
+//! agents` or `claude attach` titles its terminal with the session's name.
+//! After each round the daemon also asks which panes show the live
+//! background sessions, and keeps the answer, a mirror, for previews only
+//! ([ADR 0018]): it records no event, since the session runs elsewhere.
+//!
 //! [ADR 0015]: https://volee-org.github.io/volee/adr/0015-tuios-location-adapter.html
+//! [ADR 0018]: https://volee-org.github.io/volee/adr/0018-panes-that-show-background-sessions.html
 
 use std::sync::{Arc, PoisonError};
 
@@ -24,6 +31,16 @@ use crate::server::Shared;
 pub(crate) struct Panes {
     adapters: Vec<Arc<dyn Multiplexer>>,
     statuses: std::sync::Mutex<Vec<MultiplexerStatus>>,
+    /// The panes that showed background sessions at the last round.
+    mirrors: std::sync::Mutex<Vec<Mirror>>,
+}
+
+/// A pane that shows a background session (ADR 0018).
+#[derive(Clone, Debug)]
+struct Mirror {
+    key: SessionKey,
+    multiplexer: &'static str,
+    target: String,
 }
 
 impl std::fmt::Debug for Panes {
@@ -49,7 +66,17 @@ impl Panes {
         Self {
             adapters,
             statuses: std::sync::Mutex::new(statuses),
+            mirrors: std::sync::Mutex::new(Vec::new()),
         }
+    }
+
+    /// The pane that showed the background session `key` at the last round,
+    /// when one did: its multiplexer and its address.
+    pub(crate) fn mirror_of(&self, key: &SessionKey) -> Option<(Arc<dyn Multiplexer>, String)> {
+        let mirrors = self.mirrors.lock().unwrap_or_else(PoisonError::into_inner);
+        let mirror = mirrors.iter().find(|mirror| &mirror.key == key)?;
+        self.adapter(mirror.multiplexer)
+            .map(|adapter| (adapter, mirror.target.clone()))
     }
 
     /// What is known about each multiplexer, for `volee daemon status`.
@@ -118,6 +145,66 @@ pub(crate) fn hosted(sessions: &[ListedSession]) -> Vec<Hosted> {
             pid: session.pid,
         })
         .collect()
+}
+
+/// The live background sessions a pane may show, with their names. A pane
+/// is found by the name in its title, so only names that no other live
+/// session shares are kept (ADR 0018).
+pub(crate) fn shown(sessions: &[ListedSession]) -> Vec<(SessionKey, String)> {
+    let live = || sessions.iter().filter(|session| session.alive);
+    let named = |session: &ListedSession| {
+        session
+            .name
+            .as_deref()
+            .map(volee_mux::shown_name)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+    };
+    live()
+        .filter(|session| session.background)
+        .filter_map(|session| {
+            let name = named(session)?;
+            let alike = live()
+                .filter(|other| named(other).as_deref() == Some(name.as_str()))
+                .count();
+            (alike == 1).then(|| (session.key.clone(), name))
+        })
+        .collect()
+}
+
+/// Asks every multiplexer which panes show `shown` background sessions, and
+/// keeps the answer until the next round (ADR 0018). A session one
+/// multiplexer found is not offered to the next; one that does not answer
+/// finds none this round.
+pub(crate) async fn mirror(shared: &Arc<Shared>, shown: &[(SessionKey, String)]) {
+    let mut found: Vec<Mirror> = Vec::new();
+    for adapter in shared.panes.adapters.clone() {
+        let asked: Vec<(SessionKey, String)> = shown
+            .iter()
+            .filter(|(key, _)| !found.iter().any(|mirror| &mirror.key == key))
+            .cloned()
+            .collect();
+        if asked.is_empty() {
+            break;
+        }
+        let multiplexer = adapter.name();
+        match tokio::task::spawn_blocking(move || adapter.mirrors(&asked)).await {
+            Ok(Ok(located)) => found.extend(located.into_iter().map(|located| Mirror {
+                key: located.key,
+                multiplexer,
+                target: located.target,
+            })),
+            Ok(Err(error)) => {
+                tracing::debug!(multiplexer, %error, "cannot find the panes that show sessions");
+            }
+            Err(error) => tracing::error!(%error, "the mirror task panicked"),
+        }
+    }
+    *shared
+        .panes
+        .mirrors
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = found;
 }
 
 /// Asks every multiplexer which panes `live` sessions run in, and records
@@ -238,4 +325,42 @@ async fn in_panes_of(shared: &Arc<Shared>, multiplexer: &str, live: &[Hosted]) -
         .filter_map(|agent| agent.current_session().map(|link| link.key.clone()))
         .filter(|key| !live.iter().any(|session| &session.key == key))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use volee_core::state::AgentState;
+
+    use super::*;
+
+    fn session(id: &str, name: &str, background: bool, alive: bool) -> ListedSession {
+        let mut session = ListedSession::new(SessionKey::claude(id), "/work", AgentState::Working);
+        session.name = Some(name.to_owned());
+        session.background = background;
+        session.alive = alive;
+        session
+    }
+
+    #[test]
+    fn panes_may_show_live_background_sessions_with_a_name_of_their_own() {
+        let sessions = [
+            session("b60aa3b9", "cockpit open launch failure", true, true),
+            // Ended.
+            session("4402670e", "neon billing", true, false),
+            // Runs in a terminal, where its process tells its pane.
+            session("1f0c2d3e", "fix the parser", false, true),
+            // Two live sessions with one name: a title cannot tell them apart.
+            session("aaaa0001", "same name", true, true),
+            session("aaaa0002", "same name", true, true),
+            // Its name, without its status mark, is the terminal one's.
+            session("bbbb0001", "◑ fix the parser", true, true),
+        ];
+        assert_eq!(
+            shown(&sessions),
+            [(
+                SessionKey::claude("b60aa3b9"),
+                "cockpit open launch failure".to_owned()
+            )]
+        );
+    }
 }

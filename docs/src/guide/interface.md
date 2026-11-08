@@ -98,8 +98,11 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   between words where they can, so that nothing is cut but the padding and
   frames the agent's interface draws to its own edge. `j` and `k` scroll
   it, `a` takes the agent over, and `z` or `esc` comes back. For a session
-  in a tuios or tmux pane, the screen is the pane's. For a background
-  session, it is replayed from `claude logs`, which keeps only the
+  in a tuios or tmux pane, the screen is the pane's. A background session
+  that a tuios pane shows, in `claude agents` or `claude attach`, previews
+  as that pane shows it, status line included: volee finds the pane by the
+  session's name in its title ([ADR 0018](../adr/0018-panes-that-show-background-sessions.md)).
+  Otherwise its screen is replayed from `claude logs`, which keeps only the
   session's recent output: in a session that has run for hours, parts of
   the screen drawn long ago and never redrawn since, such as a list that
   has not changed, can show gaps. A recent session shows whole.
