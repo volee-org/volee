@@ -9,6 +9,7 @@
 //! since that is where the latest output and the prompt are.
 
 use std::num::NonZeroU16;
+use std::ops::Range;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -176,6 +177,25 @@ struct PreviewCell {
     continuation: bool,
 }
 
+/// How a screen fits rows wider than the area it is drawn in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Fit {
+    /// Each row on one line, cut at the edge: the preview, a glance at as
+    /// many rows as fit.
+    Crop,
+    /// A row whose text goes past the edge goes on over several lines: the
+    /// full-screen view, for reading.
+    Wrap,
+}
+
+/// Whether a cell holds only blanks or box lines (U+2500 to U+257F), which
+/// a row may lose past the edge without losing any of its text.
+fn decorative(symbol: &str) -> bool {
+    symbol
+        .chars()
+        .all(|c| c == ' ' || ('\u{2500}'..='\u{257f}').contains(&c))
+}
+
 /// A parsed screen.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PreviewScreen {
@@ -248,18 +268,73 @@ impl PreviewScreen {
         }
     }
 
-    /// How many rows the screen has.
-    pub(crate) fn height(&self) -> u16 {
-        u16::try_from(self.rows.len()).unwrap_or(u16::MAX)
+    /// How many lines the screen takes in `width` columns (see
+    /// [`Self::lines`]).
+    pub(crate) fn line_count(&self, width: u16, fit: Fit) -> u16 {
+        u16::try_from(self.lines(width, fit).len()).unwrap_or(u16::MAX)
     }
 
-    /// Draws the screen in `area`, bottom-anchored, `scroll` rows up.
-    pub(crate) fn render(&self, area: Rect, buf: &mut Buffer, scroll: u16, theme: &Theme) {
+    /// The lines the screen takes in `width` columns, down to its last row
+    /// worth showing, each as a row and a range of its cells. With
+    /// [`Fit::Wrap`], a row with text past `width` goes on over as many
+    /// lines as it needs, cut as a terminal wraps a long line, never inside
+    /// a wide character. What a row ends with that is only blanks and box
+    /// lines, such as the padding of a diff line or the right side of a
+    /// frame, does not count: such a row stays one line, cut at the edge.
+    fn lines(&self, width: u16, fit: Fit) -> Vec<(usize, Range<usize>)> {
+        let width = usize::from(width.max(1));
+        let mut lines = Vec::new();
+        let shown = usize::from(self.anchor) + 1;
+        for (row, cells) in self.rows.iter().enumerate().take(shown) {
+            let text_end = match fit {
+                Fit::Crop => 0,
+                Fit::Wrap => cells
+                    .iter()
+                    .rposition(|cell| !decorative(&cell.symbol))
+                    .map_or(0, |last| last + 1),
+            };
+            let (mut start, mut used) = (0, 0);
+            for (position, cell) in cells.iter().enumerate().take(text_end) {
+                if cell.continuation {
+                    continue;
+                }
+                let cell_width = crate::text::width(&cell.symbol).max(1);
+                if used > 0 && used + cell_width > width {
+                    lines.push((row, start..position));
+                    (start, used) = (position, 0);
+                }
+                used += cell_width;
+            }
+            lines.push((row, start..cells.len()));
+        }
+        lines
+    }
+
+    /// Draws the screen in `area`, bottom-anchored, `scroll` lines up, rows
+    /// wider than the area fitted as `fit` says.
+    pub(crate) fn render(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        scroll: u16,
+        fit: Fit,
+        theme: &Theme,
+    ) {
         let base = theme.style(StyleRole::Text);
-        let bottom = self.anchor.saturating_sub(scroll);
-        let top = (bottom + 1).saturating_sub(area.height);
-        for (y, row) in (area.y..area.bottom()).zip(top..=bottom) {
-            let Some(cells) = self.rows.get(usize::from(row)) else {
+        let lines = self.lines(area.width, fit);
+        // The first line stays in sight however far the screen is scrolled.
+        let bottom = lines
+            .len()
+            .saturating_sub(usize::from(scroll))
+            .max(1)
+            .min(lines.len());
+        let top = bottom.saturating_sub(usize::from(area.height));
+        for (y, (row, range)) in (area.y..area.bottom()).zip(&lines[top..bottom]) {
+            let Some(cells) = self
+                .rows
+                .get(*row)
+                .and_then(|cells| cells.get(range.clone()))
+            else {
                 continue;
             };
             for (x, cell) in (area.x..area.right()).zip(cells) {
@@ -444,9 +519,50 @@ mod tests {
         assert_eq!(screen_text(output), "first\n\nsecond\n\nlast\n\n18%");
         let area = Rect::new(0, 0, 6, 3);
         let mut buf = Buffer::empty(area);
-        screen.render(area, &mut buf, 0, &Theme::default());
+        screen.render(area, &mut buf, 0, Fit::Crop, &Theme::default());
         let row = |y: u16| -> String { (0..6).map(|x| buf[(x, y)].symbol().to_owned()).collect() };
         assert_eq!([row(0), row(1), row(2)], ["last  ", "      ", "18%   "]);
+    }
+
+    #[test]
+    fn rows_wider_than_the_area_go_on_over_several_lines() {
+        // A long row, a padded diff row, a wide character at the edge, and
+        // the top of a frame wider than the area.
+        let output = format!(
+            "{}\r\n\x1b[48;5;22mbbb{}\x1b[0m\r\nabcdefghi\u{754c}\r\n\u{256d}{}\u{256e}\r\nend",
+            "a".repeat(15),
+            " ".repeat(17),
+            "\u{2500}".repeat(15),
+        );
+        let screen = PreviewScreen::parse(&output, ColorDepth::TrueColor);
+        assert_eq!(screen.line_count(10, Fit::Wrap), 7);
+        assert_eq!(screen.line_count(20, Fit::Wrap), 5);
+        assert_eq!(screen.line_count(10, Fit::Crop), 5);
+        let area = Rect::new(0, 0, 10, 7);
+        let mut buf = Buffer::empty(area);
+        screen.render(area, &mut buf, 0, Fit::Wrap, &Theme::default());
+        let row = |buf: &Buffer, y: u16| -> String {
+            (0..10).map(|x| buf[(x, y)].symbol().to_owned()).collect()
+        };
+        assert_eq!(row(&buf, 0), "aaaaaaaaaa");
+        assert_eq!(row(&buf, 1), "aaaaa     ");
+        assert_eq!(row(&buf, 2), "bbb       ");
+        assert_eq!(buf[(9, 2)].bg, Color::Indexed(22), "padded up to the edge");
+        assert_eq!(row(&buf, 3), "abcdefghi ");
+        assert_eq!(buf[(0, 4)].symbol(), "\u{754c}");
+        let frame = format!("\u{256d}{}", "\u{2500}".repeat(9));
+        assert_eq!(row(&buf, 5), frame, "a frame is cut, not wrapped");
+        assert_eq!(row(&buf, 6), "end       ");
+        // Cropped, each row takes one line.
+        let mut buf = Buffer::empty(area);
+        screen.render(area, &mut buf, 0, Fit::Crop, &Theme::default());
+        assert_eq!(row(&buf, 0), "aaaaaaaaaa");
+        assert_eq!(row(&buf, 1), "bbb       ");
+        // Scrolled past the top, the first line stays in sight.
+        let mut buf = Buffer::empty(area);
+        screen.render(area, &mut buf, 40, Fit::Wrap, &Theme::default());
+        assert_eq!(row(&buf, 0), "aaaaaaaaaa");
+        assert_eq!(row(&buf, 1), "          ");
     }
 
     #[test]
@@ -484,7 +600,7 @@ mod tests {
         let screen = PreviewScreen::parse(&output, ColorDepth::TrueColor);
         let area = Rect::new(0, 0, 10, 3);
         let mut buf = Buffer::empty(area);
-        screen.render(area, &mut buf, 0, &Theme::default());
+        screen.render(area, &mut buf, 0, Fit::Crop, &Theme::default());
         let row = |buf: &Buffer, y: u16| -> String {
             (0..10).map(|x| buf[(x, y)].symbol().to_owned()).collect()
         };
@@ -492,7 +608,7 @@ mod tests {
         assert_eq!(row(&buf, 0), "row 18    ");
         assert_eq!(row(&buf, 1), "row 19    ");
         let mut buf = Buffer::empty(area);
-        screen.render(area, &mut buf, 5, &Theme::default());
+        screen.render(area, &mut buf, 5, Fit::Crop, &Theme::default());
         assert_eq!(row(&buf, 2), "row 15    ");
     }
 }

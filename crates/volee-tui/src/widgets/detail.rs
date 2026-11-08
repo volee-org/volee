@@ -11,6 +11,7 @@ use volee_core::time::Elapsed;
 
 use super::{panel, put_spans, state_glyph, truncated};
 use crate::app::{Model, Pane};
+use crate::preview::Fit;
 use crate::text;
 use crate::theme::StyleRole;
 
@@ -169,7 +170,7 @@ fn facts(model: &Model, agent: &Agent) -> Vec<(&'static str, String)> {
 /// Draws the selected agent's screen.
 pub(crate) fn render_preview(model: &Model, area: Rect, buf: &mut Buffer) {
     let focused = model.focus == Pane::Detail && model.overlay.is_none();
-    draw_screen(model, area, buf, "Preview", focused);
+    draw_screen(model, area, buf, "Preview", focused, Fit::Crop);
 }
 
 /// Draws the selected agent's screen over the whole interface but its hint
@@ -184,11 +185,19 @@ pub(crate) fn render_full_screen(model: &Model, area: Rect, buf: &mut Buffer) {
     }
     ratatui::widgets::Widget::render(ratatui::widgets::Clear, window, buf);
     buf.set_style(window, model.theme.style(StyleRole::Background));
-    draw_screen(model, window, buf, "Screen", true);
+    draw_screen(model, window, buf, "Screen", true, Fit::Wrap);
 }
 
-/// The panel of an agent's screen, titled `name`.
-fn draw_screen(model: &Model, area: Rect, buf: &mut Buffer, name: &'static str, focused: bool) {
+/// The panel of an agent's screen, titled `name`, its rows fitted as `fit`
+/// says.
+fn draw_screen(
+    model: &Model,
+    area: Rect,
+    buf: &mut Buffer,
+    name: &'static str,
+    focused: bool,
+    fit: Fit,
+) {
     let theme = &model.theme;
     let mut title = vec![Span::raw(name)];
     if let Some(agent) = model.preview.agent.and_then(|id| model.registry.agent(id)) {
@@ -215,6 +224,7 @@ fn draw_screen(model: &Model, area: Rect, buf: &mut Buffer, name: &'static str, 
                 ),
                 buf,
                 model.preview.scroll,
+                fit,
                 theme,
             );
             return;

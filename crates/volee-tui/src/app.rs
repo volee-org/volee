@@ -24,7 +24,7 @@ use crate::keymap::{Action, Context, KeyCombo, Keymap};
 use crate::launch::LaunchDialog;
 use crate::layout::{Mode, ScreenLayout};
 use crate::letters::Letters;
-use crate::preview::PreviewScreen;
+use crate::preview::{Fit, PreviewScreen};
 use crate::pulses::Pulses;
 use crate::source::{
     Changes, MissionRequest, NewMission, Outgoing, PaneFocus, SourceError, SpawnRequest, Summary,
@@ -1659,6 +1659,7 @@ fn zoom(model: &mut Model, context: Context, action: Action) {
 fn open_full_screen(model: &mut Model, effects: &mut Vec<Effect>) {
     if let Some(agent) = model.selected {
         model.overlay = Some(Overlay::Screen);
+        model.preview.scroll = 0;
         model.request_preview(agent, effects);
     }
 }
@@ -1831,7 +1832,11 @@ fn on_paste(model: &mut Model, text: &str) -> bool {
 
 /// Escape: closes or leaves the innermost thing, and never quits.
 fn back(model: &mut Model) {
-    if model.overlay.take().is_some() {
+    if let Some(overlay) = model.overlay.take() {
+        if matches!(overlay, Overlay::Screen) {
+            // The preview counts rows, the full-screen view wrapped lines.
+            model.preview.scroll = 0;
+        }
         return;
     }
     if model.scrubbing() {
@@ -1873,14 +1878,13 @@ fn navigate(model: &mut Model, context: Context, action: Action, effects: &mut V
             };
         }
         Context::Screen => {
-            // The screen fills the terminal but its top line and the hint
-            // line: it scrolls until its first row is in sight.
-            let rows = model
-                .preview
-                .screen
-                .as_ref()
-                .map_or(0, PreviewScreen::height);
-            let most = rows.saturating_sub(model.size.1.saturating_sub(3));
+            // The screen fills the terminal but its frame, its margin and
+            // the hint line: it scrolls until its first line is in sight.
+            let (columns, rows) = model.size;
+            let lines = model.preview.screen.as_ref().map_or(0, |screen| {
+                screen.line_count(columns.saturating_sub(3), Fit::Wrap)
+            });
+            let most = lines.saturating_sub(rows.saturating_sub(3));
             let scroll = &mut model.preview.scroll;
             *scroll = match action {
                 Action::Up => scroll.saturating_add(1).min(most),
