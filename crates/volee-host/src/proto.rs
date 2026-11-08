@@ -93,7 +93,10 @@ pub fn read_frame(mut reader: impl Read) -> io::Result<Option<Frame>> {
     }
     let len = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
     if len > MAX_FRAME {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "frame too large",
+        ));
     }
     let kind = Kind::from_byte(header[4])
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "unknown frame kind"))?;
@@ -104,7 +107,8 @@ pub fn read_frame(mut reader: impl Read) -> io::Result<Option<Frame>> {
 
 /// Parses a frame's JSON payload.
 pub fn parse<T: for<'de> Deserialize<'de>>(frame: &Frame) -> io::Result<T> {
-    serde_json::from_slice(&frame.payload).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    serde_json::from_slice(&frame.payload)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 /// A terminal size in cells.

@@ -69,9 +69,13 @@ pub fn attach(socket: &Path, client: &str) -> io::Result<AttachEnd> {
 }
 
 /// Copies the host's screen to the terminal until the take over ends.
-fn relay(connection: &mut Connection, out: &mut impl Write, detached: &AtomicBool) -> io::Result<AttachEnd> {
+fn relay(
+    connection: &mut Connection,
+    out: &mut impl Write,
+    detached: &AtomicBool,
+) -> io::Result<AttachEnd> {
     loop {
-        match connection.next() {
+        match connection.next_update() {
             Ok(Some(Update::Snapshot(bytes))) => {
                 out.write_all(CLEAR)?;
                 out.write_all(&bytes)?;

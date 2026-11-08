@@ -83,6 +83,15 @@ pub enum HostError {
     Io(#[from] io::Error),
 }
 
+/// Makes this process the leader of a new session, without a controlling
+/// terminal, so that closing the terminal that started it sends it nothing.
+/// Call it first thing in a host process started by another program (it
+/// fails in a process group leader).
+pub fn detach_from_terminal() -> io::Result<()> {
+    rustix::process::setsid()?;
+    Ok(())
+}
+
 /// Runs a host until its program has ended and its linger time is over.
 /// Returns how the program ended.
 pub fn run(config: HostConfig) -> Result<Exit, HostError> {
@@ -103,7 +112,8 @@ pub fn run(config: HostConfig) -> Result<Exit, HostError> {
     let pair = native_pty_system()
         .openpty(pty_size(config.size))
         .map_err(|error| spawn_error(error.to_string()))?;
-    let mut command = CommandBuilder::from_argv(config.command.iter().map(OsString::from).collect());
+    let mut command =
+        CommandBuilder::from_argv(config.command.iter().map(OsString::from).collect());
     command.cwd(&config.cwd);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
@@ -259,7 +269,9 @@ impl Host {
             {
                 self.finish_exit();
             }
-            if self.stop_deadline.is_some_and(|deadline| now >= deadline) && self.record.exit.is_none() {
+            if self.stop_deadline.is_some_and(|deadline| now >= deadline)
+                && self.record.exit.is_none()
+            {
                 self.signal(Signal::KILL);
                 self.stop_deadline = None;
             }
@@ -406,7 +418,10 @@ impl Host {
             let Some(client) = self.clients.get_mut(&id) else {
                 continue;
             };
-            match client.tx.try_send(Out::Frame(Kind::Snapshot, snapshot.clone())) {
+            match client
+                .tx
+                .try_send(Out::Frame(Kind::Snapshot, snapshot.clone()))
+            {
                 Ok(()) => client.state = ClientState::Live,
                 Err(TrySendError::Full(_)) => {}
                 Err(TrySendError::Disconnected(_)) => {
@@ -534,7 +549,11 @@ fn spawn_writer(mut writer: Box<dyn Write + Send>) -> Sender<Vec<u8>> {
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
     thread::spawn(move || {
         for bytes in rx {
-            if writer.write_all(&bytes).and_then(|()| writer.flush()).is_err() {
+            if writer
+                .write_all(&bytes)
+                .and_then(|()| writer.flush())
+                .is_err()
+            {
                 break;
             }
         }
@@ -548,7 +567,7 @@ fn spawn_acceptor(listener: UnixListener, tx: Sender<Msg>) {
             match stream {
                 Ok(stream) => {
                     let tx = tx.clone();
-                    thread::spawn(move || serve_client(id, stream, &tx));
+                    thread::spawn(move || serve_client(id, &stream, &tx));
                 }
                 Err(error) => tracing::warn!(%error, "accept failed"),
             }
@@ -558,10 +577,10 @@ fn spawn_acceptor(listener: UnixListener, tx: Sender<Msg>) {
 
 /// Reads a client's frames and passes them to the terminal thread; a second
 /// thread writes what the terminal thread queues for it.
-fn serve_client(id: u64, stream: UnixStream, tx: &Sender<Msg>) {
+fn serve_client(id: u64, stream: &UnixStream, tx: &Sender<Msg>) {
     let hello = (|| -> io::Result<Hello> {
         stream.set_read_timeout(Some(HELLO_TIMEOUT))?;
-        let frame = proto::read_frame(&stream)?
+        let frame = proto::read_frame(stream)?
             .filter(|frame| frame.kind == Kind::Hello)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "expected hello"))?;
         stream.set_read_timeout(None)?;
@@ -587,10 +606,17 @@ fn serve_client(id: u64, stream: UnixStream, tx: &Sender<Msg>) {
         // The terminal thread dropped this client, or it went away.
         let _ = write_half.shutdown(std::net::Shutdown::Both);
     });
-    if tx.send(Msg::Connected { id, hello, tx: out_tx }).is_err() {
+    if tx
+        .send(Msg::Connected {
+            id,
+            hello,
+            tx: out_tx,
+        })
+        .is_err()
+    {
         return;
     }
-    while let Ok(Some(frame)) = proto::read_frame(&stream) {
+    while let Ok(Some(frame)) = proto::read_frame(stream) {
         let msg = match frame.kind {
             Kind::Input => Msg::Input {
                 id,

@@ -44,7 +44,9 @@ impl Connection {
         proto::write_json(&stream, Kind::Hello, &hello)?;
         let frame = proto::read_frame(&stream)?
             .filter(|frame| frame.kind == Kind::Welcome)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "the host did not welcome us"))?;
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "the host did not welcome us")
+            })?;
         let welcome: Welcome = proto::parse(&frame)?;
         if welcome.protocol != PROTOCOL {
             return Err(io::Error::new(
@@ -59,7 +61,7 @@ impl Connection {
     }
 
     /// The next update; `Ok(None)` when the host closed the connection.
-    pub fn next(&mut self) -> io::Result<Option<Update>> {
+    pub fn next_update(&mut self) -> io::Result<Option<Update>> {
         loop {
             let Some(frame) = proto::read_frame(&self.stream)? else {
                 return Ok(None);
@@ -128,13 +130,14 @@ pub struct Watch {
 impl Watch {
     /// Starts watching the host at `socket`.
     pub fn start(socket: &Path, client: &str) -> io::Result<Self> {
-        let mut connection = Connection::open(socket, Role::Watch, Size { cols: 0, rows: 0 }, client)?;
+        let mut connection =
+            Connection::open(socket, Role::Watch, Size { cols: 0, rows: 0 }, client)?;
         let welcome = connection.welcome.clone();
         let sender = connection.sender()?;
         let (tx, updates) = mpsc::channel();
         thread::spawn(move || {
             loop {
-                let update = connection.next();
+                let update = connection.next_update();
                 let end = !matches!(update, Ok(Some(_)));
                 let sent = match update {
                     Ok(Some(update)) => tx.send(Ok(update)),

@@ -146,7 +146,10 @@ mod tests {
 
     #[test]
     fn plain_text_passes_through() {
-        assert_eq!(split(&[b"hello", b" world"]), [b"hello".to_vec(), b" world".to_vec()]);
+        assert_eq!(
+            split(&[b"hello", b" world"]),
+            [b"hello".to_vec(), b" world".to_vec()]
+        );
     }
 
     #[test]

@@ -1939,6 +1939,7 @@ dependencies = [
  "volee-daemon",
  "volee-git",
  "volee-harness",
+ "volee-host",
  "volee-mcp",
  "volee-mux",
  "volee-proto",
@@ -2109,7 +2110,9 @@ dependencies = [
  "unicode-width",
  "volee-core",
  "volee-daemon",
+ "volee-host",
  "volee-proto",
+ "volee-term",
  "vt100",
 ]
 

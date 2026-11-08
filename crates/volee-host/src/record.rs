@@ -107,7 +107,8 @@ impl HostRecord {
     /// Reads a record.
     pub fn read(path: &Path) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        serde_json::from_slice(&bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+        serde_json::from_slice(&bytes)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 
     /// Writes the record atomically: a temporary file, then a rename.
@@ -150,7 +151,10 @@ mod tests {
         let root = tempfile::tempdir().expect("tempdir");
         let dir = HostDir::new(root.path().join("state/hosts"));
         dir.ensure().expect("ensure");
-        let mode = fs::metadata(dir.path()).expect("metadata").permissions().mode();
+        let mode = fs::metadata(dir.path())
+            .expect("metadata")
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o700);
     }
 
@@ -162,13 +166,16 @@ mod tests {
         record("a", 10).write(&dir.record("a")).expect("write");
         fs::write(dir.path().join("junk.json"), "not json").expect("write");
         let listed = dir.list().expect("list");
-        let ids: Vec<_> = listed.iter().map(|(r, live)| (r.id.as_str(), *live)).collect();
+        let ids: Vec<_> = listed
+            .iter()
+            .map(|(r, live)| (r.id.as_str(), *live))
+            .collect();
         assert_eq!(ids, [("a", false), ("b", false)]);
     }
 
     #[test]
     fn a_missing_directory_lists_nothing() {
         let dir = HostDir::new("/nonexistent/volee/hosts");
-        assert!(dir.list().expect("list").is_empty());
+        assert_eq!(dir.list().expect("list"), Vec::new());
     }
 }

@@ -3,13 +3,13 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use libghostty_vt::Terminal;
 use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
 use libghostty_vt::render::{CellIterator, RenderState, RowIterator};
 use libghostty_vt::terminal::{
     ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode, Options,
     PrimaryDeviceAttributes, SecondaryDeviceAttributes, TertiaryDeviceAttributes,
 };
-use libghostty_vt::Terminal;
 
 use crate::Error;
 
@@ -50,9 +50,8 @@ impl Frame {
     /// The index of the last row that shows something, if any.
     pub fn last_drawn_row(&self) -> Option<usize> {
         self.rows.iter().rposition(|row| {
-            row.iter().any(|cell| {
-                !cell.symbol.trim().is_empty() || cell.style.bg.is_some()
-            })
+            row.iter()
+                .any(|cell| !cell.symbol.trim().is_empty() || cell.style.bg.is_some())
         })
     }
 }
@@ -281,7 +280,10 @@ mod tests {
         );
         let mut copy = replay(&original);
         assert_eq!(copy.text().expect("text"), original.text().expect("text"));
-        assert_same_frames(&copy.frame().expect("frame"), &original.frame().expect("frame"));
+        assert_same_frames(
+            &copy.frame().expect("frame"),
+            &original.frame().expect("frame"),
+        );
     }
 
     fn assert_same_frames(copy: &Frame, original: &Frame) {
@@ -300,8 +302,14 @@ mod tests {
         let original = screen_after(30, 5, b"\x1b[?2004h\x1b[>1u\x1b[2;7Hx");
         let copy = replay(&original);
         assert!(copy.terminal.mode(Mode::BRACKETED_PASTE).expect("mode"));
-        assert_eq!(copy.terminal.cursor_x().ok(), original.terminal.cursor_x().ok());
-        assert_eq!(copy.terminal.cursor_y().ok(), original.terminal.cursor_y().ok());
+        assert_eq!(
+            copy.terminal.cursor_x().ok(),
+            original.terminal.cursor_x().ok()
+        );
+        assert_eq!(
+            copy.terminal.cursor_y().ok(),
+            original.terminal.cursor_y().ok()
+        );
         assert_eq!(
             copy.terminal.kitty_keyboard_flags().ok(),
             original.terminal.kitty_keyboard_flags().ok()
@@ -323,11 +331,18 @@ mod tests {
                 .expect("frame")
                 .rows
                 .iter()
-                .map(|row| row.iter().map(|cell| cell.symbol.as_str()).collect::<String>())
+                .map(|row| {
+                    row.iter()
+                        .map(|cell| cell.symbol.as_str())
+                        .collect::<String>()
+                })
                 .collect::<Vec<_>>()
         };
         assert_eq!(visible(&mut copy), visible(&mut original));
-        assert_eq!(copy.frame().expect("frame").cursor, original.frame().expect("frame").cursor);
+        assert_eq!(
+            copy.frame().expect("frame").cursor,
+            original.frame().expect("frame").cursor
+        );
     }
 
     #[test]

@@ -148,6 +148,10 @@ enum Command {
         #[arg(long)]
         theme: Option<String>,
     },
+    /// Run programs in hosts, watch them on a wall, take them over
+    /// (prototype of ADR 0019).
+    #[command(subcommand)]
+    Host(HostCommand),
     /// Called by the hooks of agents volee launched. Not for people.
     #[command(hide = true)]
     Hook {
@@ -170,6 +174,76 @@ enum ConfigCommand {
     Init,
     /// Check the file and summarize what it sets.
     Check,
+}
+
+#[derive(Debug, Subcommand)]
+enum HostCommand {
+    /// Start a program in a new host, detached from this terminal, and print
+    /// the host's id.
+    Spawn {
+        /// The host's id; a new agent id when absent.
+        #[arg(long)]
+        id: Option<String>,
+        /// The program's directory; this one when absent.
+        #[arg(long)]
+        cwd: Option<std::path::PathBuf>,
+        /// Columns before anyone takes it over; this terminal's when absent.
+        #[arg(long, requires = "rows")]
+        cols: Option<u16>,
+        /// Rows before anyone takes it over; this terminal's when absent.
+        #[arg(long, requires = "cols")]
+        rows: Option<u16>,
+        /// The harness profile (ADR 0022).
+        #[arg(long, default_value = "generic")]
+        profile: String,
+        /// Seconds the last screen stays after the program ends.
+        #[arg(long, default_value_t = 600)]
+        linger: u64,
+        /// The command line, after `--`.
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+    /// List hosts, running or ended.
+    Ls {
+        /// Print JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print a host's screen as plain text.
+    Peek {
+        /// The host's id.
+        id: String,
+    },
+    /// Take a host over in this terminal; Ctrl+Q comes back.
+    Attach {
+        /// The host's id.
+        id: String,
+    },
+    /// Ask a host to end its program.
+    Stop {
+        /// The host's id.
+        id: String,
+    },
+    /// Show every running host as a wall of live screens.
+    Wall,
+    /// Run a host in this process. `spawn` starts this; not for people.
+    #[command(hide = true)]
+    Run {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        cwd: std::path::PathBuf,
+        #[arg(long)]
+        cols: u16,
+        #[arg(long)]
+        rows: u16,
+        #[arg(long)]
+        profile: String,
+        #[arg(long)]
+        linger: u64,
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -300,6 +374,8 @@ fn main() -> ExitCode {
             ConfigCommand::Init => cmd::config::init(),
             ConfigCommand::Check => cmd::config::check(),
         }),
+        // Hosts run without the async runtime: a host is plain threads.
+        Some(Command::Host(command)) => report(host(command)),
         Some(command) => async_main(command),
         None => block_on(cmd::interface::run()),
     }
@@ -377,11 +453,56 @@ fn async_main(command: Command) -> ExitCode {
                 result => result.map_err(Into::into),
             },
             Command::Demo { theme } => cmd::demo::run(theme.as_deref()).await,
-            Command::Hook { .. } | Command::Config(_) => {
+            Command::Hook { .. } | Command::Config(_) | Command::Host(_) => {
                 unreachable!("these commands run without the async runtime")
             }
         }
     })
+}
+
+fn host(command: HostCommand) -> anyhow::Result<()> {
+    match command {
+        HostCommand::Spawn {
+            id,
+            cwd,
+            cols,
+            rows,
+            profile,
+            linger,
+            command,
+        } => cmd::host::spawn(cmd::host::Spawn {
+            id,
+            cwd,
+            size: cols.zip(rows),
+            profile,
+            linger,
+            command,
+        }),
+        HostCommand::Ls { json } => cmd::host::list(json),
+        HostCommand::Peek { id } => cmd::host::peek(&id),
+        HostCommand::Attach { id } => cmd::host::attach(&id),
+        HostCommand::Stop { id } => cmd::host::stop(&id),
+        HostCommand::Wall => cmd::host::wall(),
+        HostCommand::Run {
+            id,
+            cwd,
+            cols,
+            rows,
+            profile,
+            linger,
+            command,
+        } => cmd::host::run(volee_host::HostConfig {
+            id,
+            dir: cmd::host::host_dir()?,
+            command,
+            cwd,
+            env: Vec::new(),
+            size: volee_host::Size { cols, rows },
+            profile,
+            scrollback: 1_000,
+            linger: std::time::Duration::from_secs(linger),
+        }),
+    }
 }
 
 async fn mission(command: MissionCommand) -> anyhow::Result<()> {

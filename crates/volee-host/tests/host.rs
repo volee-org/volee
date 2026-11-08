@@ -63,7 +63,11 @@ fn a_watcher_sees_what_the_owner_types() {
     assert!(!watch.welcome().input, "a watcher never gets the input");
     let owner = control(&dir.socket("typing"), SIZE);
     assert!(owner.welcome.input);
-    owner.sender().expect("sender").input(b"hello host\r").expect("input");
+    owner
+        .sender()
+        .expect("sender")
+        .input(b"hello host\r")
+        .expect("input");
     watch_until(&mut watch, |w| screen_has(w, "hello host"));
 
     // A late watcher gets the whole screen from its first snapshot.
@@ -85,10 +89,19 @@ fn keys_from_a_watcher_are_ignored() {
     let dir = HostDir::new(root.path().join("hosts"));
     let host = start(&dir, "ignored", &["cat"]);
 
-    let watcher = Connection::open(&dir.socket("ignored"), Role::Watch, SIZE, "test").expect("connect");
-    watcher.sender().expect("sender").input(b"sneaky\r").expect("input");
+    let watcher =
+        Connection::open(&dir.socket("ignored"), Role::Watch, SIZE, "test").expect("connect");
+    watcher
+        .sender()
+        .expect("sender")
+        .input(b"sneaky\r")
+        .expect("input");
     let owner = control(&dir.socket("ignored"), SIZE);
-    owner.sender().expect("sender").input(b"allowed\r").expect("input");
+    owner
+        .sender()
+        .expect("sender")
+        .input(b"allowed\r")
+        .expect("input");
     let mut watch = Watch::start(&dir.socket("ignored"), "test").expect("watch");
     watch_until(&mut watch, |w| screen_has(w, "allowed"));
     assert!(!screen_has(&mut watch, "sneaky"));
@@ -101,13 +114,25 @@ fn keys_from_a_watcher_are_ignored() {
 fn the_owner_sets_the_size_and_watchers_follow() {
     let root = tempfile::tempdir().expect("tempdir");
     let dir = HostDir::new(root.path().join("hosts"));
-    let host = start(&dir, "sizes", &["sh", "-c", "while :; do stty size; sleep 0.1; done"]);
+    let host = start(
+        &dir,
+        "sizes",
+        &["sh", "-c", "while :; do stty size; sleep 0.1; done"],
+    );
 
     let mut watch = Watch::start(&dir.socket("sizes"), "test").expect("watch");
     watch_until(&mut watch, |w| screen_has(w, "12 60"));
     // A watcher with another size changes nothing.
-    let _other = Connection::open(&dir.socket("sizes"), Role::Watch, Size { cols: 200, rows: 50 }, "test")
-        .expect("connect");
+    let _other = Connection::open(
+        &dir.socket("sizes"),
+        Role::Watch,
+        Size {
+            cols: 200,
+            rows: 50,
+        },
+        "test",
+    )
+    .expect("connect");
     let wide = Size { cols: 90, rows: 20 };
     let owner = control(&dir.socket("sizes"), wide);
     watch_until(&mut watch, |w| w.size() == wide && screen_has(w, "20 90"));
@@ -127,7 +152,7 @@ fn a_second_owner_takes_the_input() {
     let second = control(&dir.socket("takeover"), SIZE);
     assert!(second.welcome.input);
     let mut taken = false;
-    while let Ok(Some(update)) = first.next() {
+    while let Ok(Some(update)) = first.next_update() {
         if update == Update::Event(Event::InputTaken) {
             taken = true;
         }

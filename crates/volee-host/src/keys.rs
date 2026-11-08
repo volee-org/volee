@@ -24,17 +24,18 @@ pub fn filter(keys: &[u8]) -> Filtered {
             out.detach = true;
             return out;
         }
-        if keys[i] == 0x1b && keys.get(i + 1) == Some(&b'[') {
-            if let Some((len, action)) = csi_ctrl_q(&keys[i + 2..]) {
-                match action {
-                    Action::Detach => {
-                        out.detach = true;
-                        return out;
-                    }
-                    Action::Swallow => {
-                        i += 2 + len;
-                        continue;
-                    }
+        if keys[i] == 0x1b
+            && keys.get(i + 1) == Some(&b'[')
+            && let Some((len, action)) = csi_ctrl_q(&keys[i + 2..])
+        {
+            match action {
+                Action::Detach => {
+                    out.detach = true;
+                    return out;
+                }
+                Action::Swallow => {
+                    i += 2 + len;
+                    continue;
                 }
             }
         }
@@ -70,7 +71,14 @@ fn csi_ctrl_q(rest: &[u8]) -> Option<(usize, Action)> {
             if !is_ctrl_only(mods) {
                 return None;
             }
-            Some((len, if event == 1 { Action::Detach } else { Action::Swallow }))
+            Some((
+                len,
+                if event == 1 {
+                    Action::Detach
+                } else {
+                    Action::Swallow
+                },
+            ))
         }
         b'~' => {
             let mut fields = params.split(';');
@@ -132,7 +140,13 @@ mod tests {
 
     #[test]
     fn other_q_keys_pass() {
-        for keys in [&b"\x1b[113u"[..], b"\x1b[113;3u", b"\x1b[113;7u", b"\x1b[113;6u", b"\x1b[27;3;113~"] {
+        for keys in [
+            &b"\x1b[113u"[..],
+            b"\x1b[113;3u",
+            b"\x1b[113;7u",
+            b"\x1b[113;6u",
+            b"\x1b[27;3;113~",
+        ] {
             let out = filter(keys);
             assert_eq!(out.forward, keys, "{keys:?}");
             assert!(!out.detach);

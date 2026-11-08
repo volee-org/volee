@@ -22,7 +22,10 @@ pub(crate) fn to_ratatui(style: &VtStyle) -> Style {
         (style.inverse, Modifier::REVERSED),
         (style.invisible, Modifier::HIDDEN),
         (style.strikethrough, Modifier::CROSSED_OUT),
-        (!matches!(style.underline, Underline::None), Modifier::UNDERLINED),
+        (
+            !matches!(style.underline, Underline::None),
+            Modifier::UNDERLINED,
+        ),
     ];
     let modifiers = flags
         .into_iter()
