@@ -94,10 +94,15 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   view; scroll it with `j` and `k` when the panel has the keyboard. Lines
   wider than the panel are cut at its edge. `z` (or `enter` in the preview)
   shows that screen full size, its whole conversation in view, from its
-  newest lines: lines wider than the window go on over several lines, so
-  that nothing is cut but the padding and frames the agent's interface
-  draws to its own edge. `j` and `k` scroll it, `a` takes the agent over,
-  and `z` or `esc` comes back.
+  newest lines: lines wider than the window go on over several lines,
+  between words where they can, so that nothing is cut but the padding and
+  frames the agent's interface draws to its own edge. `j` and `k` scroll
+  it, `a` takes the agent over, and `z` or `esc` comes back. For a session
+  in a tuios or tmux pane, the screen is the pane's. For a background
+  session, it is replayed from `claude logs`, which keeps only the
+  session's recent output: in a session that has run for hours, parts of
+  the screen drawn long ago and never redrawn since, such as a list that
+  has not changed, can show gaps. A recent session shows whole.
 - **Hints.** The keys that apply to the panel that has the keyboard. They
   come from the same table as the help (`?`), so they are always right.
 
