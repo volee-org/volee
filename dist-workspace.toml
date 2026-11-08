@@ -29,3 +29,6 @@ hosting = "github"
 checksum = "sha256"
 # Packages are not distributed unless they opt in with `dist = true`
 dist = false
+# Extra steps for every build job, relative to .github/workflows: Zig for
+# libghostty-vt (ADR 0020)
+github-build-setup = "../build-setup.yml"

@@ -26,7 +26,15 @@ volee supports macOS and Linux.
 1. Install Rust with [rustup](https://rustup.rs). The stable toolchain is pinned
    by `rust-toolchain.toml`, so rustup picks the right version automatically.
    The minimum supported Rust version (MSRV) is declared in `Cargo.toml`.
-2. Clone the repository and build:
+2. Install [Zig](https://ziglang.org) **0.15.2** exactly. The terminal
+   emulator, libghostty-vt, is built from a pinned Ghostty commit that needs
+   this version ([ADR 0020](docs/src/adr/0020-libghostty-vt-emulates-terminals.md)).
+   On macOS, `brew install zig@0.15` installs it outside your `PATH`: put
+   `$(brew --prefix zig@0.15)/bin` first in the `PATH` of the shell you build
+   from. Elsewhere, take the 0.15.2 archive from ziglang.org or use a version
+   manager. The first build also needs network access to github.com to fetch
+   Ghostty, and takes about a minute and a half longer.
+3. Clone the repository and build:
 
    ```sh
    git clone https://github.com/volee-org/volee
@@ -34,7 +42,7 @@ volee supports macOS and Linux.
    cargo build --workspace
    ```
 
-3. Optional tools (install the ones you need):
+4. Optional tools (install the ones you need):
 
    | Tool | Used for |
    | --- | --- |

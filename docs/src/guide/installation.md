@@ -72,6 +72,9 @@ cargo install --locked --git https://github.com/volee-org/volee --tag v0.7.0 vol
 
 Replace `v0.7.0` with the release you want, or leave `--tag` out to build the
 latest commit of `main`. The `volee` command goes into `~/.cargo/bin`.
+Building `main` after 0.7.0 also needs Rust 1.90 and Zig 0.15.2, as
+[CONTRIBUTING.md](https://github.com/volee-org/volee/blob/main/CONTRIBUTING.md)
+explains.
 
 ## Check the installation
 

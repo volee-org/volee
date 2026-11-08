@@ -1,0 +1,8 @@
+# Steps dist adds to every release build job (`github-build-setup` in
+# dist-workspace.toml). libghostty-vt builds Ghostty's pinned commit with this
+# exact Zig (ADR 0020). After a change here, run `dist generate`.
+- name: Install Zig
+  uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+  with:
+    version: 0.15.2
+    use-cache: false
