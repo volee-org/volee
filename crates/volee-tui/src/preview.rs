@@ -40,7 +40,9 @@ fn screen_size(output: &str) -> (u16, u16) {
     let mut extent = Extent {
         rows: ROWS,
         columns: COLUMNS,
+        row: 1,
         column: 1,
+        saved: (1, 1),
     };
     let mut rest = output;
     loop {
@@ -61,8 +63,13 @@ fn screen_size(output: &str) -> (u16, u16) {
 struct Extent {
     rows: u16,
     columns: u16,
-    /// The cursor's column, from 1, as far as the output lets it be followed.
+    /// The cursor's row and column, from 1, as far as the output lets them
+    /// be followed. Line feeds do not move `row`: at the bottom of a
+    /// terminal they scroll, and a taller emulator would not.
+    row: u16,
     column: u16,
+    /// Where the output last saved the cursor (`ESC 7` or `CSI s`).
+    saved: (u16, u16),
 }
 
 impl Extent {
@@ -126,6 +133,14 @@ impl Extent {
                 characters.next()?;
                 Some(characters.as_str())
             }
+            '7' => {
+                self.saved = (self.row, self.column);
+                Some(characters.as_str())
+            }
+            '8' => {
+                (self.row, self.column) = self.saved;
+                Some(characters.as_str())
+            }
             _ => Some(characters.as_str()),
         }
     }
@@ -136,34 +151,38 @@ impl Extent {
             // Private modes, such as hiding the cursor, move nothing.
             return;
         }
+        // A missing parameter, or 0, means 1 for every move.
         let number = |text: &str| -> u16 {
             if text.is_empty() {
                 1
             } else {
-                text.parse().unwrap_or(u16::MAX)
+                text.parse().map_or(u16::MAX, |value: u16| value.max(1))
             }
         };
         let mut numbers = parameters.split(';').map(number);
         let first = numbers.next().unwrap_or(1);
         match command {
             'H' | 'f' => {
-                self.rows = self.rows.max(first);
+                self.row = first;
                 self.column = numbers.next().unwrap_or(1);
-                self.columns = self.columns.max(self.column);
             }
-            'd' => self.rows = self.rows.max(first),
-            'G' | '`' => {
-                self.column = first;
-                self.columns = self.columns.max(first);
-            }
-            'B' => self.rows = self.rows.max(first.saturating_add(1)),
-            'E' => {
-                self.rows = self.rows.max(first.saturating_add(1));
-                self.column = 1;
-            }
+            'd' => self.row = first,
+            'G' | '`' => self.column = first,
+            'B' | 'e' => self.row = self.row.saturating_add(first),
+            'E' => (self.row, self.column) = (self.row.saturating_add(first), 1),
+            'A' => self.row = self.row.saturating_sub(first).max(1),
+            'F' => (self.row, self.column) = (self.row.saturating_sub(first).max(1), 1),
             'C' | 'a' => self.column = self.column.saturating_add(first),
             'D' => self.column = self.column.saturating_sub(first).max(1),
+            's' if parameters.is_empty() => self.saved = (self.row, self.column),
+            'u' if parameters.is_empty() => (self.row, self.column) = self.saved,
             _ => {}
+        }
+        // Every row the cursor goes to exists. A column counts once a move
+        // names it outright, or once text lands there (see `write`).
+        self.rows = self.rows.max(self.row);
+        if matches!(command, 'H' | 'f' | 'G' | '`') {
+            self.columns = self.columns.max(self.column);
         }
     }
 }
@@ -574,6 +593,31 @@ mod tests {
         );
         assert_eq!(screen_size(&output), (ROWS, COLUMNS));
         assert_eq!(screen_text(&output), "link>");
+    }
+
+    #[test]
+    fn relative_moves_and_saved_cursors_are_followed() {
+        use std::fmt::Write as _;
+        // Seventy rows reached one move down at a time, with no move that
+        // names a row: a 50-row emulator would stop the cursor at its
+        // bottom and lose the rows past it.
+        let mut output = String::from("\x1b[H");
+        for row in 0..70 {
+            write!(output, "\x1b[1B\rrow{row}").unwrap();
+        }
+        assert_eq!(screen_size(&output), (71, COLUMNS));
+        let text = screen_text(&output);
+        assert!(text.contains("row47\nrow48"), "{text}");
+        assert!(text.ends_with("row68\nrow69"), "{text}");
+        // The cursor saved at column 250, then restored for 100 more columns.
+        let saved = format!("\x1b[250G\x1b7\rab\x1b8{}", "x".repeat(100));
+        assert_eq!(screen_size(&saved), (ROWS, 349));
+        let saved = format!("\x1b[1;250H\x1b[s\r\x1b[u{}", "y".repeat(10));
+        assert_eq!(screen_size(&saved), (ROWS, 259));
+        // Up and back to the first column.
+        assert_eq!(screen_size("\x1b[60;1H\x1b[5Fz\x1b[2A"), (60, COLUMNS));
+        // A parameter of 0 moves as 1 does.
+        assert_eq!(screen_size("\x1b[1;300H\x1b[0Cx"), (ROWS, 301));
     }
 
     #[test]
