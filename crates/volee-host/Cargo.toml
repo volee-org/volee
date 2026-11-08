@@ -1,0 +1,27 @@
+[package]
+name = "volee-host"
+description = "The volee host: one process per agent that holds its terminal and serves its screen on a socket."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+portable-pty.workspace = true
+rustix = { workspace = true, features = ["event", "process", "termios"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+volee-term.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
