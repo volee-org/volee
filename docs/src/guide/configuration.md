@@ -107,6 +107,33 @@ its branch before launching again. If the agent's mission ends during the
 setup, the launch stops and no session starts. A mission's coordinator works
 in the main checkout and runs no setup.
 
+Some setups, each checked with `volee config check`:
+
+```toml
+# Bun, and a .env.local that git ignores, from the main checkout.
+setup = ['cp "$VOLEE_REPO_ROOT/.env.local" .', "bun install"]
+
+# npm, exactly as the lockfile says.
+setup = ["npm ci"]
+
+# Python with uv.
+setup = ["uv sync"]
+
+# A monorepo with a .env.local in several apps and packages.
+setup = [
+  '''cd "$VOLEE_REPO_ROOT" && find apps packages -maxdepth 2 -name .env.local | while read -r file; do mkdir -p "$VOLEE_WORKTREE/${file%/*}" && cp "$file" "$VOLEE_WORKTREE/$file"; done''',
+  "bun install",
+]
+```
+
+Package managers also run scripts: the project's own and its dependencies'
+(`postinstall`, `prepare`). They run in the new worktree, which shares the
+repository's git configuration with your main checkout, so a script that runs
+`git config` (to set `core.hooksPath`, for example) changes it for every
+checkout of the repository. If that matters, skip the scripts
+(`bun install --ignore-scripts`, `npm ci --ignore-scripts`) and run the ones
+you need as setup commands of their own.
+
 ## `[messages]`
 
 | Key | Default | Meaning |

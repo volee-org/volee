@@ -33,7 +33,7 @@ Everything on the screen comes from the daemon, and so do the actions:
 | What | What the daemon uses |
 | --- | --- |
 | The agents, their states and messages | Its own records, kept up to date as sessions come and go. |
-| The preview of an agent's screen | Claude Code, which replays the session's output (`claude logs`); tuios or tmux, for a session in one of their panes (`capture-pane`). |
+| The preview of an agent's screen | Claude Code, which replays the session's output (`claude logs`); tuios or tmux, for a session in one of their panes (`capture-pane`); volee's setup log, for an agent whose session has not started yet. |
 | An agent's changes (`d`) | git, in the agent's worktree or folder. |
 | Taking over an agent (`a`) | Claude Code, which attaches the session (`claude attach`); tuios or tmux, which bring forward the pane of a session in one of their panes. |
 | Writing to an agent (`m`) | Its own records and the agent's hooks. |
