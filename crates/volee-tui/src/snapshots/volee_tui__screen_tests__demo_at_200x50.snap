@@ -10,7 +10,7 @@ expression: draw(&model)
 "│    needs you · billing › feat/invoi… ││                                    │ Read missions/invoicing/pla… │                                                │ Bash terraform plan          │          │"
 "│ x ▸ explore-traces              39 s ││                                    │ 2 missions · 9 agents        │                                                │ PR #12 merged ✓              │          │"
 "│    working · gateway › audit/p95-la… ││                                    ╰───────────────┬──────────────╯                                                ╰──────────────────────────────╯          │"
-"│ e ▸ explore-handlers           6 min ││                         ┌──────────────────────────┴──────────────────────────┐                                    ╭─ broken-li… ─ independent ⠹ ─╮          │"
+"│ e ▸ explore-handlers           6 min ││                         ┌──────────────────────────┴──────────────────────────┐                                    ╭─ broken-links ─────────── ⠹ ─╮          │"
 "│    working · gateway › audit/p95-la… ││                         │                                                     │                                    │ ▸ working · 18 min  ▁█▁▁▁█▁█ │          │"
 "│ r ▸ trace-search              11 min ││         ╭─ invoicing ───┴ coordinator ─╮                      ╭─ latency-aud… ┴ coordinator ─╮                     │ website › fix/broken-links   │          │"
 "│    working · search › audit/p95-lat… ││         │ · idle · 14 min              │                      │ · idle · 12 min              │                     │ Read docs/guide/install.md   │          │"

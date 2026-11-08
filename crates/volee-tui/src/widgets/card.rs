@@ -191,6 +191,22 @@ fn frame(
     }
 }
 
+/// Whether a card `width` wide shows the role of an agent named `name`. An
+/// independent session, often started outside volee and named in several
+/// words by Claude Code, gives the room of its long role to its name when
+/// both do not fit: the name's color tells the role too, and no edge joins
+/// it from above. Other roles keep theirs: their parent's edge meets the
+/// middle of their top border, where a longer name would hide the junction.
+fn shows_role(name: &str, role: Role, spinner: bool, width: u16) -> bool {
+    if role != Role::Independent {
+        return true;
+    }
+    // The top border as `frame` lays it out: the corners, the blanks around
+    // the name and one line cell (7), then the right part and its blanks.
+    let right = text::width(role.label()) + if spinner { 2 } else { 0 };
+    text::width(name) + 7 + right + 2 <= usize::from(width)
+}
+
 /// Draws an agent alone as a compact card (its name and its state) with
 /// its top left at (`x`, `y`): the network view's most detailed level.
 pub(crate) fn draw_compact(
@@ -228,12 +244,18 @@ fn full(
     let theme = &context.model.theme;
     let name_style = look.or_dim(theme.role(agent.role).add_modifier(Modifier::BOLD), context);
     let name = Span::styled(agent.name.as_str(), name_style);
-    let mut right = vec![Span::styled(
-        agent.role.label(),
-        context.style(StyleRole::TextDim),
-    )];
-    if let Some(spinner) = spinner(agent, context) {
-        right.push(Span::raw(" "));
+    let spinner = spinner(agent, context);
+    let mut right = Vec::new();
+    if shows_role(&agent.name, agent.role, spinner.is_some(), width) {
+        right.push(Span::styled(
+            agent.role.label(),
+            context.style(StyleRole::TextDim),
+        ));
+    }
+    if let Some(spinner) = spinner {
+        if !right.is_empty() {
+            right.push(Span::raw(" "));
+        }
         right.push(spinner);
     }
     frame(canvas, (x, y), (width, 6), look, (name, &right), context);
@@ -635,6 +657,19 @@ mod tests {
             .iter()
             .map(|span| span.content.as_ref())
             .collect()
+    }
+
+    #[test]
+    fn a_long_name_takes_the_room_of_the_role() {
+        let long = "cockpit open launch failure";
+        assert!(shows_role("broken-links", Role::Independent, true, 36));
+        // A name Claude Code gave a session: its role gives way...
+        assert!(!shows_role(long, Role::Independent, true, 36));
+        assert!(shows_role(long, Role::Independent, false, 47));
+        assert!(!shows_role(long, Role::Independent, false, 46));
+        // ...but the role of an agent with a parent stays, whatever its name.
+        assert!(shows_role(long, Role::Coordinator, true, 36));
+        assert!(shows_role(long, Role::Worker, true, 20));
     }
 
     #[test]

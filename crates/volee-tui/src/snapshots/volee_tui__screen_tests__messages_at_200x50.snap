@@ -10,7 +10,7 @@ expression: draw(&model)
 "│    needs you · bil│ ? trace-gateway asks you                          30 s │ ● infra → you · question · 25 min ago                                                               │        │          │"
 "│ x ▸ explore-traces│   Can you ask Invoicing whether create_invoice fetche… │ PR #12 is green: it moves the gateway behind the new load balancer. Shall I merge it, or will you   │        │          │"
 "│    working · gatew│ ● Inbox (4)                                       30 s │ after a review?                                                                                     │────────╯          │"
-"│ e ▸ explore-handle│   question · trace-gateway: Can you ask Invoicing whe… │                                                                                                     │dent ⠹ ─╮          │"
+"│ e ▸ explore-handle│   question · trace-gateway: Can you ask Invoicing whe… │                                                                                                     │──── ⠹ ─╮          │"
 "│    working · gatew│   ◆ Invoicing                                     59 s │ you → infra · answer · 20 min ago                                                                   │█▁▁▁█▁█ │          │"
 "│ r ▸ trace-search  │   alert · volee: invoice-tools waits for a person: sh… │ Reviewed: I am merging it now.                                                                      │links   │          │"
 "│    working · searc│ ● volee                                          7 min │                                                                                                     │ll.md   │          │"
