@@ -333,50 +333,67 @@ fn submit(dialog: &mut LaunchDialog, effects: &mut Vec<Effect>) {
     effects.push(effect);
 }
 
+/// The dialog of `kind` that is waiting for the source, if it is open.
+fn waiting(model: &mut Model, kind: DialogKind) -> Option<&mut LaunchDialog> {
+    match &mut model.overlay {
+        Some(Overlay::Launch(dialog)) if dialog.kind == kind && dialog.sending => Some(dialog),
+        _ => None,
+    }
+}
+
 /// The source launched the agent, or refused: the dialog closes, or shows
-/// why and stays.
+/// why and stays. A dialog closed while the launch went on (a long setup)
+/// leaves the answer to a notice.
 pub(crate) fn launched(
     model: &mut Model,
     result: Result<volee_core::AgentId, SourceError>,
 ) -> bool {
-    let Some(Overlay::Launch(dialog)) = &mut model.overlay else {
-        return false;
-    };
-    if dialog.kind != DialogKind::Agent {
-        return false;
-    }
+    let open = waiting(model, DialogKind::Agent).is_some();
     match result {
         Ok(agent) => {
-            model.overlay = None;
             model.notify(
                 "Agent launched: it appears in the list as it starts.",
                 false,
             );
-            model.follow(agent);
+            if open {
+                model.overlay = None;
+                model.follow(agent);
+            }
         }
         Err(error) => {
-            dialog.sending = false;
-            dialog.error = Some(crate::text::sentence(&error.to_string()));
+            if let Some(dialog) = waiting(model, DialogKind::Agent) {
+                dialog.sending = false;
+                dialog.error = Some(crate::text::sentence(&error.to_string()));
+            } else {
+                let reason = error.to_string();
+                model.notify(
+                    format!(
+                        "Could not launch the agent: {}.",
+                        crate::text::clause(&reason)
+                    ),
+                    true,
+                );
+            }
         }
     }
     true
 }
 
-/// The source created the mission, or refused.
+/// The source created the mission, or refused. A dialog closed meanwhile
+/// leaves the answer to a notice.
 pub(crate) fn mission_created(model: &mut Model, result: Result<NewMission, SourceError>) -> bool {
-    let Some(Overlay::Launch(dialog)) = &mut model.overlay else {
-        return false;
-    };
-    if dialog.kind != DialogKind::Mission {
-        return false;
-    }
+    let open = waiting(model, DialogKind::Mission).is_some();
     match result {
         Ok(created) => {
-            model.overlay = None;
+            if open {
+                model.overlay = None;
+            }
             match created.coordinator {
                 Some(coordinator) => {
                     model.notify("Mission created: its coordinator is starting.", false);
-                    model.follow(coordinator);
+                    if open {
+                        model.follow(coordinator);
+                    }
                 }
                 None => model.notify(
                     "Mission created, but volee could not launch its coordinator: see its thread.",
@@ -385,8 +402,19 @@ pub(crate) fn mission_created(model: &mut Model, result: Result<NewMission, Sour
             }
         }
         Err(error) => {
-            dialog.sending = false;
-            dialog.error = Some(crate::text::sentence(&error.to_string()));
+            if let Some(dialog) = waiting(model, DialogKind::Mission) {
+                dialog.sending = false;
+                dialog.error = Some(crate::text::sentence(&error.to_string()));
+            } else {
+                let reason = error.to_string();
+                model.notify(
+                    format!(
+                        "Could not create the mission: {}.",
+                        crate::text::clause(&reason)
+                    ),
+                    true,
+                );
+            }
         }
     }
     true
@@ -459,6 +487,49 @@ mod tests {
         );
         submit(&mut dialog, &mut effects);
         assert_eq!(effects.len(), 1, "launched once");
+    }
+
+    #[test]
+    fn a_launch_whose_dialog_was_closed_still_says_how_it_went() {
+        let mut model = Model::new(
+            crate::theme::Theme::default(),
+            crate::keymap::Keymap::default(),
+            None,
+            (120, 40),
+            volee_core::time::Timestamp::from_millis(0),
+        );
+        model.settings.repos = vec!["billing".to_owned()];
+        open(&mut model, DialogKind::Agent);
+        if let Some(Overlay::Launch(dialog)) = &mut model.overlay {
+            dialog.sending = true;
+        }
+        // Esc while the setup runs: the dialog closes, the launch goes on.
+        model.overlay = None;
+        launched(
+            &mut model,
+            Err(SourceError::Unsupported(
+                "the setup command `bun install` exited with status 1".into(),
+            )),
+        );
+        let notice = model.notice.as_ref().unwrap();
+        assert!(notice.error);
+        assert_eq!(
+            notice.text,
+            "Could not launch the agent: the setup command `bun install` exited with status 1."
+        );
+        let agent = volee_core::AgentId::from_ulid(ulid::Ulid::from_parts(1, 1));
+        launched(&mut model, Ok(agent));
+        let notice = model.notice.as_ref().unwrap();
+        assert!(!notice.error);
+        assert_eq!(
+            notice.text,
+            "Agent launched: it appears in the list as it starts."
+        );
+        assert_eq!(model.overlay, None);
+        // A new dialog, not waiting, is not the one that launched: it stays.
+        open(&mut model, DialogKind::Agent);
+        launched(&mut model, Ok(agent));
+        assert!(matches!(model.overlay, Some(Overlay::Launch(_))));
     }
 
     #[test]
@@ -602,6 +673,11 @@ mod tests {
                 Some("A mission needs at least one repository")
             );
             assert!(!dialog.sending);
+            // Sent again, once fixed.
+            assert!(matches!(
+                ctrl(&mut model, 's').as_slice(),
+                [Effect::CreateMission(_)]
+            ));
             update(
                 &mut model,
                 Msg::MissionCreated(Ok(NewMission {

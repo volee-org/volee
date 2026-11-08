@@ -101,16 +101,23 @@ pub(crate) fn render(model: &Model, dialog: &LaunchDialog, area: Rect, buf: &mut
         );
         y += height + 1;
     }
-    if let Some(error) = &dialog.error {
-        let width = usize::from(inner.width.saturating_sub(2));
-        let style = theme.style(StyleRole::NoticeError);
-        for (start, end) in text::wrap(error, width) {
-            if y >= inner.bottom() {
-                break;
-            }
-            buf.set_stringn(x, y, &error[start..end], width, style);
-            y += 1;
+    let (note, style) = match &dialog.error {
+        Some(error) => (error.as_str(), theme.style(StyleRole::NoticeError)),
+        // The launch waits for the repository's setup commands, which can
+        // take minutes: closing the dialog does not stop it.
+        None if dialog.sending && dialog.kind == DialogKind::Agent => (
+            "The setup may take a while: esc closes this window, the launch goes on.",
+            theme.style(StyleRole::TextDim),
+        ),
+        None => return,
+    };
+    let width = usize::from(inner.width.saturating_sub(2));
+    for (start, end) in text::wrap(note, width) {
+        if y >= inner.bottom() {
+            break;
         }
+        buf.set_stringn(x, y, &note[start..end], width, style);
+        y += 1;
     }
 }
 
