@@ -371,6 +371,36 @@ fn z_shows_the_agent_screen_full_size_and_comes_back() {
 }
 
 #[test]
+fn the_full_screen_view_scrolls_over_wrapped_lines() {
+    use std::fmt::Write as _;
+    // 120x40: the screen's text takes 117 columns and 37 rows.
+    let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    press(&mut model, "'s");
+    press(&mut model, "z");
+    // Thirty rows of 234 characters, two lines each, then the cursor's row.
+    let mut text = String::new();
+    for n in 0..30 {
+        write!(text, "{n:02}{}\r\n", "x".repeat(232)).unwrap();
+    }
+    update(
+        &mut model,
+        Msg::PreviewLoaded {
+            agent: schema,
+            result: Ok(text),
+        },
+    );
+    for _ in 0..40 {
+        press(&mut model, "k");
+    }
+    assert_eq!(model.preview.scroll, 61 - 37, "up to the first line");
+    // Back in the main view, the preview starts from its newest rows.
+    press(&mut model, "z");
+    assert_eq!(model.overlay, None);
+    assert_eq!(model.preview.scroll, 0);
+}
+
+#[test]
 fn forgetting_an_agent_asks_first_and_says_how_it_went() {
     let mut model = model(120, 40);
     let schema = id(INVOICE_SCHEMA);

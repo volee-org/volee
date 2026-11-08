@@ -91,10 +91,13 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   its own), delivery evidence, last activity and session.
 - **Preview.** The selected agent's terminal screen, kept up to date while
   it works. The bottom of the screen, where the latest output is, stays in
-  view; scroll it with `j` and `k` when the panel has the keyboard. `z`
-  (or `enter` in the preview) shows that screen full size, its whole
-  conversation in view: `j` and `k` scroll it, `a` takes the agent over, and
-  `z` or `esc` comes back.
+  view; scroll it with `j` and `k` when the panel has the keyboard. Lines
+  wider than the panel are cut at its edge. `z` (or `enter` in the preview)
+  shows that screen full size, its whole conversation in view, from its
+  newest lines: lines wider than the window go on over several lines, so
+  that nothing is cut but the padding and frames the agent's interface
+  draws to its own edge. `j` and `k` scroll it, `a` takes the agent over,
+  and `z` or `esc` comes back.
 - **Hints.** The keys that apply to the panel that has the keyboard. They
   come from the same table as the help (`?`), so they are always right.
 
