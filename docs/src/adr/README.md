@@ -25,6 +25,12 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0016](0016-what-a-failed-launch-left-untouched.md) | Reuse or tidy what a failed launch left untouched (refines 0011) | Accepted |
 | [0017](0017-setup-commands-for-new-worktrees.md) | Setup commands prepare a new worktree before its agent starts | Accepted |
 | [0018](0018-panes-that-show-background-sessions.md) | A pane that shows a background session is its preview | Accepted |
+| [0019](0019-a-host-process-holds-each-agent-terminal.md) | A volee-host process holds each agent's terminal (supersedes 0002) | Proposed |
+| [0020](0020-libghostty-vt-emulates-terminals.md) | libghostty-vt emulates every terminal volee reads | Proposed |
+| [0021](0021-take-over-watch-and-the-wall-of-screens.md) | Take over with `a` or `volee attach`, leave with Ctrl+Q, watch on a wall | Proposed |
+| [0022](0022-harness-profiles.md) | A profile per harness says how to launch, resume, find and read it | Proposed |
+| [0023](0023-every-agent-on-the-machine.md) | volee shows every agent on the machine, and adopts the ones it did not start (supersedes 0018) | Proposed |
+| [0024](0024-agents-come-back-after-a-reboot.md) | Agents interrupted by a reboot come back in new hosts | Proposed |
 
 ## Not built yet
 
