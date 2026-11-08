@@ -119,6 +119,25 @@ pub trait Multiplexer: fmt::Debug + Send + Sync {
     fn attach_command(&self, _target: &str) -> Option<Vec<String>> {
         None
     }
+
+    /// The panes that show some of `sessions`, background sessions given
+    /// with their names: panes whose title names one of them, as Claude
+    /// Code titles the terminal of `claude agents` or `claude attach` with
+    /// the session it shows (ADR 0018). Such a pane shows a session that
+    /// runs elsewhere, so the daemon only reads it, for previews. Sessions no
+    /// pane shows are left out; a multiplexer that cannot tell finds none.
+    fn mirrors(&self, _sessions: &[(SessionKey, String)]) -> Result<Vec<Located>, MuxError> {
+        Ok(Vec::new())
+    }
+}
+
+/// The name a pane title shows, without the status mark Claude Code puts
+/// before it (a spinner frame, a star): "◑ fix the parser" shows "fix the
+/// parser". Compare names through it on both sides.
+pub fn shown_name(title: &str) -> &str {
+    title
+        .trim_start_matches(|c: char| !c.is_alphanumeric())
+        .trim_end()
 }
 
 /// Splits a pane address into its session and its pane. The pane part is the
@@ -138,6 +157,18 @@ pub fn target(session: &str, pane: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn titles_show_names_without_their_status_mark() {
+        assert_eq!(
+            shown_name("◑ cockpit open launch failure"),
+            "cockpit open launch failure"
+        );
+        assert_eq!(shown_name("✳ fix the parser "), "fix the parser");
+        assert_eq!(shown_name("fix the parser"), "fix the parser");
+        assert_eq!(shown_name("⠂ 42 failing tests"), "42 failing tests");
+        assert_eq!(shown_name("◐ "), "");
+    }
 
     #[test]
     fn addresses_round_trip_with_colons_in_the_session() {

@@ -43,6 +43,7 @@
   - [0015. tuios is the first location adapter](adr/0015-tuios-location-adapter.md)
   - [0016. Reuse or tidy what a failed launch left untouched](adr/0016-what-a-failed-launch-left-untouched.md)
   - [0017. Setup commands prepare a new worktree before its agent starts](adr/0017-setup-commands-for-new-worktrees.md)
+  - [0018. A pane that shows a background session is its preview](adr/0018-panes-that-show-background-sessions.md)
   - [Template](adr/template.md)
 
 # Project

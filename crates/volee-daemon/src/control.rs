@@ -189,6 +189,21 @@ async fn pane(shared: &Arc<Shared>, agent: AgentId) -> Option<Pane> {
     })
 }
 
+/// The pane that showed the background session of `agent` at the last
+/// discovery round, when one did (ADR 0018).
+async fn mirror(shared: &Arc<Shared>, agent: AgentId) -> Option<(Arc<dyn Multiplexer>, String)> {
+    let key = {
+        let state = shared.state.lock().await;
+        state
+            .registry()
+            .agent(agent)?
+            .current_session()?
+            .key
+            .clone()
+    };
+    shared.panes.mirror_of(&key)
+}
+
 /// A multiplexer failure about the pane of the agent `name`, said for
 /// people.
 fn pane_error(name: &str, adapter: &dyn Multiplexer, error: &MuxError) -> DaemonError {
@@ -217,6 +232,14 @@ pub(crate) async fn preview(
         let screen = blocking(move || reader.capture(&target))
             .await?
             .map_err(|error| pane_error(&name, adapter.as_ref(), &error))?;
+        return Ok(PreviewText { screen });
+    }
+    // A background session that a pane shows (ADR 0018): the pane holds its
+    // whole screen, where the harness's replay misses what was drawn before
+    // it starts. Should the pane not answer, the replay still does.
+    if let Some((adapter, target)) = mirror(shared, params.agent).await
+        && let Ok(Ok(screen)) = blocking(move || adapter.capture(&target)).await
+    {
         return Ok(PreviewText { screen });
     }
     let Target {

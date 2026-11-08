@@ -24,6 +24,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0015](0015-tuios-location-adapter.md) | tuios is the first location adapter | Accepted |
 | [0016](0016-what-a-failed-launch-left-untouched.md) | Reuse or tidy what a failed launch left untouched (refines 0011) | Accepted |
 | [0017](0017-setup-commands-for-new-worktrees.md) | Setup commands prepare a new worktree before its agent starts | Accepted |
+| [0018](0018-panes-that-show-background-sessions.md) | A pane that shows a background session is its preview | Accepted |
 
 ## Not built yet
 
