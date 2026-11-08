@@ -50,9 +50,11 @@ screen), then restores the person's screen.
 **Watch.** The preview and the full-screen view are watchers: a socket to the
 host, a `Screen` of `volee-term` fed by the snapshot and the stream, drawn
 into a ratatui buffer cell by cell with its colors. An agent's screen is drawn
-at the agent's size, never resized for the view: when the area is smaller,
-the view keeps the cursor's rows in sight (the bottom of the screen for an
-agent waiting at its prompt) and cuts the rest.
+at the agent's size, never resized for the view. When the area has fewer
+rows, runs of blank rows shrink to one (an agent sized by a tall terminal
+leaves a gap between its conversation and its prompt), then the view keeps
+the rows from the bottom of what is drawn, or the cursor, upwards. Columns
+that do not fit are cut on the right.
 
 **The wall of screens.** A fifth view (`5`, after the hierarchy, the
 network, the repositories and the timeline) shows the agents of the current

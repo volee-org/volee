@@ -44,6 +44,7 @@ pub mod theme;
 mod tools;
 mod view;
 mod views;
+pub mod wall;
 mod widgets;
 
 #[cfg(test)]
