@@ -645,16 +645,36 @@ fn spawn_acceptor(listener: UnixListener, tx: Sender<Msg>) {
 /// Reads a client's frames and passes them to the terminal thread; a second
 /// thread writes what the terminal thread queues for it.
 fn serve_client(id: u64, stream: &UnixStream, tx: &Sender<Msg>) {
-    let hello = (|| -> io::Result<Hello> {
+    let hello = (|| -> io::Result<Option<Hello>> {
         stream.set_read_timeout(Some(HELLO_TIMEOUT))?;
-        let frame = proto::read_frame(stream)?
-            .filter(|frame| frame.kind == Kind::Hello)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "expected hello"))?;
+        let Some(frame) = proto::read_frame(stream)? else {
+            return Ok(None);
+        };
+        if frame.kind != Kind::Hello {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "expected hello"));
+        }
         stream.set_read_timeout(None)?;
-        proto::parse(&frame)
+        proto::parse(&frame).map(Some)
     })();
     let hello = match hello {
-        Ok(hello) => hello,
+        Ok(Some(hello)) => hello,
+        // A probe connects only to learn that the host answers, and leaves at
+        // once; macOS then refuses the read timeout with EINVAL.
+        Ok(None) => {
+            tracing::debug!(id, "client left before its hello");
+            return;
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::InvalidInput
+                    | io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::BrokenPipe
+            ) =>
+        {
+            tracing::debug!(id, %error, "client left before its hello");
+            return;
+        }
         Err(error) => {
             tracing::warn!(id, %error, "client refused");
             return;

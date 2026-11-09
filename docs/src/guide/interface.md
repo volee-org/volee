@@ -450,6 +450,14 @@ that runs in a terminal of its own must be quit there first: volee refuses
 it until then and says so on the bottom line. The agent keeps its name and
 its history; once adopted, `a` takes it over.
 
+Claude Code resumes the conversation only in a repository you trust: run
+`claude` once in the repository and accept its trust prompt before you adopt
+an agent that works there. When the resumed program fails, the agent is
+`stopped` and its detail quotes the program's last line (Claude Code's
+trust message, for example). The conversation is not lost: fix the cause
+and send the agent a message, or resume it in the background yourself,
+and volee shows it there again, ready to adopt.
+
 ### Agents in tuios panes
 
 A Claude Code session you started by hand in a

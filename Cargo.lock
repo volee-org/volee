@@ -1986,6 +1986,7 @@ dependencies = [
  "volee-mux",
  "volee-proto",
  "volee-store",
+ "volee-term",
 ]
 
 [[package]]

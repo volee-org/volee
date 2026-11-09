@@ -26,6 +26,7 @@ volee-host.workspace = true
 volee-mux.workspace = true
 volee-proto.workspace = true
 volee-store.workspace = true
+volee-term.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
