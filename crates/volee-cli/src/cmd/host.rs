@@ -211,8 +211,10 @@ pub(crate) fn attach(dir: &HostDir, id: &str) -> anyhow::Result<()> {
         .ok()
         .and_then(|record| record.name)
         .unwrap_or_else(|| id.to_owned());
-    eprintln!("volee: taking over {name}; Ctrl+Q comes back");
-    let end = volee_host::attach(&socket, &client_name("attach"))
+    let keymap = super::interface::keymap_or_default();
+    let leave = super::interface::leave_key_name(&keymap);
+    eprintln!("volee: taking over {name}; {leave} comes back");
+    let end = volee_host::attach_leaving(&socket, &client_name("attach"), keymap.leave_letter())
         .with_context(|| format!("cannot take over {id}"))?;
     match end {
         AttachEnd::Detached => eprintln!("volee: back from {name}; it keeps running"),
@@ -249,7 +251,8 @@ pub(crate) fn wall(dir: &HostDir, ids: &[String]) -> anyhow::Result<()> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         bail!("the wall needs a terminal on standard input and output");
     }
-    volee_tui::wall::run(dir, &client_name("wall"), ids)?;
+    let keymap = super::interface::keymap_or_default();
+    volee_tui::wall::run(dir, &client_name("wall"), ids, &keymap)?;
     Ok(())
 }
 

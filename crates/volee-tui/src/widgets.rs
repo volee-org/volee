@@ -9,8 +9,11 @@ pub(crate) mod diff;
 pub(crate) mod help;
 pub(crate) mod hints;
 pub(crate) mod inbox;
+pub(crate) mod keys;
 pub(crate) mod launch;
+pub(crate) mod palette;
 pub(crate) mod rail;
+pub(crate) mod theme_picker;
 pub(crate) mod tools;
 pub(crate) mod top_bar;
 

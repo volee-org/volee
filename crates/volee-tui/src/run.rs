@@ -109,6 +109,7 @@ pub(crate) async fn event_loop<S: Screen, Src: Source>(
                         queue.push_front(Msg::Resumed { agent, result });
                         queue.push_front(Msg::Resize { width, height });
                     }
+                    Effect::SaveTheme(name) => crate::themes::keep(model, &name),
                     Effect::FocusPane { agent, focus } => {
                         let result = screen.bring_forward(&focus.steps);
                         queue.push_front(Msg::PaneFocused {
@@ -245,7 +246,8 @@ fn run_request<Src: Source>(
         Effect::Quit
         | Effect::TakeOver { .. }
         | Effect::FocusPane { .. }
-        | Effect::RunTool { .. } => {}
+        | Effect::RunTool { .. }
+        | Effect::SaveTheme(_) => {}
     }
 }
 

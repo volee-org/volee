@@ -185,10 +185,43 @@ and new agents start from `origin/<base>` as that fetch left it.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `theme` | `catppuccin-mocha` | A built-in theme or a file in `~/.config/volee/themes/`; see [Themes](themes.md). |
+| `theme` | light or dark, matching the terminal | A built-in theme or a file in `~/.config/volee/themes/`; see [Themes](themes.md). Without it, volee uses `catppuccin-latte` on a light terminal and `catppuccin-mocha` otherwise. The theme picker (`Space t`) writes it for you, and `volee --theme <name>` overrides it for one run. |
 | `reduced_motion` | `false` | Stop animations: a new message lights up its line on the [network](interface.md#the-network) instead of travelling along it, and spinners stop. |
-| `keys` | none | Key overrides by action name, such as `take-over = "ctrl-a"`; the [interface guide](interface.md#keys) lists the actions. |
+| `keys` | none | Key overrides; see below. |
 | `tools` | found on the machine | Programs `o` opens an agent's worktree with; see below. |
+
+### `[tui.keys]`
+
+Every key of the interface, the wall and a take over can be changed. Name
+the action (the [interface guide](interface.md#keys) lists them by
+context) and give it one key, a list of keys, or an empty list to unbind
+it. At the top of `[tui.keys]`, the keys replace the action's keys in
+every context where it has some; in a `[tui.keys.<context>]` table, only
+there:
+
+```toml
+[tui.keys]
+take-over = "ctrl-a"
+new-agent = ["c", "space n"]
+adopt = []
+
+[tui.keys.agents]
+first = "home"
+
+[tui.keys.wall]
+take-over = "enter"
+
+[tui.keys.attached]
+leave = "ctrl-g"
+```
+
+A key is written like `q`, `G`, `ctrl-c`, `alt-x`, `shift-tab`, `enter`,
+`esc`, `space`, `home`, `pgdn` or `f5`; a sequence of up to three keys
+with spaces between them, like `g g` or `space n` (`gg` works too). volee
+refuses, naming the action, an unknown action or context, two actions on
+the same key where both apply, and a key that both acts and starts a
+longer sequence. The leave key must be Control and a letter other than
+`h`, `i`, `j` or `m`.
 
 ### `[tui.tools]`
 

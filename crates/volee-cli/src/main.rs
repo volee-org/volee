@@ -4,6 +4,7 @@
 //! printing is allowed in this crate and only here.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
+mod background;
 mod cmd;
 mod connect;
 mod resolve;
@@ -23,6 +24,12 @@ use volee_core::mission::MissionKind;
 #[derive(Debug, Parser)]
 #[command(name = "volee", version = volee_core::VERSION, about, long_about = None)]
 struct Cli {
+    /// The interface's theme, instead of the one in the configuration: a
+    /// built-in one or a file in ~/.config/volee/themes. Without it and
+    /// without a configured theme, volee picks a light or a dark one to
+    /// match your terminal.
+    #[arg(long, value_name = "NAME")]
+    theme: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -398,6 +405,10 @@ impl From<Kind> for MessageKind {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Err(error) = check_theme_flag(&cli) {
+        error.exit();
+    }
+    let theme = cli.theme;
     match cli.command {
         // Hooks run dozens of times per turn: no async runtime, no logging setup.
         Some(Command::Hook {
@@ -412,9 +423,23 @@ fn main() -> ExitCode {
         }),
         // Hosts run without the async runtime: a host is plain threads.
         Some(Command::Host(args)) => report(host(args)),
+        Some(Command::Demo { theme: own }) => block_on(cmd::demo::run(own.or(theme).as_deref())),
         Some(command) => async_main(command),
-        None => block_on(cmd::interface::run()),
+        None => block_on(cmd::interface::run(theme.as_deref())),
     }
+}
+
+/// `--theme` belongs to the interface and to `demo`; anywhere else it would
+/// be silently ignored.
+fn check_theme_flag(cli: &Cli) -> Result<(), clap::Error> {
+    use clap::CommandFactory;
+    if cli.theme.is_some() && !matches!(cli.command, None | Some(Command::Demo { .. })) {
+        return Err(Cli::command().error(
+            clap::error::ErrorKind::ArgumentConflict,
+            "`--theme` only applies to the interface (`volee --theme <NAME>`) and to `volee demo`",
+        ));
+    }
+    Ok(())
 }
 
 /// Runs a command on a multi-threaded runtime and reports how it ended.
@@ -642,6 +667,24 @@ mod tests {
         );
         let cli = Cli::try_parse_from(["volee", "demo"]).unwrap();
         assert!(matches!(cli.command, Some(Command::Demo { theme: None })));
+    }
+
+    #[test]
+    fn the_interface_takes_an_optional_theme() {
+        let cli = Cli::try_parse_from(["volee", "--theme", "catppuccin-latte"]).unwrap();
+        assert_eq!(cli.theme.as_deref(), Some("catppuccin-latte"));
+        assert!(cli.command.is_none());
+        assert!(super::check_theme_flag(&cli).is_ok());
+        let cli = Cli::try_parse_from(["volee"]).unwrap();
+        assert_eq!(cli.theme, None);
+    }
+
+    #[test]
+    fn the_theme_flag_is_refused_where_it_would_do_nothing() {
+        let cli = Cli::try_parse_from(["volee", "--theme", "terminal", "ls"]).unwrap();
+        assert!(super::check_theme_flag(&cli).is_err());
+        let cli = Cli::try_parse_from(["volee", "--theme", "terminal", "demo"]).unwrap();
+        assert!(super::check_theme_flag(&cli).is_ok());
     }
 
     #[test]

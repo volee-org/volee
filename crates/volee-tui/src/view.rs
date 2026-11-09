@@ -9,7 +9,8 @@ use crate::app::{Model, Overlay, Pane, Tab};
 use crate::theme::StyleRole;
 use crate::views::{hierarchy, network, repos, timeline};
 use crate::widgets::{
-    composer, detail, diff, help, hints, inbox, launch, panel, rail, tools, top_bar,
+    composer, detail, diff, help, hints, inbox, keys, launch, palette, panel, rail, theme_picker,
+    tools, top_bar,
 };
 
 /// Draws the whole screen from the model.
@@ -69,7 +70,20 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
     }
     hints::render(model, layout.hints, buf);
     match &model.overlay {
+        Some(Overlay::Keys) => keys::render_screen(model, area, buf),
         Some(Overlay::Help { scroll }) => help::render(model, *scroll, area, buf),
+        Some(Overlay::Commands(palette)) => palette::render(model, palette, area, buf),
+        Some(Overlay::Themes { selected, .. }) => {
+            // Above the hint bar, one cell from the right edge, like the
+            // other popups.
+            let above = Rect::new(
+                area.x,
+                area.y,
+                area.width.saturating_sub(1),
+                area.height.saturating_sub(1),
+            );
+            theme_picker::render(&model.themes.names, *selected, &model.theme, above, buf);
+        }
         Some(Overlay::Composer) => {
             if let Some(draft) = &model.draft {
                 composer::render(model, draft, area, buf);
@@ -81,6 +95,9 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
         Some(Overlay::Launch(dialog)) => launch::render(model, dialog, area, buf),
         Some(Overlay::Screen) => detail::render_full_screen(model, area, buf),
         None => {}
+    }
+    if !model.pending_keys.is_empty() {
+        keys::render_pending(model, area, buf);
     }
 }
 

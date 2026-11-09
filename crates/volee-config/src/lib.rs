@@ -11,6 +11,10 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+mod save;
+
+pub use save::set_theme;
+
 /// A commented example configuration, also written by `volee config init`.
 pub const EXAMPLE: &str = include_str!("example.toml");
 
@@ -20,6 +24,15 @@ pub enum ConfigError {
     /// The file exists but cannot be read.
     #[error("cannot read {path}: {source}")]
     Read {
+        /// The file.
+        path: PathBuf,
+        /// The underlying error.
+        #[source]
+        source: io::Error,
+    },
+    /// The file cannot be written.
+    #[error("cannot write {path}: {source}")]
+    Write {
         /// The file.
         path: PathBuf,
         /// The underlying error.
@@ -228,13 +241,47 @@ pub struct Repo {
 pub struct Tui {
     /// The theme name.
     pub theme: Option<String>,
-    /// Key overrides, by action name. Interpreted by the interface.
-    pub keys: BTreeMap<String, String>,
+    /// Key overrides (`[tui.keys]`): keys by action name for every context,
+    /// and `[tui.keys.<context>]` tables for one. Interpreted by the
+    /// interface.
+    pub keys: BTreeMap<String, KeySetting>,
     /// Programs the interface offers to open an agent's worktree with.
     pub tools: Tools,
     /// No travelling animations: message pulses become short highlights
     /// and spinners stop.
     pub reduced_motion: bool,
+}
+
+/// The keys of one action: one key or sequence (`"ctrl-a"`, `"g g"`,
+/// `"space n"`), or a list of them; an empty list unbinds the action.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum KeyList {
+    /// One key or sequence.
+    One(String),
+    /// Several, or none.
+    Many(Vec<String>),
+}
+
+impl KeyList {
+    /// The keys, as written.
+    pub fn keys(&self) -> Vec<String> {
+        match self {
+            Self::One(key) => vec![key.clone()],
+            Self::Many(keys) => keys.clone(),
+        }
+    }
+}
+
+/// An entry of `[tui.keys]`: the keys of an action in every context, or a
+/// `[tui.keys.<context>]` table of keys by action for one context.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum KeySetting {
+    /// `action = "key"` or `action = ["key", ...]`.
+    Keys(KeyList),
+    /// `[tui.keys.agents]`, `[tui.keys.wall]`...
+    Context(BTreeMap<String, KeyList>),
 }
 
 /// Programs the interface offers to open an agent's worktree with, never
@@ -534,6 +581,36 @@ mod tests {
         );
         assert_eq!(PermissionMode::DontAsk.as_flag(), "dontAsk");
         assert!(parse("[agents]\npermission_mode = \"bypassPermissions\"\n").is_err());
+    }
+
+    #[test]
+    fn keys_are_one_a_list_none_or_a_table_per_context() {
+        let config = parse(
+            r#"
+            [tui.keys]
+            take-over = "ctrl-a"
+            first = ["g g", "home"]
+            adopt = []
+
+            [tui.keys.wall]
+            take-over = "enter"
+            "#,
+        )
+        .unwrap();
+        let keys = &config.tui.keys;
+        assert_eq!(
+            keys["take-over"],
+            KeySetting::Keys(KeyList::One("ctrl-a".into()))
+        );
+        assert_eq!(
+            keys["first"],
+            KeySetting::Keys(KeyList::Many(vec!["g g".into(), "home".into()]))
+        );
+        assert_eq!(keys["adopt"], KeySetting::Keys(KeyList::Many(Vec::new())));
+        let KeySetting::Context(wall) = &keys["wall"] else {
+            panic!("a table per context");
+        };
+        assert_eq!(wall["take-over"].keys(), vec!["enter".to_owned()]);
     }
 
     #[test]

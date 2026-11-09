@@ -64,23 +64,20 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
             format!("✎ draft to {}", model.name_of(draft.to)),
             theme.style(StyleRole::Input),
         )];
-        groups.insert(0, (Action::Message, mark));
+        groups.insert(0, (Some(Action::Message), mark));
     }
     // Windows and prompts show their own way out.
     if model.can_go_back()
         && contexts.contains(&Context::Global)
         && let Some(esc) = model.keymap.first_key(Context::Global, Action::Back)
     {
-        let back = vec![
-            Span::styled(esc.to_string(), key),
-            Span::styled(" back", words),
-        ];
-        groups.insert(0, (Action::Back, back));
+        let back = vec![Span::styled(esc.short(), key), Span::styled(" back", words)];
+        groups.insert(0, (Some(Action::Back), back));
     }
     // The way to the help stays visible, at the right, whatever the width.
     let help = groups
         .iter()
-        .position(|(action, _)| *action == Action::Help)
+        .position(|(action, _)| *action == Some(Action::Help))
         .map(|index| groups.remove(index).1);
     let help_width = help.as_ref().map_or(0, |group| {
         u16::try_from(
@@ -161,7 +158,7 @@ fn render_prompt(model: &Model, prompt: Prompt, area: Rect, buf: &mut Buffer) {
 }
 
 /// One group of spans per hint (`j/k` and ` move`), with its action.
-fn groups(model: &Model, contexts: &[Context]) -> Vec<(Action, Vec<Span<'static>>)> {
+fn groups(model: &Model, contexts: &[Context]) -> Vec<(Option<Action>, Vec<Span<'static>>)> {
     let theme = &model.theme;
     model
         .keymap

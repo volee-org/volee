@@ -1,0 +1,8 @@
+---
+source: crates/volee-tui/src/widgets/theme_picker.rs
+expression: "draw(&NAMES, 5, 30, 4)"
+---
+" ╭ Theme ────────────────────╮"
+" │ ▸ dusk                    │"
+" │ enter keep · esc cancel   │"
+" ╰───────────────────────────╯"
