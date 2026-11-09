@@ -105,12 +105,22 @@ fn login_item() -> Result<LoginItem> {
         let log = paths.state_dir.join("daemon.log");
         Ok(LoginItem {
             contents: launchd_plist(&volee, &env, &log),
-            load: vec![vec![
-                "launchctl".into(),
-                "bootstrap".into(),
-                format!("gui/{uid}"),
-                path.display().to_string(),
-            ]],
+            load: vec![
+                // A second install replaces the first: unload it, if loaded.
+                vec![
+                    "sh".into(),
+                    "-c".into(),
+                    format!("launchctl bootout gui/{uid} \"$1\" 2>/dev/null; exit 0"),
+                    "sh".into(),
+                    path.display().to_string(),
+                ],
+                vec![
+                    "launchctl".into(),
+                    "bootstrap".into(),
+                    format!("gui/{uid}"),
+                    path.display().to_string(),
+                ],
+            ],
             unload: vec![vec![
                 "launchctl".into(),
                 "bootout".into(),
@@ -186,6 +196,8 @@ fn launchd_plist(volee: &Path, env: &[(String, String)], log: &Path) -> String {
 {variables}    </dict>
     <key>RunAtLoad</key>
     <true/>
+    <key>AbandonProcessGroup</key>
+    <true/>
     <key>StandardOutPath</key>
     <string>{log}</string>
     <key>StandardErrorPath</key>
@@ -198,21 +210,36 @@ fn launchd_plist(volee: &Path, env: &[(String, String)], log: &Path) -> String {
     )
 }
 
-/// A systemd user unit that runs `volee daemon run` at login.
+/// A value inside double quotes in a systemd unit: backslashes and quotes
+/// escaped, `%` doubled (systemd expands `%` specifiers).
+fn systemd_quote(value: &str) -> String {
+    format!(
+        "\"{}\"",
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('%', "%%")
+    )
+}
+
+/// A systemd user unit that runs `volee daemon run` at login. `KillMode=
+/// process` leaves the agents' hosts running when the daemon stops: they
+/// outlive it by design (ADR 0019).
 fn systemd_unit(volee: &Path, env: &[(String, String)]) -> String {
     let mut environment = String::new();
     for (name, value) in env {
         // Writing to a String cannot fail.
         let _ = writeln!(
             environment,
-            "Environment=\"{name}={}\"",
-            value.replace('"', "\\\"")
+            "Environment={}",
+            systemd_quote(&format!("{name}={value}"))
         );
     }
     format!(
         "[Unit]\nDescription=volee daemon: see and coordinate the coding agents of this machine\n\n\
-         [Service]\nExecStart={volee} daemon run\n{environment}\n[Install]\nWantedBy=default.target\n",
-        volee = volee.display()
+         [Service]\nExecStart={volee} daemon run\nKillMode=process\n{environment}\n\
+         [Install]\nWantedBy=default.target\n",
+        volee = systemd_quote(&volee.display().to_string())
     )
 }
 
@@ -255,7 +282,9 @@ mod tests {
     #[test]
     fn the_systemd_unit_runs_the_daemon_at_login() {
         let unit = systemd_unit(Path::new("/home/me/.local/bin/volee"), &env());
-        assert!(unit.contains("ExecStart=/home/me/.local/bin/volee daemon run\n"));
+        assert!(
+            unit.contains("ExecStart=\"/home/me/.local/bin/volee\" daemon run\nKillMode=process\n")
+        );
         assert!(unit.contains("Environment=\"PATH=/Users/me/.local/bin:/usr/bin\"\n"));
         assert!(unit.contains("WantedBy=default.target"));
     }

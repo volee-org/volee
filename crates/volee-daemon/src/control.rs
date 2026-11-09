@@ -88,7 +88,9 @@ impl Sessions {
                 Err(NoSession::OwnTerminal)
             };
         }
-        if let Some(handle) = expected {
+        // A launch in a host is no background session: its expected handle
+        // only keeps it from looking stalled until its first hook.
+        if let Some(handle) = expected.filter(|_| agent.location.host().is_none()) {
             let key = current.cloned().unwrap_or_else(|| SessionKey {
                 harness: agent.harness.clone(),
                 id: handle.to_owned(),
@@ -201,7 +203,6 @@ struct Hosted {
     socket: std::path::PathBuf,
     id: String,
     name: String,
-    live: bool,
 }
 
 /// The host `agent` runs in, if it runs in one.
@@ -213,7 +214,6 @@ async fn hosted(shared: &Arc<Shared>, agent: AgentId) -> Option<Hosted> {
         socket: crate::launch::hosts_dir(shared).join(format!("{id}.sock")),
         id,
         name: record.name.clone(),
-        live: record.state.is_live(),
     })
 }
 
@@ -360,6 +360,11 @@ pub(crate) async fn attach(
     // An agent in a host: `volee host attach`, which the client runs in its
     // own terminal; Ctrl+Q comes back (ADR 0021).
     if let Some(Hosted { id, name, .. }) = hosted(shared, params.agent).await {
+        if !crate::launch::host_runs(shared, &id) {
+            return Err(DaemonError::Refused(format!(
+                "{name} is not running: send it a message to resume it in a new volee host"
+            )));
+        }
         let volee = shared.volee_bin.clone().ok_or_else(|| {
             DaemonError::Unavailable(format!("this daemon cannot take {name} over"))
         })?;
@@ -447,11 +452,12 @@ pub(crate) async fn attach(
 pub(crate) async fn stop(shared: &Arc<Shared>, params: AgentParams) -> Result<Empty, DaemonError> {
     // An agent in a host: its host ends the program like a closed terminal.
     if let Some(Hosted {
-        socket, name, live, ..
+        socket, name, id, ..
     }) = hosted(shared, params.agent).await
     {
         hold(shared, params.agent).await?;
-        if live {
+        // Whatever the state says: a host that runs is stopped.
+        if crate::launch::host_runs(shared, &id) {
             blocking(move || volee_host::stop(&socket, HOST_CLIENT))
                 .await?
                 .map_err(|error| {

@@ -30,7 +30,7 @@ use volee_harness::hooks::format_messages_for_agent;
 
 use crate::error::DaemonError;
 use crate::launch;
-use crate::server::Shared;
+use crate::server::{LaunchGuard, Shared};
 
 /// How long a failed resume waits before the same agent is tried again,
 /// unless a new message arrives for it.
@@ -203,6 +203,11 @@ async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, D
         .registry()
         .agent(agent)
         .is_some_and(|record| record.harness == volee_harness::opencode::kind());
+    // A conversation whose host still runs, or that another path is
+    // launching, gets no second host: its hooks deliver the messages.
+    let Ok(_claimed) = claim(shared, agent).await else {
+        return Ok(None);
+    };
     if opencode {
         return resume_opencode(shared, agent).await;
     }
@@ -290,28 +295,59 @@ async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, D
     Ok(Some(shown.len()))
 }
 
+/// Keeps a second host away from `agent`'s conversation: refused while its
+/// host still runs, or while another launch or resume of it is under way.
+/// The guard keeps the others out until it drops.
+async fn claim(shared: &Arc<Shared>, agent: AgentId) -> Result<LaunchGuard, DaemonError> {
+    let (name, host) = {
+        let state = shared.state.lock().await;
+        let record = state
+            .registry()
+            .agent(agent)
+            .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {agent}")))?;
+        (
+            record.name.clone(),
+            record.location.host().map(str::to_owned),
+        )
+    };
+    if let Some(host) = host
+        && launch::host_runs(shared, &host)
+    {
+        return Err(DaemonError::Refused(format!(
+            "{name} still runs in its volee host: press a to take it over"
+        )));
+    }
+    shared
+        .try_begin_launch(agent)
+        .ok_or_else(|| DaemonError::Refused(format!("{name} is already being launched or resumed")))
+}
+
 /// Why a conversation moves into a new host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Rehost {
     /// The person adopted an agent volee did not host (ADR 0023).
     Adopt,
-    /// The machine restarted and ended the agent's host (ADR 0024).
+    /// The machine restarted and ended the agent's host while it worked
+    /// (ADR 0024).
     AfterReboot,
+    /// The same, for an agent that waited at its prompt: it comes back
+    /// waiting, without a prompt.
+    AfterRebootIdle,
 }
 
 impl Rehost {
-    /// The prompt the resumed session starts with: none for an adoption, the
-    /// agent waits at its prompt.
+    /// The prompt the resumed session starts with: none when the agent waits
+    /// at its prompt.
     fn prompt(self) -> &'static str {
         match self {
-            Self::Adopt => "",
+            Self::Adopt | Self::AfterRebootIdle => "",
             Self::AfterReboot => RESTARTED,
         }
     }
 
     fn state(self) -> AgentState {
         match self {
-            Self::Adopt => AgentState::Idle,
+            Self::Adopt | Self::AfterRebootIdle => AgentState::Idle,
             Self::AfterReboot => AgentState::Launching,
         }
     }
@@ -320,6 +356,7 @@ impl Rehost {
         match self {
             Self::Adopt => "adopted into a volee host",
             Self::AfterReboot => "resumed after the machine restarted",
+            Self::AfterRebootIdle => "back after the machine restarted",
         }
     }
 }
@@ -340,7 +377,7 @@ pub(crate) async fn resume_interrupted(shared: Arc<Shared>) {
     if !shared.hosts || !shared.settings.agents.resume_after_reboot {
         return;
     }
-    let candidates: Vec<(AgentId, String, String)> = {
+    let candidates: Vec<(AgentId, String, String, Rehost, bool)> = {
         let state = shared.state.lock().await;
         state
             .registry()
@@ -350,18 +387,30 @@ pub(crate) async fn resume_interrupted(shared: Arc<Shared>) {
                     || agent.harness == volee_harness::opencode::kind())
                     && agent.hold.is_none()
                     && agent.current_session().is_some()
+                    // Finished work stays finished.
+                    && !matches!(agent.state, AgentState::Done | AgentState::Failed)
             })
             .filter_map(|agent| {
                 let host = agent.location.host()?.to_owned();
-                Some((agent.id, host, agent.name.clone()))
+                // An agent that waited at its prompt comes back waiting.
+                let why = if agent.state == AgentState::Idle {
+                    Rehost::AfterRebootIdle
+                } else {
+                    Rehost::AfterReboot
+                };
+                let resumed_before = agent.detail.as_deref() == Some(Rehost::AfterReboot.detail())
+                    || agent.detail.as_deref() == Some(Rehost::AfterRebootIdle.detail());
+                Some((agent.id, host, agent.name.clone(), why, resumed_before))
             })
             .collect()
     };
     let dir = launch::hosts_dir(&shared);
-    for (agent, host, name) in candidates {
+    for (agent, host, name, why, resumed_before) in candidates {
         let socket = dir.join(format!("{host}.sock"));
         let record = dir.join(format!("{host}.json"));
-        let verdict = tokio::task::spawn_blocking(move || interrupted(&socket, &record)).await;
+        let verdict =
+            tokio::task::spawn_blocking(move || interrupted(&socket, &record, resumed_before))
+                .await;
         match verdict {
             Ok(Interrupted::No) | Err(_) => {}
             Ok(Interrupted::Crashed) => {
@@ -374,14 +423,14 @@ pub(crate) async fn resume_interrupted(shared: Arc<Shared>) {
                         agent,
                         state: AgentState::Failed,
                         detail: Some(
-                            "its volee host ended twice within ten minutes: write to it to \
-                             resume it"
+                            "its volee host ended again within ten minutes of a resume after a \
+                             reboot: write to it to resume it"
                                 .into(),
                         ),
                     },
                 )]);
             }
-            Ok(Interrupted::Yes) => match rehost(&shared, agent, Rehost::AfterReboot).await {
+            Ok(Interrupted::Yes) => match rehost(&shared, agent, why).await {
                 Ok(()) => tracing::info!(%agent, "resumed after a reboot"),
                 Err(error) => tracing::warn!(%agent, %name, %error, "cannot resume after a reboot"),
             },
@@ -396,11 +445,16 @@ enum Interrupted {
     No,
     /// It is gone without an end: the machine or the host stopped.
     Yes,
-    /// Gone without an end, but it had only just started.
+    /// Gone without an end again, less than ten minutes after a resume
+    /// after a reboot started it.
     Crashed,
 }
 
-fn interrupted(socket: &std::path::Path, record: &std::path::Path) -> Interrupted {
+fn interrupted(
+    socket: &std::path::Path,
+    record: &std::path::Path,
+    resumed_before: bool,
+) -> Interrupted {
     if std::os::unix::net::UnixStream::connect(socket).is_ok() {
         return Interrupted::No;
     }
@@ -413,7 +467,7 @@ fn interrupted(socket: &std::path::Path, record: &std::path::Path) -> Interrupte
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
-    if now.saturating_sub(record.started_at) < CRASH_WINDOW_SECS {
+    if resumed_before && now.saturating_sub(record.started_at) < CRASH_WINDOW_SECS {
         Interrupted::Crashed
     } else {
         Interrupted::Yes
@@ -505,6 +559,7 @@ pub(crate) async fn adopt(shared: &Arc<Shared>, agent: AgentId) -> Result<(), Da
 
 /// Resumes `agent`'s conversation in a new host, for `why`.
 async fn rehost(shared: &Arc<Shared>, agent: AgentId, why: Rehost) -> Result<(), DaemonError> {
+    let _claimed = claim(shared, agent).await?;
     let Adoption {
         session,
         listed,

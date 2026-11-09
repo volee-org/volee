@@ -12,6 +12,9 @@ use volee_term::{Frame, Screen};
 
 use crate::proto::{self, Event, Exit, Hello, Kind, PROTOCOL, Role, Size, Welcome};
 
+/// How long a host has to answer a hello.
+const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// What a host sent after its welcome.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Update {
@@ -35,6 +38,9 @@ impl Connection {
     /// Connects to the host at `socket` and says hello.
     pub fn open(socket: &Path, role: Role, size: Size, client: &str) -> io::Result<Self> {
         let stream = UnixStream::connect(socket)?;
+        // A wedged host must not hang its client: the greeting has a deadline.
+        stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+        stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
         let hello = Hello {
             protocol: PROTOCOL,
             role,
@@ -57,6 +63,9 @@ impl Connection {
                 ),
             ));
         }
+        // Then the connection lives as long as its client wants.
+        stream.set_read_timeout(None)?;
+        stream.set_write_timeout(None)?;
         Ok(Self { stream, welcome })
     }
 

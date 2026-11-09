@@ -166,6 +166,21 @@ impl Shared {
         }
     }
 
+    /// Like [`Shared::begin_launch`], unless `agent` is already being
+    /// launched or resumed: `None` then, so that two paths never start two
+    /// hosts for one conversation.
+    pub(crate) fn try_begin_launch(self: &Arc<Self>, agent: AgentId) -> Option<LaunchGuard> {
+        let inserted = self
+            .launches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(agent);
+        inserted.then(|| LaunchGuard {
+            shared: Arc::clone(self),
+            agent,
+        })
+    }
+
     /// The agents being launched now.
     pub(crate) fn launches_in_flight(&self) -> std::collections::HashSet<AgentId> {
         self.launches
@@ -253,6 +268,15 @@ impl Daemon {
                 cadence,
                 stop.clone(),
             ));
+        } else if shared.hosts {
+            // Without Claude Code, hosts and OpenCode still need following.
+            let shared = Arc::clone(&shared);
+            tokio::spawn(async move {
+                loop {
+                    crate::screens::round(&shared).await;
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+            });
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
         let resumer = crate::resume::spawn(&shared);

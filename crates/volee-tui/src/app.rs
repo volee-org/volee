@@ -1678,7 +1678,6 @@ fn zoom(model: &mut Model, context: Context, action: Action) {
     }
 }
 
-/// Shows the selected agent's screen full size, refreshed.
 /// Asks before forgetting the selected agent.
 fn ask_forget(model: &mut Model) {
     if let Some(agent) = model.selected {
@@ -1740,6 +1739,7 @@ fn show_wall(model: &mut Model, effects: &mut Vec<Effect>) {
     });
 }
 
+/// Shows the selected agent's screen full size, refreshed.
 fn open_full_screen(model: &mut Model, effects: &mut Vec<Effect>) {
     if let Some(agent) = model.selected {
         model.overlay = Some(Overlay::Screen);

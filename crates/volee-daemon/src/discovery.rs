@@ -237,9 +237,10 @@ pub(crate) async fn run(
         let listed = list(&shared, &harness, &mut failing).await;
         if listed.succeeded {
             crate::panes::locate(&shared, &listed.hosted).await;
-            if shared.hosts {
-                crate::screens::round(&shared).await;
-            }
+        }
+        // Hosts and OpenCode do not depend on Claude Code's listing.
+        if shared.hosts {
+            crate::screens::round(&shared).await;
         }
         shared.refreshes.progress.send_modify(|progress| {
             progress.finished = progress.started;

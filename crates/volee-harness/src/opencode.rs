@@ -115,6 +115,13 @@ const NOT_AGENTS: &[&str] = &[
     "pair",
     "api",
     "completion",
+    "run",
+    "attach",
+    "web",
+    "export",
+    "import",
+    "github",
+    "agent",
 ];
 
 /// One process of the process table.
@@ -153,10 +160,12 @@ pub fn list_processes(runner: &dyn CommandRunner) -> Result<Listing, HarnessErro
         "-p".to_owned(),
         pids.join(","),
     ]);
+    // Without directories nothing can be placed: better no listing than one
+    // that makes every agent look gone.
     let cwds = runner
         .run(&lsof)
         .map(|output| parse_lsof(&String::from_utf8_lossy(&output.stdout)))
-        .unwrap_or_default();
+        .map_err(HarnessError::Run)?;
     let sessions = agents
         .iter()
         .filter_map(|process| {

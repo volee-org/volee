@@ -737,6 +737,16 @@ pub(crate) fn host_launch(
     })
 }
 
+/// Whether the host `id` still runs its program: it answers on its socket
+/// and has recorded no end. A conversation whose host runs must never get a
+/// second host.
+pub(crate) fn host_runs(shared: &Shared, id: &str) -> bool {
+    let dir = hosts_dir(shared);
+    std::os::unix::net::UnixStream::connect(dir.join(format!("{id}.sock"))).is_ok()
+        && volee_host::HostRecord::read(&dir.join(format!("{id}.json")))
+            .is_ok_and(|record| record.exit.is_none())
+}
+
 /// Where hosts live: `<state>/hosts`.
 pub(crate) fn hosts_dir(shared: &Shared) -> PathBuf {
     shared.paths.state_dir.join("hosts")

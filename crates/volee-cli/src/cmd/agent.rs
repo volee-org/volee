@@ -150,8 +150,7 @@ pub(crate) async fn forget(input: &str) -> Result<()> {
     Ok(())
 }
 
-/// Stops an agent volee launched. Its conversation is kept, and volee does
-/// not resume it until the human writes to it.
+/// Moves an agent volee does not host into a volee host.
 pub(crate) async fn adopt(input: &str) -> Result<()> {
     let client = connect_or_start().await?;
     let (agent, name) = agent(&client, input).await?;
@@ -165,6 +164,8 @@ pub(crate) async fn adopt(input: &str) -> Result<()> {
     Ok(())
 }
 
+/// Stops an agent volee launched. Its conversation is kept, and volee does
+/// not resume it until the human writes to it.
 pub(crate) async fn stop(input: &str) -> Result<()> {
     let client = connect_or_start().await?;
     let (agent, name) = agent(&client, input).await?;

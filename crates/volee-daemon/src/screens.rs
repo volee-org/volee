@@ -26,15 +26,21 @@ use crate::server::Shared;
 /// How long a screen stays the same before its agent counts as idle.
 const IDLE_AFTER: Duration = Duration::from_secs(6);
 
-/// What the last rounds saw of each screen.
+/// How many rounds in a row a host must not answer before its agent counts
+/// as stopped: one slow answer proves nothing.
+const GONE_AFTER: u32 = 2;
+
+/// What the last rounds saw of each host.
 #[derive(Debug, Default)]
 pub(crate) struct Screens {
     seen: Mutex<HashMap<AgentId, (u64, Instant)>>,
+    misses: Mutex<HashMap<AgentId, u32>>,
 }
 
 impl Screens {
-    /// Records a screen and says whether it changed since `IDLE_AFTER`.
-    fn changed(&self, agent: AgentId, screen: &[u8]) -> bool {
+    /// Records a screen and says whether it changed in the last
+    /// `IDLE_AFTER`; `None` the first time, when nothing is known yet.
+    fn changed(&self, agent: AgentId, screen: &[u8]) -> Option<bool> {
         let mut hasher = DefaultHasher::new();
         screen.hash(&mut hasher);
         let hash = hasher.finish();
@@ -42,14 +48,30 @@ impl Screens {
         match seen.get(&agent) {
             Some((last, _)) if *last != hash => {
                 seen.insert(agent, (hash, Instant::now()));
-                true
+                Some(true)
             }
-            Some((_, since)) => since.elapsed() < IDLE_AFTER,
+            Some((_, since)) => Some(since.elapsed() < IDLE_AFTER),
             None => {
                 seen.insert(agent, (hash, Instant::now()));
-                true
+                None
             }
         }
+    }
+
+    /// Counts a round where the host of `agent` did not answer; true once it
+    /// missed `GONE_AFTER` rounds in a row.
+    fn missed(&self, agent: AgentId) -> bool {
+        let mut misses = self.misses.lock().unwrap_or_else(PoisonError::into_inner);
+        let count = misses.entry(agent).or_insert(0);
+        *count += 1;
+        *count >= GONE_AFTER
+    }
+
+    fn answered(&self, agent: AgentId) {
+        self.misses
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&agent);
     }
 }
 
@@ -60,45 +82,84 @@ pub(crate) async fn round(shared: &Arc<Shared>) {
     opencode_processes(shared).await;
 }
 
+/// One hosted agent, as a round sees it.
+struct Hosted {
+    agent: AgentId,
+    host: String,
+    state: AgentState,
+    /// Its harness has hooks (Claude Code): they give its states, the host
+    /// only says whether it runs.
+    hooked: bool,
+    held: bool,
+}
+
+/// Follows every agent in a host: whether its host runs and, for a harness
+/// without hooks, what its screen does. A program that ended, or a host that
+/// stopped answering for two rounds, stops the agent; a host that runs
+/// brings back an agent wrongly shown stopped.
 async fn hosted_states(shared: &Arc<Shared>) {
-    let hosted: Vec<(AgentId, String, AgentState)> = {
+    let hosted: Vec<Hosted> = {
         let state = shared.state.lock().await;
         state
             .registry()
             .agents()
-            .filter(|agent| agent.harness != HarnessKind::ClaudeCode)
-            .filter(|agent| agent.state.is_live() || agent.state == AgentState::Launching)
+            .filter(|agent| !matches!(agent.state, AgentState::Done | AgentState::Failed))
             .filter_map(|agent| {
-                Some((
-                    agent.id,
-                    agent.location.host()?.to_owned(),
-                    agent.state.clone(),
-                ))
+                Some(Hosted {
+                    agent: agent.id,
+                    host: agent.location.host()?.to_owned(),
+                    state: agent.state.clone(),
+                    hooked: agent.harness == HarnessKind::ClaudeCode,
+                    held: agent.hold.is_some(),
+                })
             })
             .collect()
     };
     let dir = crate::launch::hosts_dir(shared);
-    for (agent, host, current) in hosted {
+    for Hosted {
+        agent,
+        host,
+        state: current,
+        hooked,
+        held,
+    } in hosted
+    {
         let socket = dir.join(format!("{host}.sock"));
         let read = tokio::task::spawn_blocking(move || {
             volee_host::snapshot(&socket, "volee daemon screens", Duration::from_secs(2))
         })
         .await;
-        let (next, detail) = match read {
-            Ok(Ok((welcome, _))) if welcome.exit.is_some() => {
+        let running = current.is_live() || current == AgentState::Launching;
+        let (next, detail) = if let Ok(Ok((welcome, screen))) = read {
+            shared.screens.answered(agent);
+            if welcome.exit.is_some() {
+                if !running {
+                    continue;
+                }
                 (AgentState::Stopped, Some("its program ended".to_owned()))
-            }
-            Ok(Ok((_, screen))) => {
-                if shared.screens.changed(agent, &screen) {
-                    (AgentState::Working, None)
-                } else {
-                    (AgentState::Idle, None)
+            } else if !running && !held {
+                // Its host still runs it: it never stopped.
+                (
+                    AgentState::Idle,
+                    Some("its volee host still runs it".to_owned()),
+                )
+            } else if hooked {
+                continue;
+            } else {
+                match shared.screens.changed(agent, &screen) {
+                    Some(true) => (AgentState::Working, None),
+                    Some(false) => (AgentState::Idle, None),
+                    None => continue,
                 }
             }
-            _ => (
+        } else {
+            if !running || !shared.screens.missed(agent) {
+                continue;
+            }
+            (
                 AgentState::Stopped,
                 Some("its volee host is gone".to_owned()),
-            ),
+            )
         };
         if next.category() != current.category() {
             let mut state = shared.state.lock().await;
