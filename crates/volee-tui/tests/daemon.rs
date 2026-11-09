@@ -214,6 +214,7 @@ async fn the_person_reads_and_a_daemon_without_claude_code_says_what_it_cannot_d
                 branch: "feat/export".to_owned(),
                 task: "Export invoices.".to_owned(),
                 model: None,
+                harness: None,
             })
             .await,
         Err(SourceError::Failed(no_claude.to_owned()))

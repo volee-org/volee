@@ -688,6 +688,7 @@ mod tests {
             branch: "feat/export".into(),
             task: "Export invoices as CSV.".into(),
             model: Some("sonnet".into()),
+            harness: None,
         };
         let agent = demo.spawn(request.clone()).await.unwrap();
         for _ in 0..3 {

@@ -150,6 +150,8 @@ pub struct SpawnRequest {
     pub task: String,
     /// The model; the configured default when absent.
     pub model: Option<String>,
+    /// The harness profile (ADR 0022); Claude Code when absent.
+    pub harness: Option<String>,
 }
 
 /// A mission to create, as the person describes it.
