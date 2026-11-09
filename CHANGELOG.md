@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 It is generated from the commit history with [git-cliff](https://git-cliff.org):
 see [RELEASING.md](RELEASING.md).
 
+## [0.9.0] - 2026-11-09
+
+### Added
+
+- **tui**: **Breaking:** Add which-key popups, a Space leader, vim keys, a command palette and a theme picker; make every key configurable ([#118](https://github.com/volee-org/volee/pull/118))
+
 ## [0.8.1] - 2026-11-09
 
 ### Fixed
@@ -197,6 +203,7 @@ see [RELEASING.md](RELEASING.md).
 - Mark the interface, messaging and views milestones done ([#52](https://github.com/volee-org/volee/pull/52))
 - Start the daemon in the first step of the guide, and say what tidy removes ([#56](https://github.com/volee-org/volee/pull/56))
 
+[0.9.0]: https://github.com/volee-org/volee/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/volee-org/volee/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/volee-org/volee/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/volee-org/volee/compare/v0.6.2...v0.7.0
