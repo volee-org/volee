@@ -865,6 +865,21 @@ pub(crate) fn instructions_for(
 
 /// The name under `.claude/worktrees/` of a worktree volee created in
 /// `root`, which `--worktree` takes.
+/// Where a conversation resumes, and the `--worktree` name to pass, if any.
+///
+/// In a worktree that still exists, Claude Code runs in it directly: a
+/// repository it trusts covers its worktrees, and in one it does not trust
+/// yet it asks in the host, where the person answers on taking over, while
+/// `--worktree` from the main checkout exits at once ("Workspace trust not
+/// yet accepted"). A worktree that is gone is made again with `--worktree`.
+pub(crate) fn resume_place(root: &Path, worktree: Option<&Path>) -> (PathBuf, Option<String>) {
+    match worktree {
+        Some(path) if path.is_dir() => (path.to_path_buf(), None),
+        Some(path) => (root.to_path_buf(), worktree_name(root, path)),
+        None => (root.to_path_buf(), None),
+    }
+}
+
 pub(crate) fn worktree_name(root: &Path, worktree: &Path) -> Option<String> {
     let rest = worktree.strip_prefix(root.join(IN_REPO_WORKTREES)).ok()?;
     let mut parts = rest.components();
@@ -1235,6 +1250,26 @@ mod tests {
         ] {
             assert!(super::check_base(base).is_err(), "{base}");
         }
+    }
+
+    #[test]
+    fn a_conversation_resumes_in_its_worktree_when_it_exists() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        let worktree = root.join(".claude/worktrees/feat-x");
+        // Gone: made again with --worktree, from the main checkout.
+        assert_eq!(
+            super::resume_place(root, Some(&worktree)),
+            (root.to_path_buf(), Some("feat-x".to_owned()))
+        );
+        // There: run in it directly, so that Claude Code asks for trust
+        // instead of exiting.
+        std::fs::create_dir_all(&worktree).unwrap();
+        assert_eq!(
+            super::resume_place(root, Some(&worktree)),
+            (worktree.clone(), None)
+        );
+        assert_eq!(super::resume_place(root, None), (root.to_path_buf(), None));
     }
 
     #[test]

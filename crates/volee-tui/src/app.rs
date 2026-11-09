@@ -14,6 +14,7 @@ use volee_core::event::{Event, EventKind};
 use volee_core::message::{MessageKind, Party};
 use volee_core::role::Role;
 use volee_core::time::Timestamp;
+use volee_core::workspace::Location;
 use volee_core::{Agent, AgentId, MessageId, Registry, ThreadId};
 
 use crate::activity::ActivityLog;
@@ -164,6 +165,9 @@ pub(crate) enum Prompt {
     Quit,
     /// Forget this agent: stop listing it?
     Forget(AgentId),
+    /// This agent runs as a background session that volee only shows:
+    /// adopt it into a host and take it over?
+    AdoptAndTakeOver(AgentId),
 }
 
 /// The kinds of message the person can send, in the composer's order.
@@ -388,6 +392,8 @@ pub(crate) enum Msg {
     },
     /// The source adopted an agent into a host, or refused.
     Adopted {
+        /// The agent.
+        agent: AgentId,
         /// The agent's name.
         name: String,
         /// How it went.
@@ -544,6 +550,8 @@ pub(crate) struct Model {
     pub(crate) draft: Option<Draft>,
     /// The agent whose take over the source is preparing.
     pub(crate) pending_take_over: Option<AgentId>,
+    /// The agent to take over as soon as its adoption is done.
+    pub(crate) take_over_after_adopt: Option<AgentId>,
     /// Why the source stopped, once it has: the screen no longer updates.
     pub(crate) offline: Option<String>,
     /// What the configuration and the machine offer.
@@ -617,6 +625,7 @@ impl Model {
             preview: PreviewState::default(),
             draft: None,
             pending_take_over: None,
+            take_over_after_adopt: None,
             offline: None,
             settings: Settings::default(),
             awaited: None,
@@ -1359,14 +1368,14 @@ fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool 
                 }
             }
         }
-        other => return on_window_answer(model, other),
+        other => return on_window_answer(model, other, effects),
     }
     true
 }
 
 /// The answers to the requests of the messages, the tools and the launch
 /// dialogs; returns whether anything changed.
-fn on_window_answer(model: &mut Model, answer: Msg) -> bool {
+fn on_window_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool {
     match answer {
         Msg::MarkedRead(result) => {
             if let Err(error) = result {
@@ -1387,16 +1396,28 @@ fn on_window_answer(model: &mut Model, answer: Msg) -> bool {
                 model.notify(format!("Could not open {label}: {reason}."), true);
             }
         },
-        Msg::Adopted { name, result } => match result {
-            Ok(()) => model.notify(
-                format!("Adopted {name}: it continues in a volee host. Press a to take it over."),
-                false,
-            ),
-            Err(error) => {
-                let reason = text::clause(&error.to_string()).to_owned();
-                model.notify(format!("Could not adopt {name}: {reason}."), true);
+        Msg::Adopted {
+            agent,
+            name,
+            result,
+        } => {
+            let take_over = model.take_over_after_adopt.take() == Some(agent);
+            match result {
+                Ok(()) if take_over && model.pending_take_over.is_none() => {
+                    model.notify(format!("Adopted {name}: taking it over..."), false);
+                    model.pending_take_over = Some(agent);
+                    effects.push(Effect::PrepareTakeOver(agent));
+                }
+                Ok(()) => model.notify(
+                    format!("Adopted {name}: it continues in a volee host. Press a to take it over."),
+                    false,
+                ),
+                Err(error) => {
+                    let reason = text::clause(&error.to_string()).to_owned();
+                    model.notify(format!("Could not adopt {name}: {reason}."), true);
+                }
             }
-        },
+        }
         Msg::Forgot { name, result } => match result {
             Ok(()) => model.notify(
                 format!(
@@ -1469,6 +1490,24 @@ fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
             match model.keymap.action(&[Context::Confirm], key) {
                 Some(Action::Confirm | Action::Quit) => effects.push(Effect::Quit),
                 Some(Action::Back) => model.prompt = None,
+                _ => {}
+            }
+            return;
+        }
+        Some(Prompt::AdoptAndTakeOver(agent)) => {
+            match model.keymap.action(&[Context::Confirm], key) {
+                Some(Action::Confirm) => {
+                    model.prompt = None;
+                    model.take_over_after_adopt = Some(agent);
+                    let name = model.name_of(agent);
+                    model.notify(format!("Adopting {name}..."), false);
+                    effects.push(Effect::Adopt { agent, name });
+                }
+                Some(Action::Back) => model.prompt = None,
+                Some(Action::Quit) => {
+                    model.prompt = None;
+                    request_quit(model, effects);
+                }
                 _ => {}
             }
             return;
@@ -1607,8 +1646,18 @@ pub(crate) fn perform(
             if let Some(agent) = model.selected
                 && model.pending_take_over.is_none()
             {
-                model.pending_take_over = Some(agent);
-                effects.push(Effect::PrepareTakeOver(agent));
+                // A background session cannot be typed into: offer to move
+                // it into a host first, then take it over (ADR 0023).
+                let background = model
+                    .registry
+                    .agent(agent)
+                    .is_some_and(|record| record.location == Location::Background);
+                if background {
+                    model.prompt = Some(Prompt::AdoptAndTakeOver(agent));
+                } else {
+                    model.pending_take_over = Some(agent);
+                    effects.push(Effect::PrepareTakeOver(agent));
+                }
             }
         }
         Action::Message => open_composer(model),
