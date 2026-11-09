@@ -83,7 +83,9 @@ pub struct Listing {
 ///   the coarse state differs. When both agree, the registry keeps its richer
 ///   state, which usually comes from hooks.
 /// - An agent in a volee host whose session is listed alive in the background
-///   moves back to the background: the conversation left its host.
+///   moves back to the background: the conversation left its host. A
+///   finished background entry, or no entry at all, changes nothing for it:
+///   its host says when it ends.
 /// - A live listed session that nobody owns, running in the directory of an
 ///   agent volee is launching or resuming (state `launching`, and no session
 ///   of its own listed), is that agent's session: the listing saw it before
@@ -95,7 +97,7 @@ pub struct Listing {
 /// - When a complete listing no longer contains an agent's current session,
 ///   the agent becomes `stopped` if it ran in a terminal (the session ended)
 ///   or `lost` if it ran in the background (the harness removed it), unless
-///   it is launching a new session.
+///   it is launching a new session or runs in a volee host.
 pub fn reconcile(
     registry: &Registry,
     listing: &Listing,
@@ -133,6 +135,11 @@ fn follow(agent: &Agent, session: &ListedSession, now: Timestamp, events: &mut V
         .current_session()
         .is_some_and(|link| link.key == session.key);
     if !is_current {
+        return;
+    }
+    // The background process that an adoption stopped is still listed for a
+    // while: its host, not that entry, says how a hosted agent is.
+    if agent.location.host().is_some() && session.background && !session.alive {
         return;
     }
     if agent.state.category() != session.state.category() {
@@ -243,8 +250,10 @@ fn vanished(registry: &Registry, listing: &Listing, now: Timestamp, events: &mut
         };
         let listed = listing.sessions.iter().any(|s| s.key == current.key);
         // A launching agent waits for a new session (a resume forks one with
-        // a new id): its previous session being gone is expected.
+        // a new id): its previous session being gone is expected. A hosted
+        // agent ends when its host says so.
         if listed
+            || agent.location.host().is_some()
             || matches!(
                 agent.state,
                 AgentState::Stopped | AgentState::Lost | AgentState::Launching
@@ -514,6 +523,45 @@ mod tests {
         let moved = registry.agent(agent).unwrap();
         assert_eq!(moved.location, Location::Background);
         assert_eq!(moved.state, AgentState::Working);
+    }
+
+    #[test]
+    fn a_hosted_agent_ignores_the_background_process_its_adoption_stopped() {
+        let mut registry = Registry::new();
+        sync(
+            &mut registry,
+            &listing(vec![listed("bg", AgentState::Idle, true)]),
+            10,
+        );
+        let agent = registry
+            .agent_for_session(&SessionKey::claude("bg"))
+            .unwrap()
+            .id;
+        let adopted = [
+            Event::new(
+                Timestamp::from_millis(20),
+                EventKind::LocationChanged {
+                    agent,
+                    location: Location::Host { id: "h".into() },
+                },
+            ),
+            Event::new(
+                Timestamp::from_millis(20),
+                EventKind::StateChanged {
+                    agent,
+                    state: AgentState::Idle,
+                    detail: Some("adopted into a volee host".into()),
+                },
+            ),
+        ];
+        apply_all(&mut registry, &adopted);
+        let none: Vec<Event> = Vec::new();
+        // The stopped background process, then no entry at all: the host
+        // decides, the listing changes nothing.
+        let stopped = listing(vec![listed("bg", AgentState::Stopped, false)]);
+        assert_eq!(sync(&mut registry, &stopped, 30), none);
+        assert_eq!(sync(&mut registry, &listing(vec![]), 40), none);
+        assert_eq!(registry.agent(agent).unwrap().state, AgentState::Idle);
     }
 
     #[test]

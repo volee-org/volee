@@ -119,6 +119,15 @@ impl Agent {
         self.launched_by == LaunchedBy::Outside && matches!(self.harness, HarnessKind::Other(_))
     }
 
+    /// Whether volee drives the agent: it launched it, or the agent runs in
+    /// one of volee's hosts, as an adopted agent does
+    /// ([ADR 0023](https://volee-org.github.io/volee/adr/0023-every-agent-on-the-machine.html)).
+    /// volee hands messages to such an agent, stops it and resumes it; any
+    /// other agent is read only.
+    pub fn managed(&self) -> bool {
+        self.launched_by != LaunchedBy::Outside || self.location.host().is_some()
+    }
+
     /// Whether `key` is one of the agent's sessions, current or past.
     pub fn owns_session(&self, key: &SessionKey) -> bool {
         self.sessions.iter().any(|link| &link.key == key)

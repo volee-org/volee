@@ -3,7 +3,6 @@
 use anyhow::{Context, Result};
 use volee_core::agent::Hold;
 use volee_core::message::{MessageKind, Party};
-use volee_core::role::LaunchedBy;
 use volee_core::{Agent, AgentState, Event, Registry};
 use volee_proto::methods::{EventsSince, SendMessage, SendParams, SinceParams};
 
@@ -59,10 +58,10 @@ fn outlook(agent: &Agent) -> String {
             )
         };
     }
-    if agent.launched_by == LaunchedBy::Outside {
+    if !agent.managed() {
         return format!(
             "volee did not launch {name}, so nothing hands it this message: {name} sees it only if \
-             it reads its messages with volee's MCP tools."
+             it reads its messages with volee's MCP tools, or once you adopt it."
         );
     }
     if agent.state.is_live() {
@@ -91,6 +90,7 @@ mod tests {
     use super::*;
     use ulid::Ulid;
     use volee_core::harness::{HarnessKind, SessionKey, SessionOrigin};
+    use volee_core::role::LaunchedBy;
     use volee_core::role::Role;
     use volee_core::time::Timestamp;
     use volee_core::workspace::{Location, Workspace};
@@ -161,6 +161,16 @@ mod tests {
 
         let outside = agent(LaunchedBy::Outside, vec![]);
         assert!(outlook(&outside).contains("did not launch billing"));
+        // Adopted into a host, volee hands it messages and resumes it.
+        let host = |id| EventKind::LocationChanged {
+            agent: id,
+            location: Location::Host { id: "h1".into() },
+        };
+        let adopted = agent(LaunchedBy::Outside, vec![host(id)]);
+        assert!(outlook(&adopted).contains("wakes it if it is idle"));
+        let mut adopted_stopped = vec![host(id)];
+        adopted_stopped.extend(ended(id));
+        assert!(outlook(&agent(LaunchedBy::Outside, adopted_stopped)).contains("volee resumes it"));
 
         let stopped = agent(LaunchedBy::Human, ended(id));
         assert!(outlook(&stopped).contains("volee resumes it"));

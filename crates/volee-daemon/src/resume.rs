@@ -72,29 +72,48 @@ async fn run(shared: Arc<Shared>) {
     for agent in waiting {
         start(&shared, &book, agent, false);
     }
+    // An event can come too early: an agent's session ends (its `SessionEnd`
+    // hook) a moment before its host records that the program ended, and a
+    // resume started in between finds the host still running. So the agents
+    // that wait are also looked at every few seconds.
+    let mut sweep =
+        tokio::time::interval_at(tokio::time::Instant::now() + SWEEP_EVERY, SWEEP_EVERY);
+    sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        match events.recv().await {
-            Ok(event) => {
-                for (agent, new_message) in triggered(&event.event.kind) {
-                    start(&shared, &book, agent, new_message);
+        tokio::select! {
+            received = events.recv() => match received {
+                Ok(event) => {
+                    for (agent, new_message) in triggered(&event.event.kind) {
+                        start(&shared, &book, agent, new_message);
+                    }
                 }
-            }
-            Err(broadcast::error::RecvError::Lagged(_)) => {
-                let waiting: Vec<AgentId> = {
-                    let state = shared.state.lock().await;
-                    state
-                        .registry()
-                        .agents()
-                        .filter(|agent| needs_resume(state.registry(), agent))
-                        .map(|agent| agent.id)
-                        .collect()
-                };
-                for agent in waiting {
-                    start(&shared, &book, agent, false);
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    start_waiting(&shared, &book).await;
                 }
-            }
-            Err(broadcast::error::RecvError::Closed) => return,
+                Err(broadcast::error::RecvError::Closed) => return,
+            },
+            _ = sweep.tick() => start_waiting(&shared, &book).await,
         }
+    }
+}
+
+/// How often the agents that wait for a resume are looked at, besides the
+/// events that start one.
+const SWEEP_EVERY: Duration = Duration::from_secs(5);
+
+/// Starts a resume for every agent that needs one.
+async fn start_waiting(shared: &Arc<Shared>, book: &Arc<Mutex<Book>>) {
+    let waiting: Vec<AgentId> = {
+        let state = shared.state.lock().await;
+        state
+            .registry()
+            .agents()
+            .filter(|agent| needs_resume(state.registry(), agent))
+            .map(|agent| agent.id)
+            .collect()
+    };
+    for agent in waiting {
+        start(shared, book, agent, false);
     }
 }
 
@@ -119,12 +138,12 @@ fn triggered(kind: &EventKind) -> Vec<(AgentId, bool)> {
     }
 }
 
-/// Whether volee should resume `agent` now: it launched it, its session
-/// ended, messages wait for it, and nothing holds it (the human stopped it,
-/// or its mission is over).
+/// Whether volee should resume `agent` now: volee drives it (it launched or
+/// adopted it), its session ended, messages wait for it, and nothing holds
+/// it (the human stopped it, or its mission is over).
 fn needs_resume(registry: &Registry, agent: &Agent) -> bool {
     (agent.harness == HarnessKind::ClaudeCode || agent.harness == volee_harness::opencode::kind())
-        && agent.launched_by != LaunchedBy::Outside
+        && agent.managed()
         && agent.hold.is_none()
         && agent.current_session().is_some()
         && matches!(agent.state, AgentState::Stopped | AgentState::Lost)
@@ -815,7 +834,9 @@ fn plan(
             permission_mode: launch::permission_mode(shared),
             allowed_tools: Vec::new(),
             disallowed_tools,
-            append_system_prompt: Some(launch::instructions_for(registry, agent)),
+            // An adopted agent keeps its own instructions, as at its adoption.
+            append_system_prompt: (agent.launched_by != LaunchedBy::Outside)
+                .then(|| launch::instructions_for(registry, agent)),
             worktree,
             host: launch::host_launch(shared, agent.id, &agent.name),
         },

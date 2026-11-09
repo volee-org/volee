@@ -448,7 +448,9 @@ never write the same conversation, then resumes the conversation in a new
 host, in the same directory, where the agent waits at its prompt. An agent
 that runs in a terminal of its own must be quit there first: volee refuses
 it until then and says so on the bottom line. The agent keeps its name and
-its history; once adopted, `a` takes it over.
+its history; once adopted, `a` takes it over, and volee handles it like the
+agents it launches: messages reach it, `volee stop` stops it, and a message
+resumes it.
 
 Claude Code resumes the conversation only in a repository you trust: run
 `claude` once in the repository and accept its trust prompt before you adopt

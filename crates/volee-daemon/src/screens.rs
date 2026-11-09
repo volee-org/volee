@@ -87,6 +87,9 @@ struct Hosted {
     agent: AgentId,
     host: String,
     state: AgentState,
+    /// Stopped with no reason given, as a listing may have stopped it before
+    /// its host was read: the host's end gives the reason.
+    unexplained_stop: bool,
     /// Its harness has hooks (Claude Code): they give its states, the host
     /// only says whether it runs.
     hooked: bool,
@@ -103,12 +106,13 @@ async fn hosted_states(shared: &Arc<Shared>) {
         state
             .registry()
             .agents()
-            .filter(|agent| !matches!(agent.state, AgentState::Done | AgentState::Failed))
+            .filter(|agent| agent.state != AgentState::Failed)
             .filter_map(|agent| {
                 Some(Hosted {
                     agent: agent.id,
                     host: agent.location.host()?.to_owned(),
                     state: agent.state.clone(),
+                    unexplained_stop: agent.state == AgentState::Stopped && agent.detail.is_none(),
                     hooked: agent.harness == HarnessKind::ClaudeCode,
                     held: agent.hold.is_some(),
                 })
@@ -120,6 +124,7 @@ async fn hosted_states(shared: &Arc<Shared>) {
         agent,
         host,
         state: current,
+        unexplained_stop,
         hooked,
         held,
     } in hosted
@@ -130,12 +135,15 @@ async fn hosted_states(shared: &Arc<Shared>) {
         })
         .await;
         let running = current.is_live() || current == AgentState::Launching;
+        // A stop that came without a reason gets the one its host recorded.
+        let mut explain = false;
         let (next, detail) = if let Ok(Ok((welcome, screen))) = read {
             shared.screens.answered(agent);
             if let Some(exit) = &welcome.exit {
-                if !running {
+                if !running && !unexplained_stop {
                     continue;
                 }
+                explain = !running;
                 (
                     AgentState::Stopped,
                     Some(ended(exit, welcome.size, &screen)),
@@ -164,7 +172,7 @@ async fn hosted_states(shared: &Arc<Shared>) {
                 Some("its volee host is gone".to_owned()),
             )
         };
-        if next.category() != current.category() {
+        if explain || next.category() != current.category() {
             let mut state = shared.state.lock().await;
             let now = state.now();
             let _ = state.commit(vec![Event::new(

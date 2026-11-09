@@ -15,7 +15,6 @@ use std::sync::Arc;
 use volee_core::harness::SessionKey;
 use volee_core::message::{Message, MessageKind, Party, Receipt};
 use volee_core::reconcile::{ListedSession, Listing};
-use volee_core::role::LaunchedBy;
 use volee_core::workspace::Location;
 use volee_core::{Agent, AgentId, Event, EventKind};
 use volee_git::DiffFormat;
@@ -467,7 +466,7 @@ pub(crate) async fn stop(shared: &Arc<Shared>, params: AgentParams) -> Result<Em
         return Ok(Empty {});
     }
     harness(shared)?;
-    let (name, launched_by, live) = {
+    let (name, managed, live) = {
         let state = shared.state.lock().await;
         let record = state
             .registry()
@@ -475,7 +474,7 @@ pub(crate) async fn stop(shared: &Arc<Shared>, params: AgentParams) -> Result<Em
             .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {}", params.agent)))?;
         (
             record.name.clone(),
-            record.launched_by,
+            record.managed(),
             record.state.is_live(),
         )
     };
@@ -486,10 +485,10 @@ pub(crate) async fn stop(shared: &Arc<Shared>, params: AgentParams) -> Result<Em
     } else {
         None
     };
-    if launched_by == LaunchedBy::Outside {
+    if !managed {
         return Err(DaemonError::Refused(format!(
-            "{name} was not launched by volee, which stops only the agents it launched: stop it \
-             where it was started"
+            "{name} was not launched by volee, which stops only the agents it launched or \
+             adopted: stop it where it was started, or adopt it first"
         )));
     }
     // Recorded before the session ends: the end must find the hold, or a
@@ -620,7 +619,7 @@ mod tests {
 
     use ulid::Ulid;
     use volee_core::harness::{HarnessKind, SessionOrigin};
-    use volee_core::role::Role;
+    use volee_core::role::{LaunchedBy, Role};
     use volee_core::state::AgentState;
     use volee_core::time::Timestamp;
     use volee_core::workspace::Workspace;

@@ -16,7 +16,6 @@ use ratatui::style::Modifier;
 use ratatui::text::Span;
 use ratatui::widgets::{Clear, Widget};
 use volee_core::message::MessageKind;
-use volee_core::role::LaunchedBy;
 
 use super::{panel, put_spans, truncated};
 use crate::app::{Draft, MESSAGE_KINDS, Model};
@@ -125,17 +124,18 @@ fn header(model: &Model, draft: &Draft, name: &str) -> Vec<Vec<Span<'static>>> {
             Span::styled(format!("\"{first_line}\""), theme.style(StyleRole::Text)),
         ]);
     }
-    // Sessions started outside volee have no hooks to receive messages; an
-    // agent of another harness that joined through MCP reads them itself.
+    // Sessions started outside volee have no hooks to receive messages until
+    // they are adopted; an agent of another harness that joined through MCP
+    // reads them itself.
     if let Some(agent) = model
         .registry
         .agent(draft.to)
-        .filter(|agent| agent.launched_by == LaunchedBy::Outside)
+        .filter(|agent| !agent.managed())
     {
         let note = if agent.joined() {
             format!("{name} joined through MCP: it reads this when it calls read_messages.")
         } else {
-            format!("{name} was started outside volee: it cannot receive messages yet.")
+            format!("{name} was started outside volee: it receives messages once adopted (A).")
         };
         lines.push(vec![Span::styled(
             note,

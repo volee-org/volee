@@ -496,6 +496,40 @@ fn join_through_mcp(registry: &mut Registry, agent: AgentId) {
 }
 
 #[test]
+fn an_agent_started_elsewhere_is_managed_once_adopted_into_a_host() {
+    let mut registry = Registry::new();
+    let agent = agent_id(30);
+    registry
+        .apply(&Event::new(
+            at(1),
+            EventKind::AgentRegistered {
+                agent,
+                name: "by-hand".into(),
+                role: Role::Independent,
+                harness: HarnessKind::ClaudeCode,
+                launched_by: LaunchedBy::Outside,
+                parent: None,
+                mission: None,
+                workspace: Workspace::default(),
+                location: Location::Background,
+            },
+        ))
+        .unwrap();
+    assert!(!registry.agent(agent).unwrap().managed(), "read only");
+    let mut move_to = |location| {
+        registry
+            .apply(&Event::new(
+                at(2),
+                EventKind::LocationChanged { agent, location },
+            ))
+            .unwrap();
+        registry.agent(agent).unwrap().managed()
+    };
+    assert!(move_to(Location::Host { id: "h1".into() }), "adopted");
+    assert!(!move_to(Location::Background), "back in the background");
+}
+
+#[test]
 fn a_joined_agent_takes_part_in_a_mission_and_leaves_it() {
     let mut registry = Registry::new();
     let mission = create_mission(&mut registry, None);
