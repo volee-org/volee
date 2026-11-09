@@ -56,7 +56,7 @@ to come:
   crates.io release.
 - [0020](0020-libghostty-vt-emulates-terminals.md): the interface still draws
   previews and the full-screen view with the `vt100` crate, fed with the
-  host's snapshot at its exact size; hosts and the wall already use
+  host's snapshot; hosts and the wall already use
   libghostty-vt.
 - [0021](0021-take-over-watch-and-the-wall-of-screens.md): the wall of
   screens is a full-screen view that `5` opens over the interface (it runs
