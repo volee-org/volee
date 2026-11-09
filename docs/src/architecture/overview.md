@@ -126,7 +126,7 @@ All three were verified on Claude Code 2.1.319 (see
 | Agent is | volee delivers by | Effect |
 | --- | --- | --- |
 | Working | A `Stop` hook that returns `decision: "block"` with the pending messages | The agent reads them at the end of its turn and continues. |
-| Idle, process alive | An `asyncRewake` `Stop` hook that waits for a message, then exits with status 2 | The idle agent wakes up with the message, same session. |
+| Idle, process alive | An `asyncRewake` hook (on `Stop`, and on `SessionStart` for a session that waits at its prompt) that waits for a message, then exits with status 2 | The idle agent wakes up with the message, same session. |
 | Stopped (its program ended, or Claude Code reaped an idle background session after about an hour) | `claude --resume=<session>` with the message, in a new volee host | The conversation continues in a new host, in the agent's worktree, linked to the same agent. Never for an agent you stopped (until you write to it) or whose mission is over. |
 
 OpenCode has no hooks: a message waits until the agent stops, then volee

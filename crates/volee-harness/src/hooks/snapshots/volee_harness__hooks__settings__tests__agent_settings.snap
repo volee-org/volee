@@ -54,6 +54,12 @@ expression: settings
             "command": "/opt/volee/bin/volee hook session-start --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3",
             "timeout": 10,
             "type": "command"
+          },
+          {
+            "asyncRewake": true,
+            "command": "/opt/volee/bin/volee hook wait --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3 --timeout 3600",
+            "timeout": 3630,
+            "type": "command"
           }
         ]
       }

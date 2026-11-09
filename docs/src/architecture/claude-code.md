@@ -125,9 +125,11 @@ The settings file of an agent adds one hook per event to the user's own
 hooks; the user's settings file is never edited. Each hook runs
 `volee hook <event> --agent <id>` with a ten-second timeout (except
 `SessionEnd`, which keeps Claude Code's short exit budget), and the `Stop`
-event has a second handler that waits for messages while the agent is idle.
-Claude Code gives that waiter 30 seconds more than its own wait, which is at
-most a day, so it always ends on its own:
+and `SessionStart` events have a second handler that waits for messages
+while the agent is idle: after a turn, and from the start of a session that
+waits at its prompt without one (an adopted agent). The daemon keeps one
+waiter per agent, the newest. Claude Code gives that waiter 30 seconds more
+than its own wait, which is at most a day, so it always ends on its own:
 
 ```json
 "Stop": [{ "hooks": [

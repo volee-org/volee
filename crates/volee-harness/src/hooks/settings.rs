@@ -39,7 +39,7 @@ pub const VOLEE_TOOLS_RULE: &str = "mcp__volee";
 /// Every event in [`HookEventName::OBSERVED`] runs `<volee_bin> hook
 /// <event-kebab> --agent <agent>` with a [`HOOK_TIMEOUT_SECS`] timeout
 /// (except `SessionEnd`, which keeps Claude Code's short exit budget). `Stop`
-/// has a second handler, `<volee_bin> hook wait --agent <agent> --timeout
+/// and `SessionStart` have a second handler, `<volee_bin> hook wait --agent <agent> --timeout
 /// <seconds>`, declared with `asyncRewake`: it waits up to `rewake_timeout`
 /// (rounded up to whole seconds, at most [`MAX_REWAKE_SECS`]) for messages
 /// while the agent is idle, and wakes it by exiting with
@@ -73,7 +73,10 @@ pub fn agent_settings(
             handler["timeout"] = json!(HOOK_TIMEOUT_SECS);
         }
         let mut handlers = vec![handler];
-        if event == HookEventName::Stop {
+        // After a turn, and at the start of a session that waits at its
+        // prompt without one (an adopted agent, or one resumed idle after a
+        // reboot). A newer waiter replaces the older one in the daemon.
+        if matches!(event, HookEventName::Stop | HookEventName::SessionStart) {
             handlers.push(json!({
                 "type": "command",
                 "command": format!("{} --timeout {wait}", command("wait")),
@@ -182,16 +185,18 @@ mod tests {
                 format!("/bin/volee hook {} --agent {}", event.kebab(), agent())
             );
         }
-        assert_eq!(hooks["Stop"][0]["hooks"].as_array().unwrap().len(), 2);
-        let waiter = &hooks["Stop"][0]["hooks"][1];
-        assert_eq!(waiter["asyncRewake"], true);
-        assert_eq!(waiter["timeout"], 60 + REWAKE_GRACE_SECS);
-        assert!(
-            waiter["command"]
-                .as_str()
-                .unwrap()
-                .ends_with(" hook wait --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3 --timeout 60")
-        );
+        for event in ["Stop", "SessionStart"] {
+            assert_eq!(hooks[event][0]["hooks"].as_array().unwrap().len(), 2);
+            let waiter = &hooks[event][0]["hooks"][1];
+            assert_eq!(waiter["asyncRewake"], true);
+            assert_eq!(waiter["timeout"], 60 + REWAKE_GRACE_SECS);
+            assert!(
+                waiter["command"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with(" hook wait --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3 --timeout 60")
+            );
+        }
     }
 
     #[test]

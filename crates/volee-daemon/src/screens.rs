@@ -87,6 +87,9 @@ struct Hosted {
     agent: AgentId,
     host: String,
     state: AgentState,
+    /// Stopped with no reason given, as a listing may have stopped it before
+    /// its host was read: the host's end gives the reason.
+    unexplained_stop: bool,
     /// Its harness has hooks (Claude Code): they give its states, the host
     /// only says whether it runs.
     hooked: bool,
@@ -103,12 +106,13 @@ async fn hosted_states(shared: &Arc<Shared>) {
         state
             .registry()
             .agents()
-            .filter(|agent| !matches!(agent.state, AgentState::Done | AgentState::Failed))
+            .filter(|agent| agent.state != AgentState::Failed)
             .filter_map(|agent| {
                 Some(Hosted {
                     agent: agent.id,
                     host: agent.location.host()?.to_owned(),
                     state: agent.state.clone(),
+                    unexplained_stop: agent.state == AgentState::Stopped && agent.detail.is_none(),
                     hooked: agent.harness == HarnessKind::ClaudeCode,
                     held: agent.hold.is_some(),
                 })
@@ -120,6 +124,7 @@ async fn hosted_states(shared: &Arc<Shared>) {
         agent,
         host,
         state: current,
+        unexplained_stop,
         hooked,
         held,
     } in hosted
@@ -130,13 +135,19 @@ async fn hosted_states(shared: &Arc<Shared>) {
         })
         .await;
         let running = current.is_live() || current == AgentState::Launching;
+        // A stop that came without a reason gets the one its host recorded.
+        let mut explain = false;
         let (next, detail) = if let Ok(Ok((welcome, screen))) = read {
             shared.screens.answered(agent);
-            if welcome.exit.is_some() {
-                if !running {
+            if let Some(exit) = &welcome.exit {
+                if !running && !unexplained_stop {
                     continue;
                 }
-                (AgentState::Stopped, Some("its program ended".to_owned()))
+                explain = !running;
+                (
+                    AgentState::Stopped,
+                    Some(ended(exit, welcome.size, &screen)),
+                )
             } else if !running && !held {
                 // Its host still runs it: it never stopped.
                 (
@@ -161,7 +172,7 @@ async fn hosted_states(shared: &Arc<Shared>) {
                 Some("its volee host is gone".to_owned()),
             )
         };
-        if next.category() != current.category() {
+        if explain || next.category() != current.category() {
             let mut state = shared.state.lock().await;
             let now = state.now();
             let _ = state.commit(vec![Event::new(
@@ -174,6 +185,32 @@ async fn hosted_states(shared: &Arc<Shared>) {
             )]);
         }
     }
+}
+
+/// The detail of an agent whose hosted program ended. A program that failed
+/// gets its status and the last line it printed, so that its error (Claude
+/// Code refusing a repository it does not trust yet, for example) shows
+/// without taking the host over.
+fn ended(exit: &volee_host::Exit, size: volee_host::Size, screen: &[u8]) -> String {
+    let status = match (exit.code, &exit.signal) {
+        (_, Some(signal)) => format!("signal {signal}"),
+        (Some(code), None) if code != 0 => format!("exit {code}"),
+        _ => return "its program ended".to_owned(),
+    };
+    match last_line(size, screen) {
+        Some(line) => format!("its program failed ({status}): {line}"),
+        None => format!("its program failed ({status})"),
+    }
+}
+
+/// The last line of a host's screen that is not blank, at most 300
+/// characters long.
+fn last_line(size: volee_host::Size, screen: &[u8]) -> Option<String> {
+    let mut parsed = volee_term::Screen::new(size.cols, size.rows, 0).ok()?;
+    parsed.feed(screen);
+    let text = parsed.text().ok()?;
+    let line = text.lines().map(str::trim).rfind(|line| !line.is_empty())?;
+    Some(line.chars().take(300).collect())
 }
 
 async fn opencode_processes(shared: &Arc<Shared>) {
@@ -219,5 +256,42 @@ async fn opencode_processes(shared: &Arc<Shared>) {
         && let Err(error) = state.commit(events)
     {
         tracing::error!(%error, "cannot apply OpenCode's processes");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SIZE: volee_host::Size = volee_host::Size { cols: 80, rows: 6 };
+
+    fn exit(code: Option<u32>, signal: Option<&str>) -> volee_host::Exit {
+        volee_host::Exit {
+            code,
+            signal: signal.map(str::to_owned),
+            at: 0,
+        }
+    }
+
+    #[test]
+    fn a_failed_program_shows_its_last_line() {
+        let screen =
+            b"\x1b[2J\x1b[HError creating worktree: Workspace trust not yet accepted.\r\n\r\n";
+        assert_eq!(
+            ended(&exit(Some(1), None), SIZE, screen),
+            "its program failed (exit 1): Error creating worktree: Workspace trust not yet accepted."
+        );
+        assert_eq!(
+            ended(&exit(None, Some("SIGKILL")), SIZE, b""),
+            "its program failed (signal SIGKILL)"
+        );
+    }
+
+    #[test]
+    fn a_program_that_exits_cleanly_just_ended() {
+        assert_eq!(
+            ended(&exit(Some(0), None), SIZE, b"Goodbye\r\n"),
+            "its program ended"
+        );
     }
 }

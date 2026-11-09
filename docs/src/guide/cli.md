@@ -150,7 +150,11 @@ host, in the same directory, where it waits at its prompt. It also adopts
 an agent whose session ended. An agent that runs in a terminal of its own
 must be quit there first: volee refuses it until then. An OpenCode agent can
 be adopted when it was started with `--session`, once you quit it. The agent
-keeps its name and history in volee.
+keeps its name and history in volee. Once adopted, it is handled like the
+agents volee launches: messages reach it (they wake it when it waits at its
+prompt), `volee stop` stops it, and a message resumes it in a new host.
+Claude Code resumes a conversation only in a repository you trust; when the
+resumed program fails, the agent's detail quotes its last line.
 
 A stopped agent keeps its conversation, and volee does not resume it on its
 own, even when other agents write to it, until you send it a message

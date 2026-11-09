@@ -15,7 +15,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use volee_core::delivery::{ChecksState, Delivery, PrState, PushState};
 use volee_core::mission::Verdict;
-use volee_core::role::{LaunchedBy, Role};
+use volee_core::role::Role;
 use volee_core::state::StateCategory;
 use volee_core::time::Elapsed;
 use volee_core::{Agent, AgentState};
@@ -489,8 +489,8 @@ fn doing_spans<'a>(agent: &'a Agent, context: &CardContext<'_>) -> Vec<Span<'a>>
     match text {
         Some(text) => vec![Span::styled(text, style)],
         // volee hears what an agent does through the hooks of the agents it
-        // launches: a session started elsewhere never reports any.
-        None if agent.launched_by == LaunchedBy::Outside => {
+        // launches or adopts: a session started elsewhere never reports any.
+        None if !agent.managed() => {
             vec![Span::styled("activity not reported", dim)]
         }
         None => vec![Span::styled("no activity yet", dim)],
@@ -650,6 +650,7 @@ mod tests {
     use super::*;
     use crate::demo::INVOICE_PAGE;
     use crate::test_support::{id, model};
+    use volee_core::role::LaunchedBy;
 
     fn doing(agent: &Agent, model: &Model) -> String {
         let context = CardContext::new(model);
