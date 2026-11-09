@@ -107,6 +107,7 @@ async fn spawn_worker(client: &Client, branch: &str) -> Spawned {
             mission: None,
             model: None,
             name: None,
+            harness: None,
         })
         .await
         .unwrap()

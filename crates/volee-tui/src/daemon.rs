@@ -229,6 +229,7 @@ impl Source for DaemonSource {
             mission: None,
             model: request.model,
             name: None,
+            harness: None,
         };
         self.client
             .call::<Spawn>(params)

@@ -61,6 +61,7 @@ mod error;
 mod harness;
 pub mod hooks;
 mod lenient;
+pub mod opencode;
 mod runner;
 mod spec;
 #[cfg(any(test, feature = "testing"))]

@@ -380,6 +380,10 @@ pub struct SpawnParams {
     pub model: Option<String>,
     /// A display name; derived from the repository and branch when absent.
     pub name: Option<String>,
+    /// The harness profile (ADR 0022): `claude-code` when absent, or
+    /// `opencode`.
+    #[serde(default)]
+    pub harness: Option<String>,
 }
 
 /// The result of [`Spawn`].

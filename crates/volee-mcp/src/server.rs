@@ -558,6 +558,7 @@ impl VoleeMcp {
                 mission: Some(mission),
                 model: None,
                 name: args.name,
+                harness: None,
             })
             .await;
         match spawned {

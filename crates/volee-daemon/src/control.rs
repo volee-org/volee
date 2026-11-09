@@ -56,13 +56,15 @@ pub(crate) enum NoSession {
 }
 
 impl Sessions {
-    /// Records a listing, which replaces the previous one.
+    /// Records a listing, which replaces the previous one of its harness.
     pub(crate) fn record(&mut self, listing: &Listing) {
-        self.listed = listing
-            .sessions
-            .iter()
-            .map(|session| (session.key.clone(), session.clone()))
-            .collect();
+        self.listed.retain(|key, _| key.harness != listing.harness);
+        self.listed.extend(
+            listing
+                .sessions
+                .iter()
+                .map(|session| (session.key.clone(), session.clone())),
+        );
     }
 
     /// A session as the last listing showed it.

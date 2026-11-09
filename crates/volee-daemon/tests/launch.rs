@@ -159,6 +159,7 @@ fn worker(branch: &str) -> SpawnParams {
         mission: None,
         model: None,
         name: None,
+        harness: None,
     }
 }
 

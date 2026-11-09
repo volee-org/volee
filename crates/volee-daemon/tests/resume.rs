@@ -129,6 +129,7 @@ async fn running_worker(daemon: &Running) -> AgentId {
             mission: None,
             model: None,
             name: Some("invoices".into()),
+            harness: None,
         })
         .await
         .unwrap();

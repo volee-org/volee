@@ -60,6 +60,9 @@ enum Command {
         /// absent.
         #[arg(long)]
         name: Option<String>,
+        /// The harness: claude-code (the default) or opencode.
+        #[arg(long)]
+        harness: Option<String>,
     },
     /// Take an agent over in this terminal; Ctrl+Q comes back.
     Attach {
@@ -462,6 +465,7 @@ fn async_main(command: Command) -> ExitCode {
                 base,
                 model,
                 name,
+                harness,
             } => {
                 cmd::spawn::run(cmd::spawn::SpawnRequest {
                     repo,
@@ -470,6 +474,7 @@ fn async_main(command: Command) -> ExitCode {
                     base,
                     model,
                     name,
+                    harness,
                 })
                 .await
             }

@@ -17,6 +17,7 @@ pub(crate) struct SpawnRequest {
     pub(crate) base: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) name: Option<String>,
+    pub(crate) harness: Option<String>,
 }
 
 /// Launches an agent that answers to the human.
@@ -39,6 +40,7 @@ pub(crate) async fn run(request: SpawnRequest) -> Result<()> {
             mission: None,
             model: request.model,
             name: request.name,
+            harness: request.harness,
         })
         .await?;
     let registry = resolve::registry(&client).await?;

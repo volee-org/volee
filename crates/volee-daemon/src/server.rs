@@ -93,6 +93,7 @@ pub(crate) struct Shared {
     pub(crate) settings: volee_config::Config,
     pub(crate) volee_bin: Option<PathBuf>,
     pub(crate) hosts: bool,
+    pub(crate) screens: crate::screens::Screens,
     pub(crate) paths: Paths,
     /// The interactive subscriptions open now, which set discovery's pace.
     pub(crate) watchers: Watchers,
@@ -222,6 +223,7 @@ impl Daemon {
             settings: config.evidence.settings.clone(),
             volee_bin: config.volee_bin,
             hosts: config.hosts,
+            screens: crate::screens::Screens::default(),
             paths: config.paths,
             watchers: Watchers::new(),
             refreshes: Refreshes::new(),

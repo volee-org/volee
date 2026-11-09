@@ -123,7 +123,7 @@ fn triggered(kind: &EventKind) -> Vec<(AgentId, bool)> {
 /// ended, messages wait for it, and nothing holds it (the human stopped it,
 /// or its mission is over).
 fn needs_resume(registry: &Registry, agent: &Agent) -> bool {
-    agent.harness == HarnessKind::ClaudeCode
+    (agent.harness == HarnessKind::ClaudeCode || agent.harness == volee_harness::opencode::kind())
         && agent.launched_by != LaunchedBy::Outside
         && agent.hold.is_none()
         && agent.current_session().is_some()
@@ -196,6 +196,16 @@ struct Plan {
 /// Resumes `agent` with its pending messages. `Ok(None)` when it no longer
 /// needs it (a hook or another resume got there first).
 async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, DaemonError> {
+    let opencode = shared
+        .state
+        .lock()
+        .await
+        .registry()
+        .agent(agent)
+        .is_some_and(|record| record.harness == volee_harness::opencode::kind());
+    if opencode {
+        return resume_opencode(shared, agent).await;
+    }
     let harness = shared
         .harness
         .clone()
@@ -336,7 +346,8 @@ pub(crate) async fn resume_interrupted(shared: Arc<Shared>) {
             .registry()
             .agents()
             .filter(|agent| {
-                agent.harness == HarnessKind::ClaudeCode
+                (agent.harness == HarnessKind::ClaudeCode
+                    || agent.harness == volee_harness::opencode::kind())
                     && agent.hold.is_none()
                     && agent.current_session().is_some()
             })
@@ -419,6 +430,7 @@ struct Adoption {
     worktree: Option<String>,
     model: Option<String>,
     instructions: Option<String>,
+    cwd: std::path::PathBuf,
 }
 
 /// Reads what adopting `agent` needs, or why it cannot be adopted.
@@ -432,7 +444,9 @@ async fn adoption(
         .registry()
         .agent(agent)
         .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {agent}")))?;
-    if record.harness != HarnessKind::ClaudeCode {
+    if record.harness != HarnessKind::ClaudeCode
+        && record.harness != volee_harness::opencode::kind()
+    {
         return Err(DaemonError::Refused(format!(
             "{} runs in {}, which volee cannot resume yet",
             record.name, record.harness
@@ -474,6 +488,7 @@ async fn adoption(
         root,
         worktree,
         model,
+        cwd: record.workspace.cwd.clone(),
         instructions: (record.launched_by != LaunchedBy::Outside)
             .then(|| launch::instructions_for(state.registry(), record)),
     })
@@ -490,10 +505,6 @@ pub(crate) async fn adopt(shared: &Arc<Shared>, agent: AgentId) -> Result<(), Da
 
 /// Resumes `agent`'s conversation in a new host, for `why`.
 async fn rehost(shared: &Arc<Shared>, agent: AgentId, why: Rehost) -> Result<(), DaemonError> {
-    let harness = shared
-        .harness
-        .clone()
-        .ok_or_else(|| DaemonError::Unavailable("Claude Code is not available".into()))?;
     let Adoption {
         session,
         listed,
@@ -503,6 +514,7 @@ async fn rehost(shared: &Arc<Shared>, agent: AgentId, why: Rehost) -> Result<(),
         worktree,
         model,
         instructions,
+        cwd,
     } = adoption(shared, agent, why).await?;
     let alive = listed.as_ref().is_some_and(|session| session.alive);
     if alive && !matches!(location, Location::Background) {
@@ -510,6 +522,24 @@ async fn rehost(shared: &Arc<Shared>, agent: AgentId, why: Rehost) -> Result<(),
             "{name} runs in a terminal: quit it there first, then adopt it"
         )));
     }
+    if session.harness == volee_harness::opencode::kind() {
+        let prompt = Some(why.prompt()).filter(|prompt| !prompt.is_empty());
+        return rehost_opencode(
+            shared,
+            agent,
+            &session.id,
+            &name,
+            &cwd,
+            prompt,
+            why.state(),
+            why.detail(),
+        )
+        .await;
+    }
+    let harness = shared
+        .harness
+        .clone()
+        .ok_or_else(|| DaemonError::Unavailable("Claude Code is not available".into()))?;
     if alive && let Some(listed) = listed {
         let harness = Arc::clone(&harness);
         launch::blocking(move || harness.stop(&listed)).await??;
@@ -551,6 +581,135 @@ async fn rehost(shared: &Arc<Shared>, agent: AgentId, why: Rehost) -> Result<(),
         ),
     ])?;
     Ok(())
+}
+
+/// Resumes an OpenCode session in a new host, in `cwd`: `opencode --session
+/// <id> [--prompt <prompt>]` (ADR 0022).
+#[allow(clippy::too_many_arguments)] // Each is one fact of the resume.
+async fn rehost_opencode(
+    shared: &Arc<Shared>,
+    agent: AgentId,
+    session: &str,
+    name: &str,
+    cwd: &std::path::Path,
+    prompt: Option<&str>,
+    state_after: AgentState,
+    detail: &str,
+) -> Result<(), DaemonError> {
+    use volee_harness::opencode;
+    if session.starts_with("pid-") {
+        return Err(DaemonError::Refused(format!(
+            "{name} was started without a session id (opencode --session), so volee cannot \
+             resume its conversation"
+        )));
+    }
+    let host = launch::host_launch(shared, agent, name)
+        .ok_or_else(|| DaemonError::Unavailable("this daemon cannot start volee hosts".into()))?;
+    let location = launch::location_of(Some(&host));
+    let args = opencode::args(
+        session,
+        prompt,
+        launch::permission_mode(shared) == volee_harness::PermissionMode::Auto,
+    );
+    let cwd = cwd.to_path_buf();
+    launch::blocking(move || {
+        opencode::launch_in_host(
+            &volee_harness::SystemRunner,
+            &host,
+            &cwd,
+            args,
+            Duration::from_secs(60),
+        )
+    })
+    .await??;
+    let mut state = shared.state.lock().await;
+    let now = state.now();
+    state.commit(vec![
+        Event::new(now, EventKind::LocationChanged { agent, location }),
+        Event::new(
+            now,
+            EventKind::StateChanged {
+                agent,
+                state: state_after,
+                detail: Some(detail.to_owned()),
+            },
+        ),
+    ])?;
+    Ok(())
+}
+
+/// Delivers the pending messages of a stopped OpenCode agent by resuming
+/// its session in a new host with them as its prompt.
+async fn resume_opencode(
+    shared: &Arc<Shared>,
+    agent: AgentId,
+) -> Result<Option<usize>, DaemonError> {
+    let (session, name, cwd, prompt, shown) = {
+        let mut state = shared.state.lock().await;
+        let registry = state.registry();
+        let Some(record) = registry.agent(agent) else {
+            return Ok(None);
+        };
+        if !needs_resume(registry, record) {
+            return Ok(None);
+        }
+        let Some(link) = record.current_session() else {
+            return Ok(None);
+        };
+        let pending = registry.pending_for(agent);
+        let rendered = format_messages_for_agent(pending.iter().copied(), |id| {
+            registry.agent(id).map(|sender| sender.name.clone())
+        });
+        let shown: Vec<MessageId> = pending
+            .iter()
+            .take(rendered.shown)
+            .map(|message| message.id)
+            .collect();
+        let found = (
+            link.key.id.clone(),
+            record.name.clone(),
+            record.workspace.cwd.clone(),
+            format!("{RESUMED}\n\n{}", rendered.text),
+            shown,
+        );
+        let now = state.now();
+        state.commit(vec![Event::new(
+            now,
+            EventKind::StateChanged {
+                agent,
+                state: AgentState::Launching,
+                detail: Some("resuming to deliver messages".into()),
+            },
+        )])?;
+        found
+    };
+    rehost_opencode(
+        shared,
+        agent,
+        &session,
+        &name,
+        &cwd,
+        Some(&prompt),
+        AgentState::Working,
+        "resumed to deliver messages",
+    )
+    .await?;
+    let mut state = shared.state.lock().await;
+    let now = state.now();
+    let delivered: Vec<Event> = shown
+        .iter()
+        .map(|message| {
+            Event::new(
+                now,
+                EventKind::MessageDelivered {
+                    message: *message,
+                    to: Party::Agent(agent),
+                },
+            )
+        })
+        .collect();
+    state.commit(delivered)?;
+    Ok(Some(shown.len()))
 }
 
 fn plan(
