@@ -437,8 +437,11 @@ over from a second terminal, with `volee attach`, moves the input there,
 and the first terminal comes back to volee.
 
 volee types only into the agents it hosts. On a Claude Code background
-session that volee does not host, `a` is refused with a hint: adopt it
-first (below). Agents running in another terminal cannot be taken over
+session that volee does not host, `a` asks first, on the bottom line,
+whether to move it into a volee host: `y` adopts it (below) and takes it
+over as soon as its host runs, `n` or `Esc` leaves it alone. In a
+repository Claude Code does not trust yet, the agent's screen then shows
+Claude Code's trust question: answer it there, once. Agents running in another terminal cannot be taken over
 from here; volee tells you where they are instead, and brings forward the
 pane of an agent in a tuios or tmux pane (below).
 
@@ -458,9 +461,9 @@ its history; once adopted, `a` takes it over, and volee handles it like the
 agents it launches: messages reach it, `volee stop` stops it, and a message
 resumes it.
 
-Claude Code resumes the conversation only in a repository you trust: run
-`claude` once in the repository and accept its trust prompt before you adopt
-an agent that works there. When the resumed program fails, the agent is
+The conversation resumes in the agent's worktree. In a repository Claude
+Code does not trust yet, it asks first, in the host: take the agent over
+(`a`) to answer, once for the repository. When the resumed program fails, the agent is
 `stopped` and its detail quotes the program's last line (Claude Code's
 trust message, for example). The conversation is not lost: fix the cause
 and send the agent a message, or resume it in the background yourself,

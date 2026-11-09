@@ -303,6 +303,21 @@ impl Source for DemoSource {
         let event = requests::forget(&registry, agent, scripted, self.clock.now())?;
         self.emit(vec![event]).await
     }
+
+    /// The demo's agents move into a pretend host, so that taking one over
+    /// can be tried.
+    async fn adopt(&self, agent: AgentId) -> Result<(), SourceError> {
+        let event = Event::new(
+            self.clock.now(),
+            EventKind::LocationChanged {
+                agent,
+                location: volee_core::workspace::Location::Host {
+                    id: format!("demo-{}", agent.short()),
+                },
+            },
+        );
+        self.emit(vec![event]).await
+    }
 }
 
 impl DemoSource {

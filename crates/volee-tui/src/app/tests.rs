@@ -363,10 +363,78 @@ fn numbers_switch_tabs_and_the_keys_follow_the_panel() {
     assert_eq!(model.tab, Tab::Hierarchy);
 }
 
+/// Moves an agent into a volee host, as its adoption does.
+fn hosted(model: &mut Model, agent: AgentId) {
+    update(
+        model,
+        Msg::Events(vec![Event::new(
+            Timestamp::from_millis(1_793_986_618_000),
+            EventKind::LocationChanged {
+                agent,
+                location: Location::Host { id: "h1".into() },
+            },
+        )]),
+    );
+}
+
+#[test]
+fn a_on_a_background_session_offers_to_adopt_it_then_takes_it_over() {
+    let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    press(&mut model, "'s");
+    // The demo's agents run in the background: `a` asks first.
+    assert_eq!(press(&mut model, "a"), []);
+    assert_eq!(model.prompt, Some(Prompt::AdoptAndTakeOver(schema)));
+    // No: nothing happens.
+    key(&mut model, KeyCode::Esc);
+    assert_eq!(model.prompt, None);
+    // Yes: it is adopted, then taken over once the adoption is done.
+    press(&mut model, "a");
+    let effects = press(&mut model, "y");
+    assert_eq!(
+        effects,
+        [Effect::Adopt {
+            agent: schema,
+            name: "invoice-schema".into()
+        }]
+    );
+    let effects = update(
+        &mut model,
+        Msg::Adopted {
+            agent: schema,
+            name: "invoice-schema".into(),
+            result: Ok(()),
+        },
+    );
+    assert_eq!(effects, [Effect::PrepareTakeOver(schema)]);
+    assert_eq!(model.pending_take_over, Some(schema));
+}
+
+#[test]
+fn a_failed_adoption_takes_nothing_over() {
+    let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    press(&mut model, "'s");
+    press(&mut model, "ay");
+    let effects = update(
+        &mut model,
+        Msg::Adopted {
+            agent: schema,
+            name: "invoice-schema".into(),
+            result: Err(SourceError::Failed("no".into())),
+        },
+    );
+    assert_eq!(effects, []);
+    assert_eq!(model.pending_take_over, None);
+    assert_eq!(model.take_over_after_adopt, None);
+    assert!(model.notice.as_ref().is_some_and(|notice| notice.error));
+}
+
 #[test]
 fn a_asks_the_source_then_takes_over_the_selected_agent() {
     let mut model = model(120, 40);
     let schema = id(INVOICE_SCHEMA);
+    hosted(&mut model, schema);
     press(&mut model, "'s");
     assert_eq!(press(&mut model, "a"), [Effect::PrepareTakeOver(schema)]);
     assert!(press(&mut model, "a").is_empty(), "one take over at a time");
@@ -564,6 +632,7 @@ fn the_preview_empties_when_the_last_agent_leaves() {
 fn an_agent_in_a_pane_is_brought_forward_instead_of_taken_over() {
     let mut model = model(120, 40);
     let schema = id(INVOICE_SCHEMA);
+    hosted(&mut model, schema);
     press(&mut model, "'s");
     assert_eq!(press(&mut model, "a"), [Effect::PrepareTakeOver(schema)]);
     let focus = PaneFocus {

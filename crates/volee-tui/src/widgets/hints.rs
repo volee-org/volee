@@ -153,6 +153,24 @@ fn render_prompt(model: &Model, prompt: Prompt, area: Rect, buf: &mut Buffer) {
             spans.extend(join(answers, usize::from(area.width)));
             spans
         }
+        Prompt::AdoptAndTakeOver(agent) => {
+            let mut spans = vec![
+                Span::styled(
+                    format!(
+                        "{} runs in the background, where volee cannot type. Move it into a \
+                         volee host and take it over? Its conversation goes on.",
+                        model.name_of(agent)
+                    ),
+                    theme.style(StyleRole::Input),
+                ),
+                Span::raw(SEPARATOR),
+            ];
+            let answers = groups(model, &[Context::Confirm])
+                .into_iter()
+                .map(|(_, group)| group);
+            spans.extend(join(answers, usize::from(area.width)));
+            spans
+        }
     };
     put_spans(buf, area.x, area.y, &spans, area.width);
 }

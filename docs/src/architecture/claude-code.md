@@ -38,9 +38,13 @@ you start by hand. volee shows them and does not drive them:
 | Stop | `claude stop <id>` | Before an adoption, and for the sessions volee 0.7 launched. The conversation is kept. |
 | Delete | `claude rm <id>` | Never with `--discard-unpushed` or `--force-remove-worktree`. |
 
-Taking over a background session is refused with a hint: adopt it first
+Taking over a background session needs it adopted first
 ([ADR 0023](../adr/0023-every-agent-on-the-machine.md)), which stops it with
-`claude stop` and resumes its conversation in a host.
+`claude stop` and resumes its conversation in a host; in the interface, `a`
+offers to do both. A conversation whose worktree still exists resumes in
+that worktree rather than with `--worktree` from the main checkout: a
+repository Claude Code trusts covers its worktrees, and in one it does not
+trust yet Claude Code asks in the host instead of exiting.
 
 `<id>` is the id of a background session, kept exactly as `claude agents`
 lists it (the session's *handle*). Interactive sessions started by hand have

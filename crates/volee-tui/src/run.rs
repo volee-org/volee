@@ -240,7 +240,11 @@ fn run_request<Src: Source>(
         }),
         Effect::Adopt { agent, name } => spawn(results, async move {
             let result = source.adopt(agent).await;
-            Msg::Adopted { name, result }
+            Msg::Adopted {
+                agent,
+                name,
+                result,
+            }
         }),
         // The loop runs these itself.
         Effect::Quit
@@ -654,7 +658,10 @@ mod tests {
         let mut model = Model::new(Theme::default(), Keymap::default(), None, (120, 40), start);
         type_later(
             send,
-            vec![vec![key('j'), key('a')], vec![key('?'), key('?'), key('q')]],
+            vec![
+                vec![key('j'), key('a'), key('y')],
+                vec![key('?'), key('?'), key('q')],
+            ],
         );
         event_loop(
             &mut screen,

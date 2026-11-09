@@ -537,16 +537,13 @@ async fn adoption(
         .ok_or_else(|| {
             DaemonError::Refused(format!("{} has no conversation to resume", record.name))
         })?;
-    let root = record
+    let main = record
         .workspace
         .repo_root
         .clone()
         .unwrap_or_else(|| record.workspace.cwd.clone());
-    let worktree = record
-        .workspace
-        .worktree
-        .as_deref()
-        .and_then(|worktree| launch::worktree_name(&root, worktree));
+    // `root` is where the resumed program runs: the worktree when it exists.
+    let (root, worktree) = launch::resume_place(&main, record.workspace.worktree.as_deref());
     let model = record.model.clone().or_else(|| {
         shared
             .settings
@@ -794,12 +791,8 @@ fn plan(
     mcp_config_file: std::path::PathBuf,
 ) -> Option<Plan> {
     let session = agent.current_session()?.key.clone();
-    let root = agent.workspace.repo_root.clone()?;
-    let worktree = agent
-        .workspace
-        .worktree
-        .as_deref()
-        .and_then(|worktree| launch::worktree_name(&root, worktree));
+    let main = agent.workspace.repo_root.clone()?;
+    let (root, worktree) = launch::resume_place(&main, agent.workspace.worktree.as_deref());
     let pending = registry.pending_for(agent.id);
     let rendered = format_messages_for_agent(pending.iter().copied(), |id| {
         registry.agent(id).map(|sender| sender.name.clone())
