@@ -20,6 +20,7 @@ mod log;
 mod missions;
 mod panes;
 mod resume;
+mod screens;
 mod server;
 mod setup;
 mod sqlite;

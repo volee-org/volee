@@ -171,6 +171,7 @@ fn start_muxes(history: Vec<Event>, mux: Arc<FakeMux>, muxes: Vec<Arc<FakeMux>>)
             .into_iter()
             .map(|mux| mux as Arc<dyn Multiplexer>)
             .collect(),
+        hosts: false,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

@@ -91,6 +91,7 @@ fn start_with(events: Vec<Event>) -> Fixture {
             evidence: EvidenceSources::default(),
             volee_bin: None,
             multiplexers: Vec::new(),
+            hosts: false,
         },
     ));
     Fixture { socket, _dir: dir }

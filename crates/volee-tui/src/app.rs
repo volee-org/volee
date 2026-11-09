@@ -375,6 +375,13 @@ pub(crate) enum Msg {
         /// How it went.
         result: Result<(), String>,
     },
+    /// The source adopted an agent into a host, or refused.
+    Adopted {
+        /// The agent's name.
+        name: String,
+        /// How it went.
+        result: Result<(), SourceError>,
+    },
     /// The source forgot an agent, or refused.
     Forgot {
         /// The agent's name, kept from the request: once forgotten, the
@@ -428,6 +435,13 @@ pub(crate) enum Effect {
     CreateMission(MissionRequest),
     /// Forget an agent: the source stops listing it.
     Forget {
+        /// The agent.
+        agent: AgentId,
+        /// Its name, for the notice that follows.
+        name: String,
+    },
+    /// Adopt an agent into a volee host.
+    Adopt {
         /// The agent.
         agent: AgentId,
         /// Its name, for the notice that follows.
@@ -1154,7 +1168,8 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         | Msg::Launched(_)
         | Msg::MissionCreated(_)
         | Msg::ToolFinished { .. }
-        | Msg::Forgot { .. }) => dirty = on_answer(model, answer, &mut effects),
+        | Msg::Forgot { .. }
+        | Msg::Adopted { .. }) => dirty = on_answer(model, answer, &mut effects),
         Msg::Resumed { agent, result } => {
             let name = model.name_of(agent);
             match result {
@@ -1344,6 +1359,16 @@ fn on_window_answer(model: &mut Model, answer: Msg) -> bool {
                 model.notify(format!("Could not open {label}: {reason}."), true);
             }
         },
+        Msg::Adopted { name, result } => match result {
+            Ok(()) => model.notify(
+                format!("Adopted {name}: it continues in a volee host. Press a to take it over."),
+                false,
+            ),
+            Err(error) => {
+                let reason = text::clause(&error.to_string()).to_owned();
+                model.notify(format!("Could not adopt {name}: {reason}."), true);
+            }
+        },
         Msg::Forgot { name, result } => match result {
             Ok(()) => model.notify(
                 format!(
@@ -1529,11 +1554,9 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
         }
         Action::Message => open_composer(model),
         Action::FullScreen => open_full_screen(model, effects),
-        Action::Forget => {
-            if let Some(agent) = model.selected {
-                model.prompt = Some(Prompt::Forget(agent));
-            }
-        }
+        Action::Forget => ask_forget(model),
+        Action::Adopt => adopt_selected(model, effects),
+        Action::ShowWall => show_wall(model, effects),
         Action::Diff => {
             if let Some(agent) = model.selected {
                 open_diff(model, agent, false, effects);
@@ -1653,6 +1676,67 @@ fn zoom(model: &mut Model, context: Context, action: Action) {
         },
         _ => step(&mut model.zoom, model.scene.zoom),
     }
+}
+
+/// Asks before forgetting the selected agent.
+fn ask_forget(model: &mut Model) {
+    if let Some(agent) = model.selected {
+        model.prompt = Some(Prompt::Forget(agent));
+    }
+}
+
+/// Asks the source to adopt the selected agent into a volee host.
+fn adopt_selected(model: &mut Model, effects: &mut Vec<Effect>) {
+    if let Some(agent) = model.selected {
+        let name = model
+            .registry
+            .agent(agent)
+            .map_or_else(|| agent.short(), |record| record.name.clone());
+        model.notify(format!("Adopting {name}..."), false);
+        effects.push(Effect::Adopt { agent, name });
+    }
+}
+
+/// Opens the wall of screens (ADR 0021): the agents of the current list that
+/// run in a volee host, as tiles of their live screens, in this terminal
+/// until the person comes back with `q`.
+fn show_wall(model: &mut Model, effects: &mut Vec<Effect>) {
+    let hosts: Vec<String> = model
+        .rail
+        .iter()
+        .filter_map(|entry| model.registry.agent(entry.agent))
+        .filter(|agent| agent.state.is_live())
+        .filter_map(|agent| agent.location.host().map(str::to_owned))
+        .collect();
+    if hosts.is_empty() {
+        model.notify(
+            "No agent of the list runs in a volee host: the wall shows agents volee launched \
+             or adopted.",
+            false,
+        );
+        return;
+    }
+    let Ok(program) = std::env::current_exe() else {
+        model.notify("Cannot find the volee program to open the wall.", true);
+        return;
+    };
+    effects.push(Effect::RunTool {
+        label: "the wall".to_owned(),
+        detached: false,
+        take_over: TakeOver {
+            program: program.display().to_string(),
+            args: vec![
+                "host".to_owned(),
+                "wall".to_owned(),
+                "--ids".to_owned(),
+                hosts.join(","),
+            ],
+            cwd: None,
+            env_remove: Vec::new(),
+            hint: None,
+            focus: None,
+        },
+    });
 }
 
 /// Shows the selected agent's screen full size, refreshed.

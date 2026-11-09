@@ -79,6 +79,7 @@ fn start_with(every: Duration, tools: bool) -> Running {
         },
         volee_bin: Some(PathBuf::from("/opt/volee/bin/volee")),
         multiplexers: Vec::new(),
+        hosts: false,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -106,6 +107,7 @@ async fn spawn_worker(client: &Client, branch: &str) -> Spawned {
             mission: None,
             model: None,
             name: None,
+            harness: None,
         })
         .await
         .unwrap()

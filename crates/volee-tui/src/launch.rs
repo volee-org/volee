@@ -90,6 +90,9 @@ pub(crate) struct LaunchDialog {
 
 const KINDS: [MissionKind; 2] = [MissionKind::Change, MissionKind::Analysis];
 
+/// The harnesses an agent can be launched with (ADR 0022), the default first.
+const HARNESSES: [&str; 2] = ["claude-code", "opencode"];
+
 /// Opens a dialog. The repositories come from the configuration; without
 /// any, an agent's repository is written as a path.
 pub(crate) fn open(model: &mut Model, kind: DialogKind) {
@@ -124,6 +127,14 @@ pub(crate) fn open(model: &mut Model, kind: DialogKind) {
                 name: "model",
                 value: line,
                 placeholder: "the configured default",
+            },
+            Field {
+                name: "harness",
+                value: Value::Choice {
+                    options: HARNESSES.iter().map(|name| (*name).to_owned()).collect(),
+                    index: 0,
+                },
+                placeholder: "",
             },
         ],
         DialogKind::Mission => vec![
@@ -297,11 +308,14 @@ fn submit(dialog: &mut LaunchDialog, effects: &mut Vec<Effect>) {
                 return;
             }
             let model = value("model");
+            let harness = value("harness");
             Effect::Spawn(SpawnRequest {
                 repo: value("repository"),
                 branch,
                 task: value("task"),
                 model: (!model.is_empty()).then_some(model),
+                // Claude Code is the default the daemon applies.
+                harness: (!harness.is_empty() && harness != HARNESSES[0]).then_some(harness),
             })
         }
         DialogKind::Mission => {
@@ -483,6 +497,7 @@ mod tests {
                 branch: "feat/export-csv".into(),
                 task: "Export invoices as CSV.".into(),
                 model: None,
+                harness: None,
             })]
         );
         submit(&mut dialog, &mut effects);
@@ -709,7 +724,9 @@ mod tests {
                 focused(&model),
                 (2, "Export invoices.\nOne file per month.".to_owned())
             );
-            // From the last field, Enter goes round to the first.
+            // From the last field (the model, then the harness), Enter goes
+            // round to the first.
+            key(&mut model, KeyCode::Tab);
             key(&mut model, KeyCode::Tab);
             assert!(!launches(&key(&mut model, KeyCode::Enter)));
             assert_eq!(focused(&model).0, 0);
@@ -721,6 +738,7 @@ mod tests {
                     branch: "feat/export".into(),
                     task: "Export invoices.\nOne file per month.".into(),
                     model: None,
+                    harness: None,
                 })]
             );
         }

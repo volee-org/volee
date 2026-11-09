@@ -22,6 +22,7 @@
 
 - [Overview](architecture/overview.md)
 - [Domain model](architecture/domain.md)
+- [Hosts](architecture/hosts.md)
 - [Claude Code adapter](architecture/claude-code.md)
 - [Git](architecture/git.md)
 - [Decisions](adr/README.md)
@@ -44,6 +45,12 @@
   - [0016. Reuse or tidy what a failed launch left untouched](adr/0016-what-a-failed-launch-left-untouched.md)
   - [0017. Setup commands prepare a new worktree before its agent starts](adr/0017-setup-commands-for-new-worktrees.md)
   - [0018. A pane that shows a background session is its preview](adr/0018-panes-that-show-background-sessions.md)
+  - [0019. A host process holds each agent's terminal](adr/0019-a-host-process-holds-each-agent-terminal.md)
+  - [0020. libghostty-vt emulates terminals](adr/0020-libghostty-vt-emulates-terminals.md)
+  - [0021. Take over, watch, and the wall of screens](adr/0021-take-over-watch-and-the-wall-of-screens.md)
+  - [0022. Harness profiles](adr/0022-harness-profiles.md)
+  - [0023. Every agent on the machine](adr/0023-every-agent-on-the-machine.md)
+  - [0024. Agents come back after a reboot](adr/0024-agents-come-back-after-a-reboot.md)
   - [Template](adr/template.md)
 
 # Project

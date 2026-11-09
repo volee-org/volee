@@ -279,7 +279,8 @@ pub fn relocate(
             continue;
         };
         let current = agent.current_session().is_some_and(|link| &link.key == key);
-        if !current || agent.location == Location::Background {
+        // Background agents and agents in a volee host run in no pane.
+        if !current || matches!(agent.location, Location::Background | Location::Host { .. }) {
             continue;
         }
         let location = match found.iter().find(|(session, _)| session == key) {

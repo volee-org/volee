@@ -61,6 +61,7 @@ pub(crate) async fn tidy(
         });
     }
     let git = git(shared)?;
+    stop_host(shared, params.agent).await;
 
     let harness = shared.harness.clone();
     let deleted = match (&harness, &plan.session) {
@@ -101,6 +102,31 @@ pub(crate) async fn tidy(
         worktree: plan.worktree.display().to_string(),
         branch: plan.branch,
     })
+}
+
+/// Ends the program of an agent whose host still runs it, idle, before its
+/// worktree goes: nothing should run in a removed directory. Best effort.
+async fn stop_host(shared: &Arc<Shared>, agent: AgentId) {
+    let host = {
+        let state = shared.state.lock().await;
+        state
+            .registry()
+            .agent(agent)
+            .and_then(|record| record.location.host().map(str::to_owned))
+    };
+    let Some(host) = host else {
+        return;
+    };
+    let socket = crate::launch::hosts_dir(shared).join(format!("{host}.sock"));
+    let _ = blocking(move || {
+        if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
+            let _ = volee_host::stop(&socket, "volee daemon tidy");
+            // Give the program a moment to end before git looks at the
+            // worktree.
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    })
+    .await;
 }
 
 /// The verdict and, when it allows tidying, what tidying needs.

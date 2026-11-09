@@ -54,8 +54,14 @@ fn dir_name(path: &Path) -> String {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "kind")]
 pub enum Location {
-    /// Supervised by its harness in the background; attachable from any
-    /// terminal.
+    /// In a volee host (ADR 0019): volee holds its terminal, shows its exact
+    /// screen and lets any terminal take it over.
+    Host {
+        /// The host's id: its socket is `<state>/hosts/<id>.sock`.
+        id: String,
+    },
+    /// A background session of its harness, started by an earlier volee or
+    /// by hand. volee shows it and can adopt it into a host (ADR 0023).
     Background,
     /// Inside a terminal multiplexer pane.
     Pane {
@@ -73,11 +79,20 @@ pub enum Location {
 }
 
 impl Location {
-    /// Where the agent runs, said for people: `background`, the multiplexer
+    /// The id of the host the agent runs in, if it runs in one.
+    pub fn host(&self) -> Option<&str> {
+        match self {
+            Self::Host { id } => Some(id),
+            _ => None,
+        }
+    }
+
+    /// Where the agent runs, said for people: `volee host`, `background`, the multiplexer
     /// and the session that holds its pane (`tuios · work`), `a terminal`
     /// or `unknown`.
     pub fn label(&self) -> String {
         match self {
+            Self::Host { .. } => "volee host".to_owned(),
             Self::Background => "background".to_owned(),
             Self::Pane {
                 multiplexer,

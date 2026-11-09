@@ -61,6 +61,7 @@ mod error;
 mod harness;
 pub mod hooks;
 mod lenient;
+pub mod opencode;
 mod runner;
 mod spec;
 #[cfg(any(test, feature = "testing"))]
@@ -71,5 +72,5 @@ pub use claude::ClaudeCode;
 pub use error::{HarnessError, ParseError, RequestError};
 pub use harness::{Capabilities, Harness, WorktreeRemoval};
 pub use runner::{CommandRunner, Invocation, Output, RunError, SystemRunner};
-pub use spec::{Completion, PermissionMode, SpawnSpec, Spawned};
+pub use spec::{Completion, HostLaunch, PermissionMode, SpawnSpec, Spawned};
 pub use version::{ParseVersionError, Version};

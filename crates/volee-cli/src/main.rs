@@ -60,8 +60,11 @@ enum Command {
         /// absent.
         #[arg(long)]
         name: Option<String>,
+        /// The harness: claude-code (the default) or opencode.
+        #[arg(long)]
+        harness: Option<String>,
     },
-    /// Take an agent over in this terminal; Ctrl+Z comes back.
+    /// Take an agent over in this terminal; Ctrl+Q comes back.
     Attach {
         /// The agent: its name, short id or id.
         agent: String,
@@ -81,6 +84,12 @@ enum Command {
     },
     /// Stop an agent volee launched; its conversation is kept.
     Stop {
+        /// The agent: its name, short id or id.
+        agent: String,
+    },
+    /// Move an agent volee does not host (a background session, or one that
+    /// ended) into a volee host, so that you can take it over.
+    Adopt {
         /// The agent: its name, short id or id.
         agent: String,
     },
@@ -148,6 +157,9 @@ enum Command {
         #[arg(long)]
         theme: Option<String>,
     },
+    /// Run any command line in a volee host, watch hosts on a wall, take
+    /// them over (ADR 0019). The daemon starts every agent in a host.
+    Host(HostArgs),
     /// Called by the hooks of agents volee launched. Not for people.
     #[command(hide = true)]
     Hook {
@@ -172,6 +184,94 @@ enum ConfigCommand {
     Check,
 }
 
+#[derive(Debug, clap::Args)]
+struct HostArgs {
+    /// The directory of hosts; `<state>/hosts` when absent.
+    #[arg(long, global = true)]
+    dir: Option<std::path::PathBuf>,
+    #[command(subcommand)]
+    command: HostCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum HostCommand {
+    /// Start a program in a new host, detached from this terminal, and print
+    /// the host's id.
+    Spawn {
+        /// The host's id; a new agent id when absent.
+        #[arg(long)]
+        id: Option<String>,
+        /// The program's directory; this one when absent.
+        #[arg(long)]
+        cwd: Option<std::path::PathBuf>,
+        /// Columns before anyone takes it over; this terminal's when absent.
+        #[arg(long, requires = "rows")]
+        cols: Option<u16>,
+        /// Rows before anyone takes it over; this terminal's when absent.
+        #[arg(long, requires = "cols")]
+        rows: Option<u16>,
+        /// The harness profile (ADR 0022).
+        #[arg(long, default_value = "generic")]
+        profile: String,
+        /// A display name for the host's clients.
+        #[arg(long)]
+        name: Option<String>,
+        /// Seconds the last screen stays after the program ends.
+        #[arg(long, default_value_t = 600)]
+        linger: u64,
+        /// The command line, after `--`.
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+    /// List hosts, running or ended.
+    Ls {
+        /// Print JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print a host's screen as plain text.
+    Peek {
+        /// The host's id.
+        id: String,
+    },
+    /// Take a host over in this terminal; Ctrl+Q comes back.
+    Attach {
+        /// The host's id.
+        id: String,
+    },
+    /// Ask a host to end its program.
+    Stop {
+        /// The host's id.
+        id: String,
+    },
+    /// Show every running host as a wall of live screens.
+    Wall {
+        /// Only these hosts, by id, separated by commas.
+        #[arg(long, value_delimiter = ',')]
+        ids: Vec<String>,
+    },
+    /// Run a host in this process. `spawn` starts this; not for people.
+    #[command(hide = true)]
+    Run {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        cwd: std::path::PathBuf,
+        #[arg(long)]
+        cols: u16,
+        #[arg(long)]
+        rows: u16,
+        #[arg(long)]
+        profile: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        linger: u64,
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 enum DaemonCommand {
     /// Run the daemon in the foreground.
@@ -182,6 +282,16 @@ enum DaemonCommand {
     Stop,
     /// Show whether the daemon runs, and its counters.
     Status,
+    /// Start the daemon at login (a launchd agent on macOS, a systemd user
+    /// unit on Linux), so that agents a reboot interrupted come back on
+    /// their own.
+    Install {
+        /// Only print the file and where it would go.
+        #[arg(long)]
+        print: bool,
+    },
+    /// Stop starting the daemon at login.
+    Uninstall,
 }
 
 #[derive(Debug, Subcommand)]
@@ -300,6 +410,8 @@ fn main() -> ExitCode {
             ConfigCommand::Init => cmd::config::init(),
             ConfigCommand::Check => cmd::config::check(),
         }),
+        // Hosts run without the async runtime: a host is plain threads.
+        Some(Command::Host(args)) => report(host(args)),
         Some(command) => async_main(command),
         None => block_on(cmd::interface::run()),
     }
@@ -327,11 +439,14 @@ fn async_main(command: Command) -> ExitCode {
             Command::Daemon(DaemonCommand::Start) => cmd::daemon::start().await,
             Command::Daemon(DaemonCommand::Stop) => cmd::daemon::stop().await,
             Command::Daemon(DaemonCommand::Status) => cmd::daemon::status().await,
+            Command::Daemon(DaemonCommand::Install { print }) => cmd::login::install(print),
+            Command::Daemon(DaemonCommand::Uninstall) => cmd::login::uninstall(),
             Command::Ls { json } => cmd::ls::run(json).await,
             Command::Attach { agent } => cmd::agent::attach(&agent).await,
             Command::Logs { agent } => cmd::agent::logs(&agent).await,
             Command::Diff { agent, full } => cmd::agent::diff(&agent, full).await,
             Command::Stop { agent } => cmd::agent::stop(&agent).await,
+            Command::Adopt { agent } => cmd::agent::adopt(&agent).await,
             Command::Forget { agent } => cmd::agent::forget(&agent).await,
             Command::Tidy {
                 agent,
@@ -350,6 +465,7 @@ fn async_main(command: Command) -> ExitCode {
                 base,
                 model,
                 name,
+                harness,
             } => {
                 cmd::spawn::run(cmd::spawn::SpawnRequest {
                     repo,
@@ -358,6 +474,7 @@ fn async_main(command: Command) -> ExitCode {
                     base,
                     model,
                     name,
+                    harness,
                 })
                 .await
             }
@@ -377,11 +494,67 @@ fn async_main(command: Command) -> ExitCode {
                 result => result.map_err(Into::into),
             },
             Command::Demo { theme } => cmd::demo::run(theme.as_deref()).await,
-            Command::Hook { .. } | Command::Config(_) => {
+            Command::Hook { .. } | Command::Config(_) | Command::Host(_) => {
                 unreachable!("these commands run without the async runtime")
             }
         }
     })
+}
+
+fn host(args: HostArgs) -> anyhow::Result<()> {
+    let dir = match args.dir {
+        Some(dir) => volee_host::HostDir::new(dir),
+        None => cmd::host::host_dir()?,
+    };
+    match args.command {
+        HostCommand::Spawn {
+            id,
+            cwd,
+            cols,
+            rows,
+            profile,
+            name,
+            linger,
+            command,
+        } => cmd::host::spawn(
+            &dir,
+            cmd::host::Spawn {
+                id,
+                cwd,
+                size: cols.zip(rows),
+                profile,
+                name,
+                linger,
+                command,
+            },
+        ),
+        HostCommand::Ls { json } => cmd::host::list(&dir, json),
+        HostCommand::Peek { id } => cmd::host::peek(&dir, &id),
+        HostCommand::Attach { id } => cmd::host::attach(&dir, &id),
+        HostCommand::Stop { id } => cmd::host::stop(&dir, &id),
+        HostCommand::Wall { ids } => cmd::host::wall(&dir, &ids),
+        HostCommand::Run {
+            id,
+            cwd,
+            cols,
+            rows,
+            profile,
+            name,
+            linger,
+            command,
+        } => cmd::host::run(volee_host::HostConfig {
+            id,
+            dir,
+            command,
+            cwd,
+            env: Vec::new(),
+            size: volee_host::Size { cols, rows },
+            profile,
+            name,
+            scrollback: 1_000,
+            linger: std::time::Duration::from_secs(linger),
+        }),
+    }
 }
 
 async fn mission(command: MissionCommand) -> anyhow::Result<()> {

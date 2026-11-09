@@ -23,7 +23,9 @@ tracing.workspace = true
 ulid.workspace = true
 unicode-width.workspace = true
 volee-core.workspace = true
+volee-host.workspace = true
 volee-proto.workspace = true
+volee-term.workspace = true
 vt100.workspace = true
 
 [dev-dependencies]

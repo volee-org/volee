@@ -5,7 +5,10 @@ pub(crate) mod config;
 pub(crate) mod daemon;
 pub(crate) mod demo;
 pub(crate) mod hook;
+
+pub(crate) mod host;
 pub(crate) mod interface;
+pub(crate) mod login;
 pub(crate) mod ls;
 pub(crate) mod mcp;
 pub(crate) mod mission;

@@ -267,6 +267,10 @@ actions! {
     FullScreen => "full-screen",
     /// Forget the selected agent: stop listing it, after asking.
     Forget => "forget",
+    /// Move the selected agent's conversation into a volee host.
+    Adopt => "adopt",
+    /// Show the agents in volee hosts as a wall of live screens.
+    ShowWall => "show-wall",
     /// Move down.
     Down => "down",
     /// Move up.
@@ -688,6 +692,8 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &[ch('n')], A::NewAgent, "launch an agent in a new worktree", None),
         bind(C::Global, &[ch('N')], A::NewMission, "create a mission, which launches its coordinator", None),
         bind(C::Global, &[ch('F')], A::Forget, "forget the selected agent: stop listing it (asks first)", None),
+        bind(C::Global, &[ch('A')], A::Adopt, "adopt the selected agent into a volee host, so that you can take it over", None),
+        bind(C::Global, &[ch('5')], A::ShowWall, "show the agents in volee hosts as a wall of live screens", None),
         bind(C::Global, &[key(K::Tab)], A::NextPane, "focus the next panel", None),
         bind(C::Global, &[key(K::BackTab)], A::PreviousPane, "focus the previous panel", None),
         bind(C::Global, &[ch('1')], A::ShowHierarchy, "show the hierarchy", None),

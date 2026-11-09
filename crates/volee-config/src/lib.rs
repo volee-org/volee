@@ -152,6 +152,10 @@ pub struct AgentDefaults {
     pub permission_mode: Option<PermissionMode>,
     /// How long an idle agent's hook waits for messages, in seconds.
     pub wake_timeout: u64,
+    /// Whether agents a reboot interrupted come back on their own in new
+    /// volee hosts when the daemon starts (ADR 0024); on unless set to
+    /// `false`.
+    pub resume_after_reboot: bool,
 }
 
 impl Default for AgentDefaults {
@@ -160,6 +164,7 @@ impl Default for AgentDefaults {
             model: None,
             permission_mode: None,
             wake_timeout: 3_600,
+            resume_after_reboot: true,
         }
     }
 }

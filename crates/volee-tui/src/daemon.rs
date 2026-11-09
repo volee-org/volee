@@ -209,6 +209,14 @@ impl Source for DaemonSource {
             .map_err(|error| failure(error, "this volee daemon cannot forget agents"))
     }
 
+    async fn adopt(&self, agent: AgentId) -> Result<(), SourceError> {
+        self.client
+            .call::<volee_proto::methods::Adopt>(AgentParams { agent })
+            .await
+            .map(|_| ())
+            .map_err(|error| failure(error, "this volee daemon cannot adopt agents"))
+    }
+
     async fn spawn(&self, request: SpawnRequest) -> Result<AgentId, SourceError> {
         let params = SpawnParams {
             repo: request.repo,
@@ -221,6 +229,7 @@ impl Source for DaemonSource {
             mission: None,
             model: request.model,
             name: None,
+            harness: request.harness,
         };
         self.client
             .call::<Spawn>(params)

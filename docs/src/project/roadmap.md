@@ -50,21 +50,38 @@ deliberately out of scope. Dates are targets, not promises.
 | Wide sessions | The preview of a Claude Code session wider than 200 columns replays without garbling, and the end of its conversation stays in view | Done: v0.5.1 |
 | Long lines | The full-screen view wraps lines wider than the window; the preview keeps cutting them | Done: v0.6.0 |
 
+## 0.8: a host for every agent
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| Hosts | Every agent volee launches runs in a volee host that holds its terminal and its exact screen, emulated by libghostty-vt, and survives the interface, the daemon and the terminal that started it ([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md), [ADR 0020](../adr/0020-libghostty-vt-emulates-terminals.md)) | Done |
+| Take over and watch | `a` and `volee attach` take an agent over from any terminal, `Ctrl+Q` comes back; the preview and `z` show the exact screen without resizing the agent ([ADR 0021](../adr/0021-take-over-watch-and-the-wall-of-screens.md)) | Done |
+| Wall of screens | `5` shows the hosted agents of the list as tiles of live screens; `volee host wall` opens it from a shell | Done |
+| OpenCode | `volee spawn --harness opencode` and the launch dialog launch OpenCode agents in hosts, follow their state from their screen and resume them ([ADR 0022](../adr/0022-harness-profiles.md)) | Done |
+| Every agent on the machine | OpenCode agents started elsewhere are found in the process table; agents volee does not host are read only, and `A` or `volee adopt` moves one into a host ([ADR 0023](../adr/0023-every-agent-on-the-machine.md)) | Done |
+| Back after a reboot | The daemon resumes the agents a reboot interrupted, in new hosts; `volee daemon install` starts it at login ([ADR 0024](../adr/0024-agents-come-back-after-a-reboot.md)) | Done |
+| Hosts by hand | `volee host spawn`, `ls`, `peek`, `attach`, `stop` and `wall` run any command line in a host, without the daemon | Done |
+| Mirrors removed | The 0.7.0 previews of background sessions read from tuios panes by their title are gone; tuios and tmux still show the sessions started by hand in their panes | Done |
+| Release | v0.8.0 | Next |
+
 ## Later
 
 - A location adapter for Zellij (jump to a pane-hosted agent); tuios and tmux
   have one ([ADR 0015](../adr/0015-tuios-location-adapter.md)).
-- Other harnesses: Codex CLI, Gemini CLI (discovery and messaging first).
-  Agents of any MCP-capable harness can already
-  [join](../guide/other-harnesses.md) through `volee mcp --join`; discovering
-  their sessions and handing them messages would come with adapters.
+- Profiles for Codex CLI, Gemini CLI, Grok Build and others, each measured on
+  the real program ([ADR 0022](../adr/0022-harness-profiles.md)). Until
+  then, `volee host spawn` runs any of them in a host, and agents of any
+  MCP-capable harness can [join](../guide/other-harnesses.md) through
+  `volee mcp --join`.
+- Finding agents of harnesses other than OpenCode in the process table.
 - Leads that start missions and workers themselves.
-- Adopting and messaging sessions started outside volee.
+- Messaging sessions started outside volee.
 - A Homebrew tap and a crates.io release.
 
 ## Not planned
 
-- Owning agent processes or terminals (see [ADR 0002](../adr/0002-harness-owns-processes.md)).
+- Running agents inside tmux or another multiplexer: hosts hold their
+  terminals ([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md)).
 - Windows support, until the harnesses and Unix-socket replacements make it
   reasonable.
 - A web or desktop interface.

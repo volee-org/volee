@@ -237,6 +237,10 @@ fn run_request<Src: Source>(
             let result = source.forget(agent).await;
             Msg::Forgot { name, result }
         }),
+        Effect::Adopt { agent, name } => spawn(results, async move {
+            let result = source.adopt(agent).await;
+            Msg::Adopted { name, result }
+        }),
         // The loop runs these itself.
         Effect::Quit
         | Effect::TakeOver { .. }

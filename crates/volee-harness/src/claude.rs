@@ -47,7 +47,7 @@ use crate::error::{HarnessError, ParseError};
 use crate::harness::{Capabilities, Harness, WorktreeRemoval};
 use crate::hooks;
 use crate::runner::{CommandRunner, Invocation, Output, RunError, SystemRunner};
-use crate::spec::{Completion, SpawnSpec, Spawned};
+use crate::spec::{Completion, HostLaunch, SpawnSpec, Spawned};
 use crate::version::Version;
 
 /// The oldest Claude Code volee runs agents with: the version every behaviour
@@ -261,6 +261,40 @@ impl<R: CommandRunner> ClaudeCode<R> {
             })
     }
 
+    /// Starts `claude <args>` interactive in a volee host: runs `volee host
+    /// spawn`, which starts the host detached from every terminal and returns
+    /// once the host answers on its socket.
+    fn launch_in_host(
+        &self,
+        host: &HostLaunch,
+        claude_args: Vec<OsString>,
+        spec: &SpawnSpec,
+    ) -> Result<(), HarnessError> {
+        let mut args: Vec<OsString> = vec!["host".into(), "spawn".into()];
+        let mut option = |name: &str, value: OsString| {
+            args.push(name.into());
+            args.push(value);
+        };
+        option("--dir", host.dir.clone().into_os_string());
+        option("--id", host.id.clone().into());
+        option("--cwd", spec.cwd.clone().into_os_string());
+        option("--cols", host.cols.to_string().into());
+        option("--rows", host.rows.to_string().into());
+        option("--profile", "claude-code".into());
+        if !host.name.trim().is_empty() {
+            option("--name", host.name.clone().into());
+        }
+        args.push("--".into());
+        args.push(self.program.clone().into_os_string());
+        args.extend(claude_args);
+        let command = format!("{} host spawn --id {}", host.volee_bin.display(), host.id);
+        let invocation = Invocation::new(host.volee_bin.clone(), self.timeouts.launch)
+            .env_remove(SESSION_VARIABLES.iter().copied())
+            .args(args)
+            .cwd(&spec.cwd);
+        self.run(&command, &invocation).map(drop)
+    }
+
     /// Runs `claude --bg` and reads the session it reports.
     fn launch(
         &self,
@@ -340,6 +374,15 @@ impl<R: CommandRunner> Harness for ClaudeCode<R> {
     /// [`HarnessError::UntrustedDirectory`].
     fn spawn(&self, spec: &SpawnSpec) -> Result<Spawned, HarnessError> {
         spec.validate()?;
+        if let Some(host) = &spec.host {
+            let session = new_session_id();
+            self.launch_in_host(host, launch::host_args(None, Some(&session), spec), spec)?;
+            return Ok(Spawned {
+                handle: session,
+                name: Some(spec.name.clone()).filter(|name| !name.trim().is_empty()),
+                origin: SessionOrigin::Started,
+            });
+        }
         let background = self.launch(&self.describe("--bg"), launch::args(None, spec), spec)?;
         Ok(Spawned {
             handle: background.id,
@@ -357,6 +400,16 @@ impl<R: CommandRunner> Harness for ClaudeCode<R> {
     fn resume(&self, session: &SessionKey, spec: &SpawnSpec) -> Result<Spawned, HarnessError> {
         let id = session_uuid(session)?;
         spec.validate()?;
+        if let Some(host) = &spec.host {
+            // Without --fork-session, an interactive resume continues the
+            // same session.
+            self.launch_in_host(host, launch::host_args(Some(id), None, spec), spec)?;
+            return Ok(Spawned {
+                handle: id.to_owned(),
+                name: Some(spec.name.clone()).filter(|name| !name.trim().is_empty()),
+                origin: SessionOrigin::Resumed,
+            });
+        }
         let command = self.describe(&format!("--bg --resume={id}"));
         let background = self.launch(&command, launch::args(Some(id), spec), spec)?;
         let origin = if id.starts_with(&background.id) {
@@ -509,6 +562,24 @@ fn handle(session: &ListedSession) -> Result<&str, HarnessError> {
             id: handle.to_owned(),
         })
     }
+}
+
+/// A new random session id in the UUID form Claude Code's `--session-id`
+/// requires (version 4, RFC 4122 variant).
+fn new_session_id() -> String {
+    let mut bits = ulid::Ulid::generate().0;
+    // Version 4 in bits 76-79, variant 10 in bits 62-63.
+    bits = (bits & !(0xf << 76)) | (0x4 << 76);
+    bits = (bits & !(0x3 << 62)) | (0x2 << 62);
+    let hex = format!("{bits:032x}");
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    )
 }
 
 /// The full session UUID of a Claude Code session, which `--resume` needs: a

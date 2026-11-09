@@ -380,6 +380,10 @@ pub struct SpawnParams {
     pub model: Option<String>,
     /// A display name; derived from the repository and branch when absent.
     pub name: Option<String>,
+    /// The harness profile (ADR 0022): `claude-code` when absent, or
+    /// `opencode`.
+    #[serde(default)]
+    pub harness: Option<String>,
 }
 
 /// The result of [`Spawn`].
@@ -505,6 +509,17 @@ method!(
     /// resumed. Refused for agents volee did not launch (ADR 0011).
     Stop,
     "agents.stop",
+    AgentParams,
+    Empty
+);
+
+method!(
+    /// Moves an agent's conversation into a volee host (ADR 0023): stops its
+    /// background session if it runs, then resumes it in a host. Refused for
+    /// an agent that runs in someone's terminal, which must be quit there
+    /// first.
+    Adopt,
+    "agents.adopt",
     AgentParams,
     Empty
 );
@@ -756,6 +771,7 @@ mod tests {
             Diff::NAME,
             Attach::NAME,
             Stop::NAME,
+            Adopt::NAME,
             SendMessage::NAME,
             MarkRead::NAME,
             HookIngest::NAME,

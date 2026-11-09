@@ -56,13 +56,20 @@ pub(crate) enum NoSession {
 }
 
 impl Sessions {
-    /// Records a listing, which replaces the previous one.
+    /// Records a listing, which replaces the previous one of its harness.
     pub(crate) fn record(&mut self, listing: &Listing) {
-        self.listed = listing
-            .sessions
-            .iter()
-            .map(|session| (session.key.clone(), session.clone()))
-            .collect();
+        self.listed.retain(|key, _| key.harness != listing.harness);
+        self.listed.extend(
+            listing
+                .sessions
+                .iter()
+                .map(|session| (session.key.clone(), session.clone())),
+        );
+    }
+
+    /// A session as the last listing showed it.
+    pub(crate) fn listed(&self, key: &SessionKey) -> Option<&ListedSession> {
+        self.listed.get(key)
     }
 
     /// The session to act on for `agent`: its current session as the last
@@ -81,7 +88,9 @@ impl Sessions {
                 Err(NoSession::OwnTerminal)
             };
         }
-        if let Some(handle) = expected {
+        // A launch in a host is no background session: its expected handle
+        // only keeps it from looking stalled until its first hook.
+        if let Some(handle) = expected.filter(|_| agent.location.host().is_none()) {
             let key = current.cloned().unwrap_or_else(|| SessionKey {
                 harness: agent.harness.clone(),
                 id: handle.to_owned(),
@@ -189,19 +198,37 @@ async fn pane(shared: &Arc<Shared>, agent: AgentId) -> Option<Pane> {
     })
 }
 
-/// The pane that showed the background session of `agent` at the last
-/// discovery round, when one did (ADR 0018).
-async fn mirror(shared: &Arc<Shared>, agent: AgentId) -> Option<(Arc<dyn Multiplexer>, String)> {
-    let key = {
-        let state = shared.state.lock().await;
-        state
-            .registry()
-            .agent(agent)?
-            .current_session()?
-            .key
-            .clone()
-    };
-    shared.panes.mirror_of(&key)
+/// The volee host an agent runs in (ADR 0019).
+struct Hosted {
+    socket: std::path::PathBuf,
+    id: String,
+    name: String,
+}
+
+/// The host `agent` runs in, if it runs in one.
+async fn hosted(shared: &Arc<Shared>, agent: AgentId) -> Option<Hosted> {
+    let state = shared.state.lock().await;
+    let record = state.registry().agent(agent)?;
+    let id = record.location.host()?.to_owned();
+    Some(Hosted {
+        socket: crate::launch::hosts_dir(shared).join(format!("{id}.sock")),
+        id,
+        name: record.name.clone(),
+    })
+}
+
+/// How a client of the daemon names itself to hosts.
+const HOST_CLIENT: &str = concat!("volee daemon ", env!("CARGO_PKG_VERSION"));
+
+/// What a person reads before taking over an agent in a host.
+const HOST_ATTACH_HINT: &str = "Press Ctrl+Q to come back; the agent keeps running.";
+
+/// A background session volee does not host: shown, never driven (ADR 0023).
+fn background_refusal(name: &str) -> DaemonError {
+    DaemonError::Refused(format!(
+        "{name} runs as a Claude Code background session, which volee only shows: press A to \
+         adopt it into a volee host, then take it over"
+    ))
 }
 
 /// A multiplexer failure about the pane of the agent `name`, said for
@@ -222,6 +249,24 @@ pub(crate) async fn preview(
     shared: &Arc<Shared>,
     params: AgentParams,
 ) -> Result<PreviewText, DaemonError> {
+    // An agent in a host: the host's exact screen (ADR 0019).
+    if let Some(Hosted { socket, name, .. }) = hosted(shared, params.agent).await {
+        let read = blocking(move || {
+            volee_host::snapshot(&socket, HOST_CLIENT, std::time::Duration::from_secs(3))
+        })
+        .await?;
+        return match read {
+            Ok((_, screen)) => Ok(PreviewText {
+                screen: String::from_utf8_lossy(&screen).into_owned(),
+            }),
+            Err(_) => match setup_screen(shared, params.agent).await {
+                Some(screen) => Ok(PreviewText { screen }),
+                None => Err(DaemonError::Unavailable(format!(
+                    "{name} is not running: its volee host is gone"
+                ))),
+            },
+        };
+    }
     if let Some(Pane {
         adapter,
         target,
@@ -232,14 +277,6 @@ pub(crate) async fn preview(
         let screen = blocking(move || reader.capture(&target))
             .await?
             .map_err(|error| pane_error(&name, adapter.as_ref(), &error))?;
-        return Ok(PreviewText { screen });
-    }
-    // A background session that a pane shows (ADR 0018): the pane holds its
-    // whole screen, where the harness's replay misses what was drawn before
-    // it starts. Should the pane not answer, the replay still does.
-    if let Some((adapter, target)) = mirror(shared, params.agent).await
-        && let Ok(Ok(screen)) = blocking(move || adapter.capture(&target)).await
-    {
         return Ok(PreviewText { screen });
     }
     let Target {
@@ -320,6 +357,42 @@ pub(crate) async fn attach(
     shared: &Arc<Shared>,
     params: AgentParams,
 ) -> Result<AttachCommand, DaemonError> {
+    // An agent in a host: `volee host attach`, which the client runs in its
+    // own terminal; Ctrl+Q comes back (ADR 0021).
+    if let Some(Hosted { id, name, .. }) = hosted(shared, params.agent).await {
+        if !crate::launch::host_runs(shared, &id) {
+            return Err(DaemonError::Refused(format!(
+                "{name} is not running: send it a message to resume it in a new volee host"
+            )));
+        }
+        let volee = shared.volee_bin.clone().ok_or_else(|| {
+            DaemonError::Unavailable(format!("this daemon cannot take {name} over"))
+        })?;
+        return Ok(AttachCommand {
+            program: volee.display().to_string(),
+            args: vec![
+                "host".to_owned(),
+                "--dir".to_owned(),
+                crate::launch::hosts_dir(shared).display().to_string(),
+                "attach".to_owned(),
+                id,
+            ],
+            cwd: None,
+            env_remove: Vec::new(),
+            hint: HOST_ATTACH_HINT.to_owned(),
+            focus: None,
+        });
+    }
+    {
+        let state = shared.state.lock().await;
+        // A daemon that hosts its agents only shows background sessions.
+        if let Some(record) = state.registry().agent(params.agent)
+            && record.location == Location::Background
+            && shared.hosts
+        {
+            return Err(background_refusal(&record.name));
+        }
+    }
     if let Some(Pane {
         adapter,
         target,
@@ -377,6 +450,22 @@ pub(crate) async fn attach(
 /// An agent that is not running is only held. volee stops only the agents it
 /// launched (ADR 0011).
 pub(crate) async fn stop(shared: &Arc<Shared>, params: AgentParams) -> Result<Empty, DaemonError> {
+    // An agent in a host: its host ends the program like a closed terminal.
+    if let Some(Hosted {
+        socket, name, id, ..
+    }) = hosted(shared, params.agent).await
+    {
+        hold(shared, params.agent).await?;
+        // Whatever the state says: a host that runs is stopped.
+        if crate::launch::host_runs(shared, &id) {
+            blocking(move || volee_host::stop(&socket, HOST_CLIENT))
+                .await?
+                .map_err(|error| {
+                    DaemonError::Unavailable(format!("cannot reach the host of {name}: {error}"))
+                })?;
+        }
+        return Ok(Empty {});
+    }
     harness(shared)?;
     let (name, launched_by, live) = {
         let state = shared.state.lock().await;

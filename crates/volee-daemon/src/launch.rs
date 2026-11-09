@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use volee_core::harness::HarnessKind;
+use volee_core::harness::{HarnessKind, SessionKey};
 use volee_core::mission::{Mission, MissionKind};
 use volee_core::role::{LaunchedBy, Role};
 use volee_core::state::AgentState;
@@ -60,6 +60,9 @@ pub(crate) async fn spawn(
     shared: &Arc<Shared>,
     params: SpawnParams,
 ) -> Result<Spawned, DaemonError> {
+    if is_opencode(&params)? {
+        return spawn_opencode(shared, params).await;
+    }
     let harness = harness(shared)?;
     let git = git(shared)?;
     let task = params.task.trim().to_owned();
@@ -107,6 +110,7 @@ pub(crate) async fn spawn(
         ..Workspace::at(&worktree)
     };
     let _in_flight = shared.begin_launch(agent);
+    let host = host_launch(shared, agent, &name);
     register(
         shared,
         agent,
@@ -116,6 +120,8 @@ pub(crate) async fn spawn(
         mission.as_ref().map(|m| m.id),
         workspace,
         slot,
+        location_of(host.as_ref()),
+        HarnessKind::ClaudeCode,
     )
     .await?;
     let setup_log = prepare(shared, agent, &target, &worktree, &params.branch).await?;
@@ -143,6 +149,7 @@ pub(crate) async fn spawn(
             &params.branch,
         )),
         worktree: Some(worktree_name),
+        host,
     };
     start_session(shared, &harness, agent, spec)
         .await
@@ -152,6 +159,140 @@ pub(crate) async fn spawn(
         worktree: worktree.display().to_string(),
         setup_log,
     })
+}
+
+/// Whether a launch asks for OpenCode rather than Claude Code (ADR 0022).
+fn is_opencode(params: &SpawnParams) -> Result<bool, DaemonError> {
+    match params.harness.as_deref() {
+        None | Some("claude-code" | "claude") => Ok(false),
+        Some(volee_harness::opencode::PROFILE) => Ok(true),
+        Some(other) => Err(DaemonError::InvalidParams(format!(
+            "unknown harness {other}: volee launches claude-code and opencode"
+        ))),
+    }
+}
+
+/// The events that record how an OpenCode launch went.
+fn opencode_started(
+    agent: AgentId,
+    session: String,
+    started: &Result<(), volee_harness::HarnessError>,
+    now: volee_core::time::Timestamp,
+) -> Vec<Event> {
+    match started {
+        Ok(()) => vec![
+            Event::new(
+                now,
+                EventKind::SessionLinked {
+                    agent,
+                    session: SessionKey {
+                        harness: volee_harness::opencode::kind(),
+                        id: session,
+                    },
+                    origin: volee_core::harness::SessionOrigin::Started,
+                },
+            ),
+            Event::new(
+                now,
+                EventKind::StateChanged {
+                    agent,
+                    state: AgentState::Working,
+                    detail: None,
+                },
+            ),
+        ],
+        Err(error) => vec![Event::new(
+            now,
+            EventKind::StateChanged {
+                agent,
+                state: AgentState::Failed,
+                detail: Some(format!("launch failed: {error}")),
+            },
+        )],
+    }
+}
+
+/// Launches an OpenCode agent (ADR 0022): a worktree like any agent's, then
+/// `opencode --session <id> --prompt <task>` in a volee host, in the
+/// worktree. OpenCode takes no hooks on its command line: its state comes
+/// from its screen, and messages reach it when volee resumes it.
+async fn spawn_opencode(shared: &Arc<Shared>, params: SpawnParams) -> Result<Spawned, DaemonError> {
+    use volee_harness::opencode;
+    let git = git(shared)?;
+    let task = params.task.trim().to_owned();
+    if task.is_empty() {
+        return Err(DaemonError::InvalidParams("an agent needs a task".into()));
+    }
+    let (mission, slot) = context(shared, params.parent, params.mission).await?;
+    let target = resolve(shared, &git, &params.repo, params.base.as_deref()).await?;
+    let agent = shared.state.lock().await.new_agent_id();
+    let name = params
+        .name
+        .clone()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| format!("{}-{}", target.name, slug(&params.branch)));
+    let host = host_launch(shared, agent, &name).ok_or_else(|| {
+        DaemonError::Unavailable(
+            "OpenCode agents run in volee hosts, which this daemon does not start".into(),
+        )
+    })?;
+    let worktree_name = slug(&params.branch);
+    let worktree = target.root.join(IN_REPO_WORKTREES).join(&worktree_name);
+    let start_commit = make_worktree(shared, &git, &target, &params.branch, &worktree).await?;
+    exclude_worktrees(&target.root);
+    let workspace = Workspace {
+        repo: Some(target.name.clone()),
+        repo_root: Some(target.root.clone()),
+        worktree: Some(worktree.clone()),
+        branch: Some(params.branch.clone()),
+        base: Some(target.base.clone()),
+        start_commit: Some(start_commit),
+        ..Workspace::at(&worktree)
+    };
+    let _in_flight = shared.begin_launch(agent);
+    register(
+        shared,
+        agent,
+        &name,
+        params.role,
+        params.parent,
+        mission.as_ref().map(|m| m.id),
+        workspace,
+        slot,
+        location_of(Some(&host)),
+        opencode::kind(),
+    )
+    .await?;
+    let setup_log = prepare(shared, agent, &target, &worktree, &params.branch).await?;
+    let session = opencode::new_session_id();
+    let auto = permission_mode(shared) == PermissionMode::Auto;
+    let started = {
+        let (session, worktree) = (session.clone(), worktree.clone());
+        blocking(move || {
+            let runner = volee_harness::SystemRunner;
+            opencode::launch_in_host(
+                &runner,
+                &host,
+                &worktree,
+                opencode::args(&session, Some(&task), auto),
+                Duration::from_secs(60),
+            )
+        })
+        .await?
+    };
+    {
+        let mut state = shared.state.lock().await;
+        let now = state.now();
+        state.commit(opencode_started(agent, session, &started, now))?;
+    }
+    match started {
+        Ok(()) => Ok(Spawned {
+            agent,
+            worktree: worktree.display().to_string(),
+            setup_log,
+        }),
+        Err(error) => Err(kept(error.into(), &target.root, &worktree, &params.branch)),
+    }
 }
 
 /// Runs the repository's setup commands in the new worktree, if it has any
@@ -210,6 +351,7 @@ pub(crate) async fn coordinator(
         ..Workspace::at(&target.root)
     };
     let _in_flight = shared.begin_launch(agent);
+    let host = host_launch(shared, agent, &name);
     register(
         shared,
         agent,
@@ -219,6 +361,8 @@ pub(crate) async fn coordinator(
         Some(mission),
         workspace,
         None,
+        location_of(host.as_ref()),
+        HarnessKind::ClaudeCode,
     )
     .await?;
     let spec = SpawnSpec {
@@ -238,6 +382,7 @@ pub(crate) async fn coordinator(
             .to_vec(),
         append_system_prompt: Some(coordinator_instructions(&record)),
         worktree: None,
+        host,
     };
     start_session(shared, &harness, agent, spec).await?;
     Ok(agent)
@@ -563,6 +708,57 @@ async fn in_mission(
     false
 }
 
+/// The terminal size of a new host, before anyone takes the agent over: wide
+/// enough for Claude Code's layout, small enough for previews.
+const HOST_COLS: u16 = 160;
+/// See [`HOST_COLS`].
+const HOST_ROWS: u16 = 45;
+
+/// The host a new session of `agent` runs in (ADR 0019), or `None` when the
+/// daemon does not know its own binary (tests): the session then runs in the
+/// background, as before hosts. Each launch gets a host of its own.
+pub(crate) fn host_launch(
+    shared: &Shared,
+    agent: AgentId,
+    name: &str,
+) -> Option<volee_harness::HostLaunch> {
+    if !shared.hosts {
+        return None;
+    }
+    let volee_bin = shared.volee_bin.clone()?;
+    let suffix = ulid::Ulid::generate().to_string().to_lowercase();
+    Some(volee_harness::HostLaunch {
+        volee_bin,
+        dir: hosts_dir(shared),
+        id: format!("{agent}-{}", &suffix[suffix.len() - 6..]),
+        name: name.to_owned(),
+        cols: HOST_COLS,
+        rows: HOST_ROWS,
+    })
+}
+
+/// Whether the host `id` still runs its program: it answers on its socket
+/// and has recorded no end. A conversation whose host runs must never get a
+/// second host.
+pub(crate) fn host_runs(shared: &Shared, id: &str) -> bool {
+    let dir = hosts_dir(shared);
+    std::os::unix::net::UnixStream::connect(dir.join(format!("{id}.sock"))).is_ok()
+        && volee_host::HostRecord::read(&dir.join(format!("{id}.json")))
+            .is_ok_and(|record| record.exit.is_none())
+}
+
+/// Where hosts live: `<state>/hosts`.
+pub(crate) fn hosts_dir(shared: &Shared) -> PathBuf {
+    shared.paths.state_dir.join("hosts")
+}
+
+/// Where a session started with `host` runs.
+pub(crate) fn location_of(host: Option<&volee_harness::HostLaunch>) -> Location {
+    host.map_or(Location::Background, |host| Location::Host {
+        id: host.id.clone(),
+    })
+}
+
 /// Records the agent before its session exists. Its mission `slot`, if
 /// any, is released under the same lock, once the agent counts as launched.
 #[allow(clippy::too_many_arguments)] // Each is one fact of the registration.
@@ -575,6 +771,8 @@ async fn register(
     mission: Option<MissionId>,
     workspace: Workspace,
     slot: Option<Slot>,
+    location: Location,
+    harness: HarnessKind,
 ) -> Result<(), DaemonError> {
     let mut state = shared.state.lock().await;
     let now = state.now();
@@ -584,12 +782,12 @@ async fn register(
             agent,
             name: name.to_owned(),
             role,
-            harness: HarnessKind::ClaudeCode,
+            harness,
             launched_by: parent.map_or(LaunchedBy::Human, LaunchedBy::Agent),
             parent,
             mission,
             workspace,
-            location: Location::Background,
+            location,
         },
     )])?;
     drop(slot);

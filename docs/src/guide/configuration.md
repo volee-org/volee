@@ -42,8 +42,9 @@ git = "gitui"
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `model` | the harness default | Model for the agents volee launches, unless the repository sets one. |
-| `permission_mode` | `manual` | `acceptEdits`, `auto`, `manual`, `dontAsk` or `plan`, passed to Claude Code with every launch and resume. `manual` asks before every tool that needs permission: a background agent then waits until you take it over and answer. volee never passes `bypassPermissions`, and never leaves the mode to your own Claude Code default. |
+| `permission_mode` | `manual` | `acceptEdits`, `auto`, `manual`, `dontAsk` or `plan`, passed to Claude Code with every launch and resume. `manual` asks before every tool that needs permission: the agent then waits until you take it over and answer. volee never passes `bypassPermissions`, and never leaves the mode to your own Claude Code default. OpenCode agents get `--auto` when the mode is `auto`, and nothing otherwise. |
 | `wake_timeout` | `3600` | Seconds an idle agent stays reachable by the wake-up hook. Afterwards, a message resumes the session instead. |
+| `resume_after_reboot` | `true` | Resume, in new volee hosts, the agents a reboot interrupted, the first time the daemon starts afterwards ([after a reboot](cli.md#after-a-reboot)). `false`: they show as stopped, and your next message to one resumes it. |
 
 ## Worktrees
 
@@ -52,8 +53,8 @@ volee creates each agent's worktree inside its repository, at
 branch with every character other than a letter, a digit, `.`, `_` or `-`
 replaced by `-`: `feat/invoices` becomes `feat-invoices`. volee adds that
 folder to the repository's local exclude file so `git status` stays clean.
-The location is not configurable: Claude Code only trusts a background
-session started from a repository you trust, and never a worktree elsewhere
+The location is not configurable: Claude Code only trusts a session started
+from a repository you trust, and never a worktree elsewhere
 (see [ADR 0013](../adr/0013-worktrees-live-in-their-repository.md)). Run
 `claude` once in each repository you list below and accept its trust prompt.
 

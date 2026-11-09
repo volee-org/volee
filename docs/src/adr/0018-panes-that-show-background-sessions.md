@@ -1,6 +1,6 @@
 # 0018. A pane that shows a background session is its preview
 
-- Status: Accepted
+- Status: Superseded by [0023](0023-every-agent-on-the-machine.md)
 - Date: 2026-11-08
 
 ## Context

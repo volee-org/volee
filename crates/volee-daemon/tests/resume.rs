@@ -74,6 +74,7 @@ fn start() -> Running {
         },
         volee_bin: Some(PathBuf::from("/opt/volee/bin/volee")),
         multiplexers: Vec::new(),
+        hosts: false,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -128,6 +129,7 @@ async fn running_worker(daemon: &Running) -> AgentId {
             mission: None,
             model: None,
             name: Some("invoices".into()),
+            harness: None,
         })
         .await
         .unwrap();
