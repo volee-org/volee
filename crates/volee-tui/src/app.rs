@@ -1409,7 +1409,9 @@ fn on_window_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -
                     effects.push(Effect::PrepareTakeOver(agent));
                 }
                 Ok(()) => model.notify(
-                    format!("Adopted {name}: it continues in a volee host. Press a to take it over."),
+                    format!(
+                        "Adopted {name}: it continues in a volee host. Press a to take it over."
+                    ),
                     false,
                 ),
                 Err(error) => {
@@ -1474,7 +1476,9 @@ fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool
     changed
 }
 
-fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
+/// A key while a question waits on the bottom line; returns whether a
+/// question took it.
+fn on_prompt(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) -> bool {
     match model.prompt {
         Some(Prompt::Jump) => {
             model.prompt = None;
@@ -1484,7 +1488,7 @@ fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
                     None => model.notify(format!("No agent has the letter {letter}."), false),
                 }
             }
-            return;
+            true
         }
         Some(Prompt::Quit) => {
             match model.keymap.action(&[Context::Confirm], key) {
@@ -1492,7 +1496,7 @@ fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
                 Some(Action::Back) => model.prompt = None,
                 _ => {}
             }
-            return;
+            true
         }
         Some(Prompt::AdoptAndTakeOver(agent)) => {
             match model.keymap.action(&[Context::Confirm], key) {
@@ -1510,7 +1514,7 @@ fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
                 }
                 _ => {}
             }
-            return;
+            true
         }
         Some(Prompt::Forget(agent)) => {
             match model.keymap.action(&[Context::Confirm], key) {
@@ -1526,9 +1530,15 @@ fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
                 }
                 _ => {}
             }
-            return;
+            true
         }
-        None => {}
+        None => false,
+    }
+}
+
+fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
+    if on_prompt(model, key, effects) {
+        return;
     }
     if model.overlay == Some(Overlay::Composer) {
         match model.keymap.action(&[Context::Composer], key) {
@@ -1642,24 +1652,7 @@ pub(crate) fn perform(
             }
         }
         Action::Filter => model.filter.editing = true,
-        Action::TakeOver => {
-            if let Some(agent) = model.selected
-                && model.pending_take_over.is_none()
-            {
-                // A background session cannot be typed into: offer to move
-                // it into a host first, then take it over (ADR 0023).
-                let background = model
-                    .registry
-                    .agent(agent)
-                    .is_some_and(|record| record.location == Location::Background);
-                if background {
-                    model.prompt = Some(Prompt::AdoptAndTakeOver(agent));
-                } else {
-                    model.pending_take_over = Some(agent);
-                    effects.push(Effect::PrepareTakeOver(agent));
-                }
-            }
-        }
+        Action::TakeOver => take_over_selected(model, effects),
         Action::Message => open_composer(model),
         Action::FullScreen => open_full_screen(model, effects),
         Action::Forget => ask_forget(model),
@@ -1784,6 +1777,28 @@ fn zoom(model: &mut Model, context: Context, action: Action) {
             _ => model.timeline.reset(),
         },
         _ => step(&mut model.zoom, model.scene.zoom),
+    }
+}
+
+/// Takes over the selected agent. A background session cannot be typed
+/// into: volee offers to move it into a host first, then takes it over
+/// (ADR 0023).
+fn take_over_selected(model: &mut Model, effects: &mut Vec<Effect>) {
+    let Some(agent) = model.selected else {
+        return;
+    };
+    if model.pending_take_over.is_some() {
+        return;
+    }
+    let background = model
+        .registry
+        .agent(agent)
+        .is_some_and(|record| record.location == Location::Background);
+    if background {
+        model.prompt = Some(Prompt::AdoptAndTakeOver(agent));
+    } else {
+        model.pending_take_over = Some(agent);
+        effects.push(Effect::PrepareTakeOver(agent));
     }
 }
 

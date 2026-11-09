@@ -137,7 +137,7 @@ Where an agent runs decides what these commands can do:
 | The agent runs | `volee logs` | `volee attach` | `volee stop` |
 | --- | --- | --- | --- |
 | In a volee host: launched or adopted by volee | the exact screen | takes it over | ends it, like a closed terminal |
-| As a Claude Code background session: launched by volee 0.7, or by hand with `claude --bg` | a replay of `claude logs` | refused: adopt it first | stops it if volee launched it |
+| As a Claude Code background session: launched by volee 0.7, or by hand with `claude --bg` | a replay of `claude logs` | refused: adopt it first (in the interface, `a` offers to) | stops it if volee launched it |
 | Interactive, in a tuios or tmux pane | the pane's screen | brings the pane forward ([panes](interface.md#agents-in-tuios-panes)) | refused |
 | Interactive, in another terminal (Claude Code or OpenCode) | refused: only that terminal shows it | refused | refused |
 
@@ -153,8 +153,9 @@ be adopted when it was started with `--session`, once you quit it. The agent
 keeps its name and history in volee. Once adopted, it is handled like the
 agents volee launches: messages reach it (they wake it when it waits at its
 prompt), `volee stop` stops it, and a message resumes it in a new host.
-Claude Code resumes a conversation only in a repository you trust; when the
-resumed program fails, the agent's detail quotes its last line.
+The conversation resumes in the agent's worktree; in a repository Claude
+Code does not trust yet, it asks there first (`volee attach` to answer).
+When the resumed program fails, the agent's detail quotes its last line.
 
 A stopped agent keeps its conversation, and volee does not resume it on its
 own, even when other agents write to it, until you send it a message

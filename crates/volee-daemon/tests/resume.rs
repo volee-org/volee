@@ -214,8 +214,13 @@ async fn a_message_resumes_a_stopped_agent_in_its_worktree() {
     assert_eq!(resumes.len(), 1);
     let (session, spec) = &resumes[0];
     assert_eq!(session, &SessionKey::claude("first-session"));
-    assert_eq!(spec.cwd, daemon.repo, "from the trusted main checkout");
-    assert_eq!(spec.worktree.as_deref(), Some("feat-invoices"));
+    // In its worktree, which still exists, without `--worktree`: Claude Code
+    // asks there for a trust it lacks instead of exiting.
+    assert_eq!(
+        spec.cwd,
+        daemon.repo.join(".claude/worktrees/feat-invoices")
+    );
+    assert_eq!(spec.worktree, None);
     assert!(
         spec.prompt.contains("Also update the changelog."),
         "{}",
