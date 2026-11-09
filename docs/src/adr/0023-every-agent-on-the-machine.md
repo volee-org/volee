@@ -1,6 +1,6 @@
 # 0023. volee shows every agent on the machine, and adopts the ones it did not start
 
-- Status: Proposed (supersedes [0018](0018-panes-that-show-background-sessions.md) once accepted; amends [0004](0004-sources-and-reconciliation.md) and [0015](0015-tuios-location-adapter.md))
+- Status: Accepted (supersedes [0018](0018-panes-that-show-background-sessions.md); amends [0004](0004-sources-and-reconciliation.md) and [0015](0015-tuios-location-adapter.md))
 - Date: 2026-11-08
 
 ## Context

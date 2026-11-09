@@ -1,6 +1,6 @@
 # 0002. The harness owns agent processes
 
-- Status: Accepted
+- Status: Superseded by [0019](0019-a-host-process-holds-each-agent-terminal.md)
 - Date: 2026-11-06
 
 ## Context

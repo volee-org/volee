@@ -1,6 +1,6 @@
 # 0019. A volee-host process holds each agent's terminal
 
-- Status: Proposed (supersedes [0002](0002-harness-owns-processes.md) once accepted)
+- Status: Accepted (supersedes [0002](0002-harness-owns-processes.md))
 - Date: 2026-11-08
 
 ## Context

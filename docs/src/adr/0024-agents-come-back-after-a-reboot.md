@@ -1,6 +1,6 @@
 # 0024. Agents interrupted by a reboot come back in new hosts
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-08
 
 ## Context

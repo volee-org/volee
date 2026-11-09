@@ -1,6 +1,6 @@
 # 0021. Take over with `a` or `volee attach`, leave with Ctrl+Q, watch on a wall
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-08
 
 ## Context

@@ -1,6 +1,6 @@
 # 0022. A profile per harness says how to launch, resume, find and read it
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-08
 
 ## Context

@@ -8,7 +8,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | --- | --- | --- |
 | [0000](0000-record-architecture-decisions.md) | Record architecture decisions | Accepted |
 | [0001](0001-agent-identity.md) | An agent is a unit of work, not a pane or a process | Accepted |
-| [0002](0002-harness-owns-processes.md) | The harness owns agent processes | Accepted |
+| [0002](0002-harness-owns-processes.md) | The harness owns agent processes | Superseded by 0019 |
 | [0003](0003-daemon-and-event-log.md) | A daemon with an event log is the single source of truth | Accepted |
 | [0004](0004-sources-and-reconciliation.md) | Hooks, harness listing, git and forge are reconciled into one model | Accepted |
 | [0005](0005-harness-neutral-agent-protocol.md) | Agents talk to volee through MCP and the CLI | Accepted |
@@ -24,13 +24,13 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0015](0015-tuios-location-adapter.md) | tuios is the first location adapter | Accepted |
 | [0016](0016-what-a-failed-launch-left-untouched.md) | Reuse or tidy what a failed launch left untouched (refines 0011) | Accepted |
 | [0017](0017-setup-commands-for-new-worktrees.md) | Setup commands prepare a new worktree before its agent starts | Accepted |
-| [0018](0018-panes-that-show-background-sessions.md) | A pane that shows a background session is its preview | Accepted |
-| [0019](0019-a-host-process-holds-each-agent-terminal.md) | A volee-host process holds each agent's terminal (supersedes 0002) | Proposed |
-| [0020](0020-libghostty-vt-emulates-terminals.md) | libghostty-vt emulates every terminal volee reads | Proposed |
-| [0021](0021-take-over-watch-and-the-wall-of-screens.md) | Take over with `a` or `volee attach`, leave with Ctrl+Q, watch on a wall | Proposed |
-| [0022](0022-harness-profiles.md) | A profile per harness says how to launch, resume, find and read it | Proposed |
-| [0023](0023-every-agent-on-the-machine.md) | volee shows every agent on the machine, and adopts the ones it did not start (supersedes 0018) | Proposed |
-| [0024](0024-agents-come-back-after-a-reboot.md) | Agents interrupted by a reboot come back in new hosts | Proposed |
+| [0018](0018-panes-that-show-background-sessions.md) | A pane that shows a background session is its preview | Superseded by 0023 |
+| [0019](0019-a-host-process-holds-each-agent-terminal.md) | A volee-host process holds each agent's terminal (supersedes 0002) | Accepted |
+| [0020](0020-libghostty-vt-emulates-terminals.md) | libghostty-vt emulates every terminal volee reads | Accepted |
+| [0021](0021-take-over-watch-and-the-wall-of-screens.md) | Take over with `a` or `volee attach`, leave with Ctrl+Q, watch on a wall | Accepted |
+| [0022](0022-harness-profiles.md) | A profile per harness says how to launch, resume, find and read it | Accepted |
+| [0023](0023-every-agent-on-the-machine.md) | volee shows every agent on the machine, and adopts the ones it did not start (supersedes 0018) | Accepted |
+| [0024](0024-agents-come-back-after-a-reboot.md) | Agents interrupted by a reboot come back in new hosts | Accepted |
 
 ## Not built yet
 
