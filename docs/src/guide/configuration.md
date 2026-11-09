@@ -185,7 +185,7 @@ and new agents start from `origin/<base>` as that fetch left it.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `theme` | `catppuccin-mocha` | A built-in theme or a file in `~/.config/volee/themes/`; see [Themes](themes.md). |
+| `theme` | light or dark, matching the terminal | A built-in theme or a file in `~/.config/volee/themes/`; see [Themes](themes.md). Without it, volee uses `catppuccin-latte` on a light terminal and `catppuccin-mocha` otherwise. The theme picker (`Space t`) writes it for you, and `volee --theme <name>` overrides it for one run. |
 | `reduced_motion` | `false` | Stop animations: a new message lights up its line on the [network](interface.md#the-network) instead of travelling along it, and spinners stop. |
 | `keys` | none | Key overrides by action name, such as `take-over = "ctrl-a"`; the [interface guide](interface.md#keys) lists the actions. |
 | `tools` | found on the machine | Programs `o` opens an agent's worktree with; see below. |

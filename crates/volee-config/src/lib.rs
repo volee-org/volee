@@ -11,6 +11,10 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+mod save;
+
+pub use save::set_theme;
+
 /// A commented example configuration, also written by `volee config init`.
 pub const EXAMPLE: &str = include_str!("example.toml");
 
@@ -20,6 +24,15 @@ pub enum ConfigError {
     /// The file exists but cannot be read.
     #[error("cannot read {path}: {source}")]
     Read {
+        /// The file.
+        path: PathBuf,
+        /// The underlying error.
+        #[source]
+        source: io::Error,
+    },
+    /// The file cannot be written.
+    #[error("cannot write {path}: {source}")]
+    Write {
         /// The file.
         path: PathBuf,
         /// The underlying error.

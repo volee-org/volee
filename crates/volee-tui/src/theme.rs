@@ -369,6 +369,26 @@ impl Theme {
         BUILTIN.iter().map(|(name, _)| *name)
     }
 
+    /// Every theme a person can pick: the built-in ones in their stable
+    /// order, then the `*.toml` files of `user_dir` (names without the
+    /// extension, sorted, without the names already built in). A missing or
+    /// unreadable directory adds nothing.
+    pub fn available_names(user_dir: Option<&Path>) -> Vec<String> {
+        let mut names: Vec<String> = Self::builtin_names().map(str::to_owned).collect();
+        let Some(entries) = user_dir.and_then(|dir| std::fs::read_dir(dir).ok()) else {
+            return names;
+        };
+        let user: BTreeSet<String> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "toml"))
+            .filter_map(|path| path.file_stem()?.to_str().map(str::to_owned))
+            .filter(|name| !names.contains(name) && validate_name(name).is_ok())
+            .collect();
+        names.extend(user);
+        names
+    }
+
     /// A theme compiled into volee.
     pub fn builtin(name: &str) -> Result<Self, ThemeError> {
         Self::resolve(name, &mut |wanted, _| {
@@ -759,6 +779,27 @@ mod tests {
             latte.style(StyleRole::RoleCoordinator).fg,
             Some(Color::Rgb(0xfe, 0x64, 0x0b))
         );
+    }
+
+    #[test]
+    fn available_names_list_builtins_then_sorted_user_themes() {
+        let dir = tempfile::tempdir().unwrap();
+        for file in ["zen.toml", "dusk.toml", "terminal.toml", "notes.txt"] {
+            std::fs::write(dir.path().join(file), "").unwrap();
+        }
+        std::fs::create_dir(dir.path().join("folder.toml.d")).unwrap();
+        let names = Theme::available_names(Some(dir.path()));
+        let builtin: Vec<&str> = Theme::builtin_names().collect();
+        assert_eq!(names[..builtin.len()], builtin[..]);
+        assert_eq!(names[builtin.len()..], ["dusk", "zen"]);
+    }
+
+    #[test]
+    fn available_names_without_a_directory_are_the_builtins() {
+        let builtin: Vec<&str> = Theme::builtin_names().collect();
+        assert_eq!(Theme::available_names(None), builtin);
+        let missing = Path::new("/nonexistent/volee/themes");
+        assert_eq!(Theme::available_names(Some(missing)), builtin);
     }
 
     #[test]

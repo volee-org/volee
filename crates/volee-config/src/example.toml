@@ -53,7 +53,10 @@ wake_timeout = 3600
 [tui]
 # "catppuccin-mocha" (default), "catppuccin-macchiato", "catppuccin-frappe",
 # "catppuccin-latte", "terminal", or the name of a file in
-# ~/.config/volee/themes/ without its .toml extension.
+# ~/.config/volee/themes/ without its .toml extension. Without it, volee
+# guesses from your terminal: "catppuccin-latte" on a light background,
+# "catppuccin-mocha" otherwise. The theme picker (Space t) saves it here, and
+# `volee --theme <name>` overrides it for one run.
 # theme = "catppuccin-mocha"
 
 # Stop animations: messages light up their line on the network instead of

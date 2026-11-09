@@ -15,21 +15,51 @@ volee ships with five themes:
 | `catppuccin-latte` | Light. |
 | `terminal` | Your terminal's own 16 colors and background. |
 
-Choose one in the [configuration](configuration.md):
+### From the interface
+
+Press `Space t`, or type `:theme`, to open the theme picker at the bottom
+right of the screen. It lists the built-in themes, then your own from
+`~/.config/volee/themes`. Moving in the list applies each theme at once, so
+you see it on your own agents before you decide.
+
+- `Enter` keeps the theme and saves it as `[tui] theme` in your
+  [configuration](configuration.md). The rest of the file, comments
+  included, is left as it was.
+- `Esc` closes the picker and brings back the theme you had.
+
+### From the command line
+
+`volee --theme <name>` opens the interface with that theme for this run. It
+does not change the configuration, and it wins over `[tui] theme`. An
+unknown name is refused with the list of the themes that exist.
+
+```sh
+volee --theme catppuccin-latte
+volee demo --theme catppuccin-latte
+```
+
+### In the configuration
 
 ```toml
 [tui]
 theme = "catppuccin-latte"
 ```
 
-or try one with the demo, which then ignores the configured theme:
-
-```sh
-volee demo --theme catppuccin-latte
-```
-
 volee looks for a theme in `~/.config/volee/themes/<name>.toml` first, then
 among the built-in themes.
+
+### When nothing is set
+
+With no `--theme` and no `[tui] theme`, volee looks at your terminal: it asks
+for the background color and uses `catppuccin-mocha` on a dark background and
+`catppuccin-latte` on a light one. When the terminal does not answer (some
+multiplexers and remote sessions), it reads the `COLORFGBG` variable, and
+when that is missing too it keeps `catppuccin-mocha`. The guess is only made
+when the output is a terminal, and never waits more than a moment. Set a
+theme to turn it off.
+
+The order is: `--theme`, then `[tui] theme`, then the guess, then
+`catppuccin-mocha`.
 
 volee uses 24-bit colors when the terminal announces them in `COLORTERM`
 (`truecolor` or `24bit`), and otherwise replaces each color by the nearest

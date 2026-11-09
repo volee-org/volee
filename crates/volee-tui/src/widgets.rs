@@ -11,6 +11,7 @@ pub(crate) mod hints;
 pub(crate) mod inbox;
 pub(crate) mod launch;
 pub(crate) mod rail;
+pub(crate) mod theme_picker;
 pub(crate) mod tools;
 pub(crate) mod top_bar;
 

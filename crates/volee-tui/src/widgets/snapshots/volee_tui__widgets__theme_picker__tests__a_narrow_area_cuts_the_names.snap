@@ -1,0 +1,16 @@
+---
+source: crates/volee-tui/src/widgets/theme_picker.rs
+expression: "draw(&NAMES, 1, 16, 12)"
+---
+"                "
+"                "
+"                "
+"╭ Theme ───────╮"
+"│   catppuccin…│"
+"│ ▸ catppuccin…│"
+"│   catppuccin…│"
+"│   catppuccin…│"
+"│   terminal   │"
+"│   dusk       │"
+"│ enter keep ·…│"
+"╰──────────────╯"
