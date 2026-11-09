@@ -22,6 +22,7 @@
 
 - [Overview](architecture/overview.md)
 - [Domain model](architecture/domain.md)
+- [Hosts](architecture/hosts.md)
 - [Claude Code adapter](architecture/claude-code.md)
 - [Git](architecture/git.md)
 - [Decisions](adr/README.md)

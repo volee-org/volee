@@ -31,10 +31,17 @@ do*. volee shows what they do.
   and with you, and a live graph where each message travels along its edge.
 - **Missions**: give a goal across several repositories to a coordinator
   agent; volee supervises its workers and checks that the work was delivered.
-- **Your terminal, your tools**: jump into an agent with a key and come back
-  with `Ctrl+Z`; open its worktree in your editor, your diff viewer or your
+- **Every screen, exactly**: each agent volee launches runs in a volee host
+  that holds its terminal, so its preview is the exact screen, and a wall
+  shows the screens of many agents at once. The agent survives closed
+  windows, the interface and the daemon, and comes back after a reboot.
+- **Your terminal, your tools**: take over an agent with a key and come back
+  with `Ctrl+Q`; open its worktree in your editor, your diff viewer or your
   git interface. None of them is required, and no multiplexer either; a
   session you started in a tuios or tmux pane is shown and reached there.
+- **Claude Code and OpenCode**: volee launches agents of both, shows the
+  ones started elsewhere read only, and adopts one into a host when you
+  want to take it over.
 - **Worktrees ready to work**: your setup commands, such as `bun install`,
   run in each new worktree before its agent starts.
 

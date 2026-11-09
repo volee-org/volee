@@ -1,11 +1,48 @@
 # Agents of other harnesses
 
-volee finds Claude Code sessions by itself. An agent of another harness,
-such as Codex CLI or Gemini CLI, joins volee through its MCP server instead:
-it then shows up in `volee ls` and in the interface, can write to you and
-read your answers, and, inside a mission, can talk with the mission's other
+volee finds Claude Code sessions by itself, and launches, finds and resumes
+[OpenCode](#opencode) agents too. An agent of another harness, such as
+Codex CLI or Gemini CLI, joins volee through its MCP server instead: it
+then shows up in `volee ls` and in the interface, can write to you and read
+your answers, and, inside a mission, can talk with the mission's other
 agents, whatever AI runs them. The decision behind it is
 [ADR 0014](../adr/0014-agents-of-other-harnesses-join-through-mcp.md).
+
+## OpenCode
+
+volee has a profile for [OpenCode](https://opencode.ai)
+([ADR 0022](../adr/0022-harness-profiles.md)), measured on OpenCode 2.2.5:
+
+```sh
+volee spawn billing feat/export "Export invoices as CSV." --harness opencode
+```
+
+The launch dialog (`n`) has the same choice in its `harness` field. volee
+creates the branch and the worktree as for any agent, runs the
+repository's setup commands, then starts
+`opencode --session <id> --prompt <task>` in a volee host, in the worktree,
+with a session id it chooses (and `--auto` when
+`[agents] permission_mode = "auto"`). Take it over with `a` or
+`volee attach`, watch it in the preview, full screen or on the wall, and
+stop it with `volee stop`, like any agent in a host.
+
+- **State.** OpenCode takes no hooks on its command line, so volee reads
+  the agent's state from its screen: a screen that changes is working, one
+  unchanged for a few seconds is idle, a program that ended is stopped.
+  volee cannot tell when it waits for you.
+- **Messages.** Nothing hands it a message while it runs. A message waits
+  until the agent stops, then volee resumes it in a new host with
+  `opencode --session <id> --prompt <messages>`.
+- **After a reboot.** volee resumes it like a Claude Code agent, with
+  `opencode --session <id>` and a prompt that says the machine restarted.
+- **Started elsewhere.** An OpenCode agent you started yourself is found in
+  the process table (not the background service,
+  `opencode serve --service`), with its directory, and so its repository
+  and branch. It is
+  shown read only and stops when its process ends. To take it over, quit
+  it, then adopt it (`A`, or `volee adopt`): volee resumes it in a host,
+  which only works when it was started with `--session`, since volee needs
+  the session id.
 
 ## Join
 
@@ -90,3 +127,7 @@ your version, such as `cwd` or `timeout`.
   joined. Joining again with another mission, or without one, changes its
   membership.
 - **Not resumed.** volee never starts or resumes it: you start its harness.
+  To have volee start a program it has no profile for, run it in a host
+  with `volee host spawn -- <command>` ([hosts](cli.md#hosts)): you get its
+  exact screen and can take it over, but no state, no resume and no agent
+  in volee's list.

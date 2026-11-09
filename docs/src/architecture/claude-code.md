@@ -7,28 +7,46 @@ page was measured on Claude Code 2.1.319 or taken from its documentation, as
 marked; volee needs 2.1.319 or newer, the version it was measured on, and
 says so at startup when the installed version is older.
 
-The daemon uses the adapter through the `Harness` trait, so other harnesses
-can join later. Every command runs through a `CommandRunner` with a timeout,
-which lets the tests replay recorded output instead of running `claude`.
+The daemon uses the adapter through the `Harness` trait; the same crate
+holds the OpenCode profile ([ADR 0022](../adr/0022-harness-profiles.md),
+[Agents of other harnesses](../guide/other-harnesses.md#opencode)). Every
+command runs through a `CommandRunner` with a timeout, which lets the tests
+replay recorded output instead of running `claude`.
 
 ## Commands
+
+Every agent volee launches or adopts runs `claude` interactive inside a
+volee host ([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md),
+[Hosts](hosts.md)), started through `volee host spawn`:
 
 | Need | Command | Notes |
 | --- | --- | --- |
 | Version | `claude --version` | Checked when the daemon starts. |
 | Every session | `claude agents --json --all` | Polled and reconciled by session id. |
-| Launch | `claude --bg --opt=value... -- <prompt>` | Runs in the agent's worktree; prints `backgrounded · <id> · <name>`. |
-| Resume | `claude --bg --resume=<session-uuid> --opt=value... -- <prompt>` | Continues a stopped session; 2.1.319 creates a fork, linked to the same agent. |
-| Stop | `claude stop <id>` | The conversation is kept. |
+| Launch | `claude --session-id=<uuid> --name=<name> --settings=<file> --worktree=<name> --opt=value... -- <prompt>`, in a new host | Runs from the repository's main checkout. volee chooses the session id, so it knows the session before its first hook. |
+| Resume | `claude --resume=<session-uuid> --worktree=<name> --opt=value... -- <prompt>`, in a new host | Continues a stopped session: for a message, after a reboot, or to adopt a session (then without a prompt, so it waits at its prompt). Linked to the same agent. |
+| Preview | the host's screen | Exact, status line and prompt frame included; read without resizing the agent. |
+| Take over | `volee host attach <host>` | Runs in the client's terminal; `Ctrl+Q` returns. |
+| Stop | through the host: `SIGHUP` to the program's process group, `SIGKILL` five seconds later | Like a closed terminal; the conversation is kept. |
+
+Background sessions (`claude --bg`) are the ones volee 0.7 launched, and any
+you start by hand. volee shows them and does not drive them:
+
+| Need | Command | Notes |
+| --- | --- | --- |
+| Preview | `claude logs <id>` | A raw replay of the session's terminal, see below. |
+| Stop | `claude stop <id>` | Before an adoption, and for the sessions volee 0.7 launched. The conversation is kept. |
 | Delete | `claude rm <id>` | Never with `--discard-unpushed` or `--force-remove-worktree`. |
-| Preview | `claude logs <id>` | A raw replay of the session's terminal. |
-| Take over | `claude attach <id>` | Runs in the TUI's terminal; `Ctrl+Z` returns to volee. |
+
+Taking over a background session is refused with a hint: adopt it first
+([ADR 0023](../adr/0023-every-agent-on-the-machine.md)), which stops it with
+`claude stop` and resumes its conversation in a host.
 
 `<id>` is the id of a background session, kept exactly as `claude agents`
-lists it (the session's *handle*). Interactive sessions have no id: volee
-shows them but cannot stop or delete them, and previews and takes over only
-the ones that run in a tuios pane, through tuios
-([ADR 0015](../adr/0015-tuios-location-adapter.md)).
+lists it (the session's *handle*). Interactive sessions started by hand have
+no handle: volee shows them but cannot stop or delete them, and previews
+and reaches only the ones that run in a tuios or tmux pane, through the
+multiplexer ([ADR 0015](../adr/0015-tuios-location-adapter.md)).
 
 `claude logs` replays the session's recent drawing, not a log of its text:
 rows placed by cursor moves from the top left of the session's own terminal,
@@ -39,10 +57,9 @@ replays it in a terminal emulator at least as wide as the widest row it
 writes, so that no row wraps onto the next, and keeps a run of blank rows as
 one, so that the end of the conversation stays in view
 (`crates/volee-tui/src/preview.rs`; measured on 2.1.319 with a session 308
-columns wide). When a tuios pane shows the session (`claude agents` or
-`claude attach`, which title the terminal with the session's name), the
-preview reads that pane instead, which holds the whole screen
-([ADR 0018](../adr/0018-panes-that-show-background-sessions.md)).
+columns wide). It is one of the reasons volee no longer launches background
+sessions ([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md)):
+a host holds the whole screen from the start.
 
 Every launch passes the agent's settings file (`--settings`: volee's hooks,
 and a rule that allows volee's own MCP tools) and its MCP configuration
@@ -99,7 +116,8 @@ or unknown.
 
 Each listed session also carries its id, its process id while it runs, and
 when it started. Hooks refine these states for the agents volee launched, for
-example with the tool that waits for permission.
+example with the tool that waits for permission. The agents volee runs in
+hosts are interactive sessions, so their hooks carry most of their state.
 
 ## Hooks
 
@@ -154,7 +172,9 @@ What the adapter knows, and how it knows it:
   ``Workspace not trusted. Run `claude` in <dir> once and accept the trust
   prompt, then retry.`` (two variants name the home directory and a directory
   that cannot be found). volee reports it as `UntrustedDirectory` with the
-  directory.
+  directory. In a host, `claude` runs interactive, with a terminal to ask
+  in; the guides still ask you to run `claude` once in each repository
+  before volee launches agents there.
 - **Trust and worktrees** (measured with 2.1.319 in a trusted sandbox
   repository, clean environment). Trust is recorded per path, and a
   repository nested in a trusted folder does not inherit it. A worktree made
@@ -162,12 +182,14 @@ What the adapter knows, and how it knows it:
   trusted repository's `.claude/worktrees/`. From the trusted main checkout,
   `claude --bg --worktree=<name>` works, and when `.claude/worktrees/<name>`
   already exists Claude Code reuses it on its current branch and locks it.
-  That is how volee launches every agent (`SpawnSpec::worktree`, [ADR
+  That is how volee launches every agent, now without `--bg`, in a host
+  (`SpawnSpec::worktree`, [ADR
   0013](../adr/0013-worktrees-live-in-their-repository.md)).
 - **Resuming** (measured). From the trusted main checkout, `claude --bg
   --worktree=<name> --resume=<session id>` continues a stopped session's
-  conversation in its worktree, as a fork with a new id. volee resumes agents
-  this way to deliver messages (ADR 0006). Once two sessions record the same
+  conversation in its worktree, as a fork with a new id. volee 0.7 resumed
+  agents this way to deliver messages (ADR 0006); volee now runs the same
+  command without `--bg`, in a new host. Once two sessions record the same
   worktree, `claude rm` refuses to delete it and offers no way to force it.
   The resumed session starts its MCP servers again, but the conversation it
   continues may say that the volee server disconnected (it stopped with the
@@ -188,10 +210,12 @@ What the adapter knows, and how it knows it:
   worktree unless the daemon passes `WorktreeRemoval::Delivered`, which it
   does only after `tidy_verdict` found delivery evidence
   ([ADR 0011](../adr/0011-safety-and-delivery-evidence.md)).
-- **Choosing the session id** (not measured). `--session-id <uuid>` is
-  documented as a general option, but its effect with `--bg` is neither
-  documented nor measured, so the adapter does not use it: the daemon learns
-  a new session's full id from its first hook or the next listing.
+- **Choosing the session id** (documented). `--session-id <uuid>` is
+  documented as a general option. volee passes a new random UUID with every
+  launch in a host, so the daemon knows the session before its first hook.
+  Its effect with `--bg` is neither documented nor measured, so the
+  background launches of volee 0.7 did not use it: the daemon learned a new
+  session's full id from its first hook or the next listing.
 
 ## Tolerance
 

@@ -28,12 +28,13 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `agents.diff` | `agent`, optional `full` | `text`: a summary by file, or the full patch; `truncated` |
 | `agents.attach` | `agent` | `program`, `args`, `cwd`, `env_remove`, `hint`: the command that takes the agent over |
 | `agents.stop` | `agent` | none |
+| `agents.adopt` | `agent` | none; the agent's conversation continues in a volee host |
 | `agents.tidy` | `agent`, optional `dry_run` | `outcome`: `removed` or `would-remove` (`worktree`, `branch`), or `kept` (`reasons`) |
 | `messages.send` | `from`, `to`, `kind`, `body`, optional `refs`, `in_reply_to`, `thread` | `message`, `thread` |
 | `messages.read` | `message`, `by` | none |
 | `hooks.ingest` | `agent`, `event`, `payload` | `stdout`: what the hook prints, if anything |
 | `hooks.wait` | `agent`, `timeout_ms` | `text`: messages that wake the agent, or `null` |
-| `agents.spawn` | `repo`, `branch`, `task`, `role`, optional `base`, `parent`, `mission`, `model`, `name` | `agent`, `worktree` |
+| `agents.spawn` | `repo`, `branch`, `task`, `role`, optional `base`, `parent`, `mission`, `model`, `name`, `harness` (`claude-code` by default, or `opencode`) | `agent`, `worktree` |
 | `threads.summarize` | `thread` | `summary`, `messages`, `model`; refused unless `[messages] summaries` is on |
 | `missions.create` | `title`, `kind` (`change` or `analysis`), `goal`, `repos`, optional `requested_by` | `mission`, `thread`, `coordinator` |
 | `missions.abort` | `mission`, optional `reason` | none |
@@ -65,8 +66,12 @@ is touched.
 
 `agents.spawn` creates the branch and its worktree with git, writes the
 agent's hook settings and MCP configuration (readable only by you), records
-the agent, then starts the session from the repository's main checkout with
-`--worktree` ([ADR 0013](../adr/0013-worktrees-live-in-their-repository.md)).
+the agent, then starts the session in a new volee host
+([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md)), from
+the repository's main checkout with `--worktree`
+([ADR 0013](../adr/0013-worktrees-live-in-their-repository.md)). With
+`harness: "opencode"`, it starts `opencode --session <id> --prompt <task>`
+in the worktree instead; any other harness is refused (`-32602`).
 A failed start marks the agent `failed` and keeps the worktree; the same
 request sent again reuses that worktree while nothing was done in it, and
 forgets the failed agent
@@ -99,9 +104,20 @@ server sends one per tool call). It refuses agents that did not join.
 
 ### Acting on agents
 
-`agents.preview`, `agents.attach` and `agents.stop` act on the agent's
-current harness session, as the last listing showed it; an agent volee just
-launched is reachable before any listing shows it. They refuse (`-32002`) an
+For an agent in a volee host
+([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md)),
+`agents.preview` returns a snapshot of the host's screen, `agents.attach`
+returns the `volee host attach` command for the client to run (Ctrl+Q comes
+back), and `agents.stop` asks the host to end the program. `agents.attach`
+refuses (`-32002`) a Claude Code background session that volee does not
+host: `agents.adopt` first stops it, then resumes its conversation in a new
+host. `agents.adopt` refuses an agent that already runs in a host and one
+that runs in a terminal of its own, which must be quit there first
+([ADR 0023](../adr/0023-every-agent-on-the-machine.md)).
+
+For other agents, `agents.preview`, `agents.attach` and `agents.stop` act on
+the agent's current harness session, as the last listing showed it; an agent
+volee just launched is reachable before any listing shows it. They refuse (`-32002`) an
 agent whose session runs in a terminal of its own, which only that terminal
 can show or control, and answer `-32001` when the harness no longer knows the
 session. `agents.stop` also refuses agents volee did not launch
