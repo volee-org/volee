@@ -74,6 +74,7 @@ fn start() -> Running {
         },
         volee_bin: Some(PathBuf::from("/opt/volee/bin/volee")),
         multiplexers: Vec::new(),
+        hosts: false,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

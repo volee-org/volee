@@ -55,6 +55,7 @@ pub(crate) async fn run() -> Result<()> {
         evidence,
         volee_bin,
         multiplexers: multiplexers(),
+        hosts: true,
     };
     Daemon::run(config)
         .await

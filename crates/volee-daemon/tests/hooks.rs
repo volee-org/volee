@@ -63,6 +63,7 @@ fn start() -> Running {
         evidence: EvidenceSources::default(),
         volee_bin: None,
         multiplexers: Vec::new(),
+        hosts: false,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running { socket, _dir: dir }

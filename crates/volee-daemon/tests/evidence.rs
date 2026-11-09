@@ -315,6 +315,7 @@ fn start(events: Vec<Event>, clock: Arc<ManualClock>, evidence: EvidenceSources)
         evidence,
         volee_bin: None,
         multiplexers: Vec::new(),
+        hosts: false,
     };
     Running {
         socket,

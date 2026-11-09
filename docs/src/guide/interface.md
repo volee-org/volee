@@ -473,6 +473,8 @@ take-over = "ctrl-a"
 | `n` | launch an agent in a new worktree | `new-agent` |
 | `N` | create a mission, which launches its coordinator | `new-mission` |
 | `F` | forget the selected agent: stop listing it (asks first) | `forget` |
+| `A` | adopt the selected agent into a volee host, so that you can take it over | `adopt` |
+| `5` | show the agents in volee hosts as a wall of live screens | `show-wall` |
 | `tab` | focus the next panel | `next-pane` |
 | `shift-tab` | focus the previous panel | `previous-pane` |
 | `1` | show the hierarchy | `show-hierarchy` |

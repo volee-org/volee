@@ -135,6 +135,7 @@ fn start_prepared(extra: &str, prepare: impl FnOnce(&Path) -> Vec<Event>) -> Run
         },
         volee_bin: Some(PathBuf::from("/opt/volee/bin/volee")),
         multiplexers: Vec::new(),
+        hosts: false,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

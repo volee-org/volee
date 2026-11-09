@@ -188,7 +188,7 @@ mod tests {
         assert!(!first.detach);
         assert!(filter.filter(b"u").detach);
         let mut other = KeyFilter::default();
-        assert!(other.filter(b"\x1b[1").forward.is_empty());
+        assert_eq!(other.filter(b"\x1b[1").forward, b"");
         assert_eq!(other.filter(b"A").forward, b"\x1b[1A");
     }
 

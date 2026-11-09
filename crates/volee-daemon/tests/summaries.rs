@@ -84,6 +84,7 @@ fn start(summaries: bool) -> Running {
         },
         volee_bin: None,
         multiplexers: Vec::new(),
+        hosts: false,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

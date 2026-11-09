@@ -42,6 +42,7 @@ fn spec() -> SpawnSpec {
         disallowed_tools: vec![],
         append_system_prompt: None,
         worktree: None,
+        host: None,
     }
 }
 

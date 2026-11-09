@@ -378,8 +378,10 @@ pub(crate) async fn attach(
     }
     {
         let state = shared.state.lock().await;
+        // A daemon that hosts its agents only shows background sessions.
         if let Some(record) = state.registry().agent(params.agent)
             && record.location == Location::Background
+            && shared.hosts
         {
             return Err(background_refusal(&record.name));
         }

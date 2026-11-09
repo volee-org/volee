@@ -280,6 +280,72 @@ async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, D
     Ok(Some(shown.len()))
 }
 
+/// What an adoption needs, read under the lock.
+struct Adoption {
+    session: volee_core::harness::SessionKey,
+    listed: Option<volee_core::reconcile::ListedSession>,
+    location: Location,
+    name: String,
+    root: std::path::PathBuf,
+    worktree: Option<String>,
+    model: Option<String>,
+    instructions: Option<String>,
+}
+
+/// Reads what adopting `agent` needs, or why it cannot be adopted.
+async fn adoption(shared: &Arc<Shared>, agent: AgentId) -> Result<Adoption, DaemonError> {
+    let state = shared.state.lock().await;
+    let record = state
+        .registry()
+        .agent(agent)
+        .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {agent}")))?;
+    if record.harness != HarnessKind::ClaudeCode {
+        return Err(DaemonError::Refused(format!(
+            "{} runs in {}, which volee cannot resume yet",
+            record.name, record.harness
+        )));
+    }
+    if record.location.host().is_some() && record.state.is_live() {
+        return Err(DaemonError::Refused(format!(
+            "{} already runs in a volee host: press a to take it over",
+            record.name
+        )));
+    }
+    let session = record
+        .current_session()
+        .map(|link| link.key.clone())
+        .ok_or_else(|| {
+            DaemonError::Refused(format!("{} has no conversation to resume", record.name))
+        })?;
+    let root = record
+        .workspace
+        .repo_root
+        .clone()
+        .unwrap_or_else(|| record.workspace.cwd.clone());
+    let worktree = record
+        .workspace
+        .worktree
+        .as_deref()
+        .and_then(|worktree| launch::worktree_name(&root, worktree));
+    let model = record.model.clone().or_else(|| {
+        shared
+            .settings
+            .model_for(record.workspace.repo.as_deref())
+            .map(str::to_owned)
+    });
+    Ok(Adoption {
+        listed: state.sessions().listed(&session).cloned(),
+        session,
+        location: record.location.clone(),
+        name: record.name.clone(),
+        root,
+        worktree,
+        model,
+        instructions: (record.launched_by != LaunchedBy::Outside)
+            .then(|| launch::instructions_for(state.registry(), record)),
+    })
+}
+
 /// Moves an agent's conversation into a host (ADR 0023): stops its
 /// background session if it runs, then resumes the conversation in a new
 /// host, at its prompt, with volee's hooks. An agent that runs in someone's
@@ -290,57 +356,16 @@ pub(crate) async fn adopt(shared: &Arc<Shared>, agent: AgentId) -> Result<(), Da
         .harness
         .clone()
         .ok_or_else(|| DaemonError::Unavailable("Claude Code is not available".into()))?;
-    let (session, listed, location, name, spec_base) = {
-        let state = shared.state.lock().await;
-        let record = state
-            .registry()
-            .agent(agent)
-            .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {agent}")))?;
-        if record.harness != HarnessKind::ClaudeCode {
-            return Err(DaemonError::Refused(format!(
-                "{} runs in {}, which volee cannot resume yet",
-                record.name, record.harness
-            )));
-        }
-        if record.location.host().is_some() && record.state.is_live() {
-            return Err(DaemonError::Refused(format!(
-                "{} already runs in a volee host: press a to take it over",
-                record.name
-            )));
-        }
-        let session = record
-            .current_session()
-            .map(|link| link.key.clone())
-            .ok_or_else(|| {
-                DaemonError::Refused(format!("{} has no conversation to resume", record.name))
-            })?;
-        let listed = state.sessions().listed(&session).cloned();
-        let root = record
-            .workspace
-            .repo_root
-            .clone()
-            .unwrap_or_else(|| record.workspace.cwd.clone());
-        let worktree = record
-            .workspace
-            .worktree
-            .as_deref()
-            .and_then(|worktree| launch::worktree_name(&root, worktree));
-        let model = record.model.clone().or_else(|| {
-            shared
-                .settings
-                .model_for(record.workspace.repo.as_deref())
-                .map(str::to_owned)
-        });
-        let instructions = (record.launched_by != LaunchedBy::Outside)
-            .then(|| launch::instructions_for(state.registry(), record));
-        (
-            session,
-            listed,
-            record.location.clone(),
-            record.name.clone(),
-            (root, worktree, model, instructions),
-        )
-    };
+    let Adoption {
+        session,
+        listed,
+        location,
+        name,
+        root,
+        worktree,
+        model,
+        instructions,
+    } = adoption(shared, agent).await?;
     let alive = listed.as_ref().is_some_and(|session| session.alive);
     if alive && !matches!(location, Location::Background) {
         return Err(DaemonError::Refused(format!(
@@ -352,7 +377,6 @@ pub(crate) async fn adopt(shared: &Arc<Shared>, agent: AgentId) -> Result<(), Da
         launch::blocking(move || harness.stop(&listed)).await??;
     }
     let (settings_file, mcp_config_file) = launch::write_agent_files(shared, &harness, agent)?;
-    let (root, worktree, model, instructions) = spec_base;
     let host = launch::host_launch(shared, agent, &name)
         .ok_or_else(|| DaemonError::Unavailable("this daemon cannot start volee hosts".into()))?;
     let location = launch::location_of(Some(&host));

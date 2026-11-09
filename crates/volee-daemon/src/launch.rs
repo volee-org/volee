@@ -583,6 +583,9 @@ pub(crate) fn host_launch(
     agent: AgentId,
     name: &str,
 ) -> Option<volee_harness::HostLaunch> {
+    if !shared.hosts {
+        return None;
+    }
     let volee_bin = shared.volee_bin.clone()?;
     let suffix = ulid::Ulid::generate().to_string().to_lowercase();
     Some(volee_harness::HostLaunch {

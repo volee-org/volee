@@ -68,6 +68,10 @@ pub struct Config {
     /// The terminal multiplexers whose panes interactive sessions are looked
     /// for in (ADR 0015); none means agents in panes are only listed.
     pub multiplexers: Vec<Arc<dyn volee_mux::Multiplexer>>,
+    /// Launch agents in volee hosts (ADR 0019), through `volee_bin host
+    /// spawn`. Off, agents run as background sessions of their harness, as
+    /// before hosts; tests with a fake harness turn it off.
+    pub hosts: bool,
 }
 
 impl std::fmt::Debug for Config {
@@ -88,6 +92,7 @@ pub(crate) struct Shared {
     pub(crate) git: Option<Arc<dyn Git>>,
     pub(crate) settings: volee_config::Config,
     pub(crate) volee_bin: Option<PathBuf>,
+    pub(crate) hosts: bool,
     pub(crate) paths: Paths,
     /// The interactive subscriptions open now, which set discovery's pace.
     pub(crate) watchers: Watchers,
@@ -216,6 +221,7 @@ impl Daemon {
             git: config.evidence.git.clone(),
             settings: config.evidence.settings.clone(),
             volee_bin: config.volee_bin,
+            hosts: config.hosts,
             paths: config.paths,
             watchers: Watchers::new(),
             refreshes: Refreshes::new(),

@@ -1554,21 +1554,8 @@ fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Ve
         }
         Action::Message => open_composer(model),
         Action::FullScreen => open_full_screen(model, effects),
-        Action::Forget => {
-            if let Some(agent) = model.selected {
-                model.prompt = Some(Prompt::Forget(agent));
-            }
-        }
-        Action::Adopt => {
-            if let Some(agent) = model.selected {
-                let name = model
-                    .registry
-                    .agent(agent)
-                    .map_or_else(|| agent.short(), |record| record.name.clone());
-                model.notify(format!("Adopting {name}..."), false);
-                effects.push(Effect::Adopt { agent, name });
-            }
-        }
+        Action::Forget => ask_forget(model),
+        Action::Adopt => adopt_selected(model, effects),
         Action::ShowWall => show_wall(model, effects),
         Action::Diff => {
             if let Some(agent) = model.selected {
@@ -1692,6 +1679,25 @@ fn zoom(model: &mut Model, context: Context, action: Action) {
 }
 
 /// Shows the selected agent's screen full size, refreshed.
+/// Asks before forgetting the selected agent.
+fn ask_forget(model: &mut Model) {
+    if let Some(agent) = model.selected {
+        model.prompt = Some(Prompt::Forget(agent));
+    }
+}
+
+/// Asks the source to adopt the selected agent into a volee host.
+fn adopt_selected(model: &mut Model, effects: &mut Vec<Effect>) {
+    if let Some(agent) = model.selected {
+        let name = model
+            .registry
+            .agent(agent)
+            .map_or_else(|| agent.short(), |record| record.name.clone());
+        model.notify(format!("Adopting {name}..."), false);
+        effects.push(Effect::Adopt { agent, name });
+    }
+}
+
 /// Opens the wall of screens (ADR 0021): the agents of the current list that
 /// run in a volee host, as tiles of their live screens, in this terminal
 /// until the person comes back with `q`.

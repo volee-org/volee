@@ -207,20 +207,24 @@ pub(crate) fn attach(dir: &HostDir, id: &str) -> anyhow::Result<()> {
     if !socket.exists() {
         bail!("no host {id}; `volee host ls` lists them");
     }
-    eprintln!("volee: taking over {id}; Ctrl+Q comes back");
+    let name = volee_host::HostRecord::read(&dir.record(id))
+        .ok()
+        .and_then(|record| record.name)
+        .unwrap_or_else(|| id.to_owned());
+    eprintln!("volee: taking over {name}; Ctrl+Q comes back");
     let end = volee_host::attach(&socket, &client_name("attach"))
         .with_context(|| format!("cannot take over {id}"))?;
     match end {
-        AttachEnd::Detached => eprintln!("volee: back from {id}; it keeps running"),
+        AttachEnd::Detached => eprintln!("volee: back from {name}; it keeps running"),
         AttachEnd::Exited(exit) => eprintln!(
-            "volee: {id} ended ({})",
+            "volee: {name} ended ({})",
             exit.code.map_or_else(
                 || exit.signal.unwrap_or_default(),
                 |code| format!("code {code}")
             )
         ),
-        AttachEnd::InputTaken => eprintln!("volee: {id} was taken over from another terminal"),
-        AttachEnd::HostGone => eprintln!("volee: the host of {id} went away"),
+        AttachEnd::InputTaken => eprintln!("volee: {name} was taken over from another terminal"),
+        AttachEnd::HostGone => eprintln!("volee: the host of {name} went away"),
     }
     Ok(())
 }
