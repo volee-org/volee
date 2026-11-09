@@ -7,12 +7,14 @@ use std::time::{Duration, Instant};
 
 use ratatui::DefaultTerminal;
 use ratatui::Frame as UiFrame;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph};
 use volee_host::{AttachEnd, HostDir, Watch};
+
+use crate::keymap::{Action as Keyed, Context, KeyCombo, Keymap};
 use volee_term::{Frame, FrameView};
 
 /// The most tiles shown at once.
@@ -22,11 +24,17 @@ const RESCAN: Duration = Duration::from_secs(1);
 
 /// Runs the wall until the person quits. `client` names this client in the
 /// hosts' logs; `only`, when not empty, limits the wall to these host ids
-/// (the agents of the interface's current list).
-pub fn run(dir: &HostDir, client: &str, only: &[String]) -> io::Result<()> {
+/// (the agents of the interface's current list); `keymap` gives the wall's
+/// keys (the `wall` context) and the leave key of a take over.
+pub fn run(dir: &HostDir, client: &str, only: &[String], keymap: &Keymap) -> io::Result<()> {
     // `init` also restores the terminal if the wall panics.
     let mut terminal = ratatui::init();
-    let mut wall = Wall::new(dir.clone(), client.to_owned(), only.to_vec());
+    let mut wall = Wall::new(
+        dir.clone(),
+        client.to_owned(),
+        only.to_vec(),
+        keymap.clone(),
+    );
     let result = wall.run(&mut terminal);
     ratatui::try_restore()?;
     result
@@ -61,6 +69,7 @@ struct Wall {
     dir: HostDir,
     client: String,
     only: Vec<String>,
+    keymap: Keymap,
     tiles: Vec<Tile>,
     selected: usize,
     zoom: bool,
@@ -69,16 +78,23 @@ struct Wall {
 }
 
 impl Wall {
-    fn new(dir: HostDir, client: String, only: Vec<String>) -> Self {
+    fn new(dir: HostDir, client: String, only: Vec<String>, keymap: Keymap) -> Self {
+        let status = keymap
+            .hints(&[Context::Wall])
+            .iter()
+            .map(|hint| format!("{} {}", hint.keys, hint.text))
+            .collect::<Vec<_>>()
+            .join(" · ");
         Self {
             dir,
             client,
             only,
+            keymap,
             tiles: Vec::new(),
             selected: 0,
             zoom: false,
             scanned: None,
-            status: "a take over · z full screen · arrows move · q quit".to_owned(),
+            status,
         }
     }
 
@@ -194,24 +210,18 @@ impl Wall {
     fn key(&mut self, key: KeyEvent) -> Action {
         let columns = grid(self.shown().len()).0.max(1);
         let last = self.tiles.len().saturating_sub(1);
-        let ctrl_c =
-            key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
-        match key.code {
-            KeyCode::Esc if self.zoom => self.zoom = false,
-            KeyCode::Char('q') | KeyCode::Esc => return Action::Quit,
-            _ if ctrl_c => return Action::Quit,
-            KeyCode::Char('z') => self.zoom = !self.zoom,
-            KeyCode::Char('a') | KeyCode::Enter if !self.tiles.is_empty() => {
-                return Action::TakeOver;
-            }
-            KeyCode::Left | KeyCode::Char('h') => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Right | KeyCode::Char('l') => self.selected = (self.selected + 1).min(last),
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.selected = self.selected.saturating_sub(columns);
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.selected = (self.selected + columns).min(last);
-            }
+        let action = self
+            .keymap
+            .action(&[Context::Wall], KeyCombo::from_event(&key));
+        match action {
+            Some(Keyed::Back) if self.zoom => self.zoom = false,
+            Some(Keyed::Back | Keyed::Quit) => return Action::Quit,
+            Some(Keyed::FullScreen) => self.zoom = !self.zoom,
+            Some(Keyed::TakeOver) if !self.tiles.is_empty() => return Action::TakeOver,
+            Some(Keyed::Left) => self.selected = self.selected.saturating_sub(1),
+            Some(Keyed::Right) => self.selected = (self.selected + 1).min(last),
+            Some(Keyed::Up) => self.selected = self.selected.saturating_sub(columns),
+            Some(Keyed::Down) => self.selected = (self.selected + columns).min(last),
             _ => {}
         }
         // A new page or the zoom changes which tiles need a watcher.
@@ -224,7 +234,8 @@ impl Wall {
             return;
         };
         let id = tile.id.clone();
-        self.status = match volee_host::attach(&self.dir.socket(&id), &self.client) {
+        let leave = self.keymap.leave_letter();
+        self.status = match volee_host::attach_leaving(&self.dir.socket(&id), &self.client, leave) {
             Ok(AttachEnd::Detached) => format!("back from {id}; it keeps running"),
             Ok(AttachEnd::Exited(_)) => format!("{id} ended"),
             Ok(AttachEnd::InputTaken) => format!("{id} was taken over from another terminal"),

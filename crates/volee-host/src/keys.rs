@@ -1,4 +1,5 @@
-//! Find Ctrl+Q in the person's keys, in every encoding (ADR 0021).
+//! Find the leave key, Ctrl+Q unless configured otherwise, in the person's
+//! keys, in every encoding (ADR 0021).
 
 /// What a chunk of keys holds once Ctrl+Q is taken out.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -17,8 +18,10 @@ pub struct Filtered {
 /// swallowed without detaching. Keys after a Ctrl+Q are dropped: the person
 /// is leaving. A control sequence cut between two reads is held until it is
 /// complete, and a `0x11` inside a bracketed paste is pasted, not obeyed.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct KeyFilter {
+    /// The leave key's letter, lowercase.
+    letter: char,
     /// The start of a control sequence (`ESC [` and parameters) that the
     /// last read cut.
     pending: Vec<u8>,
@@ -26,10 +29,46 @@ pub struct KeyFilter {
     pasting: bool,
 }
 
+impl Default for KeyFilter {
+    fn default() -> Self {
+        Self::new(DEFAULT_LEAVE)
+    }
+}
+
+/// The leave key's letter when nothing else is configured: Ctrl+Q.
+pub const DEFAULT_LEAVE: char = 'q';
+
+/// Whether Control and `letter` can leave: a letter whose Control byte is
+/// not also Backspace, Tab, Line Feed or Enter.
+pub fn valid_leave(letter: char) -> bool {
+    letter.is_ascii_alphabetic() && !matches!(letter.to_ascii_lowercase(), 'h' | 'i' | 'j' | 'm')
+}
+
 /// The longest incomplete control sequence held for the next read.
 const MAX_PENDING: usize = 32;
 
 impl KeyFilter {
+    /// A filter for Control and `letter`; a letter that cannot leave (see
+    /// [`valid_leave`]) falls back to Ctrl+Q.
+    pub fn new(letter: char) -> Self {
+        let letter = letter.to_ascii_lowercase();
+        Self {
+            letter: if valid_leave(letter) {
+                letter
+            } else {
+                DEFAULT_LEAVE
+            },
+            pending: Vec::new(),
+            pasting: false,
+        }
+    }
+
+    /// The byte Control and the letter sends without a keyboard protocol.
+    fn byte(&self) -> u8 {
+        // An ASCII letter, checked in `new`.
+        (self.letter as u8) - b'a' + 1
+    }
+
     /// Filters one read of keys.
     pub fn filter(&mut self, read: &[u8]) -> Filtered {
         let mut keys = std::mem::take(&mut self.pending);
@@ -37,7 +76,7 @@ impl KeyFilter {
         let mut out = Filtered::default();
         let mut i = 0;
         while i < keys.len() {
-            if keys[i] == 0x11 && !self.pasting {
+            if keys[i] == self.byte() && !self.pasting {
                 out.detach = true;
                 return out;
             }
@@ -58,7 +97,7 @@ impl KeyFilter {
                     _ => {}
                 }
                 if !self.pasting
-                    && let Some((len, action)) = csi_ctrl_q(rest)
+                    && let Some((len, action)) = csi_ctrl_letter(rest, self.letter)
                 {
                     match action {
                         Action::Detach => {
@@ -93,9 +132,10 @@ enum Action {
     Swallow,
 }
 
-/// If `rest` (after `ESC [`) starts with a Ctrl+Q sequence, its length and
-/// what to do with it.
-fn csi_ctrl_q(rest: &[u8]) -> Option<(usize, Action)> {
+/// If `rest` (after `ESC [`) starts with Control and `letter`, its length
+/// and what to do with it.
+fn csi_ctrl_letter(rest: &[u8], letter: char) -> Option<(usize, Action)> {
+    let code = u32::from(letter).to_string();
     let end = rest.iter().position(|byte| (0x40..=0x7e).contains(byte))?;
     let params = std::str::from_utf8(&rest[..end]).ok()?;
     let len = end + 1;
@@ -104,7 +144,7 @@ fn csi_ctrl_q(rest: &[u8]) -> Option<(usize, Action)> {
             // key[:alternates];modifiers[:event][;text]
             let mut fields = params.split(';');
             let key = fields.next()?.split(':').next()?;
-            if key != "113" {
+            if key != code {
                 return None;
             }
             let mut modifiers = fields.next().unwrap_or("1").split(':');
@@ -126,7 +166,7 @@ fn csi_ctrl_q(rest: &[u8]) -> Option<(usize, Action)> {
             let mut fields = params.split(';');
             let (first, mods, key) = (fields.next()?, fields.next()?, fields.next()?);
             let mods: u16 = mods.parse().ok()?;
-            (first == "27" && key == "113" && is_ctrl_only(mods)).then_some((len, Action::Detach))
+            (first == "27" && key == code && is_ctrl_only(mods)).then_some((len, Action::Detach))
         }
         _ => None,
     }
@@ -190,6 +230,20 @@ mod tests {
         let mut other = KeyFilter::default();
         assert_eq!(other.filter(b"\x1b[1").forward, b"");
         assert_eq!(other.filter(b"A").forward, b"\x1b[1A");
+    }
+
+    #[test]
+    fn another_letter_leaves_in_every_encoding() {
+        for keys in [&b"\x07"[..], b"\x1b[103;5u", b"\x1b[27;5;103~"] {
+            assert!(KeyFilter::new('g').filter(keys).detach, "{keys:?}");
+        }
+        // Ctrl+Q then reaches the agent.
+        let out = KeyFilter::new('G').filter(b"\x11");
+        assert_eq!(out.forward, b"\x11");
+        assert!(!out.detach);
+        // Letters that are also Backspace, Tab, Line Feed or Enter fall back.
+        assert!(!valid_leave('m') && !valid_leave('1') && valid_leave('q'));
+        assert!(KeyFilter::new('m').filter(b"\x11").detach);
     }
 
     #[test]

@@ -63,9 +63,16 @@ wake_timeout = 3600
 # travelling along it, and spinners stop.
 # reduced_motion = true
 
-# Key overrides, by action name. See the interface guide for the actions.
+# Key overrides, by action name: one key, a list, or [] to unbind. A
+# [tui.keys.<context>] table changes keys in one context only. Sequences
+# are written with spaces ("g g", "space n"). See the interface guide for
+# the actions and the contexts.
 # [tui.keys]
 # take-over = "ctrl-a"
+# new-agent = ["c", "space n"]
+#
+# [tui.keys.attached]
+# leave = "ctrl-g"                         # default: ctrl-q
 
 # Programs `o` offers to open an agent's worktree with. None is required:
 # volee only offers what it finds. Each is a command line run in the

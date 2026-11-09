@@ -19,7 +19,7 @@ pub mod proto;
 pub mod record;
 pub mod server;
 
-pub use attach::{AttachEnd, attach, terminal_size};
+pub use attach::{AttachEnd, attach, attach_leaving, terminal_size};
 pub use client::{Connection, HostSender, Update, Watch, snapshot, stop};
 pub use proto::{Event, Exit, Role, Size};
 pub use record::{HostDir, HostRecord};

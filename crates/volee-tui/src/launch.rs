@@ -7,7 +7,7 @@ use volee_core::mission::MissionKind;
 
 use crate::app::{Effect, Model, Overlay};
 use crate::editor::{self, TextField};
-use crate::keymap::{Action, Context, KeyCombo};
+use crate::keymap::{Action, Context, KeyCombo, Keymap};
 use crate::source::{MissionRequest, NewMission, SourceError, SpawnRequest};
 
 /// What the dialog launches.
@@ -204,7 +204,7 @@ pub(crate) fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>
         _ if dialog.sending => {}
         _ => {
             if let Some(field) = dialog.fields.get_mut(dialog.focus) {
-                edit(&mut field.value, key);
+                edit(&mut field.value, key, &model.keymap);
             }
         }
     }
@@ -240,24 +240,25 @@ pub(crate) fn paste(dialog: &mut LaunchDialog, text: &str) {
     }
 }
 
-/// Keys the dialog does not bind: text for text fields, ←/→ for choices,
-/// space to pick a repository.
-fn edit(value: &mut Value, key: KeyCombo) {
+/// Keys the dialog does not bind: text for text fields; for choices, the
+/// keys of the `choice` context (by default ←/→ and space).
+fn edit(value: &mut Value, key: KeyCombo, keymap: &Keymap) {
     use ratatui::crossterm::event::KeyCode;
+    let choice = keymap.action(&[Context::Choice], key);
     match value {
         Value::Line(field) => {
             if !matches!(key.code(), KeyCode::Up | KeyCode::Down) {
-                editor::apply_key(field, key);
+                editor::apply_key(field, key, keymap);
             }
         }
         Value::Lines(field) => {
-            editor::apply_key(field, key);
+            editor::apply_key(field, key, keymap);
         }
         Value::Choice { options, index } => {
             let count = options.len().max(1);
-            match key.code() {
-                KeyCode::Left => *index = (*index + count - 1) % count,
-                KeyCode::Right | KeyCode::Char(' ') => *index = (*index + 1) % count,
+            match choice {
+                Some(Action::PreviousChoice) => *index = (*index + count - 1) % count,
+                Some(Action::NextChoice | Action::ToggleChoice) => *index = (*index + 1) % count,
                 _ => {}
             }
         }
@@ -267,10 +268,10 @@ fn edit(value: &mut Value, key: KeyCombo) {
             cursor,
         } => {
             let count = options.len().max(1);
-            match key.code() {
-                KeyCode::Left => *cursor = (*cursor + count - 1) % count,
-                KeyCode::Right => *cursor = (*cursor + 1) % count,
-                KeyCode::Char(' ') => {
+            match choice {
+                Some(Action::PreviousChoice) => *cursor = (*cursor + count - 1) % count,
+                Some(Action::NextChoice) => *cursor = (*cursor + 1) % count,
+                Some(Action::ToggleChoice) => {
                     if let Some(chosen) = chosen.get_mut(*cursor) {
                         *chosen = !*chosen;
                     }
@@ -443,7 +444,7 @@ mod tests {
     fn dialog(kind: DialogKind, repos: &[&str]) -> LaunchDialog {
         let mut model = Model::new(
             crate::theme::Theme::default(),
-            crate::keymap::Keymap::default(),
+            Keymap::default(),
             None,
             (120, 40),
             volee_core::time::Timestamp::from_millis(0),
@@ -463,7 +464,7 @@ mod tests {
     fn typed(dialog: &mut LaunchDialog, text: &str) {
         let field = &mut dialog.fields[dialog.focus];
         for c in text.chars() {
-            edit(&mut field.value, key(KeyCode::Char(c)));
+            edit(&mut field.value, key(KeyCode::Char(c)), &Keymap::default());
         }
     }
 
@@ -471,7 +472,11 @@ mod tests {
     fn an_agent_needs_a_repository_a_branch_and_a_task() {
         let mut dialog = dialog(DialogKind::Agent, &["billing", "dashboard"]);
         let mut effects = Vec::new();
-        edit(&mut dialog.fields[0].value, key(KeyCode::Right));
+        edit(
+            &mut dialog.fields[0].value,
+            key(KeyCode::Right),
+            &Keymap::default(),
+        );
         submit(&mut dialog, &mut effects);
         assert_eq!(dialog.error.as_deref(), Some("The agent needs a branch."));
         dialog.focus = 1;
@@ -484,7 +489,11 @@ mod tests {
         assert!(dialog.error.as_deref().unwrap().contains("no spaces"));
         dialog.focus = 1;
         for _ in 0..4 {
-            edit(&mut dialog.fields[1].value, key(KeyCode::Backspace));
+            edit(
+                &mut dialog.fields[1].value,
+                key(KeyCode::Backspace),
+                &Keymap::default(),
+            );
         }
         typed(&mut dialog, "-csv");
         submit(&mut dialog, &mut effects);
@@ -508,7 +517,7 @@ mod tests {
     fn a_launch_whose_dialog_was_closed_still_says_how_it_went() {
         let mut model = Model::new(
             crate::theme::Theme::default(),
-            crate::keymap::Keymap::default(),
+            Keymap::default(),
             None,
             (120, 40),
             volee_core::time::Timestamp::from_millis(0),
@@ -559,7 +568,11 @@ mod tests {
         let mut effects = Vec::new();
         typed(&mut dialog, "Invoice export");
         dialog.focus = 1;
-        edit(&mut dialog.fields[1].value, key(KeyCode::Right));
+        edit(
+            &mut dialog.fields[1].value,
+            key(KeyCode::Right),
+            &Keymap::default(),
+        );
         dialog.focus = 2;
         submit(&mut dialog, &mut effects);
         assert!(
@@ -569,10 +582,26 @@ mod tests {
                 .unwrap()
                 .starts_with("Choose at least one")
         );
-        edit(&mut dialog.fields[2].value, key(KeyCode::Char(' ')));
-        edit(&mut dialog.fields[2].value, key(KeyCode::Right));
-        edit(&mut dialog.fields[2].value, key(KeyCode::Right));
-        edit(&mut dialog.fields[2].value, key(KeyCode::Char(' ')));
+        edit(
+            &mut dialog.fields[2].value,
+            key(KeyCode::Char(' ')),
+            &Keymap::default(),
+        );
+        edit(
+            &mut dialog.fields[2].value,
+            key(KeyCode::Right),
+            &Keymap::default(),
+        );
+        edit(
+            &mut dialog.fields[2].value,
+            key(KeyCode::Right),
+            &Keymap::default(),
+        );
+        edit(
+            &mut dialog.fields[2].value,
+            key(KeyCode::Char(' ')),
+            &Keymap::default(),
+        );
         dialog.focus = 3;
         typed(&mut dialog, "Find why exports are slow.");
         submit(&mut dialog, &mut effects);
@@ -619,7 +648,7 @@ mod tests {
         fn n_launches_an_agent_and_selects_it_once_it_appears() {
             let mut model = model(120, 40);
             model.settings.repos = vec!["billing".into()];
-            press(&mut model, "n");
+            press(&mut model, " n");
             assert_eq!(model.contexts(), [Context::Dialog]);
             key(&mut model, KeyCode::Tab);
             press(&mut model, "feat/export");
@@ -663,7 +692,7 @@ mod tests {
         fn a_refusal_stays_in_the_dialog_until_fixed() {
             let mut model = model(120, 40);
             model.settings.repos = vec!["billing".into()];
-            press(&mut model, "N");
+            press(&mut model, " N");
             press(&mut model, "Export");
             key(&mut model, KeyCode::Tab);
             key(&mut model, KeyCode::Tab);
@@ -710,7 +739,7 @@ mod tests {
         fn enter_moves_on_or_starts_a_line_and_never_launches() {
             let mut model = model(120, 40);
             model.settings.repos = vec!["billing".into()];
-            press(&mut model, "n");
+            press(&mut model, " n");
             // From the repository and the branch, Enter moves on.
             assert!(!launches(&key(&mut model, KeyCode::Enter)));
             press(&mut model, "feat/export");
@@ -747,7 +776,7 @@ mod tests {
         fn a_mission_s_goal_takes_several_lines() {
             let mut model = model(120, 40);
             model.settings.repos = vec!["billing".into()];
-            press(&mut model, "N");
+            press(&mut model, " N");
             press(&mut model, "Export");
             // Title, kind, then repositories: Enter moves on.
             key(&mut model, KeyCode::Enter);
@@ -775,10 +804,10 @@ mod tests {
         #[test]
         fn escape_cancels_and_ctrl_c_quits() {
             let mut model = model(120, 40);
-            press(&mut model, "n");
+            press(&mut model, " n");
             key(&mut model, KeyCode::Esc);
             assert_eq!(model.overlay, None);
-            press(&mut model, "n");
+            press(&mut model, " n");
             let effects = update(
                 &mut model,
                 Msg::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),

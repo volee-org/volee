@@ -40,7 +40,7 @@ pub(crate) fn render(model: &Model, menu: ToolMenu, area: Rect, buf: &mut Buffer
         let key = model
             .keymap
             .first_key(Context::Tools, kind.action())
-            .map(|key| key.to_string())
+            .map(ToString::to_string)
             .unwrap_or_default();
         let tool = model.settings.tools.iter().find(|tool| tool.kind == kind);
         let mut spans = vec![

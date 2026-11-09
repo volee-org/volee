@@ -124,7 +124,7 @@ fn j_and_k_follow_the_list() {
     );
     press(&mut model, "G");
     assert_eq!(model.selected, model.rail.last().map(|entry| entry.agent));
-    press(&mut model, "g");
+    press(&mut model, "gg");
     assert_eq!(model.selected, Some(id(INVOICE_TOOLS)));
 }
 
@@ -217,11 +217,11 @@ fn escape_closes_one_thing_at_a_time_and_never_quits() {
     press(&mut model, "'n");
     key(&mut model, KeyCode::Enter);
     press(&mut model, "?");
-    assert_eq!(model.overlay, Some(Overlay::Help { scroll: 0 }));
+    assert_eq!(model.overlay, Some(Overlay::Keys));
     assert_eq!(model.subtree, [id(INVOICING)]);
 
     assert_eq!(key(&mut model, KeyCode::Esc), []);
-    assert_eq!(model.overlay, None, "the help closes first");
+    assert_eq!(model.overlay, None, "the keys popup closes first");
     key(&mut model, KeyCode::Esc);
     assert!(model.subtree.is_empty(), "then the subtree");
     key(&mut model, KeyCode::Esc);
@@ -232,6 +232,90 @@ fn escape_closes_one_thing_at_a_time_and_never_quits() {
     for _ in 0..5 {
         assert!(!key(&mut model, KeyCode::Esc).contains(&Effect::Quit));
     }
+}
+
+#[test]
+fn the_keys_popup_the_leader_and_vim_keys() {
+    let mut model = model(120, 40);
+    // `?` shows this screen's keys; another key closes it and acts.
+    press(&mut model, "?");
+    assert_eq!(model.overlay, Some(Overlay::Keys));
+    press(&mut model, "j");
+    assert_eq!(model.overlay, None);
+    assert_eq!(model.selected, Some(id(INVOICE_SCHEMA)));
+    // `? ?` lists every key.
+    press(&mut model, "??");
+    assert_eq!(model.overlay, Some(Overlay::Help { scroll: 0 }));
+    key(&mut model, KeyCode::Esc);
+    // A sequence waits for its next key, and Escape drops it.
+    press(&mut model, "g");
+    assert_eq!(model.pending_keys, [KeyCombo::char('g')]);
+    key(&mut model, KeyCode::Esc);
+    assert_eq!(model.pending_keys, Vec::<KeyCombo>::new());
+    assert_eq!(model.selected, Some(id(INVOICE_SCHEMA)), "nothing moved");
+    press(&mut model, "gg");
+    assert_eq!(model.selected, Some(id(INVOICE_TOOLS)));
+    // The leader opens the launch dialog; `n` no longer does.
+    press(&mut model, "n");
+    assert!(model.overlay.is_none(), "n is the next match");
+    press(&mut model, " n");
+    assert!(matches!(model.overlay, Some(Overlay::Launch(_))));
+    key(&mut model, KeyCode::Esc);
+    // `n` and `N` go round the filtered list.
+    press(&mut model, "/inv");
+    key(&mut model, KeyCode::Enter);
+    let first = model.selected;
+    press(&mut model, "n");
+    assert_ne!(model.selected, first);
+    press(&mut model, "N");
+    assert_eq!(model.selected, first);
+    // `L` and `H` go through the views.
+    assert_eq!(model.tab, Tab::Hierarchy);
+    press(&mut model, "L");
+    assert_eq!(model.tab, Tab::Network);
+    press(&mut model, "HH");
+    assert_eq!(model.tab, Tab::Timeline);
+}
+
+#[test]
+fn the_palette_runs_a_command_by_name() {
+    let mut model = model(120, 40);
+    press(&mut model, ":");
+    assert!(matches!(model.overlay, Some(Overlay::Commands(_))));
+    press(&mut model, "show-repos");
+    key(&mut model, KeyCode::Enter);
+    assert_eq!(model.overlay, None);
+    assert_eq!(model.tab, Tab::Repos);
+    press(&mut model, ":nothing-like-this");
+    key(&mut model, KeyCode::Enter);
+    assert_eq!(model.tab, Tab::Repos);
+}
+
+#[test]
+fn the_theme_picker_shows_themes_live_and_keeps_or_restores() {
+    let mut model = model(120, 40);
+    let names = ["catppuccin-mocha", "catppuccin-latte"];
+    let themes = names
+        .iter()
+        .map(|name| ((*name).to_owned(), Theme::load(name, None).unwrap()))
+        .collect();
+    model.themes = crate::themes::ThemeMenu::new(themes, "catppuccin-mocha");
+    let mocha = model.theme.clone();
+    press(&mut model, " t");
+    assert!(matches!(model.overlay, Some(Overlay::Themes { .. })));
+    press(&mut model, "j");
+    assert_ne!(model.theme, mocha, "shown at once");
+    key(&mut model, KeyCode::Esc);
+    assert_eq!(model.theme, mocha, "Escape restores it");
+    press(&mut model, " tj");
+    let effects = key(&mut model, KeyCode::Enter);
+    assert_eq!(effects, [Effect::SaveTheme("catppuccin-latte".into())]);
+    assert_eq!(model.overlay, None);
+    // The palette picks a theme by name too.
+    press(&mut model, ":theme mocha");
+    let effects = key(&mut model, KeyCode::Enter);
+    assert_eq!(effects, [Effect::SaveTheme("catppuccin-mocha".into())]);
+    assert_eq!(model.theme, mocha);
 }
 
 #[test]
@@ -1115,7 +1199,7 @@ fn network_arrows_follow_the_picture_and_its_zoom_is_its_own() {
     assert_eq!(model.zoom, ZoomChoice::Auto, "the hierarchy keeps its zoom");
     press(&mut model, "0");
     assert_eq!(model.network.zoom, ZoomChoice::Auto);
-    press(&mut model, "g");
+    press(&mut model, "gg");
     let corner = model.selected.unwrap();
     assert!(
         model.network.targets().iter().all(
@@ -1181,7 +1265,7 @@ fn the_timeline_scrubs_jumps_to_events_and_escape_comes_back() {
     assert_eq!(model.timeline.scale, Scale::Auto);
     assert_eq!(model.timeline.cursor, None);
     // Lanes follow the hierarchy, so they never jump around.
-    press(&mut model, "g");
+    press(&mut model, "gg");
     assert_eq!(model.selected, Some(id(TOWER)));
     press(&mut model, "j");
     assert_eq!(model.selected, Some(id(INVOICING)));
@@ -1192,7 +1276,7 @@ fn repository_keys_walk_agents_and_repositories() {
     let mut model = model(200, 50);
     press(&mut model, "3");
     key(&mut model, KeyCode::Tab);
-    press(&mut model, "g");
+    press(&mut model, "gg");
     assert_eq!(
         model.selected,
         Some(id(INVOICE_SCHEMA)),

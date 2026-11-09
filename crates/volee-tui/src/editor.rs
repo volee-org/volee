@@ -1,7 +1,7 @@
 //! A small multi-line text field: the text, a cursor, and the edits a
 //! message composer needs. Pure, so it is tested without a terminal.
 
-use crate::keymap::KeyCombo;
+use crate::keymap::{Action, Context, KeyCombo, Keymap};
 
 /// Text and a cursor, a byte offset that always sits on a character
 /// boundary.
@@ -156,26 +156,33 @@ impl TextField {
     }
 }
 
-/// Applies an editing key to a field: characters, deletions and cursor
-/// moves, with the usual Control shortcuts (`ctrl-w` and `ctrl-backspace`
-/// delete a word, `ctrl-u` the start of the line, `ctrl-a` and `ctrl-e` go
-/// to its ends). Returns whether the key edits text.
-pub(crate) fn apply_key(field: &mut TextField, key: KeyCombo) -> bool {
+/// Applies an editing key to a field: the shortcuts of the keymap's text
+/// fields (by default `ctrl-w` and `ctrl-backspace` delete a word, `ctrl-u`
+/// the start of the line, `ctrl-a` and `ctrl-e` go to its ends), then
+/// characters, deletions and cursor moves. Returns whether the key edits
+/// text.
+pub(crate) fn apply_key(field: &mut TextField, key: KeyCombo, keymap: &Keymap) -> bool {
+    match keymap.action(&[Context::Editing], key) {
+        Some(Action::DeleteWord) => field.delete_word(),
+        Some(Action::DeleteToLineStart) => field.delete_to_line_start(),
+        Some(Action::LineStart) => field.home(),
+        Some(Action::LineEnd) => field.end(),
+        _ => return apply_plain_key(field, key),
+    }
+    true
+}
+
+/// The keys every text field knows, which are not shortcuts: characters,
+/// Backspace, Delete and the arrows.
+fn apply_plain_key(field: &mut TextField, key: KeyCombo) -> bool {
     use ratatui::crossterm::event::KeyCode;
-    let control = key.ctrl_held();
     match key.code() {
-        KeyCode::Backspace | KeyCode::Char('w') if control => field.delete_word(),
-        KeyCode::Char('u') if control => field.delete_to_line_start(),
-        KeyCode::Char('a') if control => field.home(),
-        KeyCode::Char('e') if control => field.end(),
         KeyCode::Backspace => field.backspace(),
         KeyCode::Delete => field.delete(),
         KeyCode::Left => field.left(),
         KeyCode::Right => field.right(),
         KeyCode::Up => field.up(),
         KeyCode::Down => field.down(),
-        KeyCode::Home => field.home(),
-        KeyCode::End => field.end(),
         _ => match key.typed_char() {
             Some(c) => field.insert(c.encode_utf8(&mut [0; 4])),
             None => return false,

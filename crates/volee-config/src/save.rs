@@ -79,7 +79,7 @@ fn write_atomically(path: &Path, text: &str) -> Result<(), ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Config;
+    use crate::{Config, KeyList, KeySetting};
 
     fn theme_of(path: &Path) -> Option<String> {
         Config::load(path, path).unwrap().tui.theme
@@ -143,7 +143,10 @@ mod tests {
         );
         let config = Config::load(&path, dir.path()).unwrap();
         assert!(config.tui.reduced_motion);
-        assert_eq!(config.tui.keys["take-over"], "ctrl-a");
+        assert_eq!(
+            config.tui.keys["take-over"],
+            KeySetting::Keys(KeyList::One("ctrl-a".into()))
+        );
     }
 
     #[test]

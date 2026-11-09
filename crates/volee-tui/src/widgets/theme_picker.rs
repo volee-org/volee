@@ -14,9 +14,6 @@
 //!                      ╰──────────────────────────╯
 //! ```
 
-// Wired into the interface by the key handling, which lives elsewhere.
-#![allow(dead_code)]
-
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;

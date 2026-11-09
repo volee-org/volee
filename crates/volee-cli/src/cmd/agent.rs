@@ -157,9 +157,10 @@ pub(crate) async fn adopt(input: &str) -> Result<()> {
     client
         .call::<volee_proto::methods::Adopt>(AgentParams { agent })
         .await?;
+    let leave = super::interface::leave_key_name(&super::interface::keymap_or_default());
     println!(
         "Adopted {name}: its conversation continues in a volee host. Take it over with `volee \
-         attach {name}`; Ctrl+Q comes back."
+         attach {name}`; {leave} comes back."
     );
     Ok(())
 }

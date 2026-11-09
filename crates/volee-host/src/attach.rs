@@ -44,6 +44,12 @@ pub enum AttachEnd {
 /// the person presses Ctrl+Q or the program ends. stdin and stdout must be
 /// the person's terminal.
 pub fn attach(socket: &Path, client: &str) -> io::Result<AttachEnd> {
+    attach_leaving(socket, client, keys::DEFAULT_LEAVE)
+}
+
+/// Like [`attach`], leaving with Control and `leave` (a letter, see
+/// [`keys::valid_leave`]) instead of Ctrl+Q.
+pub fn attach_leaving(socket: &Path, client: &str, leave: char) -> io::Result<AttachEnd> {
     let size = terminal_size().unwrap_or(Size { cols: 80, rows: 24 });
     // Raw mode first: connecting takes the input from whoever has it, which
     // must not happen when this is not a terminal.
@@ -58,7 +64,7 @@ pub fn attach(socket: &Path, client: &str) -> io::Result<AttachEnd> {
     let detached = Arc::new(AtomicBool::new(false));
     let keys_thread = {
         let (stop, detached) = (Arc::clone(&stop), Arc::clone(&detached));
-        thread::spawn(move || forward_keys(&sender, &stop, &detached, size))
+        thread::spawn(move || forward_keys(&sender, &stop, &detached, size, leave))
     };
 
     let end = relay(&mut connection, &mut out, &detached);
@@ -108,10 +114,16 @@ fn relay(
 /// terminal's size when it changes. Polls so that it stops reading as soon
 /// as the take over ends: a thread blocked on stdin would steal the next key
 /// from whatever runs after.
-fn forward_keys(sender: &HostSender, stop: &AtomicBool, detached: &AtomicBool, mut size: Size) {
+fn forward_keys(
+    sender: &HostSender,
+    stop: &AtomicBool,
+    detached: &AtomicBool,
+    mut size: Size,
+    leave: char,
+) {
     let stdin = io::stdin();
     let mut buf = [0u8; 4096];
-    let mut filter = keys::KeyFilter::default();
+    let mut filter = keys::KeyFilter::new(leave);
     let timeout = Timespec {
         tv_sec: 0,
         tv_nsec: 50_000_000,

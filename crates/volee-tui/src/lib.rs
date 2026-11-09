@@ -26,6 +26,7 @@
 mod activity;
 mod app;
 mod clock;
+mod commands;
 mod daemon;
 mod demo;
 mod editor;
@@ -41,6 +42,7 @@ mod run;
 pub mod source;
 mod text;
 pub mod theme;
+mod themes;
 mod tools;
 mod view;
 mod views;
@@ -64,6 +66,7 @@ pub use source::{
     Subscription, Summary, TakeOver,
 };
 pub use theme::{ColorDepth, Theme, ThemeError};
+pub use themes::ThemeSaver;
 pub use tools::{Tool, ToolKind};
 
 use crate::app::{Model, Motion, Msg};
@@ -89,6 +92,14 @@ pub struct Options {
     /// No travelling animations: message pulses on the network become
     /// short highlights and spinners stop.
     pub reduced_motion: bool,
+    /// The themes the picker offers, by name; empty, the picker says how
+    /// to set a theme in the configuration instead.
+    pub themes: Vec<(String, Theme)>,
+    /// The name of [`theme`](Self::theme), so that the picker starts on it.
+    pub theme_name: String,
+    /// Keeps a theme chosen in the picker; without one, the choice lasts
+    /// for the session.
+    pub theme_saver: Option<ThemeSaver>,
 }
 
 impl Default for Options {
@@ -101,6 +112,9 @@ impl Default for Options {
             tools: Vec::new(),
             repos: Vec::new(),
             reduced_motion: false,
+            themes: Vec::new(),
+            theme_name: Theme::DEFAULT.to_owned(),
+            theme_saver: None,
         }
     }
 }
@@ -140,6 +154,8 @@ pub async fn run(source: impl Source, options: Options) -> Result<(), TuiError> 
     model.settings.tools = options.tools;
     model.settings.repos = options.repos;
     model.settings.claude_code_available = claude_code_available;
+    model.themes = themes::ThemeMenu::new(options.themes, &options.theme_name);
+    model.themes.saver = options.theme_saver;
     if options.reduced_motion {
         model.motion = Motion::Reduced;
     }

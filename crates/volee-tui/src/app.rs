@@ -20,7 +20,7 @@ use crate::activity::ActivityLog;
 use crate::editor::TextField;
 use crate::history::History;
 use crate::inbox::InboxView;
-use crate::keymap::{Action, Context, KeyCombo, Keymap};
+use crate::keymap::{Action, Context, KeyCombo, Keymap, Resolved};
 use crate::launch::LaunchDialog;
 use crate::layout::{Mode, ScreenLayout};
 use crate::letters::Letters;
@@ -82,10 +82,21 @@ pub(crate) enum Pane {
 /// A window over the screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Overlay {
-    /// The keys, scrolled by some lines.
+    /// The keys of the current screen, in a popup at the bottom right.
+    Keys,
+    /// Every key, scrolled by some lines.
     Help {
         /// Lines scrolled.
         scroll: u16,
+    },
+    /// The command palette.
+    Commands(crate::commands::Palette),
+    /// The theme picker: the theme shown, and the one to come back to.
+    Themes {
+        /// The theme shown, an index into [`Model::themes`].
+        selected: usize,
+        /// The theme there was when the picker opened.
+        original: usize,
     },
     /// The message composer, editing [`Model::draft`].
     Composer,
@@ -447,6 +458,8 @@ pub(crate) enum Effect {
         /// Its name, for the notice that follows.
         name: String,
     },
+    /// Keep the theme chosen in the picker.
+    SaveTheme(String),
     /// Run a tool on a worktree: in this terminal, or detached in a window
     /// of its own.
     RunTool {
@@ -483,6 +496,10 @@ pub(crate) struct Model {
     pub(crate) theme: Theme,
     /// Key bindings.
     pub(crate) keymap: Keymap,
+    /// The keys of a sequence typed so far, such as the leader.
+    pub(crate) pending_keys: Vec<KeyCombo>,
+    /// The themes the picker offers.
+    pub(crate) themes: crate::themes::ThemeMenu,
     /// A word about the data, such as "demo".
     pub(crate) banner: Option<String>,
 
@@ -577,6 +594,8 @@ impl Model {
         let mut model = Self {
             theme,
             keymap,
+            pending_keys: Vec::new(),
+            themes: crate::themes::ThemeMenu::default(),
             banner,
             registry: Registry::new(),
             letters: Letters::default(),
@@ -661,7 +680,10 @@ impl Model {
             return vec![Context::Confirm];
         }
         match self.overlay {
+            Some(Overlay::Keys) => return vec![Context::Keys],
             Some(Overlay::Help { .. }) => return vec![Context::Help],
+            Some(Overlay::Commands(_)) => return vec![Context::Commands],
+            Some(Overlay::Themes { .. }) => return vec![Context::Themes],
             Some(Overlay::Composer) => return vec![Context::Composer],
             Some(Overlay::Diff(_)) => return vec![Context::Diff],
             Some(Overlay::Inbox(_)) => return vec![Context::Inbox],
@@ -673,6 +695,12 @@ impl Model {
         if self.filter.editing {
             return vec![Context::Filter];
         }
+        self.screen_contexts()
+    }
+
+    /// The key contexts of the screen under any popup or window: the
+    /// focused panel, then everywhere.
+    pub(crate) fn screen_contexts(&self) -> Vec<Context> {
         let pane = match self.focus {
             Pane::Rail => Context::Agents,
             Pane::View => view_context(self.tab),
@@ -1483,40 +1511,71 @@ fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
         }
         return;
     }
+    if matches!(model.overlay, Some(Overlay::Commands(_))) {
+        crate::commands::on_key(model, key, effects);
+        return;
+    }
+    if model.overlay == Some(Overlay::Keys) {
+        match model.keymap.action(&[Context::Keys], key) {
+            Some(Action::AllKeys) => {
+                model.overlay = Some(Overlay::Help { scroll: 0 });
+                return;
+            }
+            Some(Action::Back) => {
+                model.overlay = None;
+                return;
+            }
+            // Any other key closes the popup and does what it does.
+            _ => model.overlay = None,
+        }
+    }
     let contexts = model.contexts();
-    if let Some((context, action)) = model.keymap.lookup(&contexts, key) {
-        perform(model, context, action, effects);
+    let pending = std::mem::take(&mut model.pending_keys);
+    match model.keymap.resolve(&contexts, &pending, key) {
+        Resolved::Action(context, action) => perform(model, context, action, effects),
+        // The leader, `g`...: wait for the next key, the which-key popup
+        // shows what it can be.
+        Resolved::Prefix => {
+            model.pending_keys = pending;
+            model.pending_keys.push(key);
+        }
+        // Escape, or a key that continues nothing: the sequence is dropped.
+        Resolved::Unbound => {}
     }
 }
 
 fn edit_filter(model: &mut Model, key: KeyCombo) {
     use ratatui::crossterm::event::KeyCode;
-    match key.code() {
-        KeyCode::Backspace | KeyCode::Char('u' | 'w') if key.ctrl_held() => {
-            model.filter.text.clear();
-        }
-        KeyCode::Backspace => {
-            model.filter.text.pop();
-        }
-        _ => {
-            if let Some(c) = key.typed_char() {
-                model.filter.text.push(c);
+    match model.keymap.action(&[Context::Editing], key) {
+        Some(Action::DeleteWord | Action::DeleteToLineStart) => model.filter.text.clear(),
+        _ => match key.code() {
+            KeyCode::Backspace => {
+                model.filter.text.pop();
             }
-        }
+            _ => {
+                if let Some(c) = key.typed_char() {
+                    model.filter.text.push(c);
+                }
+            }
+        },
     }
 }
 
-fn perform(model: &mut Model, context: Context, action: Action, effects: &mut Vec<Effect>) {
-    if perform_windows(model, context, action, effects) {
+/// Runs an action of a context, as its key does.
+pub(crate) fn perform(
+    model: &mut Model,
+    context: Context,
+    action: Action,
+    effects: &mut Vec<Effect>,
+) {
+    if matches!(action, Action::HalfPageDown | Action::HalfPageUp) {
+        half_page(model, context, action, effects);
+        return;
+    }
+    if perform_windows(model, context, action, effects) || perform_finding(model, action, effects) {
         return;
     }
     match action {
-        Action::Help => {
-            model.overlay = match model.overlay {
-                Some(Overlay::Help { .. }) => None,
-                _ => Some(Overlay::Help { scroll: 0 }),
-            };
-        }
         Action::Back => back(model),
         Action::NextPane | Action::PreviousPane => {
             let panes = model.panes();
@@ -1619,6 +1678,7 @@ fn perform_windows(
 ) -> bool {
     match (context, action) {
         (_, Action::Quit) => request_quit(model, effects),
+        (Context::Themes, _) => crate::themes::perform(model, action, effects),
         (Context::Inbox, _) => crate::inbox::perform(model, action, effects),
         (Context::Tools, _) => crate::tools::perform(model, action, effects),
         (_, Action::Messages) => crate::inbox::open(model),
@@ -1884,9 +1944,10 @@ fn edit(model: &mut Model, change: impl FnOnce(&mut TextField)) {
 
 /// Keys the composer does not bind edit the text.
 fn edit_draft(model: &mut Model, key: KeyCombo) {
-    edit(model, |field| {
-        crate::editor::apply_key(field, key);
-    });
+    let keymap = &model.keymap;
+    if let Some(draft) = model.draft.as_mut().filter(|draft| !draft.sending) {
+        crate::editor::apply_key(&mut draft.field, key, keymap);
+    }
 }
 
 /// Pasted text goes to the composer or the filter prompt, whichever has
@@ -2077,6 +2138,92 @@ fn direction(action: Action) -> Direction {
 }
 
 /// A window's scroll after a key, between 0 and `most` lines.
+/// The keys that help find things: the keys popup, every key, the palette,
+/// the theme picker, the matches of the filter and the views; returns
+/// whether the action was one of them.
+fn perform_finding(model: &mut Model, action: Action, effects: &mut Vec<Effect>) -> bool {
+    match action {
+        Action::Help => {
+            model.overlay = match model.overlay {
+                Some(Overlay::Keys) => None,
+                _ => Some(Overlay::Keys),
+            };
+        }
+        Action::AllKeys => model.overlay = Some(Overlay::Help { scroll: 0 }),
+        Action::Commands => crate::commands::open(model),
+        Action::PickTheme => crate::themes::open(model),
+        Action::NextMatch | Action::PreviousMatch => {
+            next_match(model, action == Action::NextMatch, effects);
+        }
+        Action::PreviousView | Action::NextView => {
+            let tabs = [Tab::Hierarchy, Tab::Network, Tab::Repos, Tab::Timeline];
+            let index = tabs.iter().position(|tab| *tab == model.tab).unwrap_or(0);
+            let count = tabs.len();
+            model.tab = if action == Action::NextView {
+                tabs[(index + 1) % count]
+            } else {
+                tabs[(index + count - 1) % count]
+            };
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Half a page down or up: in the agents list, half its rows at once;
+/// elsewhere, that many lines of scrolling.
+fn half_page(model: &mut Model, context: Context, action: Action, effects: &mut Vec<Effect>) {
+    let rows = usize::from(model.size.1.saturating_sub(4) / 2).max(1);
+    let down = action == Action::HalfPageDown;
+    if context == Context::Agents {
+        let last = model.rail.len().saturating_sub(1);
+        let index = model
+            .selected
+            .and_then(|id| model.rail.iter().position(|entry| entry.agent == id))
+            .unwrap_or(0);
+        let target = if down {
+            (index + rows).min(last)
+        } else {
+            index.saturating_sub(rows)
+        };
+        if let Some(entry) = model.rail.get(target) {
+            let agent = entry.agent;
+            model.select(agent, effects);
+        }
+        return;
+    }
+    let step = if down { Action::Down } else { Action::Up };
+    for _ in 0..rows {
+        perform(model, context, step, effects);
+    }
+}
+
+/// `n` and `N`: the next or previous agent of the filtered list, round it.
+fn next_match(model: &mut Model, forward: bool, effects: &mut Vec<Effect>) {
+    if model.filter.needle().is_none() {
+        model.notify(
+            "n and N go through the agents that match the filter: press / and type first.",
+            false,
+        );
+        return;
+    }
+    let count = model.rail.len();
+    if count == 0 {
+        model.notify("No agent matches the filter.", false);
+        return;
+    }
+    let next = match model
+        .selected
+        .and_then(|id| model.rail.iter().position(|entry| entry.agent == id))
+    {
+        Some(index) if forward => (index + 1) % count,
+        Some(index) => (index + count - 1) % count,
+        None => 0,
+    };
+    let agent = model.rail[next].agent;
+    model.select(agent, effects);
+}
+
 fn scrolled(scroll: u16, action: Action, most: u16) -> u16 {
     let scroll = match action {
         Action::Down => scroll.saturating_add(1),
@@ -2116,6 +2263,53 @@ fn scroll_view(model: &mut Model, down: bool, sideways: bool, effects: &mut Vec<
     true
 }
 
+/// The mouse over a window: the wheel scrolls it, a click closes one that
+/// holds nothing typed; returns whether anything changed.
+fn on_overlay_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> bool {
+    let action = match mouse.kind {
+        MouseEventKind::ScrollDown => Action::Down,
+        MouseEventKind::ScrollUp => Action::Up,
+        // A click closes a window that holds nothing typed; the
+        // composer, the messages and the dialogs close with keys.
+        MouseEventKind::Down(_)
+            if matches!(
+                model.overlay,
+                Some(
+                    Overlay::Keys
+                        | Overlay::Help { .. }
+                        | Overlay::Diff(_)
+                        | Overlay::Tools(_)
+                        | Overlay::Commands(_)
+                )
+            ) =>
+        {
+            model.overlay = None;
+            return true;
+        }
+        // The theme picker goes back to the theme there was.
+        MouseEventKind::Down(_) if matches!(model.overlay, Some(Overlay::Themes { .. })) => {
+            crate::themes::perform(model, Action::Back, effects);
+            return true;
+        }
+        _ => return false,
+    };
+    let context = match model.overlay {
+        Some(Overlay::Help { .. }) => Context::Help,
+        Some(Overlay::Diff(_)) => Context::Diff,
+        Some(Overlay::Inbox(_)) => {
+            for _ in 0..2 {
+                crate::inbox::perform(model, action, effects);
+            }
+            return true;
+        }
+        _ => return false,
+    };
+    for _ in 0..2 {
+        navigate(model, context, action, effects);
+    }
+    true
+}
+
 /// Handles the mouse; returns whether anything changed.
 fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> bool {
     let (column, row) = (mouse.column, mouse.row);
@@ -2123,37 +2317,7 @@ fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> 
         return false;
     }
     if model.overlay.is_some() {
-        let action = match mouse.kind {
-            MouseEventKind::ScrollDown => Action::Down,
-            MouseEventKind::ScrollUp => Action::Up,
-            // A click closes a window that holds nothing typed; the
-            // composer, the messages and the dialogs close with keys.
-            MouseEventKind::Down(_)
-                if matches!(
-                    model.overlay,
-                    Some(Overlay::Help { .. } | Overlay::Diff(_) | Overlay::Tools(_))
-                ) =>
-            {
-                model.overlay = None;
-                return true;
-            }
-            _ => return false,
-        };
-        let context = match model.overlay {
-            Some(Overlay::Help { .. }) => Context::Help,
-            Some(Overlay::Diff(_)) => Context::Diff,
-            Some(Overlay::Inbox(_)) => {
-                for _ in 0..2 {
-                    crate::inbox::perform(model, action, effects);
-                }
-                return true;
-            }
-            _ => return false,
-        };
-        for _ in 0..2 {
-            navigate(model, context, action, effects);
-        }
-        return true;
+        return on_overlay_mouse(model, mouse, effects);
     }
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => match model.hit(column, row) {

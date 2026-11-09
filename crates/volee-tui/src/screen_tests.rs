@@ -109,6 +109,27 @@ fn help_overlay() {
 }
 
 #[test]
+fn every_key_in_columns() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    type_text(&demo, &mut model, "??");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn the_leader_shows_what_follows() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    type_text(&demo, &mut model, " ");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn the_command_palette() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    type_text(&demo, &mut model, ":show");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
 fn an_agent_screen_full_size() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     type_text(&demo, &mut model, "z");
@@ -427,7 +448,7 @@ fn tools_menu_offers_what_was_found() {
 fn new_agent_dialog_with_a_refusal() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     model.settings.repos = demo.repos();
-    type_text(&demo, &mut model, "n");
+    type_text(&demo, &mut model, " n");
     keys(&demo, &mut model, &[KeyCode::Right, KeyCode::Tab]);
     type_text(&demo, &mut model, "feat/invoice-export");
     keys(&demo, &mut model, &[KeyCode::Tab]);
@@ -462,7 +483,7 @@ fn new_agent_dialog_with_a_refusal() {
 fn new_mission_dialog_on_a_small_screen() {
     let (mut model, demo) = demo_model(80, 24, Theme::default());
     model.settings.repos = demo.repos();
-    type_text(&demo, &mut model, "N");
+    type_text(&demo, &mut model, " N");
     type_text(&demo, &mut model, "Invoice export");
     keys(
         &demo,

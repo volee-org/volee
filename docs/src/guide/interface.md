@@ -291,7 +291,7 @@ make the time scale finer or coarser, from a second to an hour per column;
 
 ## The wall of screens
 
-`5` opens the wall: the agents of the current list that run in a volee
+`5` (or `Space w`) opens the wall: the agents of the current list that run in a volee
 host, each as a tile of its live screen, over the whole terminal. The
 filter (`/`) applies, so filter first to watch one mission or one
 repository. A page holds up to nine tiles, laid out as one, two, four, six
@@ -307,8 +307,11 @@ are not on the wall: [adopt](#adopting-an-agent) one to see it there.
 | --- | --- |
 | arrows, `h`, `j`, `k`, `l` | move between tiles |
 | `z` | show the selected tile alone, over the whole wall; `z` or `esc` brings the wall back |
-| `a`, `enter` | take over the selected agent; `Ctrl+Q` comes back to the wall |
+| `a`, `enter` | take over the selected agent; the leave key (`Ctrl+Q`) comes back to the wall |
 | `q`, `esc` | come back to the interface |
+
+These are the defaults of the `wall` context: `[tui.keys.wall]` changes
+them, like any other key ([Keys](#keys)).
 
 The wall runs as `volee host wall`, the interface stepping aside while it
 is open. From a shell, `volee host wall` opens it on every running host
@@ -316,7 +319,8 @@ is open. From a shell, `volee host wall` opens it on every running host
 
 ## Moving around
 
-- `j`, `k` and the arrows move through the list. In the hierarchy, `h`,
+- `j`, `k` and the arrows move through the list; `gg` and `G` go to its
+  first and last agent, `Ctrl+d` and `Ctrl+u` half a page down and up. In the hierarchy, `h`,
   `j`, `k` and `l` move through the tree as drawn: down to satellites and
   children, up to the parent, sideways to the nearest card. In the network
   they move to the nearest agent on screen; in the repositories and the
@@ -327,11 +331,13 @@ is open. From a shell, `volee host wall` opens it on every running host
 - `/` filters by name, repository, branch or mission, as you type. The
   hierarchy and the network dim the agents that do not match; the list,
   the repositories and the timeline hide them. `Enter` keeps the filter,
-  `Esc` clears it.
+  `Esc` clears it. With a filter kept, `n` and `N` go to the next and
+  previous agent that matches, round the list.
+- `1` to `4` show a view; `H` and `L` the previous and the next one.
 - `Tab` moves the keyboard to the next panel. Clicking a row, a card, a
   node, a lane or a tab selects it.
 
-`Esc` closes or leaves one thing at a time (the help, the timeline's
+`Esc` closes or leaves one thing at a time (a popup, the timeline's
 cursor, the subtree, the filter, then the panel), and never quits volee.
 
 ## Writing to an agent
@@ -515,50 +521,103 @@ which.
 
 ## Keys
 
-`q` quits at once, unless a message you started would be lost: then volee
-asks first. The tables below are generated from the keymap, like the help
-and the hints.
+The keys follow the habits of vim and of terminal tools such as lazygit:
+`h`, `j`, `k`, `l` and the arrows move, `gg` and `G` go to the ends,
+`Ctrl+d` and `Ctrl+u` move half a page, `/` filters and `n` / `N` go
+through the matches, `?` shows the keys, `:` runs a command by name, `Esc`
+goes back and `q` quits. `q` quits at once, unless a message you started
+would be lost: then volee asks first.
 
-To move an action to other keys, name it in the `[tui.keys]` table of the
-[configuration](configuration.md). An override replaces every key of the
-action, in every panel; keys are written like `q`, `ctrl-c`, `shift-tab`,
-`enter` or `f5`, and two actions cannot share a key in the same panel:
+**The keys of this screen.** `?` opens a small popup at the bottom right
+with the keys of the panel you are in and of everywhere, in columns, with
+nothing to scroll. Press one of them and the popup closes and does it;
+`?` again lists every key of every context; `Esc` closes it.
+
+**The leader.** Less frequent actions sit behind the space bar, as in
+LazyVim: press `Space` and a popup at the bottom right shows what can
+follow, such as `n` for a new agent, `N` for a new mission, `t` for the
+theme, `w` for the wall or `k` for every key. `Esc`, or a key that
+continues nothing, drops the sequence. `gg` works the same way: after `g`,
+the popup shows what can follow.
+
+**The command palette.** `:` opens a prompt on the bottom line and lists
+the commands of the current screen, the ones matching what you type first:
+each action by its name and what it does, and `theme <name>` for every
+theme. `Enter` runs the selected one, the arrows, `Tab` or `Ctrl+n` /
+`Ctrl+p` move, `Esc` closes.
+
+**The theme.** `Space t` (or `:theme`) opens the theme picker at the
+bottom right: moving shows each theme at once, `Enter` keeps it in the
+[configuration](configuration.md#tui), `Esc` goes back to the theme you
+had. See [Themes](themes.md).
+
+**Changing keys.** Every key in the tables below can be changed in the
+`[tui.keys]` table of the [configuration](configuration.md#tuikeys): give
+an action other keys in every context, or in one with a
+`[tui.keys.<context>]` table (the context's name is in each title below),
+and an empty list unbinds it. Keys are written like `q`, `ctrl-c`,
+`shift-tab`, `enter` or `f5`, and sequences of up to three keys like
+`g g` or `space n`:
 
 ```toml
 [tui.keys]
-take-over = "ctrl-a"
+take-over = "ctrl-a"           # everywhere it has a key
+new-agent = ["c", "space n"]   # several keys
+adopt = []                     # no key
+
+[tui.keys.agents]
+first = "home"                 # in the agents list only
+
+[tui.keys.attached]
+leave = "ctrl-g"               # leave a taken-over agent with Ctrl+G
 ```
 
+volee refuses, with the line of the configuration, two actions on the same
+key where both apply, and a key that both acts and starts a longer
+sequence (`g` alone would hide `gg`). The leave key (`leave`) must be
+Control and a letter other than `h`, `i`, `j` or `m`: it is the only kind
+of key every terminal sends the same way while an agent owns the keyboard.
+Typing keys (letters, Backspace, the arrows in a text) are not shortcuts
+and stay as they are. The tables are generated from the keymap, like the
+popups and the hints.
+
 <!-- keys:start -->
-### Everywhere
+### Everywhere (`global`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
 | `'` | jump to an agent: press ' then its letter | `jump` |
 | `-` | back to the agent selected before | `jump-back` |
 | `/` | filter agents by name, repository, branch or mission | `filter` |
+| `n` | the next agent that matches the filter, round the list | `next-match` |
+| `N` | the previous agent that matches the filter, round the list | `previous-match` |
 | `m` | write a message to the selected agent | `message` |
 | `d` | show the selected agent's changes | `diff` |
 | `a` | take over the selected agent in this terminal | `take-over` |
 | `z` | show the selected agent's screen full size | `full-screen` |
 | `i` | your messages, questions waiting for you first | `messages` |
-| `o` | open the selected agent's worktree in your editor, diff viewer or git tool | `open-with` |
-| `n` | launch an agent in a new worktree | `new-agent` |
-| `N` | create a mission, which launches its coordinator | `new-mission` |
-| `F` | forget the selected agent: stop listing it (asks first) | `forget` |
-| `A` | adopt the selected agent into a volee host, so that you can take it over | `adopt` |
-| `5` | show the agents in volee hosts as a wall of live screens | `show-wall` |
+| `o`, `space o` | open the selected agent's worktree in your editor, diff viewer or git tool | `open-with` |
+| `A`, `space a` | adopt the selected agent into a volee host, so that you can take it over | `adopt` |
+| `F`, `space f` | forget the selected agent: stop listing it (asks first) | `forget` |
+| `space n` | launch an agent in a new worktree | `new-agent` |
+| `space N` | create a mission, which launches its coordinator | `new-mission` |
+| `space w`, `5` | show the agents in volee hosts as a wall of live screens | `show-wall` |
+| `space t` | pick a colour theme, with a live preview; volee keeps your choice | `pick-theme` |
+| `space k` | list every key, in every context | `all-keys` |
+| `:` | the command palette: type part of a command's name and press enter | `commands` |
 | `tab` | focus the next panel | `next-pane` |
 | `shift-tab` | focus the previous panel | `previous-pane` |
 | `1` | show the hierarchy | `show-hierarchy` |
 | `2` | show the network | `show-network` |
 | `3` | show repositories and worktrees | `show-repos` |
 | `4` | show the timeline | `show-timeline` |
-| `?` | show or hide the keys | `help` |
+| `H` | show the previous view | `previous-view` |
+| `L` | show the next view | `next-view` |
+| `?` | show the keys of this screen; ? again lists every key | `help` |
 | `esc` | close, cancel or go back (never quits) | `back` |
 | `q`, `ctrl-c` | quit volee (asks first when a draft would be lost) | `quit` |
 
-### Agents list
+### Agents list (`agents`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
@@ -566,14 +625,16 @@ take-over = "ctrl-a"
 | `j`, `↓` | next agent | `down` |
 | `k`, `↑` | previous agent | `up` |
 | `l`, `→` | first child agent | `right` |
-| `g`, `home` | first agent | `first` |
+| `gg`, `home` | first agent | `first` |
 | `G`, `end` | last agent | `last` |
+| `ctrl-d`, `pgdn` | half a page of agents down | `half-page-down` |
+| `ctrl-u`, `pgup` | half a page of agents up | `half-page-up` |
 | `enter` | show the agent's subtree in the hierarchy | `focus-subtree` |
 | `+`, `=` | more detail in the view beside the list | `zoom-in` |
 | `_` | less detail in the view beside the list | `zoom-out` |
 | `0` | the view's detail chosen from the size again | `zoom-auto` |
 
-### Hierarchy
+### Hierarchy (`hierarchy`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
@@ -581,14 +642,14 @@ take-over = "ctrl-a"
 | `j`, `↓` | card below | `down` |
 | `k`, `↑` | card above | `up` |
 | `l`, `→` | card on the right | `right` |
-| `g`, `home` | first card | `first` |
+| `gg`, `home` | first card | `first` |
 | `G`, `end` | last card | `last` |
 | `enter` | show only the selected agent and its descendants | `focus-subtree` |
 | `+`, `=` | more detail on cards | `zoom-in` |
 | `_` | less detail on cards | `zoom-out` |
 | `0` | choose the detail level from the size | `zoom-auto` |
 
-### Network
+### Network (`network`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
@@ -596,13 +657,13 @@ take-over = "ctrl-a"
 | `j`, `↓` | agent below | `down` |
 | `k`, `↑` | agent above | `up` |
 | `l`, `→` | agent on the right | `right` |
-| `g`, `home` | first agent, top left | `first` |
+| `gg`, `home` | first agent, top left | `first` |
 | `G`, `end` | last agent, bottom right | `last` |
 | `+`, `=` | more detail on agents | `zoom-in` |
 | `_` | less detail on agents | `zoom-out` |
 | `0` | choose the detail level from the size | `zoom-auto` |
 
-### Repositories
+### Repositories (`repos`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
@@ -610,13 +671,13 @@ take-over = "ctrl-a"
 | `k`, `↑` | previous agent | `up` |
 | `h`, `←` | previous repository | `left` |
 | `l`, `→` | next repository | `right` |
-| `g`, `home` | first agent | `first` |
+| `gg`, `home` | first agent | `first` |
 | `G`, `end` | last agent | `last` |
 | `+`, `=` | more detail per agent | `zoom-in` |
 | `_` | less detail per agent | `zoom-out` |
 | `0` | choose the detail level from the size | `zoom-auto` |
 
-### Timeline
+### Timeline (`timeline`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
@@ -626,43 +687,47 @@ take-over = "ctrl-a"
 | `l`, `→` | move the cursor forward in time | `right` |
 | `[` | cursor to the selected agent's previous event | `previous-event` |
 | `]` | cursor to the selected agent's next event | `next-event` |
-| `g`, `home` | first agent | `first` |
+| `gg`, `home` | first agent | `first` |
 | `G`, `end` | last agent | `last` |
 | `+`, `=` | shorter time span, more detail | `zoom-in` |
 | `_` | longer time span | `zoom-out` |
 | `0` | back to now and the default time span | `zoom-auto` |
 
-### Detail and preview
+### Detail and preview (`detail`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
 | `j`, `↓` | scroll the preview down | `down` |
 | `k`, `↑` | scroll the preview up | `up` |
+| `ctrl-d`, `pgdn` | scroll the preview half a page down | `half-page-down` |
+| `ctrl-u`, `pgup` | scroll the preview half a page up | `half-page-up` |
 | `r` | refresh the preview | `refresh` |
 | `enter` | show the agent's screen full size | `full-screen` |
 
-### Full screen
+### Full screen (`screen`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
 | `k`, `↑` | scroll up, to older lines | `up` |
 | `j`, `↓` | scroll down, to newer lines | `down` |
-| `g`, `home` | the top of the screen | `first` |
+| `ctrl-u`, `pgup` | half a page up, to older lines | `half-page-up` |
+| `ctrl-d`, `pgdn` | half a page down, to newer lines | `half-page-down` |
+| `gg`, `home` | the top of the screen | `first` |
 | `G`, `end` | the bottom, the newest lines | `last` |
 | `r` | refresh the screen | `refresh` |
 | `a` | take over the agent in this terminal | `take-over` |
 | `z`, `esc`, `q` | come back to the interface | `back` |
 | `ctrl-c` | quit volee | `quit` |
 
-### Filter prompt
+### Filter prompt (`filter`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
-| `enter` | keep the filter and close the prompt | `apply` |
+| `enter` | keep the filter and close the prompt; n and N then go through the matches | `apply` |
 | `esc` | clear the filter and close the prompt | `back` |
 | `ctrl-c` | quit volee | `quit` |
 
-### Message composer
+### Message composer (`composer`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
@@ -673,13 +738,15 @@ take-over = "ctrl-a"
 | `esc` | close the composer and keep the draft | `back` |
 | `ctrl-c` | quit volee (asks first) | `quit` |
 
-### Changes
+### Changes (`diff`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
 | `j`, `↓` | scroll down | `down` |
 | `k`, `↑` | scroll up | `up` |
-| `g`, `home` | top | `first` |
+| `ctrl-d`, `pgdn` | half a page down | `half-page-down` |
+| `ctrl-u`, `pgup` | half a page up | `half-page-up` |
+| `gg`, `home` | top | `first` |
 | `G`, `end` | bottom | `last` |
 | `f` | switch between the summary and the full patch | `toggle-full` |
 | `r` | load the changes again | `refresh` |
@@ -687,7 +754,7 @@ take-over = "ctrl-a"
 | `esc`, `d`, `q` | close the changes | `back` |
 | `ctrl-c` | quit volee | `quit` |
 
-### Questions
+### Questions (`confirm`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
@@ -695,13 +762,15 @@ take-over = "ctrl-a"
 | `n`, `esc` | no | `back` |
 | `ctrl-c` | quit volee without asking again | `quit` |
 
-### Messages
+### Messages (`inbox`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
 | `j`, `↓` | next row, or further down the thread you read | `down` |
 | `k`, `↑` | previous row, or further up the thread you read | `up` |
-| `g`, `home` | first row, or the start of the thread | `first` |
+| `ctrl-d`, `pgdn` | half a page down | `half-page-down` |
+| `ctrl-u`, `pgup` | half a page up | `half-page-up` |
+| `gg`, `home` | first row, or the start of the thread | `first` |
 | `G`, `end` | last row, or the end of the thread | `last` |
 | `enter` | read the thread, which marks its messages read | `apply` |
 | `r` | reply: the answer to the question, else a note to the agent | `reply` |
@@ -709,7 +778,7 @@ take-over = "ctrl-a"
 | `esc`, `q`, `i` | leave the thread, then close the messages | `back` |
 | `ctrl-c` | quit volee | `quit` |
 
-### Open with
+### Open with (`tools`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
@@ -720,7 +789,7 @@ take-over = "ctrl-a"
 | `esc`, `q`, `o` | close the menu | `back` |
 | `ctrl-c` | quit volee | `quit` |
 
-### Launch dialogs
+### Launch dialogs (`dialog`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
@@ -731,12 +800,79 @@ take-over = "ctrl-a"
 | `esc` | cancel | `back` |
 | `ctrl-c` | quit volee | `quit` |
 
-### Help
+### Choices in dialogs (`choice`)
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `←`, `h` | the previous option, or the cursor to the previous repository | `previous-choice` |
+| `→`, `l` | the next option, or the cursor to the next repository | `next-choice` |
+| `space` | pick or unpick the repository under the cursor; the next option of a single choice | `toggle-choice` |
+
+### Text fields (`editing`)
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `ctrl-w`, `ctrl-backspace` | delete the word before the cursor | `delete-word` |
+| `ctrl-u` | delete from the start of the line to the cursor | `delete-to-line-start` |
+| `ctrl-a`, `home` | the cursor to the start of the line | `line-start` |
+| `ctrl-e`, `end` | the cursor to the end of the line | `line-end` |
+
+### Keys popup (`keys`)
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `?` | list every key, in every context | `all-keys` |
+| `esc`, `q` | close the popup; any other key closes it and acts | `back` |
+
+### All keys (`help`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
 | `j`, `↓` | scroll down | `down` |
 | `k`, `↑` | scroll up | `up` |
-| `esc`, `?`, `q` | close the help | `back` |
+| `ctrl-d`, `pgdn` | half a page down | `half-page-down` |
+| `ctrl-u`, `pgup` | half a page up | `half-page-up` |
+| `gg`, `home` | top | `first` |
+| `G`, `end` | bottom | `last` |
+| `esc`, `?`, `q` | close the list | `back` |
 | `ctrl-c` | quit volee | `quit` |
+
+### Command palette (`commands`)
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `enter` | run the selected command | `apply` |
+| `↓`, `ctrl-n`, `tab` | the next command | `down` |
+| `↑`, `ctrl-p`, `shift-tab` | the previous command | `up` |
+| `esc` | close the palette | `back` |
+| `ctrl-c` | quit volee | `quit` |
+
+### Theme picker (`themes`)
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `j`, `↓` | the next theme, shown at once | `down` |
+| `k`, `↑` | the previous theme, shown at once | `up` |
+| `enter` | keep the theme and save it in the configuration | `apply` |
+| `esc`, `q` | back to the theme you had | `back` |
+| `ctrl-c` | quit volee | `quit` |
+
+### Wall of screens (`wall`)
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `h`, `←` | the screen on the left | `left` |
+| `j`, `↓` | the screen below | `down` |
+| `k`, `↑` | the screen above | `up` |
+| `l`, `→` | the screen on the right | `right` |
+| `z` | the selected screen alone, full size, and back | `full-screen` |
+| `a`, `enter` | take over the selected agent; the leave key comes back to the wall | `take-over` |
+| `q`, `esc` | leave the wall | `back` |
+| `ctrl-c` | leave the wall | `quit` |
+
+### Taken over (`attached`)
+
+| Keys | What it does | Action |
+| --- | --- | --- |
+| `ctrl-q` | leave the agent you took over and come back; Control and a letter only | `leave` |
 <!-- keys:end -->
