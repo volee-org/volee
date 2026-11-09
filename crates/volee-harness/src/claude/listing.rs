@@ -91,7 +91,21 @@ pub fn parse_listing(stdout: &[u8]) -> Result<Listing, ParseError> {
     let mut sessions = Vec::with_capacity(elements.len());
     for element in elements {
         match serde_json::from_value::<RawSession>(element) {
-            Ok(raw) if !raw.session_id.trim().is_empty() => sessions.push(raw.into_listed()),
+            Ok(raw) if !raw.session_id.trim().is_empty() => {
+                let listed = raw.into_listed();
+                // A conversation can be listed twice: the row of the
+                // background session it started in, ended, and the
+                // interactive session that resumed it in a volee host. The
+                // live one is the session.
+                match sessions
+                    .iter_mut()
+                    .find(|known: &&mut ListedSession| known.key == listed.key)
+                {
+                    Some(known) if listed.alive && !known.alive => *known = listed,
+                    Some(_) => {}
+                    None => sessions.push(listed),
+                }
+            }
             Ok(_) => {
                 complete = false;
                 tracing::warn!("skipped a Claude Code session without a session id");
@@ -200,6 +214,21 @@ mod tests {
 
     fn needs(request: InputRequest) -> AgentState {
         AgentState::NeedsInput { request }
+    }
+
+    #[test]
+    fn an_adopted_conversation_is_its_live_session() {
+        // As measured: the ended background row, then the interactive
+        // session that resumed it in a volee host.
+        let session = only(
+            r#"[
+              {"id":"35edc1ef","sessionId":"35edc1ef-e6d0-47d0-b4f2-23d17a703eac","kind":"background","state":"done","cwd":"/work/alpha"},
+              {"sessionId":"35edc1ef-e6d0-47d0-b4f2-23d17a703eac","kind":"interactive","pid":7819,"status":"idle","cwd":"/work/alpha"}
+            ]"#,
+        );
+        assert!(session.alive);
+        assert!(!session.background);
+        assert_eq!(session.state, AgentState::Idle);
     }
 
     #[test]

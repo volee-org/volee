@@ -208,6 +208,97 @@ fn a_timeout_is_passed_through() {
     );
 }
 
+fn host() -> crate::HostLaunch {
+    crate::HostLaunch {
+        volee_bin: "/opt/volee/bin/volee".into(),
+        dir: "/state/hosts".into(),
+        id: "ag_1-abc123".into(),
+        name: "alpha worker".into(),
+        cols: 160,
+        rows: 45,
+    }
+}
+
+#[test]
+fn spawn_in_a_host_runs_claude_interactive_with_its_own_session_id() {
+    let claude = claude(vec![Ok(Output {
+        code: Some(0),
+        stdout: b"ag_1-abc123\n".to_vec(),
+        stderr: Vec::new(),
+    })]);
+    let spawned = claude
+        .spawn(&SpawnSpec {
+            host: Some(host()),
+            worktree: Some("feat-x".into()),
+            ..spec()
+        })
+        .unwrap();
+    assert_eq!(spawned.origin, SessionOrigin::Started);
+    // A version-4 UUID, which `--session-id` requires.
+    assert_eq!(spawned.handle.len(), 36);
+    assert_eq!(spawned.handle.as_bytes()[14], b'4');
+    let call = only_call(&claude);
+    assert_eq!(call.program, Path::new("/opt/volee/bin/volee"));
+    assert_eq!(call.env_remove, session_variables());
+    let args = call.args_lossy();
+    assert_eq!(
+        args[..14],
+        [
+            "host",
+            "spawn",
+            "--dir",
+            "/state/hosts",
+            "--id",
+            "ag_1-abc123",
+            "--cwd",
+            "/work/alpha",
+            "--cols",
+            "160",
+            "--rows",
+            "45",
+            "--profile",
+            "claude-code"
+        ]
+    );
+    let claude_at = args.iter().position(|arg| arg == "claude").unwrap();
+    assert_eq!(args[claude_at - 1], "--");
+    assert_eq!(
+        args[claude_at + 1],
+        format!("--session-id={}", spawned.handle)
+    );
+    assert!(!args.contains(&"--bg".to_owned()), "{args:?}");
+    assert!(args.contains(&"--worktree=feat-x".to_owned()), "{args:?}");
+    assert_eq!(args.last().map(String::as_str), Some("Fix the flaky test"));
+}
+
+#[test]
+fn a_resume_in_a_host_without_a_prompt_continues_the_same_session() {
+    let claude = claude(vec![Ok(Output {
+        code: Some(0),
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+    })]);
+    let session = SessionKey::claude("3be7fdc8-3d9c-4ff8-b917-8089d57780b2");
+    let resumed = claude
+        .resume(
+            &session,
+            &SpawnSpec {
+                host: Some(host()),
+                prompt: String::new(),
+                ..spec()
+            },
+        )
+        .unwrap();
+    assert_eq!(resumed.origin, SessionOrigin::Resumed);
+    assert_eq!(resumed.handle, session.id);
+    let args = only_call(&claude).args_lossy();
+    assert!(
+        args.contains(&format!("--resume={}", session.id)),
+        "{args:?}"
+    );
+    assert_ne!(args.last().map(String::as_str), Some("--"), "{args:?}");
+}
+
 #[test]
 fn spawn_passes_every_value_inside_its_option() {
     let claude = claude(vec![Ok(backgrounded("7d3c1f0a"))]);
