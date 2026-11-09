@@ -15,6 +15,12 @@
 # an hour anyway; volee then resumes them when a message arrives).
 wake_timeout = 3600
 
+# Agents run in volee hosts. When the machine restarts, the daemon resumes the
+# agents it interrupted in new hosts, with their conversation, the first time
+# it starts (`volee daemon install` starts it at login). false: they are
+# shown as stopped and resume when you write to them.
+# resume_after_reboot = true
+
 # One table per repository volee may launch agents in. The key is the name you
 # use on the command line and the name agents see.
 #

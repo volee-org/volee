@@ -280,6 +280,135 @@ async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, D
     Ok(Some(shown.len()))
 }
 
+/// Why a conversation moves into a new host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Rehost {
+    /// The person adopted an agent volee did not host (ADR 0023).
+    Adopt,
+    /// The machine restarted and ended the agent's host (ADR 0024).
+    AfterReboot,
+}
+
+impl Rehost {
+    /// The prompt the resumed session starts with: none for an adoption, the
+    /// agent waits at its prompt.
+    fn prompt(self) -> &'static str {
+        match self {
+            Self::Adopt => "",
+            Self::AfterReboot => RESTARTED,
+        }
+    }
+
+    fn state(self) -> AgentState {
+        match self {
+            Self::Adopt => AgentState::Idle,
+            Self::AfterReboot => AgentState::Launching,
+        }
+    }
+
+    fn detail(self) -> &'static str {
+        match self {
+            Self::Adopt => "adopted into a volee host",
+            Self::AfterReboot => "resumed after the machine restarted",
+        }
+    }
+}
+
+/// What a resumed session reads after a reboot ended its host (ADR 0024).
+const RESTARTED: &str = "The machine restarted and ended this session, maybe in the middle of a \
+     command or an answer. volee resumed the conversation in a new volee host: check where you \
+     were, then continue.";
+
+/// A host that started less than this ago and is gone again counts as a
+/// crash, not a reboot: its agent is not resumed again (ADR 0024).
+const CRASH_WINDOW_SECS: u64 = 600;
+
+/// Resumes, in new hosts, the agents a reboot interrupted: their host is gone
+/// and recorded no end, and nothing holds them (ADR 0024). Runs once, when
+/// the daemon starts.
+pub(crate) async fn resume_interrupted(shared: Arc<Shared>) {
+    if !shared.hosts || !shared.settings.agents.resume_after_reboot {
+        return;
+    }
+    let candidates: Vec<(AgentId, String, String)> = {
+        let state = shared.state.lock().await;
+        state
+            .registry()
+            .agents()
+            .filter(|agent| {
+                agent.harness == HarnessKind::ClaudeCode
+                    && agent.hold.is_none()
+                    && agent.current_session().is_some()
+            })
+            .filter_map(|agent| {
+                let host = agent.location.host()?.to_owned();
+                Some((agent.id, host, agent.name.clone()))
+            })
+            .collect()
+    };
+    let dir = launch::hosts_dir(&shared);
+    for (agent, host, name) in candidates {
+        let socket = dir.join(format!("{host}.sock"));
+        let record = dir.join(format!("{host}.json"));
+        let verdict = tokio::task::spawn_blocking(move || interrupted(&socket, &record)).await;
+        match verdict {
+            Ok(Interrupted::No) | Err(_) => {}
+            Ok(Interrupted::Crashed) => {
+                tracing::warn!(%agent, "its host ended right after it started: not resumed");
+                let mut state = shared.state.lock().await;
+                let now = state.now();
+                let _ = state.commit(vec![Event::new(
+                    now,
+                    EventKind::StateChanged {
+                        agent,
+                        state: AgentState::Failed,
+                        detail: Some(
+                            "its volee host ended twice within ten minutes: write to it to \
+                             resume it"
+                                .into(),
+                        ),
+                    },
+                )]);
+            }
+            Ok(Interrupted::Yes) => match rehost(&shared, agent, Rehost::AfterReboot).await {
+                Ok(()) => tracing::info!(%agent, "resumed after a reboot"),
+                Err(error) => tracing::warn!(%agent, %name, %error, "cannot resume after a reboot"),
+            },
+        }
+    }
+}
+
+/// What a host left when the daemon started.
+#[derive(Debug, PartialEq, Eq)]
+enum Interrupted {
+    /// It runs, or its program ended and said so.
+    No,
+    /// It is gone without an end: the machine or the host stopped.
+    Yes,
+    /// Gone without an end, but it had only just started.
+    Crashed,
+}
+
+fn interrupted(socket: &std::path::Path, record: &std::path::Path) -> Interrupted {
+    if std::os::unix::net::UnixStream::connect(socket).is_ok() {
+        return Interrupted::No;
+    }
+    let Ok(record) = volee_host::HostRecord::read(record) else {
+        return Interrupted::No;
+    };
+    if record.exit.is_some() {
+        return Interrupted::No;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    if now.saturating_sub(record.started_at) < CRASH_WINDOW_SECS {
+        Interrupted::Crashed
+    } else {
+        Interrupted::Yes
+    }
+}
+
 /// What an adoption needs, read under the lock.
 struct Adoption {
     session: volee_core::harness::SessionKey,
@@ -293,7 +422,11 @@ struct Adoption {
 }
 
 /// Reads what adopting `agent` needs, or why it cannot be adopted.
-async fn adoption(shared: &Arc<Shared>, agent: AgentId) -> Result<Adoption, DaemonError> {
+async fn adoption(
+    shared: &Arc<Shared>,
+    agent: AgentId,
+    why: Rehost,
+) -> Result<Adoption, DaemonError> {
     let state = shared.state.lock().await;
     let record = state
         .registry()
@@ -305,7 +438,7 @@ async fn adoption(shared: &Arc<Shared>, agent: AgentId) -> Result<Adoption, Daem
             record.name, record.harness
         )));
     }
-    if record.location.host().is_some() && record.state.is_live() {
+    if why == Rehost::Adopt && record.location.host().is_some() && record.state.is_live() {
         return Err(DaemonError::Refused(format!(
             "{} already runs in a volee host: press a to take it over",
             record.name
@@ -352,6 +485,11 @@ async fn adoption(shared: &Arc<Shared>, agent: AgentId) -> Result<Adoption, Daem
 /// terminal must be quit there first, so that two programs never write the
 /// same conversation.
 pub(crate) async fn adopt(shared: &Arc<Shared>, agent: AgentId) -> Result<(), DaemonError> {
+    rehost(shared, agent, Rehost::Adopt).await
+}
+
+/// Resumes `agent`'s conversation in a new host, for `why`.
+async fn rehost(shared: &Arc<Shared>, agent: AgentId, why: Rehost) -> Result<(), DaemonError> {
     let harness = shared
         .harness
         .clone()
@@ -365,7 +503,7 @@ pub(crate) async fn adopt(shared: &Arc<Shared>, agent: AgentId) -> Result<(), Da
         worktree,
         model,
         instructions,
-    } = adoption(shared, agent).await?;
+    } = adoption(shared, agent, why).await?;
     let alive = listed.as_ref().is_some_and(|session| session.alive);
     if alive && !matches!(location, Location::Background) {
         return Err(DaemonError::Refused(format!(
@@ -384,7 +522,7 @@ pub(crate) async fn adopt(shared: &Arc<Shared>, agent: AgentId) -> Result<(), Da
         cwd: root,
         name,
         model,
-        prompt: String::new(),
+        prompt: why.prompt().to_owned(),
         settings_file,
         mcp_config_file,
         permission_mode: launch::permission_mode(shared),
@@ -407,8 +545,8 @@ pub(crate) async fn adopt(shared: &Arc<Shared>, agent: AgentId) -> Result<(), Da
             now,
             EventKind::StateChanged {
                 agent,
-                state: AgentState::Idle,
-                detail: Some("adopted into a volee host".into()),
+                state: why.state(),
+                detail: Some(why.detail().into()),
             },
         ),
     ])?;

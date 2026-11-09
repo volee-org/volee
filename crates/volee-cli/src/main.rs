@@ -279,6 +279,16 @@ enum DaemonCommand {
     Stop,
     /// Show whether the daemon runs, and its counters.
     Status,
+    /// Start the daemon at login (a launchd agent on macOS, a systemd user
+    /// unit on Linux), so that agents a reboot interrupted come back on
+    /// their own.
+    Install {
+        /// Only print the file and where it would go.
+        #[arg(long)]
+        print: bool,
+    },
+    /// Stop starting the daemon at login.
+    Uninstall,
 }
 
 #[derive(Debug, Subcommand)]
@@ -426,6 +436,8 @@ fn async_main(command: Command) -> ExitCode {
             Command::Daemon(DaemonCommand::Start) => cmd::daemon::start().await,
             Command::Daemon(DaemonCommand::Stop) => cmd::daemon::stop().await,
             Command::Daemon(DaemonCommand::Status) => cmd::daemon::status().await,
+            Command::Daemon(DaemonCommand::Install { print }) => cmd::login::install(print),
+            Command::Daemon(DaemonCommand::Uninstall) => cmd::login::uninstall(),
             Command::Ls { json } => cmd::ls::run(json).await,
             Command::Attach { agent } => cmd::agent::attach(&agent).await,
             Command::Logs { agent } => cmd::agent::logs(&agent).await,

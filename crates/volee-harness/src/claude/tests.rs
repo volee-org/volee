@@ -208,8 +208,8 @@ fn a_timeout_is_passed_through() {
     );
 }
 
-fn host() -> crate::HostLaunch {
-    crate::HostLaunch {
+fn host() -> HostLaunch {
+    HostLaunch {
         volee_bin: "/opt/volee/bin/volee".into(),
         dir: "/state/hosts".into(),
         id: "ag_1-abc123".into(),

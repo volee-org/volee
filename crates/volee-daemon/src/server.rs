@@ -254,6 +254,8 @@ impl Daemon {
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
         let resumer = crate::resume::spawn(&shared);
+        // Agents a reboot interrupted come back in new hosts (ADR 0024).
+        tokio::spawn(crate::resume::resume_interrupted(Arc::clone(&shared)));
         tracing::info!(socket = ?listener.local_addr().ok(), "volee daemon ready");
         let mut connections = JoinSet::new();
         loop {
