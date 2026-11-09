@@ -34,6 +34,34 @@ pub(crate) fn to_ratatui(style: &VtStyle) -> Style {
     result.add_modifier(modifiers)
 }
 
+/// The SGR sequence that sets `style` from a reset state.
+pub(crate) fn to_sgr(style: Style) -> Vec<u8> {
+    let mut params: Vec<String> = vec!["0".to_owned()];
+    let modifiers = [
+        (Modifier::BOLD, "1"),
+        (Modifier::DIM, "2"),
+        (Modifier::ITALIC, "3"),
+        (Modifier::UNDERLINED, "4"),
+        (Modifier::SLOW_BLINK, "5"),
+        (Modifier::REVERSED, "7"),
+        (Modifier::HIDDEN, "8"),
+        (Modifier::CROSSED_OUT, "9"),
+    ];
+    for (modifier, code) in modifiers {
+        if style.add_modifier.contains(modifier) {
+            params.push(code.to_owned());
+        }
+    }
+    for (color, base) in [(style.fg, 38), (style.bg, 48)] {
+        match color {
+            Some(Color::Indexed(index)) => params.push(format!("{base};5;{index}")),
+            Some(Color::Rgb(r, g, b)) => params.push(format!("{base};2;{r};{g};{b}")),
+            _ => {}
+        }
+    }
+    format!("\x1b[{}m", params.join(";")).into_bytes()
+}
+
 fn color(color: StyleColor) -> Option<Color> {
     match color {
         StyleColor::None => None,

@@ -16,7 +16,7 @@ use volee_core::{Agent, AgentId, Event, EventKind, Registry};
 use volee_harness::hooks::{HookPayload, HookSignal, SessionSource, interpret, stop_block_output};
 use volee_proto::PROTOCOL_VERSION;
 use volee_proto::methods::{
-    AbortMission, AgentParams, Attach, CloseMission, CreateMission, Diff, Empty, EventBatch,
+    AbortMission, Adopt, AgentParams, Attach, CloseMission, CreateMission, Diff, Empty, EventBatch,
     EventsSince, Forget, HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams,
     Method, Preview, RecordActivity, RefreshDiscovery, SendMessage, SendParams, Sent, Shutdown,
     SinceParams, Spawn, Status, StatusInfo, StatusParams, Stop, Summarize, Tidy, WaitParams,
@@ -61,6 +61,14 @@ pub(crate) async fn dispatch(
         Diff::NAME => respond(control::diff(shared, parse::<Diff>(params)?).await),
         Attach::NAME => respond(control::attach(shared, parse::<Attach>(params)?).await),
         Stop::NAME => respond(control::stop(shared, parse::<Stop>(params)?).await),
+        Adopt::NAME => {
+            let params = parse::<Adopt>(params)?;
+            respond(
+                crate::resume::adopt(shared, params.agent)
+                    .await
+                    .map(|()| Empty {}),
+            )
+        }
         Tidy::NAME => respond(crate::tidy::tidy(shared, parse::<Tidy>(params)?).await),
         RecordActivity::NAME => {
             respond(crate::join::activity(shared, parse::<RecordActivity>(params)?).await)

@@ -83,6 +83,39 @@ impl Connection {
     }
 }
 
+/// The host's screen as it is now: its welcome and its first snapshot (VT
+/// bytes for a blank terminal of `welcome.size`), read as a watcher within
+/// `timeout`.
+pub fn snapshot(
+    socket: &Path,
+    client: &str,
+    timeout: std::time::Duration,
+) -> io::Result<(Welcome, Vec<u8>)> {
+    let mut connection = Connection::open(socket, Role::Watch, Size { cols: 0, rows: 0 }, client)?;
+    connection.stream.set_read_timeout(Some(timeout))?;
+    let mut welcome = connection.welcome.clone();
+    loop {
+        match connection.next_update()? {
+            Some(Update::Snapshot(bytes)) => return Ok((welcome, bytes)),
+            Some(Update::Event(Event::Resized { size })) => welcome.size = size,
+            Some(Update::Event(Event::Exited { exit })) => welcome.exit = Some(exit),
+            Some(_) => {}
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "the host closed before sending its screen",
+                ));
+            }
+        }
+    }
+}
+
+/// Asks the host at `socket` to end its program, like a closed terminal.
+pub fn stop(socket: &Path, client: &str) -> io::Result<()> {
+    let connection = Connection::open(socket, Role::Watch, Size { cols: 0, rows: 0 }, client)?;
+    connection.sender()?.stop()
+}
+
 /// Writes to a host: keys, size, stop. Only the input owner's keys and size
 /// are heeded.
 #[derive(Debug)]

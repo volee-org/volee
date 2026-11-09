@@ -21,10 +21,12 @@ const MAX_TILES: usize = 9;
 const RESCAN: Duration = Duration::from_secs(1);
 
 /// Runs the wall until the person quits. `client` names this client in the
-/// hosts' logs.
-pub fn run(dir: &HostDir, client: &str) -> io::Result<()> {
-    let mut terminal = ratatui::try_init()?;
-    let mut wall = Wall::new(dir.clone(), client.to_owned());
+/// hosts' logs; `only`, when not empty, limits the wall to these host ids
+/// (the agents of the interface's current list).
+pub fn run(dir: &HostDir, client: &str, only: &[String]) -> io::Result<()> {
+    // `init` also restores the terminal if the wall panics.
+    let mut terminal = ratatui::init();
+    let mut wall = Wall::new(dir.clone(), client.to_owned(), only.to_vec());
     let result = wall.run(&mut terminal);
     ratatui::try_restore()?;
     result
@@ -32,6 +34,7 @@ pub fn run(dir: &HostDir, client: &str) -> io::Result<()> {
 
 struct Tile {
     id: String,
+    name: Option<String>,
     command: String,
     ended: bool,
     watch: Option<Watch>,
@@ -47,13 +50,17 @@ impl Tile {
             Some(watch) => watch.title().unwrap_or("running").to_owned(),
             None => "connecting".to_owned(),
         };
-        format!(" {short} · {} · {state} ", self.command)
+        match &self.name {
+            Some(name) => format!(" {name} · {state} "),
+            None => format!(" {short} · {} · {state} ", self.command),
+        }
     }
 }
 
 struct Wall {
     dir: HostDir,
     client: String,
+    only: Vec<String>,
     tiles: Vec<Tile>,
     selected: usize,
     zoom: bool,
@@ -62,10 +69,11 @@ struct Wall {
 }
 
 impl Wall {
-    fn new(dir: HostDir, client: String) -> Self {
+    fn new(dir: HostDir, client: String, only: Vec<String>) -> Self {
         Self {
             dir,
             client,
+            only,
             tiles: Vec::new(),
             selected: 0,
             zoom: false,
@@ -101,7 +109,7 @@ impl Wall {
                 Action::TakeOver => {
                     ratatui::try_restore()?;
                     self.take_over();
-                    *terminal = ratatui::try_init()?;
+                    *terminal = ratatui::init();
                     terminal.clear()?;
                 }
             }
@@ -114,7 +122,12 @@ impl Wall {
         let Ok(records) = self.dir.list() else {
             return false;
         };
-        let live: Vec<_> = records.into_iter().filter(|(_, live)| *live).collect();
+        let live: Vec<_> = records
+            .into_iter()
+            .filter(|(record, live)| {
+                *live && (self.only.is_empty() || self.only.contains(&record.id))
+            })
+            .collect();
         let before: Vec<String> = self.tiles.iter().map(|tile| tile.id.clone()).collect();
         let selected = self.tiles.get(self.selected).map(|tile| tile.id.clone());
         self.tiles
@@ -123,6 +136,7 @@ impl Wall {
             match self.tiles.iter_mut().find(|tile| tile.id == record.id) {
                 Some(tile) => tile.ended = record.exit.is_some(),
                 None => self.tiles.push(Tile {
+                    name: record.name.clone(),
                     command: record.command.join(" "),
                     ended: record.exit.is_some(),
                     id: record.id,

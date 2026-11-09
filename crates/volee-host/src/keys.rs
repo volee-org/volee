@@ -9,40 +9,82 @@ pub struct Filtered {
     pub detach: bool,
 }
 
-/// Removes Ctrl+Q from keys read from a terminal.
+/// Removes Ctrl+Q from keys read from a terminal, one read at a time.
 ///
 /// Recognized: the byte `0x11`, the kitty keyboard protocol (`CSI 113 ; 5 u`
 /// with any event type, alternate keys, text and lock modifiers), and xterm's
 /// `modifyOtherKeys` (`CSI 27 ; 5 ; 113 ~`). A key repeat or release is
 /// swallowed without detaching. Keys after a Ctrl+Q are dropped: the person
-/// is leaving.
-pub fn filter(keys: &[u8]) -> Filtered {
-    let mut out = Filtered::default();
-    let mut i = 0;
-    while i < keys.len() {
-        if keys[i] == 0x11 {
-            out.detach = true;
-            return out;
-        }
-        if keys[i] == 0x1b
-            && keys.get(i + 1) == Some(&b'[')
-            && let Some((len, action)) = csi_ctrl_q(&keys[i + 2..])
-        {
-            match action {
-                Action::Detach => {
-                    out.detach = true;
-                    return out;
-                }
-                Action::Swallow => {
-                    i += 2 + len;
-                    continue;
-                }
+/// is leaving. A control sequence cut between two reads is held until it is
+/// complete, and a `0x11` inside a bracketed paste is pasted, not obeyed.
+#[derive(Clone, Debug, Default)]
+pub struct KeyFilter {
+    /// The start of a control sequence (`ESC [` and parameters) that the
+    /// last read cut.
+    pending: Vec<u8>,
+    /// Inside a bracketed paste (`CSI 200 ~` to `CSI 201 ~`).
+    pasting: bool,
+}
+
+/// The longest incomplete control sequence held for the next read.
+const MAX_PENDING: usize = 32;
+
+impl KeyFilter {
+    /// Filters one read of keys.
+    pub fn filter(&mut self, read: &[u8]) -> Filtered {
+        let mut keys = std::mem::take(&mut self.pending);
+        keys.extend_from_slice(read);
+        let mut out = Filtered::default();
+        let mut i = 0;
+        while i < keys.len() {
+            if keys[i] == 0x11 && !self.pasting {
+                out.detach = true;
+                return out;
             }
+            if keys[i] == 0x1b && keys.get(i + 1) == Some(&b'[') {
+                let rest = &keys[i + 2..];
+                let Some(end) = rest.iter().position(|byte| (0x40..=0x7e).contains(byte)) else {
+                    // Cut by the read: wait for the rest.
+                    if keys.len() - i <= MAX_PENDING {
+                        self.pending = keys[i..].to_vec();
+                        return out;
+                    }
+                    out.forward.extend_from_slice(&keys[i..]);
+                    return out;
+                };
+                match &rest[..=end] {
+                    b"200~" => self.pasting = true,
+                    b"201~" => self.pasting = false,
+                    _ => {}
+                }
+                if !self.pasting
+                    && let Some((len, action)) = csi_ctrl_q(rest)
+                {
+                    match action {
+                        Action::Detach => {
+                            out.detach = true;
+                            return out;
+                        }
+                        Action::Swallow => {
+                            i += 2 + len;
+                            continue;
+                        }
+                    }
+                }
+                out.forward.extend_from_slice(&keys[i..i + 3 + end]);
+                i += 3 + end;
+                continue;
+            }
+            out.forward.push(keys[i]);
+            i += 1;
         }
-        out.forward.push(keys[i]);
-        i += 1;
+        out
     }
-    out
+}
+
+/// Filters keys that arrived in one read; see [`KeyFilter`].
+pub fn filter(keys: &[u8]) -> Filtered {
+    KeyFilter::default().filter(keys)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,6 +178,27 @@ mod tests {
         assert_eq!(out.forward, b"xy");
         assert!(!out.detach);
         assert!(!detaches(b"\x1b[113;5:2u"));
+    }
+
+    #[test]
+    fn a_sequence_cut_between_reads_is_still_seen() {
+        let mut filter = KeyFilter::default();
+        let first = filter.filter(b"ab\x1b[113;5");
+        assert_eq!(first.forward, b"ab");
+        assert!(!first.detach);
+        assert!(filter.filter(b"u").detach);
+        let mut other = KeyFilter::default();
+        assert!(other.filter(b"\x1b[1").forward.is_empty());
+        assert_eq!(other.filter(b"A").forward, b"\x1b[1A");
+    }
+
+    #[test]
+    fn ctrl_q_inside_a_paste_is_pasted() {
+        let mut filter = KeyFilter::default();
+        let out = filter.filter(b"\x1b[200~a\x11b\x1b[201~");
+        assert_eq!(out.forward, b"\x1b[200~a\x11b\x1b[201~");
+        assert!(!out.detach);
+        assert!(filter.filter(b"\x11").detach, "after the paste it detaches");
     }
 
     #[test]

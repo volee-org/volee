@@ -20,6 +20,7 @@ fn start(dir: &HostDir, id: &str, command: &[&str]) -> thread::JoinHandle<()> {
         env: Vec::new(),
         size: SIZE,
         profile: "generic".to_owned(),
+        name: None,
         scrollback: 100,
         linger: Duration::from_millis(300),
     };

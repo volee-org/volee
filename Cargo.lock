@@ -1982,6 +1982,7 @@ dependencies = [
  "volee-core",
  "volee-git",
  "volee-harness",
+ "volee-host",
  "volee-mux",
  "volee-proto",
  "volee-store",
@@ -2010,6 +2011,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+ "ulid",
  "volee-core",
 ]
 

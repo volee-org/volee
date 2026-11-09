@@ -23,6 +23,7 @@ use volee_core::harness::HarnessKind;
 use volee_core::message::{Message, MessageKind, Party, Receipt};
 use volee_core::role::{LaunchedBy, Role};
 use volee_core::state::AgentState;
+use volee_core::workspace::Location;
 use volee_core::{Agent, AgentId, Event, EventKind, MessageId, Registry};
 use volee_harness::SpawnSpec;
 use volee_harness::hooks::format_messages_for_agent;
@@ -240,6 +241,7 @@ async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, D
         )])?;
         (plan, previous)
     };
+    let location = launch::location_of(spec.host.as_ref());
     let resumed = {
         let harness = Arc::clone(&harness);
         launch::blocking(move || harness.resume(&session, &spec)).await?
@@ -261,20 +263,132 @@ async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, D
         }
     };
     state.expect_session(resumed.handle, agent, resumed.origin);
-    let events: Vec<Event> = shown
-        .iter()
-        .map(|message| {
-            Event::new(
-                now,
-                EventKind::MessageDelivered {
-                    message: *message,
-                    to: Party::Agent(agent),
-                },
-            )
-        })
-        .collect();
+    let mut events = vec![Event::new(
+        now,
+        EventKind::LocationChanged { agent, location },
+    )];
+    events.extend(shown.iter().map(|message| {
+        Event::new(
+            now,
+            EventKind::MessageDelivered {
+                message: *message,
+                to: Party::Agent(agent),
+            },
+        )
+    }));
     state.commit(events)?;
     Ok(Some(shown.len()))
+}
+
+/// Moves an agent's conversation into a host (ADR 0023): stops its
+/// background session if it runs, then resumes the conversation in a new
+/// host, at its prompt, with volee's hooks. An agent that runs in someone's
+/// terminal must be quit there first, so that two programs never write the
+/// same conversation.
+pub(crate) async fn adopt(shared: &Arc<Shared>, agent: AgentId) -> Result<(), DaemonError> {
+    let harness = shared
+        .harness
+        .clone()
+        .ok_or_else(|| DaemonError::Unavailable("Claude Code is not available".into()))?;
+    let (session, listed, location, name, spec_base) = {
+        let state = shared.state.lock().await;
+        let record = state
+            .registry()
+            .agent(agent)
+            .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {agent}")))?;
+        if record.harness != HarnessKind::ClaudeCode {
+            return Err(DaemonError::Refused(format!(
+                "{} runs in {}, which volee cannot resume yet",
+                record.name, record.harness
+            )));
+        }
+        if record.location.host().is_some() && record.state.is_live() {
+            return Err(DaemonError::Refused(format!(
+                "{} already runs in a volee host: press a to take it over",
+                record.name
+            )));
+        }
+        let session = record
+            .current_session()
+            .map(|link| link.key.clone())
+            .ok_or_else(|| {
+                DaemonError::Refused(format!("{} has no conversation to resume", record.name))
+            })?;
+        let listed = state.sessions().listed(&session).cloned();
+        let root = record
+            .workspace
+            .repo_root
+            .clone()
+            .unwrap_or_else(|| record.workspace.cwd.clone());
+        let worktree = record
+            .workspace
+            .worktree
+            .as_deref()
+            .and_then(|worktree| launch::worktree_name(&root, worktree));
+        let model = record.model.clone().or_else(|| {
+            shared
+                .settings
+                .model_for(record.workspace.repo.as_deref())
+                .map(str::to_owned)
+        });
+        let instructions = (record.launched_by != LaunchedBy::Outside)
+            .then(|| launch::instructions_for(state.registry(), record));
+        (
+            session,
+            listed,
+            record.location.clone(),
+            record.name.clone(),
+            (root, worktree, model, instructions),
+        )
+    };
+    let alive = listed.as_ref().is_some_and(|session| session.alive);
+    if alive && !matches!(location, Location::Background) {
+        return Err(DaemonError::Refused(format!(
+            "{name} runs in a terminal: quit it there first, then adopt it"
+        )));
+    }
+    if alive && let Some(listed) = listed {
+        let harness = Arc::clone(&harness);
+        launch::blocking(move || harness.stop(&listed)).await??;
+    }
+    let (settings_file, mcp_config_file) = launch::write_agent_files(shared, &harness, agent)?;
+    let (root, worktree, model, instructions) = spec_base;
+    let host = launch::host_launch(shared, agent, &name)
+        .ok_or_else(|| DaemonError::Unavailable("this daemon cannot start volee hosts".into()))?;
+    let location = launch::location_of(Some(&host));
+    let spec = SpawnSpec {
+        cwd: root,
+        name,
+        model,
+        prompt: String::new(),
+        settings_file,
+        mcp_config_file,
+        permission_mode: launch::permission_mode(shared),
+        allowed_tools: Vec::new(),
+        disallowed_tools: Vec::new(),
+        append_system_prompt: instructions,
+        worktree,
+        host: Some(host),
+    };
+    let resumed = {
+        let harness = Arc::clone(&harness);
+        launch::blocking(move || harness.resume(&session, &spec)).await??
+    };
+    let mut state = shared.state.lock().await;
+    let now = state.now();
+    state.expect_session(resumed.handle, agent, resumed.origin);
+    state.commit(vec![
+        Event::new(now, EventKind::LocationChanged { agent, location }),
+        Event::new(
+            now,
+            EventKind::StateChanged {
+                agent,
+                state: AgentState::Idle,
+                detail: Some("adopted into a volee host".into()),
+            },
+        ),
+    ])?;
+    Ok(())
 }
 
 fn plan(
@@ -327,6 +441,7 @@ fn plan(
             disallowed_tools,
             append_system_prompt: Some(launch::instructions_for(registry, agent)),
             worktree,
+            host: launch::host_launch(shared, agent.id, &agent.name),
         },
         shown,
     })

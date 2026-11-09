@@ -91,6 +91,9 @@ pub struct HostRecord {
     pub child_pid: Option<u32>,
     /// The harness profile (ADR 0022), `generic` for any command line.
     pub profile: String,
+    /// The display name of the agent it runs, shown by its clients.
+    #[serde(default)]
+    pub name: Option<String>,
     /// The program's command line.
     pub command: Vec<String>,
     /// Its working directory.
@@ -138,6 +141,7 @@ mod tests {
             host_pid: 1,
             child_pid: Some(2),
             profile: "generic".to_owned(),
+            name: None,
             command: vec!["sh".to_owned()],
             cwd: PathBuf::from("/tmp"),
             started_at,

@@ -72,6 +72,34 @@ fn is_short_id(id: &str) -> bool {
 /// documents. The prompt comes last, after `--`.
 pub(crate) fn args(resume: Option<&str>, spec: &SpawnSpec) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec!["--bg".into()];
+    args.extend(common_args(resume, spec));
+    args
+}
+
+/// The arguments of an interactive `claude` in a volee host: the same as
+/// [`args`] without `--bg`, with `--session-id` for a new session (so the
+/// launch knows its session before the first hook), and the prompt only when
+/// there is one (an adopted agent resumes at its prompt).
+pub(crate) fn host_args(
+    resume: Option<&str>,
+    session_id: Option<&str>,
+    spec: &SpawnSpec,
+) -> Vec<OsString> {
+    let mut args = Vec::new();
+    if let Some(id) = session_id {
+        args.push(option("--session-id", id));
+    }
+    let mut rest = common_args(resume, spec);
+    if spec.prompt.trim().is_empty() {
+        // Drop the `--` and the empty prompt.
+        rest.truncate(rest.len().saturating_sub(2));
+    }
+    args.extend(rest);
+    args
+}
+
+fn common_args(resume: Option<&str>, spec: &SpawnSpec) -> Vec<OsString> {
+    let mut args: Vec<OsString> = Vec::new();
     if let Some(session) = resume {
         args.push(option("--resume", session));
     }

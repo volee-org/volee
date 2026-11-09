@@ -31,8 +31,8 @@ use volee_core::harness::SessionKey;
 use volee_harness::{CommandRunner, Invocation, Output, RunError, SystemRunner};
 
 use crate::{
-    Hosted, Located, Multiplexer, MultiplexerStatus, MuxError, process, screen, shown_name,
-    split_target, target,
+    Hosted, Located, Multiplexer, MultiplexerStatus, MuxError, process, screen, split_target,
+    target,
 };
 
 /// How long one command may take. A call answers in about 11 ms on an idle
@@ -87,9 +87,6 @@ struct AgentPane {
     harness_id: String,
     #[serde(default)]
     agent_session_id: String,
-    /// The pane's title, as the program in it last set it.
-    #[serde(default)]
-    name: String,
 }
 
 /// The answer of `list-agents`.
@@ -269,33 +266,6 @@ impl<R: CommandRunner> Multiplexer for Tuios<R> {
         Ok(located)
     }
 
-    fn mirrors(&self, sessions: &[(SessionKey, String)]) -> Result<Vec<Located>, MuxError> {
-        if sessions.is_empty() {
-            return Ok(Vec::new());
-        }
-        let panes = self
-            .call::<AgentList>("list-agents", &json!({ "all_sessions": true }))?
-            .agents;
-        Ok(sessions
-            .iter()
-            .filter_map(|(key, name)| {
-                let name = shown_name(name);
-                let harness = key.harness.to_string();
-                panes
-                    .iter()
-                    .find(|pane| {
-                        !name.is_empty()
-                            && pane.harness_id == harness
-                            && shown_name(&pane.name) == name
-                    })
-                    .map(|pane| Located {
-                        key: key.clone(),
-                        target: target(&pane.session, &pane.window_id),
-                    })
-            })
-            .collect())
-    }
-
     fn capture(&self, target: &str) -> Result<String, MuxError> {
         let (session, window) = split_target(target)?;
         let captured: Captured = self.call(
@@ -432,43 +402,6 @@ mod tests {
             ]]
         );
     }
-
-    /// `list-agents` while `claude agents` shows a background session in a
-    /// pane: tuios knows that pane by the title Claude Code sets, not by an
-    /// id (tuios 0.12.1).
-    const SHOWN: &str = r#"{"agents":[
-        {"session":"main-session","window_id":"475fc3f0","harness_id":"claude-code",
-         "agent_session_id":"","name":"◑ cockpit open launch failure","state":"working"},
-        {"session":"main-session","window_id":"15110b89","harness_id":"",
-         "agent_session_id":"","name":"volee ~/D/L/v"}
-    ],"all_sessions":true,"type":"agent_list"}"#;
-
-    #[test]
-    fn background_sessions_are_found_where_a_pane_title_names_them() {
-        let tuios = Tuios::with_runner(FakeRunner::new().with_reply(Ok(reply(SHOWN))));
-        let shown = [
-            (
-                SessionKey::claude("b60aa3b9"),
-                "cockpit open launch failure".to_owned(),
-            ),
-            (
-                SessionKey::claude("4402670e"),
-                "neon billing investigation".to_owned(),
-            ),
-        ];
-        assert_eq!(
-            tuios.mirrors(&shown).unwrap(),
-            [Located {
-                key: SessionKey::claude("b60aa3b9"),
-                target: "main-session:475fc3f0".into(),
-            }]
-        );
-        // Nothing to look for: tuios is not asked.
-        let idle = Tuios::with_runner(FakeRunner::new());
-        assert_eq!(idle.mirrors(&[]).unwrap(), []);
-        assert_eq!(args(&idle.runner), Vec::<Vec<String>>::new());
-    }
-
     #[test]
     fn other_sessions_are_found_by_their_process_once() {
         let runner = FakeRunner::new()

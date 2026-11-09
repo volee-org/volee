@@ -162,7 +162,7 @@ impl Screen {
     /// The screen as VT sequences that redraw it on a blank terminal of the
     /// same size: text, colors, cursor, modes and keyboard protocol. It holds
     /// state only, never a query, so replaying it asks nothing.
-    pub fn snapshot(&self) -> Result<Vec<u8>, Error> {
+    pub fn snapshot(&mut self) -> Result<Vec<u8>, Error> {
         let options = FormatterOptions::new()
             .with_format(Format::Vt)
             .with_trim(false)
@@ -186,8 +186,30 @@ impl Screen {
             .with_pwd(false);
         let mut formatter = Formatter::new(&self.terminal, options)?;
         let mut bytes = formatter.format_alloc(None)?.to_vec();
+        drop(formatter);
         let (x, y) = (self.terminal.cursor_x()?, self.terminal.cursor_y()?);
         bytes.extend_from_slice(format!("\x1b[{};{}H", y + 1, x + 1).as_bytes());
+        if self.terminal.is_cursor_pending_wrap()? {
+            // A program that just filled the last column waits to wrap on
+            // the next character. Placing the cursor cancels that; printing
+            // the last cell again restores it.
+            let frame = self.frame()?;
+            let cell = frame
+                .rows
+                .get(usize::from(y))
+                .and_then(|row| row.get(usize::from(x)));
+            if let Some(cell) = cell {
+                bytes.extend_from_slice(&crate::style::to_sgr(cell.style));
+                let symbol = if cell.symbol.is_empty() {
+                    " "
+                } else {
+                    &cell.symbol
+                };
+                // The style stays on: it is most likely the program's pen,
+                // since it just drew that cell.
+                bytes.extend_from_slice(symbol.as_bytes());
+            }
+        }
         if !self.terminal.is_cursor_visible()? {
             bytes.extend_from_slice(b"\x1b[?25l");
         }
@@ -266,7 +288,7 @@ mod tests {
     }
 
     /// Replays a snapshot on a blank screen of the same size.
-    fn replay(screen: &Screen) -> Screen {
+    fn replay(screen: &mut Screen) -> Screen {
         let (cols, rows) = screen.size();
         screen_after(cols, rows, &screen.snapshot().expect("snapshot"))
     }
@@ -278,7 +300,7 @@ mod tests {
             6,
             b"\x1b[1;31mred bold\x1b[0m plain\r\n\x1b[44mblue bg\x1b[0m\r\n\x1b[3;10Hhere",
         );
-        let mut copy = replay(&original);
+        let mut copy = replay(&mut original);
         assert_eq!(copy.text().expect("text"), original.text().expect("text"));
         assert_same_frames(
             &copy.frame().expect("frame"),
@@ -299,8 +321,8 @@ mod tests {
     #[test]
     fn a_snapshot_keeps_the_cursor_and_modes() {
         // Bracketed paste and the kitty keyboard protocol switched on.
-        let original = screen_after(30, 5, b"\x1b[?2004h\x1b[>1u\x1b[2;7Hx");
-        let copy = replay(&original);
+        let mut original = screen_after(30, 5, b"\x1b[?2004h\x1b[>1u\x1b[2;7Hx");
+        let copy = replay(&mut original);
         assert!(copy.terminal.mode(Mode::BRACKETED_PASTE).expect("mode"));
         assert_eq!(
             copy.terminal.cursor_x().ok(),
@@ -324,7 +346,7 @@ mod tests {
         }
         bytes.extend_from_slice(b"prompt> ");
         let mut original = screen_after(20, 5, &bytes);
-        let mut copy = replay(&original);
+        let mut copy = replay(&mut original);
         let visible = |screen: &mut Screen| {
             screen
                 .frame()
@@ -346,10 +368,24 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_keeps_a_pending_wrap() {
+        // The last column is filled: the next character goes to a new line.
+        let mut original = screen_after(10, 3, b"\x1b[33m0123456789");
+        let mut copy = replay(&mut original);
+        original.feed(b"X");
+        copy.feed(b"X");
+        assert_eq!(copy.text().expect("text"), original.text().expect("text"));
+        assert_eq!(
+            copy.frame().expect("frame"),
+            original.frame().expect("frame")
+        );
+    }
+
+    #[test]
     fn a_snapshot_holds_no_query() {
         let mut original = screen_after(20, 5, b"\x1b[c\x1b[6n\x1b[>q");
         assert!(!original.take_replies().is_empty(), "queries were answered");
-        let mut copy = replay(&original);
+        let mut copy = replay(&mut original);
         assert!(copy.take_replies().is_empty(), "the replay asked something");
     }
 

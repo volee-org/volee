@@ -179,8 +179,6 @@ struct Listed {
     changed: bool,
     /// Its live interactive sessions, which may run in a multiplexer pane.
     hosted: Vec<volee_mux::Hosted>,
-    /// Its live background sessions a pane may show, with their names.
-    shown: Vec<(volee_core::harness::SessionKey, String)>,
 }
 
 /// Lists `harness` at once, then again after each wait the cadence gives,
@@ -239,7 +237,6 @@ pub(crate) async fn run(
         let listed = list(&shared, &harness, &mut failing).await;
         if listed.succeeded {
             crate::panes::locate(&shared, &listed.hosted).await;
-            crate::panes::mirror(&shared, &listed.shown).await;
         }
         shared.refreshes.progress.send_modify(|progress| {
             progress.finished = progress.started;
@@ -286,7 +283,6 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
         .sessions
         .retain(|session| !session.cwd.starts_with(&shared.paths.state_dir));
     let hosted = crate::panes::hosted(&listing.sessions);
-    let shown = crate::panes::shown(&listing.sessions);
     let mut state = shared.state.lock().await;
     let now = state.now();
     let claimed = claim_expected(&mut state, &listing, now);
@@ -313,7 +309,6 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
                     succeeded: false,
                     changed: linked,
                     hosted: Vec::new(),
-                    shown: Vec::new(),
                 };
             }
         }
@@ -336,7 +331,6 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
         succeeded: true,
         changed,
         hosted,
-        shown,
     }
 }
 

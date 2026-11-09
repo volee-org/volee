@@ -509,6 +509,17 @@ method!(
     Empty
 );
 
+method!(
+    /// Moves an agent's conversation into a volee host (ADR 0023): stops its
+    /// background session if it runs, then resumes it in a host. Refused for
+    /// an agent that runs in someone's terminal, which must be quit there
+    /// first.
+    Adopt,
+    "agents.adopt",
+    AgentParams,
+    Empty
+);
+
 // ---- messages -------------------------------------------------------------
 
 /// Parameters of [`SendMessage`].
@@ -756,6 +767,7 @@ mod tests {
             Diff::NAME,
             Attach::NAME,
             Stop::NAME,
+            Adopt::NAME,
             SendMessage::NAME,
             MarkRead::NAME,
             HookIngest::NAME,

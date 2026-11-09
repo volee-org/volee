@@ -84,6 +84,18 @@ pub trait Source: Send + Sync + 'static {
     /// event. Fails with [`SourceError::Unsupported`] when a rule refuses,
     /// such as an agent volee launched that still runs.
     fn forget(&self, agent: AgentId) -> impl Future<Output = Result<(), SourceError>> + Send;
+
+    /// Moves an agent's conversation into a volee host, so that it can be
+    /// taken over (ADR 0023). Fails with [`SourceError::Unsupported`] when the
+    /// source cannot, or a rule refuses (an agent that runs in a terminal).
+    fn adopt(&self, agent: AgentId) -> impl Future<Output = Result<(), SourceError>> + Send {
+        let _ = agent;
+        async {
+            Err(SourceError::Unsupported(
+                "this source cannot adopt agents".into(),
+            ))
+        }
+    }
 }
 
 /// The state at subscription time and the events that follow it.

@@ -105,15 +105,43 @@ pub struct SpawnSpec {
     /// Claude Code checks its trust there, and never trusts a fresh worktree
     /// started directly.
     pub worktree: Option<String>,
+    /// Run the agent interactive inside a volee host
+    /// ([ADR 0019](https://volee-org.github.io/volee/adr/0019-a-host-process-holds-each-agent-terminal.html))
+    /// instead of as a background session. Every agent volee launches has
+    /// one; `None` keeps the background session of earlier versions.
+    pub host: Option<HostLaunch>,
+}
+
+/// How to start the volee host an agent runs in: `volee host spawn`, which
+/// starts the host detached and returns once it answers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostLaunch {
+    /// The `volee` binary. Absolute.
+    pub volee_bin: PathBuf,
+    /// The directory of hosts (`<state>/hosts`). Absolute.
+    pub dir: PathBuf,
+    /// The host's id, unique for each launch.
+    pub id: String,
+    /// The agent's display name, shown by the host's clients.
+    pub name: String,
+    /// The terminal size before anyone takes the agent over.
+    pub cols: u16,
+    /// See `cols`.
+    pub rows: u16,
 }
 
 impl SpawnSpec {
-    /// Checks what can be checked before running anything: a prompt,
+    /// Checks what can be checked before running anything: a prompt (an
+    /// agent in a host may start without one, waiting at its prompt),
     /// absolute paths, UTF-8 file paths (they travel inside command-line
     /// options), and tool rules that cannot be mistaken for options.
     pub fn validate(&self) -> Result<(), RequestError> {
-        if self.prompt.trim().is_empty() {
+        if self.prompt.trim().is_empty() && self.host.is_none() {
             return Err(RequestError::EmptyPrompt);
+        }
+        if let Some(host) = &self.host {
+            check_path("volee binary", &host.volee_bin, false)?;
+            check_path("host directory", &host.dir, false)?;
         }
         check_path("working directory", &self.cwd, false)?;
         check_path("settings file", &self.settings_file, true)?;

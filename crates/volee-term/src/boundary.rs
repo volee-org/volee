@@ -84,15 +84,17 @@ fn step(state: State, byte: u8) -> State {
     // ESC, CAN and SUB interrupt any sequence (ECMA-48), except inside a
     // string where ESC may start the terminator.
     match state {
+        // BEL ends a string, CAN and SUB abort it, as in Ghostty.
         State::String => match byte {
-            BEL => State::Ground,
+            BEL | 0x18 | 0x1a => State::Ground,
             ESC => State::StringEscape,
             _ => State::String,
         },
+        // ESC \ ends the string; ESC followed by anything else aborts it and
+        // starts a new sequence with that byte.
         State::StringEscape => match byte {
             b'\\' => State::Ground,
-            ESC => State::StringEscape,
-            _ => State::String,
+            _ => step(State::Escape, byte),
         },
         _ if byte == ESC => State::Escape,
         _ if byte == 0x18 || byte == 0x1a => State::Ground,
@@ -189,6 +191,19 @@ mod tests {
         assert!(boundary.has_pending());
         assert_eq!(boundary.push(b"7"), b"\x1b7");
         assert!(!boundary.has_pending());
+    }
+
+    #[test]
+    fn an_aborted_string_never_holds_what_follows() {
+        // An OSC cut short by a new sequence, then by CAN.
+        assert_eq!(
+            split(&[b"\x1b]0;title\x1b[31mred text\r\n"]),
+            [b"\x1b]0;title\x1b[31mred text\r\n".to_vec()]
+        );
+        assert_eq!(
+            split(&[b"\x1b]0;title\x18plain text"]),
+            [b"\x1b]0;title\x18plain text".to_vec()]
+        );
     }
 
     #[test]

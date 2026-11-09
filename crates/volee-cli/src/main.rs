@@ -61,7 +61,7 @@ enum Command {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Take an agent over in this terminal; Ctrl+Z comes back.
+    /// Take an agent over in this terminal; Ctrl+Q comes back.
     Attach {
         /// The agent: its name, short id or id.
         agent: String,
@@ -81,6 +81,12 @@ enum Command {
     },
     /// Stop an agent volee launched; its conversation is kept.
     Stop {
+        /// The agent: its name, short id or id.
+        agent: String,
+    },
+    /// Move an agent volee does not host (a background session, or one that
+    /// ended) into a volee host, so that you can take it over.
+    Adopt {
         /// The agent: its name, short id or id.
         agent: String,
     },
@@ -148,10 +154,9 @@ enum Command {
         #[arg(long)]
         theme: Option<String>,
     },
-    /// Run programs in hosts, watch them on a wall, take them over
-    /// (prototype of ADR 0019).
-    #[command(subcommand)]
-    Host(HostCommand),
+    /// Run any command line in a volee host, watch hosts on a wall, take
+    /// them over (ADR 0019). The daemon starts every agent in a host.
+    Host(HostArgs),
     /// Called by the hooks of agents volee launched. Not for people.
     #[command(hide = true)]
     Hook {
@@ -176,6 +181,15 @@ enum ConfigCommand {
     Check,
 }
 
+#[derive(Debug, clap::Args)]
+struct HostArgs {
+    /// The directory of hosts; `<state>/hosts` when absent.
+    #[arg(long, global = true)]
+    dir: Option<std::path::PathBuf>,
+    #[command(subcommand)]
+    command: HostCommand,
+}
+
 #[derive(Debug, Subcommand)]
 enum HostCommand {
     /// Start a program in a new host, detached from this terminal, and print
@@ -196,6 +210,9 @@ enum HostCommand {
         /// The harness profile (ADR 0022).
         #[arg(long, default_value = "generic")]
         profile: String,
+        /// A display name for the host's clients.
+        #[arg(long)]
+        name: Option<String>,
         /// Seconds the last screen stays after the program ends.
         #[arg(long, default_value_t = 600)]
         linger: u64,
@@ -225,7 +242,11 @@ enum HostCommand {
         id: String,
     },
     /// Show every running host as a wall of live screens.
-    Wall,
+    Wall {
+        /// Only these hosts, by id, separated by commas.
+        #[arg(long, value_delimiter = ',')]
+        ids: Vec<String>,
+    },
     /// Run a host in this process. `spawn` starts this; not for people.
     #[command(hide = true)]
     Run {
@@ -239,6 +260,8 @@ enum HostCommand {
         rows: u16,
         #[arg(long)]
         profile: String,
+        #[arg(long)]
+        name: Option<String>,
         #[arg(long)]
         linger: u64,
         #[arg(last = true, required = true)]
@@ -375,7 +398,7 @@ fn main() -> ExitCode {
             ConfigCommand::Check => cmd::config::check(),
         }),
         // Hosts run without the async runtime: a host is plain threads.
-        Some(Command::Host(command)) => report(host(command)),
+        Some(Command::Host(args)) => report(host(args)),
         Some(command) => async_main(command),
         None => block_on(cmd::interface::run()),
     }
@@ -408,6 +431,7 @@ fn async_main(command: Command) -> ExitCode {
             Command::Logs { agent } => cmd::agent::logs(&agent).await,
             Command::Diff { agent, full } => cmd::agent::diff(&agent, full).await,
             Command::Stop { agent } => cmd::agent::stop(&agent).await,
+            Command::Adopt { agent } => cmd::agent::adopt(&agent).await,
             Command::Forget { agent } => cmd::agent::forget(&agent).await,
             Command::Tidy {
                 agent,
@@ -460,45 +484,56 @@ fn async_main(command: Command) -> ExitCode {
     })
 }
 
-fn host(command: HostCommand) -> anyhow::Result<()> {
-    match command {
+fn host(args: HostArgs) -> anyhow::Result<()> {
+    let dir = match args.dir {
+        Some(dir) => volee_host::HostDir::new(dir),
+        None => cmd::host::host_dir()?,
+    };
+    match args.command {
         HostCommand::Spawn {
             id,
             cwd,
             cols,
             rows,
             profile,
+            name,
             linger,
             command,
-        } => cmd::host::spawn(cmd::host::Spawn {
-            id,
-            cwd,
-            size: cols.zip(rows),
-            profile,
-            linger,
-            command,
-        }),
-        HostCommand::Ls { json } => cmd::host::list(json),
-        HostCommand::Peek { id } => cmd::host::peek(&id),
-        HostCommand::Attach { id } => cmd::host::attach(&id),
-        HostCommand::Stop { id } => cmd::host::stop(&id),
-        HostCommand::Wall => cmd::host::wall(),
+        } => cmd::host::spawn(
+            &dir,
+            cmd::host::Spawn {
+                id,
+                cwd,
+                size: cols.zip(rows),
+                profile,
+                name,
+                linger,
+                command,
+            },
+        ),
+        HostCommand::Ls { json } => cmd::host::list(&dir, json),
+        HostCommand::Peek { id } => cmd::host::peek(&dir, &id),
+        HostCommand::Attach { id } => cmd::host::attach(&dir, &id),
+        HostCommand::Stop { id } => cmd::host::stop(&dir, &id),
+        HostCommand::Wall { ids } => cmd::host::wall(&dir, &ids),
         HostCommand::Run {
             id,
             cwd,
             cols,
             rows,
             profile,
+            name,
             linger,
             command,
         } => cmd::host::run(volee_host::HostConfig {
             id,
-            dir: cmd::host::host_dir()?,
+            dir,
             command,
             cwd,
             env: Vec::new(),
             size: volee_host::Size { cols, rows },
             profile,
+            name,
             scrollback: 1_000,
             linger: std::time::Duration::from_secs(linger),
         }),

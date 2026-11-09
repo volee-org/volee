@@ -107,6 +107,7 @@ pub(crate) async fn spawn(
         ..Workspace::at(&worktree)
     };
     let _in_flight = shared.begin_launch(agent);
+    let host = host_launch(shared, agent, &name);
     register(
         shared,
         agent,
@@ -116,6 +117,7 @@ pub(crate) async fn spawn(
         mission.as_ref().map(|m| m.id),
         workspace,
         slot,
+        location_of(host.as_ref()),
     )
     .await?;
     let setup_log = prepare(shared, agent, &target, &worktree, &params.branch).await?;
@@ -143,6 +145,7 @@ pub(crate) async fn spawn(
             &params.branch,
         )),
         worktree: Some(worktree_name),
+        host,
     };
     start_session(shared, &harness, agent, spec)
         .await
@@ -210,6 +213,7 @@ pub(crate) async fn coordinator(
         ..Workspace::at(&target.root)
     };
     let _in_flight = shared.begin_launch(agent);
+    let host = host_launch(shared, agent, &name);
     register(
         shared,
         agent,
@@ -219,6 +223,7 @@ pub(crate) async fn coordinator(
         Some(mission),
         workspace,
         None,
+        location_of(host.as_ref()),
     )
     .await?;
     let spec = SpawnSpec {
@@ -238,6 +243,7 @@ pub(crate) async fn coordinator(
             .to_vec(),
         append_system_prompt: Some(coordinator_instructions(&record)),
         worktree: None,
+        host,
     };
     start_session(shared, &harness, agent, spec).await?;
     Ok(agent)
@@ -563,6 +569,44 @@ async fn in_mission(
     false
 }
 
+/// The terminal size of a new host, before anyone takes the agent over: wide
+/// enough for Claude Code's layout, small enough for previews.
+const HOST_COLS: u16 = 160;
+/// See [`HOST_COLS`].
+const HOST_ROWS: u16 = 45;
+
+/// The host a new session of `agent` runs in (ADR 0019), or `None` when the
+/// daemon does not know its own binary (tests): the session then runs in the
+/// background, as before hosts. Each launch gets a host of its own.
+pub(crate) fn host_launch(
+    shared: &Shared,
+    agent: AgentId,
+    name: &str,
+) -> Option<volee_harness::HostLaunch> {
+    let volee_bin = shared.volee_bin.clone()?;
+    let suffix = ulid::Ulid::generate().to_string().to_lowercase();
+    Some(volee_harness::HostLaunch {
+        volee_bin,
+        dir: hosts_dir(shared),
+        id: format!("{agent}-{}", &suffix[suffix.len() - 6..]),
+        name: name.to_owned(),
+        cols: HOST_COLS,
+        rows: HOST_ROWS,
+    })
+}
+
+/// Where hosts live: `<state>/hosts`.
+pub(crate) fn hosts_dir(shared: &Shared) -> PathBuf {
+    shared.paths.state_dir.join("hosts")
+}
+
+/// Where a session started with `host` runs.
+pub(crate) fn location_of(host: Option<&volee_harness::HostLaunch>) -> Location {
+    host.map_or(Location::Background, |host| Location::Host {
+        id: host.id.clone(),
+    })
+}
+
 /// Records the agent before its session exists. Its mission `slot`, if
 /// any, is released under the same lock, once the agent counts as launched.
 #[allow(clippy::too_many_arguments)] // Each is one fact of the registration.
@@ -575,6 +619,7 @@ async fn register(
     mission: Option<MissionId>,
     workspace: Workspace,
     slot: Option<Slot>,
+    location: Location,
 ) -> Result<(), DaemonError> {
     let mut state = shared.state.lock().await;
     let now = state.now();
@@ -589,7 +634,7 @@ async fn register(
             parent,
             mission,
             workspace,
-            location: Location::Background,
+            location,
         },
     )])?;
     drop(slot);

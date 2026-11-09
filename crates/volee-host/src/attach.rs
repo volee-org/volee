@@ -18,11 +18,14 @@ use crate::proto::{Event, Exit, Role, Size};
 const ENTER: &[u8] = b"\x1b[?1049h\x1b[H\x1b[2J\x1b[0m";
 /// Clears the screen before a snapshot.
 const CLEAR: &[u8] = b"\x1b[0m\x1b[H\x1b[2J";
-/// Turns off what an agent may have left on (mouse reporting, focus events,
-/// bracketed paste, kitty keyboard flags, a hidden cursor), then restores the
-/// person's screen.
+/// Turns off what an agent may have left on, then restores the person's
+/// screen: mouse reporting, focus events, bracketed paste, synchronized
+/// output, application cursor keys and keypad, the scrolling region, the
+/// cursor style, modifyOtherKeys, kitty keyboard flags, an open hyperlink,
+/// autowrap, color scheme reports and a hidden cursor.
 const LEAVE: &[u8] = b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?1004l\
-\x1b[?2004l\x1b[=0;1u\x1b[<99u\x1b[?25h\x1b[0m\x1b[?1049l";
+\x1b[?1007l\x1b[?2004l\x1b[?2026l\x1b[?2031l\x1b[?1l\x1b>\x1b[r\x1b[0 q\x1b[>4;0m\
+\x1b[=0;1u\x1b[<99u\x1b]8;;\x1b\\\x1b[?7h\x1b[?25h\x1b[0m\x1b[?1049l";
 
 /// How a take over ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,9 +45,11 @@ pub enum AttachEnd {
 /// the person's terminal.
 pub fn attach(socket: &Path, client: &str) -> io::Result<AttachEnd> {
     let size = terminal_size().unwrap_or(Size { cols: 80, rows: 24 });
+    // Raw mode first: connecting takes the input from whoever has it, which
+    // must not happen when this is not a terminal.
+    let raw = RawMode::enter()?;
     let mut connection = Connection::open(socket, Role::Control, size, client)?;
     let sender = connection.sender()?;
-    let raw = RawMode::enter()?;
     let mut out = io::stdout().lock();
     out.write_all(ENTER)?;
     out.flush()?;
@@ -106,6 +111,7 @@ fn relay(
 fn forward_keys(sender: &HostSender, stop: &AtomicBool, detached: &AtomicBool, mut size: Size) {
     let stdin = io::stdin();
     let mut buf = [0u8; 4096];
+    let mut filter = keys::KeyFilter::default();
     let timeout = Timespec {
         tv_sec: 0,
         tv_nsec: 50_000_000,
@@ -116,7 +122,7 @@ fn forward_keys(sender: &HostSender, stop: &AtomicBool, detached: &AtomicBool, m
             match rustix::io::read(stdin.as_fd(), &mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    let filtered = keys::filter(&buf[..n]);
+                    let filtered = filter.filter(&buf[..n]);
                     if !filtered.forward.is_empty() && sender.input(&filtered.forward).is_err() {
                         break;
                     }

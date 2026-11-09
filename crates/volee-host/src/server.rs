@@ -32,6 +32,9 @@ const SYNC_WAIT: Duration = Duration::from_secs(1);
 const STOP_GRACE: Duration = Duration::from_secs(5);
 /// How long the end of a program waits for its last output.
 const EXIT_DRAIN: Duration = Duration::from_millis(500);
+/// How long a client may wait for a snapshot it cannot take (it stopped
+/// reading) before the host drops it.
+const STUCK_AFTER: Duration = Duration::from_secs(30);
 /// How long a client has to say hello.
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -52,6 +55,8 @@ pub struct HostConfig {
     pub size: Size,
     /// The harness profile (ADR 0022).
     pub profile: String,
+    /// The display name of the agent it runs, shown by its clients.
+    pub name: Option<String>,
     /// Lines of history kept.
     pub scrollback: usize,
     /// How long the last screen stays after the program ends.
@@ -104,13 +109,21 @@ pub fn run(config: HostConfig) -> Result<Exit, HostError> {
         }
         std::fs::remove_file(&socket)?;
     }
+    // Bound before the program starts: a socket that cannot be bound (a path
+    // too long, a race on the id) must not leave a program running.
+    let listener = UnixListener::bind(&socket)?;
+    std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
+    let size = clamp(config.size);
 
-    let spawn_error = |reason: String| HostError::Spawn {
-        command: program.clone(),
-        reason,
+    let spawn_error = |reason: String| {
+        let _ = std::fs::remove_file(&socket);
+        HostError::Spawn {
+            command: program.clone(),
+            reason,
+        }
     };
     let pair = native_pty_system()
-        .openpty(pty_size(config.size))
+        .openpty(pty_size(size))
         .map_err(|error| spawn_error(error.to_string()))?;
     let mut command =
         CommandBuilder::from_argv(config.command.iter().map(OsString::from).collect());
@@ -136,19 +149,17 @@ pub fn run(config: HostConfig) -> Result<Exit, HostError> {
         .take_writer()
         .map_err(|error| spawn_error(error.to_string()))?;
 
-    let listener = UnixListener::bind(&socket)?;
-    std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
-
     let record = HostRecord {
         id: config.id.clone(),
         protocol: PROTOCOL,
         host_pid: std::process::id(),
         child_pid,
         profile: config.profile.clone(),
+        name: config.name.clone(),
         command: config.command.clone(),
         cwd: config.cwd.clone(),
         started_at: now(),
-        size: config.size,
+        size,
         exit: None,
     };
     record.write(&config.dir.record(&config.id))?;
@@ -177,7 +188,7 @@ pub fn run(config: HostConfig) -> Result<Exit, HostError> {
     }
     spawn_acceptor(listener, tx);
 
-    let screen = Screen::new(config.size.cols, config.size.rows, config.scrollback)?;
+    let screen = Screen::new(size.cols, size.rows, config.scrollback)?;
     let mut host = Host {
         config,
         record,
@@ -331,7 +342,14 @@ impl Host {
     fn output(&mut self, bytes: &[u8]) {
         self.screen.feed(bytes);
         let replies = self.screen.take_replies();
-        if self.owner.is_none() && !replies.is_empty() && self.record.exit.is_none() {
+        // An owner waiting for its snapshot does not see this output, so its
+        // terminal cannot answer: the host does.
+        let owner_answers = self.owner.is_some_and(|id| {
+            self.clients
+                .get(&id)
+                .is_some_and(|client| client.state == ClientState::Live)
+        });
+        if !owner_answers && !replies.is_empty() && self.record.exit.is_none() {
             let _ = self.input.send(replies);
         }
         let signals = self.screen.take_signals();
@@ -382,7 +400,7 @@ impl Host {
                 state: ClientState::Waiting(Instant::now()),
             },
         );
-        if wants_input && hello.size != self.record.size {
+        if wants_input && clamp(hello.size) != self.record.size {
             self.resize(hello.size);
         }
         self.send_waiting_snapshots();
@@ -390,20 +408,32 @@ impl Host {
 
     /// Sends a snapshot to every client waiting for one, unless the program
     /// is in the middle of a synchronized update that started less than a
-    /// second ago.
+    /// second ago. Each snapshot follows the current size, so that a client
+    /// that missed a resize while waiting builds its screen at the right
+    /// size. A client that has waited too long is dropped.
     fn send_waiting_snapshots(&mut self) {
-        let waiting: Vec<(u64, Instant)> = self
-            .clients
-            .iter()
-            .filter_map(|(id, client)| match client.state {
-                ClientState::Waiting(since) => Some((*id, since)),
-                ClientState::Live => None,
-            })
-            .collect();
-        if waiting.is_empty() {
+        let syncing = self.screen.in_synchronized_update();
+        let mut eligible = Vec::new();
+        let mut stuck = Vec::new();
+        for (id, client) in &self.clients {
+            if let ClientState::Waiting(since) = client.state {
+                if since.elapsed() >= STUCK_AFTER {
+                    stuck.push(*id);
+                } else if !syncing || since.elapsed() >= SYNC_WAIT {
+                    eligible.push(*id);
+                }
+            }
+        }
+        for id in stuck {
+            tracing::warn!(id, "dropping a client that stopped reading");
+            self.clients.remove(&id);
+            if self.owner == Some(id) {
+                self.owner = None;
+            }
+        }
+        if eligible.is_empty() {
             return;
         }
-        let syncing = self.screen.in_synchronized_update();
         let snapshot = match self.screen.snapshot() {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -411,17 +441,24 @@ impl Host {
                 return;
             }
         };
-        for (id, since) in waiting {
-            if syncing && since.elapsed() < SYNC_WAIT {
-                continue;
-            }
+        let Ok(size) = serde_json::to_vec(&Event::Resized {
+            size: self.record.size,
+        }) else {
+            return;
+        };
+        for id in eligible {
             let Some(client) = self.clients.get_mut(&id) else {
                 continue;
             };
-            match client
+            let sent = client
                 .tx
-                .try_send(Out::Frame(Kind::Snapshot, snapshot.clone()))
-            {
+                .try_send(Out::Frame(Kind::Event, size.clone()))
+                .and_then(|()| {
+                    client
+                        .tx
+                        .try_send(Out::Frame(Kind::Snapshot, snapshot.clone()))
+                });
+            match sent {
                 Ok(()) => client.state = ClientState::Live,
                 Err(TrySendError::Full(_)) => {}
                 Err(TrySendError::Disconnected(_)) => {
@@ -449,9 +486,27 @@ impl Host {
         }
     }
 
+    /// Sends an event to every client, including the ones waiting for a
+    /// snapshot: an event is state (a title, an exit), not part of the
+    /// stream a snapshot replaces.
     fn broadcast_event(&mut self, event: &Event) {
-        if let Ok(payload) = serde_json::to_vec(event) {
-            self.broadcast(Kind::Event, &payload);
+        let Ok(payload) = serde_json::to_vec(event) else {
+            return;
+        };
+        let mut gone = Vec::new();
+        for (id, client) in &mut self.clients {
+            match client.tx.try_send(Out::Frame(Kind::Event, payload.clone())) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => {
+                    if client.state == ClientState::Live {
+                        client.state = ClientState::Waiting(Instant::now());
+                    }
+                }
+                Err(TrySendError::Disconnected(_)) => gone.push(*id),
+            }
+        }
+        for id in gone {
+            self.clients.remove(&id);
         }
     }
 
@@ -464,6 +519,7 @@ impl Host {
     /// The input owner's size becomes the program's size. Watchers are told
     /// and get a fresh snapshot.
     fn resize(&mut self, size: Size) {
+        let size = clamp(size);
         if size.cols == 0 || size.rows == 0 || size == self.record.size {
             return;
         }
@@ -516,6 +572,17 @@ impl Host {
         if let Err(error) = self.record.write(&self.config.dir.record(&self.config.id)) {
             tracing::warn!(%error, "cannot write the host record");
         }
+    }
+}
+
+/// The largest terminal a host emulates: a size from a client is trusted only
+/// this far.
+const MAX_SIZE: u16 = 1000;
+
+fn clamp(size: Size) -> Size {
+    Size {
+        cols: size.cols.min(MAX_SIZE),
+        rows: size.rows.min(MAX_SIZE),
     }
 }
 
