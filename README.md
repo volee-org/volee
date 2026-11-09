@@ -12,7 +12,7 @@
 [![CI](https://github.com/volee-org/volee/actions/workflows/ci.yml/badge.svg)](https://github.com/volee-org/volee/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-volee--org.github.io-8839ef)](https://volee-org.github.io/volee/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
-[![MSRV](https://img.shields.io/badge/MSRV-1.89-orange)](https://github.com/volee-org/volee/blob/main/Cargo.toml)
+[![MSRV](https://img.shields.io/badge/MSRV-1.90-orange)](https://github.com/volee-org/volee/blob/main/Cargo.toml)
 
 </div>
 
@@ -69,7 +69,7 @@ and the [design decisions](https://volee-org.github.io/volee/adr/README.html).
 
 ## Install
 
-The latest release is v0.7.0. Each [release](https://github.com/volee-org/volee/releases)
+The latest release is v0.8.0. Each [release](https://github.com/volee-org/volee/releases)
 has prebuilt binaries for macOS (Apple Silicon and Intel) and Linux (x86_64
 and ARM64), and an installer that checks the download and puts `volee` in
 `~/.local/bin`:
@@ -78,10 +78,10 @@ and ARM64), and an installer that checks the download and puts `volee` in
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/volee-org/volee/releases/latest/download/volee-cli-installer.sh | sh
 ```
 
-Or build it from source with Cargo (Rust 1.89 or later):
+Or build it from source with Cargo (Rust 1.90 or later and Zig 0.15.2):
 
 ```sh
-cargo install --locked --git https://github.com/volee-org/volee --tag v0.7.0 volee-cli
+cargo install --locked --git https://github.com/volee-org/volee --tag v0.8.0 volee-cli
 ```
 
 volee supports macOS and Linux and needs [Claude Code](https://code.claude.com)

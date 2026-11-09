@@ -16,7 +16,7 @@
 
 ## With the installer
 
-The latest release of volee is **v0.7.0**. Every release on
+The latest release of volee is **v0.8.0**. Every release on
 [GitHub](https://github.com/volee-org/volee/releases) comes with prebuilt
 binaries and an installer script. To install the latest release:
 
@@ -64,17 +64,16 @@ Run it again after an upgrade, so new commands complete too.
 
 ## From source
 
-Install with Cargo (Rust 1.89 or later):
+Install with Cargo (Rust 1.90 or later and Zig 0.15.2):
 
 ```sh
-cargo install --locked --git https://github.com/volee-org/volee --tag v0.7.0 volee-cli
+cargo install --locked --git https://github.com/volee-org/volee --tag v0.8.0 volee-cli
 ```
 
-Replace `v0.7.0` with the release you want, or leave `--tag` out to build the
+Replace `v0.8.0` with the release you want, or leave `--tag` out to build the
 latest commit of `main`. The `volee` command goes into `~/.cargo/bin`.
-Building `main` after 0.7.0 also needs Rust 1.90 and Zig 0.15.2, as
 [CONTRIBUTING.md](https://github.com/volee-org/volee/blob/main/CONTRIBUTING.md)
-explains.
+says how to install Zig 0.15.2 (on macOS, Homebrew's `zig@0.15`).
 
 ## Check the installation
 
