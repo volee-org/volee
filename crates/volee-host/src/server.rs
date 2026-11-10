@@ -349,6 +349,11 @@ impl Host {
                 if self.owner == Some(id) && self.record.exit.is_none() {
                     match self.screen.encode_paste(&text) {
                         Ok(bytes) => {
+                            tracing::debug!(
+                                chars = text.chars().count(),
+                                bracketed = bytes.starts_with(b"\x1b[200~"),
+                                "paste"
+                            );
                             let _ = self.input.send(bytes);
                         }
                         Err(error) => tracing::warn!(%error, "cannot encode a paste"),
@@ -391,7 +396,11 @@ impl Host {
                 }
                 // Named keys and shortcuts only: what people type stays out
                 // of the log.
-                if press.key.chars().count() > 1 || press.ctrl || press.alt {
+                if press.key.chars().count() > 1
+                    || press.ctrl
+                    || press.alt
+                    || bytes != press.key.as_bytes()
+                {
                     tracing::debug!(
                         key = %press.key,
                         ctrl = press.ctrl,

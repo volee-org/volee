@@ -13,7 +13,7 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::sync::{Arc, Once};
 use std::time::Duration;
 
-use futures_util::{FutureExt, StreamExt};
+use futures_util::StreamExt;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{
@@ -178,8 +178,14 @@ async fn run_loop<S: Screen, Src: Source>(
                     Input::Interrupted | Input::Closed => return Ok(()),
                 }
                 // Fold a burst of input (a held key, a paste) into one frame.
+                // Polled with this task's waker, never a dummy one: crossterm
+                // keeps the waker of the poll that found nothing, and with a
+                // dummy (`now_or_never`) the next input woke nobody, so it
+                // waited for the next tick, up to a second, and text typed
+                // in edit mode reached the agent with the Enter that
+                // followed, which Claude Code took for a paste.
                 for _ in 0..BURST {
-                    match screen.input().now_or_never() {
+                    match futures_util::future::poll_immediate(screen.input()).await {
                         Some(Input::Event(event)) => queue.extend(to_msg(event)),
                         Some(Input::Interrupted | Input::Closed) => return Ok(()),
                         None => break,
@@ -689,6 +695,115 @@ mod tests {
                 }
             }
         });
+    }
+
+    /// Input that keeps one waker until it is used, as crossterm's event
+    /// stream does: a poll that finds nothing registers its waker only when
+    /// none is waiting.
+    #[derive(Default)]
+    struct Inbox {
+        events: VecDeque<Input>,
+        waker: Option<std::task::Waker>,
+    }
+
+    fn push(inbox: &std::sync::Mutex<Inbox>, input: Input) {
+        let mut inbox = inbox.lock().unwrap();
+        inbox.events.push_back(input);
+        if let Some(waker) = inbox.waker.take() {
+            waker.wake();
+        }
+    }
+
+    struct OneWakerScreen {
+        terminal: Terminal<TestBackend>,
+        inbox: Arc<std::sync::Mutex<Inbox>>,
+    }
+
+    impl Screen for OneWakerScreen {
+        fn size(&self) -> io::Result<(u16, u16)> {
+            Ok((120, 40))
+        }
+
+        fn draw(&mut self, model: &Model) -> io::Result<()> {
+            let Ok(_) = self.terminal.draw(|frame| view(model, frame));
+            Ok(())
+        }
+
+        async fn input(&mut self) -> Input {
+            std::future::poll_fn(|cx| {
+                let mut inbox = self.inbox.lock().unwrap();
+                if let Some(input) = inbox.events.pop_front() {
+                    return std::task::Poll::Ready(input);
+                }
+                if inbox.waker.is_none() {
+                    inbox.waker = Some(cx.waker().clone());
+                }
+                std::task::Poll::Pending
+            })
+            .await
+        }
+
+        fn take_over(
+            &mut self,
+            _take_over: &TakeOver,
+        ) -> impl Future<Output = io::Result<ExitStatus>> {
+            use std::os::unix::process::ExitStatusExt;
+            std::future::ready(Ok(ExitStatus::from_raw(0)))
+        }
+
+        fn detach(&mut self, _program: &TakeOver) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn bring_forward(&mut self, _steps: &[Vec<String>]) -> Result<(), FocusFailure> {
+            Ok(())
+        }
+    }
+
+    /// After a burst, the next key is read as soon as it comes, not at the
+    /// next tick: with a dummy waker left in the event stream, text typed in
+    /// edit mode waited and reached the agent together with its Enter.
+    #[tokio::test(start_paused = true)]
+    async fn a_key_after_a_burst_is_read_at_once() {
+        let start = Timestamp::from_millis(1_793_986_617_000);
+        let clock = ManualClock::new(start);
+        let source = DemoSource::new(Arc::new(clock.clone()));
+        let Subscription {
+            snapshot, updates, ..
+        } = source.subscribe().await.unwrap();
+        let inbox = Arc::new(std::sync::Mutex::new(Inbox::default()));
+        let mut screen = OneWakerScreen {
+            terminal: Terminal::new(TestBackend::new(120, 40)).unwrap(),
+            inbox: Arc::clone(&inbox),
+        };
+        let mut model = Model::new(Theme::default(), Keymap::default(), None, (120, 40), start);
+        // Nothing moves: the loop ticks once a second.
+        model.motion = crate::app::Motion::Reduced;
+        let pushed_at = Arc::new(std::sync::Mutex::new(None));
+        {
+            let (inbox, pushed_at) = (Arc::clone(&inbox), Arc::clone(&pushed_at));
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(1_500)).await;
+                push(&inbox, key('j'));
+                push(&inbox, key('k'));
+                tokio::time::sleep(Duration::from_millis(1_250)).await;
+                *pushed_at.lock().unwrap() = Some(Instant::now());
+                push(&inbox, key('q'));
+            });
+        }
+        event_loop(
+            &mut screen,
+            Arc::new(source),
+            updates,
+            &mut model,
+            &clock,
+            Msg::Events(snapshot),
+        )
+        .await
+        .unwrap();
+        let pushed_at = pushed_at.lock().unwrap().expect("the last key was sent");
+        let waited = Instant::now() - pushed_at;
+        assert!(waited < Duration::from_millis(50), "q waited {waited:?}");
     }
 
     #[tokio::test(start_paused = true)]
