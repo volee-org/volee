@@ -71,7 +71,8 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
 │ invoice-tools        ││ ⏺ Before I go on, one question:                                       │
 │ ! needs you · 1 min  ││   Should create_invoice accept a draft flag?                          │
 ╰──────────────────────╯╰───────────────────────────────────────────────────────────────────────╯
- h/j/k/l move   enter subtree   ' jump   / filter   m message   a take over   z full screen   ? help
+ h/j/k/l move   gg/G first/last   enter subtree   ' jump   / filter   n/N match   1-4 views
+ m message   d diff   a take over   z full screen   i messages   A adopt   ␣ more   ? help
 ```
 
 - **Top bar.** The views, numbered (press the number to switch; `5` opens
@@ -114,8 +115,13 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   redrawn since, such as a list that has not changed, can show gaps. A
   recent session shows whole, and [adopting](#adopting-an-agent) it moves
   it into a host, whose screen is exact.
-- **Hints.** The keys that apply to the panel that has the keyboard. They
-  come from the same table as the help (`?`), so they are always right.
+- **Hints.** The keys that apply to the panel that has the keyboard, on two
+  rows from 20 rows up: the top one says how to move around (moves, first
+  and last, the filter and its matches, panels and views), the bottom one
+  what to do (take over, message, diff, adopt, the leader, commands, quit),
+  with `? help` at the right. Smaller terminals and the windows keep one
+  row. They come from the same table as the help (`?`), so they are always
+  right.
 
 Panel sizes depend only on the size of the terminal and on the view: moving
 around never makes anything jump. Below 100 columns or 28 rows, the view
@@ -430,8 +436,18 @@ form your terminal sends it once the agent turned on a keyboard protocol
 volee turns off what the agent left on in your terminal, such as mouse
 reporting or bracketed paste, and restores your screen.
 
-While you type, your terminal's size is the agent's size, and it stays when
-you leave. Only the terminal that takes over sets it: the preview, the
+The last row of your terminal keeps a volee bar while you type, so you
+always know where you are: the agent's name, its repository and branch,
+whether it is working, and the key that comes back:
+
+```text
+ volee │ billing · shop › feat/invoices │ ▸ working │ Ctrl+Q back to volee
+```
+
+The agent gets every row above the bar; its scrolling never reaches it.
+
+While you type, your terminal's size, less the bar's row, is the agent's
+size, and it stays when you leave. Only the terminal that takes over sets it: the preview, the
 full-screen view and the wall never resize an agent. Taking the same agent
 over from a second terminal, with `volee attach`, moves the input there,
 and the first terminal comes back to volee.

@@ -16,7 +16,6 @@ expression: draw(&model)
 "│ r    └─ ▸ trace-search    11 min ││ last     Write migrations/0042_invoices… │"
 "│ i · infra                 25 min │╰──────────────────────────────────────────╯"
 "│ b ▸ broken-links          18 min │╭ Preview · invoice-schema ────────────────╮"
-"│                                  ││ │   Apply the pending migrations to the l│"
 "│                                  ││ │                                        │"
 "│                                  ││ │ Do you want to proceed?                │"
 "│                                  ││ │ ❯ 1. Yes                               │"
@@ -25,4 +24,5 @@ expression: draw(&model)
 "│                                  ││ ╰────────────────────────────────────────│"
 "│                                  ││                                          │"
 "╰──────────────────────────────────╯╰──────────────────────────────────────────╯"
+"                                                                                "
 " Quit and lose the draft to invoice-schema?   y yes   n no                      "

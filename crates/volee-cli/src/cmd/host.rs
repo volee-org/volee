@@ -207,14 +207,23 @@ pub(crate) fn attach(dir: &HostDir, id: &str) -> anyhow::Result<()> {
     if !socket.exists() {
         bail!("no host {id}; `volee host ls` lists them");
     }
-    let name = volee_host::HostRecord::read(&dir.record(id))
-        .ok()
-        .and_then(|record| record.name)
+    let record = volee_host::HostRecord::read(&dir.record(id)).ok();
+    let name = record
+        .as_ref()
+        .and_then(|record| record.name.clone())
         .unwrap_or_else(|| id.to_owned());
+    let place = record.as_ref().and_then(|record| place_of(&record.cwd));
     let keymap = super::interface::keymap_or_default();
     let leave = super::interface::leave_key_name(&keymap);
     eprintln!("volee: taking over {name}; {leave} comes back");
-    let end = volee_host::attach_leaving(&socket, &client_name("attach"), keymap.leave_letter())
+    let options = volee_host::AttachOptions {
+        leave: keymap.leave_letter(),
+        bar: Some(volee_host::AttachBar {
+            name: name.clone(),
+            place,
+        }),
+    };
+    let end = volee_host::attach_with(&socket, &client_name("attach"), &options)
         .with_context(|| format!("cannot take over {id}"))?;
     match end {
         AttachEnd::Detached => eprintln!("volee: back from {name}; it keeps running"),
@@ -229,6 +238,45 @@ pub(crate) fn attach(dir: &HostDir, id: &str) -> anyhow::Result<()> {
         AttachEnd::HostGone => eprintln!("volee: the host of {name} went away"),
     }
     Ok(())
+}
+
+/// Where a host's program works, for the take over's bar: the repository
+/// and its branch, such as `volee › release/v0.9.0`, or the folder's name
+/// outside a repository.
+fn place_of(cwd: &std::path::Path) -> Option<String> {
+    let run = |args: &[&str]| {
+        Command::new("git")
+            .arg("-C")
+            .arg(cwd)
+            .args(args)
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+            .filter(|text| !text.is_empty())
+    };
+    // The common directory names the repository even from a worktree.
+    let repo = run(&["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .map(PathBuf::from)
+        .and_then(|common| {
+            let dir = if common.ends_with(".git") {
+                common.parent().map(std::path::Path::to_path_buf)
+            } else {
+                Some(common)
+            };
+            dir.and_then(|dir| {
+                dir.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+        });
+    match (repo, run(&["branch", "--show-current"])) {
+        (Some(repo), Some(branch)) => Some(format!("{repo} › {branch}")),
+        (Some(repo), None) => Some(repo),
+        _ => cwd
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned()),
+    }
 }
 
 /// Asks a host to end its program.

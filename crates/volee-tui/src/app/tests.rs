@@ -1018,7 +1018,7 @@ fn view_keys_move_through_the_picture() {
 
 #[test]
 fn zoom_keys_override_the_automatic_level() {
-    let mut model = model(200, 50);
+    let mut model = model(200, 52);
     assert_eq!(model.scene.zoom, Zoom::Cards);
     key(&mut model, KeyCode::Tab);
     press(&mut model, "_");
@@ -1036,7 +1036,7 @@ fn zoom_keys_override_the_automatic_level() {
 
 #[test]
 fn zoom_keys_reach_the_view_from_the_agents_list() {
-    let mut model = model(200, 50);
+    let mut model = model(200, 52);
     assert_eq!(model.focus, Pane::Rail);
     press(&mut model, "_");
     assert_eq!(model.zoom, ZoomChoice::Fixed(Zoom::Compact));
