@@ -290,7 +290,7 @@ fn draw_screen(
         return;
     }
     let message = match (
-        live.as_ref().or(model.preview.screen.as_ref()),
+        live.as_deref().or(model.preview.screen.as_ref()),
         &model.preview.error,
     ) {
         (Some(screen), _) => {

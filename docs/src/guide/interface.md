@@ -665,7 +665,7 @@ popups and the hints.
 | `F`, `space f` | forget the selected agent: stop listing it (asks first) | `forget` |
 | `space n` | launch an agent in a new worktree | `new-agent` |
 | `space N` | create a mission, which launches its coordinator | `new-mission` |
-| `space w`, `5` | show the agents in volee hosts as a wall of live screens | `show-wall` |
+| `space w`, `5` | show the screens of the agents that run, side by side, as a wall | `show-wall` |
 | `space t` | pick a colour theme, with a live preview; volee keeps your choice | `pick-theme` |
 | `space k` | list every key, in every context | `all-keys` |
 | `:` | the command palette: type part of a command's name and press enter | `commands` |
@@ -928,10 +928,12 @@ popups and the hints.
 | `j`, `↓` | the screen below | `down` |
 | `k`, `↑` | the screen above | `up` |
 | `l`, `→` | the screen on the right | `right` |
-| `z` | the selected screen alone, full size, and back | `full-screen` |
-| `a`, `enter` | take over the selected agent; the leave key comes back to the wall | `take-over` |
+| `gg`, `home` | the first screen | `first` |
+| `G`, `end` | the last screen | `last` |
+| `z` | the selected screen alone, full size; back comes back to the wall | `full-screen` |
+| `enter`, `i`, `a` | open the selected agent: your keys go to it; the leave key (ctrl-q) comes back to the wall | `take-over` |
 | `q`, `esc` | leave the wall | `back` |
-| `ctrl-c` | leave the wall | `quit` |
+| `ctrl-c` | quit volee; in `volee host wall`, leave the wall | `quit` |
 
 ### Edit mode (`attached`)
 

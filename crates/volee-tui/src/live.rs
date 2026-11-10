@@ -9,7 +9,7 @@
 //! leave key goes to it. Hosts that encode keys themselves get them by name;
 //! older hosts get the bytes a terminal would send.
 
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -19,7 +19,7 @@ use volee_host::{Event as HostEvent, KeyPress, Size, Update, Welcome};
 use volee_term::Screen;
 
 use crate::preview::{PreviewScreen, adapted};
-use crate::theme::{StyleRole, Theme};
+use crate::theme::{ColorDepth, StyleRole, Theme};
 
 /// Lines of history kept for scrolling back.
 const SCROLLBACK: usize = 2_000;
@@ -82,6 +82,10 @@ pub(crate) struct Live {
     /// the host's (ADR 0020), fed the same bytes. Reading its cells updates
     /// the emulator's render state, hence the cell.
     screen: Option<RefCell<Screen>>,
+    /// The screen's cells as the wrapping and cropping views draw them,
+    /// kept until the screen changes: a wall of screens is drawn again each
+    /// time one of them moves.
+    cells: RefCell<Option<(ColorDepth, PreviewScreen)>>,
     /// Lines scrolled back into the history.
     pub(crate) scroll: usize,
 }
@@ -113,6 +117,7 @@ impl Live {
             exited: false,
             size: Size { cols: 0, rows: 0 },
             screen: None,
+            cells: RefCell::new(None),
             scroll: 0,
         }
     }
@@ -138,6 +143,9 @@ impl Live {
 
     /// Applies an update from the host.
     pub(crate) fn apply(&mut self, update: Update) -> Outcome {
+        if matches!(update, Update::Snapshot(_) | Update::Output(_)) {
+            *self.cells.get_mut() = None;
+        }
         match update {
             Update::Snapshot(bytes) => {
                 self.screen = emulator(self.size).map(|mut screen| {
@@ -197,6 +205,7 @@ impl Live {
             return 0;
         };
         self.scroll = screen.get_mut().scroll(lines);
+        *self.cells.get_mut() = None;
         self.scroll
     }
 
@@ -205,6 +214,7 @@ impl Live {
         if let Some(screen) = &mut self.screen {
             screen.get_mut().scroll_to_bottom();
         }
+        *self.cells.get_mut() = None;
         self.scroll = 0;
     }
 
@@ -285,10 +295,25 @@ impl Live {
         visible.then(|| Position::new(area.x + column, area.y + row))
     }
 
-    /// The screen for the wrapping view, when it does not fit cell for cell.
-    pub(crate) fn preview(&self, theme: &Theme) -> Option<PreviewScreen> {
-        let mut screen = self.screen.as_ref()?.borrow_mut();
-        PreviewScreen::from_emulator(&mut screen, theme.color_depth())
+    /// The screen for the views that crop or wrap it: the preview, a tile
+    /// of the wall, and the full-screen view when it does not fit cell for
+    /// cell. Read from the emulator once per change of the screen.
+    pub(crate) fn preview(&self, theme: &Theme) -> Option<Ref<'_, PreviewScreen>> {
+        let depth = theme.color_depth();
+        let fresh = self
+            .cells
+            .borrow()
+            .as_ref()
+            .is_some_and(|(kept, _)| *kept == depth);
+        if !fresh {
+            let mut screen = self.screen.as_ref()?.borrow_mut();
+            let cells = PreviewScreen::from_emulator(&mut screen, depth)?;
+            *self.cells.borrow_mut() = Some((depth, cells));
+        }
+        Ref::filter_map(self.cells.borrow(), |kept| {
+            kept.as_ref().map(|(_, cells)| cells)
+        })
+        .ok()
     }
 
     /// The text of the screen, one string per row; for tests.

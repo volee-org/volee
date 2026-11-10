@@ -10,7 +10,7 @@ use crate::theme::StyleRole;
 use crate::views::{hierarchy, network, repos, timeline};
 use crate::widgets::{
     composer, detail, diff, help, hints, inbox, keys, launch, palette, panel, rail, theme_picker,
-    tools, top_bar,
+    tiles, tools, top_bar,
 };
 
 /// Draws the whole screen from the model.
@@ -95,6 +95,7 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
         Some(Overlay::Tools(menu)) => tools::render(model, *menu, area, buf),
         Some(Overlay::Launch(dialog)) => launch::render(model, dialog, area, buf),
         Some(Overlay::Screen) => cursor = detail::render_full_screen(model, area, buf),
+        Some(Overlay::Wall) => tiles::render(model, area, buf),
         None => {}
     }
     if !model.pending_keys.is_empty() {

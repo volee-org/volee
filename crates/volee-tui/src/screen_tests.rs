@@ -149,6 +149,52 @@ fn the_preview_of_a_hosted_agent_is_its_live_screen() {
 }
 
 #[test]
+fn the_wall_of_screens() {
+    let (mut model, demo) = demo_model(160, 48, Theme::default());
+    type_text(&demo, &mut model, "5");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn the_wall_follows_an_agent_in_a_volee_host_live() {
+    let (mut model, agent) = crate::test_support::hosted_model(160, 48);
+    let effects = crate::test_support::press(&mut model, "5");
+    let link = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LiveOpen { link, .. } => Some(*link),
+            _ => None,
+        })
+        .unwrap();
+    serve(&crate::test_support::demo(), &mut model, effects);
+    let size = volee_host::Size { cols: 90, rows: 20 };
+    update(
+        &mut model,
+        Msg::LiveOpened {
+            link,
+            welcome: crate::test_support::welcome(size, true),
+        },
+    );
+    let screen = b"\x1b[2J\x1b[H\x1b[32m\xe2\x8f\xba\x1b[0m The tests pass: 356 of 356.\r\n\r\n> commit and push";
+    update(
+        &mut model,
+        Msg::LiveUpdate {
+            link,
+            update: volee_host::Update::Snapshot(screen.to_vec()),
+        },
+    );
+    assert_eq!(model.selected, Some(agent));
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn the_wall_on_its_last_page() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    type_text(&demo, &mut model, "5G");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
 fn the_command_palette() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     type_text(&demo, &mut model, ":show");

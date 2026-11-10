@@ -127,8 +127,9 @@ pub(crate) fn refresh(model: &mut Model, agent: AgentId, effects: &mut Vec<Effec
 /// (ADR 0028). Called on every tick, so that moving through the list opens
 /// no connection per row. Returns whether anything changed.
 pub(crate) fn follow_selected(model: &mut Model, effects: &mut Vec<Effect>) -> bool {
-    // The full-screen view and an agent being opened manage their own.
-    if model.overlay == Some(Overlay::Screen) || model.opening.is_some() {
+    // The full-screen view and an agent being opened manage their own, and
+    // the wall follows every screen of its page itself.
+    if model.overlay == Some(Overlay::Screen) || model.opening.is_some() || model.wall.is_some() {
         return false;
     }
     let selected = model.selected;
@@ -362,6 +363,26 @@ pub(crate) fn on_resize(model: &mut Model, effects: &mut Vec<Effect>) {
 /// A message of a live screen's connection; returns whether anything
 /// changed.
 pub(crate) fn on_msg(model: &mut Model, msg: Msg, effects: &mut Vec<Effect>) -> bool {
+    let (Msg::LiveOpened { link, .. }
+    | Msg::LiveUpdate { link, .. }
+    | Msg::LiveClosed { link, .. }) = &msg
+    else {
+        return false;
+    };
+    let link = *link;
+    // A tile of the wall only shows its screen: that its program ended, or
+    // that another terminal types into it, calls for no word.
+    if let Some(tile) = crate::tiles::live_mut(model, link) {
+        match msg {
+            Msg::LiveOpened { welcome, .. } => tile.opened(&welcome),
+            Msg::LiveUpdate { update, .. } => {
+                tile.apply(update);
+            }
+            Msg::LiveClosed { reason, .. } => tile.closed(reason),
+            _ => {}
+        }
+        return true;
+    }
     match msg {
         Msg::LiveOpened { link, welcome } => opened(model, link, &welcome),
         Msg::LiveUpdate { link, update } => updated(model, link, update, effects),
