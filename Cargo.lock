@@ -1961,7 +1961,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "volee-cli"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1989,7 +1989,7 @@ dependencies = [
 
 [[package]]
 name = "volee-config"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "serde",
  "tempfile",
@@ -2000,7 +2000,7 @@ dependencies = [
 
 [[package]]
 name = "volee-core"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2010,7 +2010,7 @@ dependencies = [
 
 [[package]]
 name = "volee-daemon"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2032,7 +2032,7 @@ dependencies = [
 
 [[package]]
 name = "volee-git"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "rustix",
  "serde",
@@ -2045,7 +2045,7 @@ dependencies = [
 
 [[package]]
 name = "volee-harness"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "insta",
  "serde",
@@ -2059,7 +2059,7 @@ dependencies = [
 
 [[package]]
 name = "volee-host"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "portable-pty",
  "rustix",
@@ -2073,7 +2073,7 @@ dependencies = [
 
 [[package]]
 name = "volee-mcp"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "rmcp",
  "schemars",
@@ -2091,7 +2091,7 @@ dependencies = [
 
 [[package]]
 name = "volee-mux"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2103,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "volee-proto"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2116,7 +2116,7 @@ dependencies = [
 
 [[package]]
 name = "volee-store"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -2129,7 +2129,7 @@ dependencies = [
 
 [[package]]
 name = "volee-term"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "libghostty-vt",
  "ratatui",
@@ -2138,7 +2138,7 @@ dependencies = [
 
 [[package]]
 name = "volee-tui"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "crossterm",
  "futures-util",
