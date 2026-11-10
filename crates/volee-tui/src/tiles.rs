@@ -19,6 +19,7 @@ use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use volee_core::AgentId;
 use volee_core::time::Timestamp;
+use volee_core::workspace::Location;
 
 use crate::app::{Effect, Model, Overlay};
 use crate::keymap::Action;
@@ -94,10 +95,12 @@ pub(crate) struct Reading {
     loading: bool,
     /// When the screen was last asked for, or read.
     asked_at: Option<Timestamp>,
-    /// The agent's state then: a change asks again, so that the end of a
-    /// turn is read.
-    state: &'static str,
-    /// The source cannot show this agent's screen: it is not asked again.
+    /// The agent's state then, and where it ran: a change asks again, so
+    /// that the end of a turn is read, and the screen of a session that
+    /// moved where volee can read it.
+    seen: Option<(&'static str, Location)>,
+    /// The source cannot show this agent's screen as things are: it is not
+    /// asked again until they change.
     unsupported: bool,
 }
 
@@ -526,13 +529,17 @@ fn read_due(model: &Model, wall: &mut Wall, effects: &mut Vec<Effect>) -> bool {
         let Some(agent) = model.registry.agent(tile.agent) else {
             continue;
         };
-        if reading.loading || reading.unsupported {
+        let state = agent.state.label();
+        let moved = !reading
+            .seen
+            .as_ref()
+            .is_some_and(|(seen, place)| *seen == state && *place == agent.location);
+        if reading.loading || (reading.unsupported && !moved) {
             continue;
         }
-        let state = agent.state.label();
         let due = match reading.asked_at {
             None => true,
-            Some(_) if reading.state != state => true,
+            Some(_) if moved => true,
             Some(at) => agent.state.is_busy() && at.millis_until(model.now) >= REFRESH_MILLIS,
         };
         if !due {
@@ -540,7 +547,7 @@ fn read_due(model: &Model, wall: &mut Wall, effects: &mut Vec<Effect>) -> bool {
         }
         reading.loading = true;
         reading.asked_at = Some(model.now);
-        reading.state = state;
+        reading.seen = Some((state, agent.location.clone()));
         // The interface reads the selected agent's screen for its preview:
         // that answer serves the tile too.
         if !(model.preview.agent == Some(tile.agent) && model.preview.loading) {

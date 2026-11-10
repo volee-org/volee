@@ -404,6 +404,56 @@ fn screens_read_through_the_source_are_read_again_while_their_agent_works() {
 }
 
 #[test]
+fn a_screen_the_source_cannot_read_is_not_asked_for_again_until_things_change() {
+    let mut model = model(160, 48);
+    let all = running(&model);
+    press(&mut model, "5");
+    let busy = all[1..PAGE]
+        .iter()
+        .copied()
+        .find(|agent| model.registry.agent(*agent).unwrap().state.is_busy())
+        .unwrap();
+    screen(&mut model, busy, "\x1b[2J\x1b[Hin the background");
+    let place = |model: &mut Model, location: Location| {
+        let at = model.now;
+        update(
+            model,
+            Msg::Events(vec![Event::new(
+                at,
+                EventKind::LocationChanged {
+                    agent: busy,
+                    location,
+                },
+            )]),
+        )
+    };
+    // The session moves to a terminal volee cannot reach: its screen is
+    // asked for where it now is, and the source says it cannot read it.
+    let effects = place(&mut model, Location::Terminal);
+    assert!(loads(&effects).contains(&busy));
+    update(
+        &mut model,
+        Msg::PreviewLoaded {
+            agent: busy,
+            result: Err(SourceError::Unsupported(
+                "it runs in a terminal of its own".into(),
+            )),
+        },
+    );
+    let said = reading(&model, busy).error.clone().unwrap();
+    assert!(said.contains("a terminal of its own"), "{said}");
+    // Though the agent works, nothing asks again, tick after tick.
+    for second in [6, 12, 18] {
+        assert!(!loads(&tick(&mut model, second)).contains(&busy));
+    }
+    // Back in the background, where its harness replays it: asked again.
+    let effects = place(&mut model, Location::Background);
+    assert!(loads(&effects).contains(&busy));
+    screen(&mut model, busy, "\x1b[2J\x1b[Hnow it shows");
+    assert!(reading(&model, busy).error.is_none());
+}
+
+#[test]
 fn the_wall_follows_the_agents_that_stop_and_start() {
     let mut model = model(160, 48);
     let all = running(&model);
