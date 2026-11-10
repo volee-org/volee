@@ -141,6 +141,16 @@ pub(crate) fn on_key(model: &mut Model, key: &KeyEvent, effects: &mut Vec<Effect
         }
     } else {
         let bytes = live.legacy_bytes(key);
+        // A host from before 0.10 does not resume a program that suspends
+        // itself: Claude Code would stay frozen.
+        if bytes == [0x1a] {
+            model.notify(
+                "Ctrl+Z is not sent to an agent in a volee host from before 0.10: nothing there \
+                 would resume Claude Code. It gets a new host when it is stopped and resumed.",
+                true,
+            );
+            return;
+        }
         if bytes.is_empty() {
             return;
         }
@@ -425,6 +435,14 @@ mod tests {
         );
         let effects = update(&mut model, Msg::Paste("a\nb".into()));
         assert_eq!(sent(&effects), [LiveInput::Bytes(b"a\rb".to_vec())]);
+        // Nothing in an older host would resume Claude Code after Ctrl+Z.
+        assert_eq!(sent(&ctrl(&mut model, 'z')), []);
+        assert!(
+            model
+                .notice
+                .as_ref()
+                .is_some_and(|notice| notice.text.starts_with("Ctrl+Z"))
+        );
     }
 
     #[test]

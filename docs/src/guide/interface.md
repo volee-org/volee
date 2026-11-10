@@ -476,8 +476,9 @@ pane (below).
 Agents volee launched before 0.10 run in older hosts, which outlive an
 upgrade: edit mode sends them the bytes a terminal sends, so typing works,
 but a key only a keyboard protocol tells apart, such as `Shift+Enter`,
-arrives as its plain form. Such an agent gets a new host the next time it
-is stopped and resumed.
+arrives as its plain form, and `Ctrl+Z` is not sent at all, since nothing
+in such a host would resume Claude Code. Such an agent gets a new host the
+next time it is stopped and resumed.
 
 ### Adopting an agent
 

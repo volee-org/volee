@@ -59,7 +59,8 @@ program's terminal queries even while that client owns the input, since no
 person's terminal sees them. The welcome says whether a host encodes keys
 (`keys`); hosts started by older versions, which outlive an upgrade, get
 the bytes a terminal in its usual mode sends instead, encoded by the
-interface. The protocol version stays 1: the new fields are optional, and
+interface, which keeps Ctrl+Z from them since they would not resume the
+program. The protocol version stays 1: the new fields are optional, and
 the new frames go only to hosts that announce them.
 
 **Ctrl+Z resumes.** After forwarding a Ctrl+Z, in any encoding and from
