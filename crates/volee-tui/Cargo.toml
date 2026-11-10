@@ -26,7 +26,6 @@ volee-core.workspace = true
 volee-host.workspace = true
 volee-proto.workspace = true
 volee-term.workspace = true
-vt100.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

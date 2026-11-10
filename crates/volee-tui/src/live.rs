@@ -9,15 +9,16 @@
 //! leave key goes to it. Hosts that encode keys themselves get them by name;
 //! older hosts get the bytes a terminal would send.
 
-use std::num::NonZeroU16;
+use std::cell::RefCell;
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Position, Rect};
 use volee_core::AgentId;
 use volee_host::{Event as HostEvent, KeyPress, Size, Update, Welcome};
+use volee_term::Screen;
 
-use crate::preview::{PreviewScreen, style_of};
+use crate::preview::{PreviewScreen, adapted};
 use crate::theme::{StyleRole, Theme};
 
 /// Lines of history kept for scrolling back.
@@ -77,8 +78,10 @@ pub(crate) struct Live {
     pub(crate) exited: bool,
     /// The program's terminal size.
     pub(crate) size: Size,
-    /// The screen, once the first snapshot arrived.
-    screen: Option<vt100::Parser>,
+    /// The screen, once the first snapshot arrived: the same emulator as
+    /// the host's (ADR 0020), fed the same bytes. Reading its cells updates
+    /// the emulator's render state, hence the cell.
+    screen: Option<RefCell<Screen>>,
     /// Lines scrolled back into the history.
     pub(crate) scroll: usize,
 }
@@ -137,15 +140,22 @@ impl Live {
     pub(crate) fn apply(&mut self, update: Update) -> Outcome {
         match update {
             Update::Snapshot(bytes) => {
-                let mut parser = parser(self.size);
-                parser.process(&bytes);
-                self.screen = Some(parser);
+                self.screen = emulator(self.size).map(|mut screen| {
+                    feed(&mut screen, &bytes);
+                    RefCell::new(screen)
+                });
                 self.scroll = 0;
                 Outcome::Drawn
             }
             Update::Output(bytes) => {
                 if let Some(screen) = &mut self.screen {
-                    screen.process(&bytes);
+                    let screen = screen.get_mut();
+                    feed(screen, &bytes);
+                    // A view scrolled back stays on its lines; how far back
+                    // they are grows as the program writes.
+                    if self.scroll > 0 {
+                        self.scroll = screen.scrolled_back();
+                    }
                 }
                 Outcome::Drawn
             }
@@ -186,18 +196,32 @@ impl Live {
         let Some(screen) = &mut self.screen else {
             return 0;
         };
-        let wanted = self.scroll.saturating_add_signed(lines);
-        screen.screen_mut().set_scrollback(wanted);
-        self.scroll = screen.screen().scrollback();
+        self.scroll = screen.get_mut().scroll(lines);
         self.scroll
     }
 
     /// Back to the newest lines.
     pub(crate) fn scroll_to_bottom(&mut self) {
         if let Some(screen) = &mut self.screen {
-            screen.screen_mut().set_scrollback(0);
+            screen.get_mut().scroll_to_bottom();
         }
         self.scroll = 0;
+    }
+
+    /// Whether the program asked for mouse events.
+    pub(crate) fn wants_mouse(&self) -> bool {
+        self.screen
+            .as_ref()
+            .is_some_and(|screen| screen.borrow().wants_mouse())
+    }
+
+    /// The bytes for a mouse event, encoded the way the program asked;
+    /// empty when it did not ask for it.
+    pub(crate) fn mouse_bytes(&self, input: &volee_term::MouseInput) -> Vec<u8> {
+        self.screen
+            .as_ref()
+            .and_then(|screen| screen.borrow().encode_mouse(input).ok())
+            .unwrap_or_default()
     }
 
     /// The bytes a terminal sends for a key, for an older host.
@@ -205,7 +229,7 @@ impl Live {
         let application = self
             .screen
             .as_ref()
-            .is_some_and(|screen| screen.screen().application_cursor());
+            .is_some_and(|screen| screen.borrow().application_cursor());
         legacy_bytes(key, application)
     }
 
@@ -214,7 +238,7 @@ impl Live {
         let bracketed = self
             .screen
             .as_ref()
-            .is_some_and(|screen| screen.screen().bracketed_paste());
+            .is_some_and(|screen| screen.borrow().bracketed_paste());
         legacy_paste(text, bracketed)
     }
 
@@ -232,49 +256,39 @@ impl Live {
         buf: &mut Buffer,
         theme: &Theme,
     ) -> Option<Position> {
-        let screen = self.screen.as_ref()?.screen();
+        let frame = self.screen.as_ref()?.borrow_mut().frame().ok()?;
         let base = theme.style(StyleRole::Text);
         let depth = theme.color_depth();
-        let (rows, cols) = screen.size();
-        let height = rows.get().min(area.height);
-        let width = cols.get().min(area.width);
-        for row in 0..height {
-            let mut column = 0;
-            while column < width {
-                let Some(cell) = screen.cell(row, column) else {
-                    break;
-                };
-                let wide = cell.is_wide();
-                if !cell.is_wide_continuation() {
-                    let symbol = if cell.has_contents() {
-                        cell.contents()
-                    } else {
-                        " "
-                    };
-                    // A wide character cut by the edge is left out.
-                    if !wide || column + 1 < width {
-                        let style = base.patch(style_of(cell, depth));
-                        buf.set_stringn(
-                            area.x + column,
-                            area.y + row,
-                            symbol,
-                            usize::from(width - column),
-                            style,
-                        );
-                    }
+        let right = area.right();
+        for (y, row) in (area.y..area.bottom()).zip(&frame.rows) {
+            for (x, cell) in (area.x..right).zip(row) {
+                // The cell before it draws both halves of a wide character.
+                if cell.continuation {
+                    continue;
                 }
-                column += 1;
+                let symbol = if cell.symbol.is_empty() {
+                    " "
+                } else {
+                    cell.symbol.as_str()
+                };
+                // A wide character cut by the edge is left out.
+                let width = u16::try_from(crate::text::width(symbol)).unwrap_or(1);
+                if x + width.max(1) > right {
+                    continue;
+                }
+                let style = base.patch(adapted(cell.style, depth));
+                buf.set_stringn(x, y, symbol, usize::from(right - x), style);
             }
         }
-        let (row, column) = screen.cursor_position();
-        let visible = !screen.hide_cursor() && self.scroll == 0 && row < height && column < width;
+        let (column, row) = frame.cursor?;
+        let visible = self.scroll == 0 && row < area.height && column < area.width;
         visible.then(|| Position::new(area.x + column, area.y + row))
     }
 
     /// The screen for the wrapping view, when it does not fit cell for cell.
     pub(crate) fn preview(&self, theme: &Theme) -> Option<PreviewScreen> {
-        let screen = self.screen.as_ref()?.screen();
-        Some(PreviewScreen::from_screen(screen, theme.color_depth()))
+        let mut screen = self.screen.as_ref()?.borrow_mut();
+        PreviewScreen::from_emulator(&mut screen, theme.color_depth())
     }
 
     /// The text of the screen, one string per row; for tests.
@@ -282,16 +296,22 @@ impl Live {
     pub(crate) fn text(&self) -> String {
         self.screen
             .as_ref()
-            .map(|screen| screen.screen().contents())
+            .and_then(|screen| screen.borrow().text().ok())
             .unwrap_or_default()
     }
 }
 
-/// An emulator of `size`, at least one cell.
-fn parser(size: Size) -> vt100::Parser {
-    let rows = NonZeroU16::new(size.rows).unwrap_or(NonZeroU16::MIN);
-    let cols = NonZeroU16::new(size.cols).unwrap_or(NonZeroU16::MIN);
-    vt100::Parser::new(rows, cols, SCROLLBACK)
+/// An emulator of `size`, at least one cell, that keeps a history.
+fn emulator(size: Size) -> Option<Screen> {
+    Screen::new(size.cols.max(1), size.rows.max(1), SCROLLBACK).ok()
+}
+
+/// Feeds what the host sent. The host answers the program's queries: what
+/// this copy would answer is dropped.
+fn feed(screen: &mut Screen, bytes: &[u8]) {
+    screen.feed(bytes);
+    let _ = screen.take_replies();
+    let _ = screen.take_signals();
 }
 
 /// A key as the host names it, or `None` for a key it has no name for

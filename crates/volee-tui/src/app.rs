@@ -1272,7 +1272,6 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             }
         }
         // In edit mode the mouse does nothing: the keys are the agent's.
-        Msg::Mouse(_) if crate::edit::editing(model) => dirty = false,
         Msg::Mouse(mouse) => dirty = on_mouse(model, mouse, &mut effects),
         Msg::Paste(text) if crate::edit::editing(model) => {
             crate::edit::on_paste(model, &text, &mut effects);
@@ -2584,6 +2583,10 @@ fn on_overlay_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effe
 const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(450);
 
 fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> bool {
+    // In edit mode the mouse is the agent's, like the keys.
+    if crate::edit::editing(model) {
+        return crate::edit::on_mouse(model, mouse, effects);
+    }
     let (column, row) = (mouse.column, mouse.row);
     if model.prompt.is_some() {
         return false;

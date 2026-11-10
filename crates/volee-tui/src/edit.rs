@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use ratatui::crossterm::event::KeyEvent;
+use ratatui::crossterm::event::{KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use volee_core::AgentId;
 use volee_host::{Size, Update, Welcome};
@@ -209,6 +209,76 @@ pub(crate) fn on_paste(model: &mut Model, text: &str, effects: &mut Vec<Effect>)
         link: live.link,
         input,
     });
+}
+
+/// How many lines one notch of the wheel scrolls back.
+const WHEEL_LINES: isize = 3;
+
+/// The mouse in edit mode. A program that asked for the mouse gets it, on
+/// the cell under the pointer, encoded the way it asked: clicks, drags and
+/// the wheel. For any other program the wheel reads back through what it
+/// wrote, as in a terminal. Returns whether the screen changed.
+pub(crate) fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> bool {
+    let area = screen_area(model.size);
+    let Some(live) = model.live.as_mut().filter(|live| live.phase == Phase::Live) else {
+        return false;
+    };
+    if live.wants_mouse() {
+        // Only on the agent's own cells: the frame around them is volee's.
+        let inside = mouse.column >= area.x
+            && mouse.row >= area.y
+            && mouse.column - area.x < live.size.cols.min(area.width)
+            && mouse.row - area.y < live.size.rows.min(area.height);
+        if !inside || live.scroll > 0 {
+            return false;
+        }
+        let bytes = live.mouse_bytes(&volee_term::MouseInput {
+            kind: mouse_kind(mouse.kind),
+            column: mouse.column - area.x,
+            row: mouse.row - area.y,
+            shift: mouse.modifiers.contains(KeyModifiers::SHIFT),
+            alt: mouse.modifiers.contains(KeyModifiers::ALT),
+            ctrl: mouse.modifiers.contains(KeyModifiers::CONTROL),
+        });
+        if !bytes.is_empty() {
+            effects.push(Effect::LiveSend {
+                link: live.link,
+                input: LiveInput::Bytes(bytes),
+            });
+        }
+        return false;
+    }
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            live.scroll_by(WHEEL_LINES);
+            true
+        }
+        MouseEventKind::ScrollDown => {
+            live.scroll_by(-WHEEL_LINES);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// A mouse event of the person's terminal, as the emulator names it.
+fn mouse_kind(kind: MouseEventKind) -> volee_term::MouseKind {
+    use volee_term::MouseKind;
+    let button = |button| match button {
+        MouseButton::Left => volee_term::MouseButton::Left,
+        MouseButton::Middle => volee_term::MouseButton::Middle,
+        MouseButton::Right => volee_term::MouseButton::Right,
+    };
+    match kind {
+        MouseEventKind::Down(pressed) => MouseKind::Press(button(pressed)),
+        MouseEventKind::Up(released) => MouseKind::Release(button(released)),
+        MouseEventKind::Drag(held) => MouseKind::Drag(button(held)),
+        MouseEventKind::Moved => MouseKind::Move,
+        MouseEventKind::ScrollUp => MouseKind::WheelUp,
+        MouseEventKind::ScrollDown => MouseKind::WheelDown,
+        MouseEventKind::ScrollLeft => MouseKind::WheelLeft,
+        MouseEventKind::ScrollRight => MouseKind::WheelRight,
+    }
 }
 
 /// The terminal changed size: in edit mode, the agent's follows.
@@ -530,6 +600,89 @@ mod tests {
                 .as_ref()
                 .is_some_and(|notice| notice.text.starts_with("Ctrl+Z"))
         );
+    }
+
+    fn mouse(model: &mut Model, kind: MouseEventKind, column: u16, row: u16) -> Vec<Effect> {
+        update(
+            model,
+            Msg::Mouse(MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            }),
+        )
+    }
+
+    fn output(model: &mut Model, link: u64, bytes: &[u8]) {
+        update(
+            model,
+            Msg::LiveUpdate {
+                link,
+                update: Update::Output(bytes.to_vec()),
+            },
+        );
+    }
+
+    #[test]
+    fn a_program_that_asked_for_the_mouse_gets_it_on_its_own_cells() {
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "i");
+        answer(&mut model, 1, true);
+        // The program turns mouse reporting on, in the SGR format.
+        output(&mut model, 1, b"\x1b[?1000h\x1b[?1006h");
+        let left = MouseEventKind::Down(MouseButton::Left);
+        // The agent's screen starts at column 2, row 1 of the terminal.
+        assert_eq!(
+            sent(&mouse(&mut model, left, 6, 3)),
+            [LiveInput::Bytes(b"\x1b[<0;5;3M".to_vec())]
+        );
+        assert_eq!(
+            sent(&mouse(
+                &mut model,
+                MouseEventKind::Up(MouseButton::Left),
+                6,
+                3
+            )),
+            [LiveInput::Bytes(b"\x1b[<0;5;3m".to_vec())]
+        );
+        assert_eq!(
+            sent(&mouse(&mut model, MouseEventKind::ScrollUp, 2, 1)),
+            [LiveInput::Bytes(b"\x1b[<64;1;1M".to_vec())]
+        );
+        // The frame and the bottom line are volee's: nothing is sent.
+        assert_eq!(sent(&mouse(&mut model, left, 0, 0)), []);
+        assert_eq!(sent(&mouse(&mut model, left, 6, 39)), []);
+        // It asked for clicks, not for moves.
+        assert_eq!(sent(&mouse(&mut model, MouseEventKind::Moved, 6, 3)), []);
+        assert!(editing(&model), "the mouse never leaves edit mode");
+    }
+
+    #[test]
+    fn for_any_other_program_the_wheel_reads_back() {
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "i");
+        answer(&mut model, 1, true);
+        // More lines than the screen holds.
+        for line in 1..=80 {
+            output(&mut model, 1, format!("line {line}\r\n").as_bytes());
+        }
+        // Nothing goes to a program that did not ask for the mouse.
+        let click = MouseEventKind::Down(MouseButton::Left);
+        assert_eq!(sent(&mouse(&mut model, click, 6, 3)), []);
+        assert_eq!(sent(&mouse(&mut model, MouseEventKind::ScrollUp, 6, 3)), []);
+        assert_eq!(model.live.as_ref().unwrap().scroll, 3);
+        mouse(&mut model, MouseEventKind::ScrollUp, 6, 3);
+        assert_eq!(model.live.as_ref().unwrap().scroll, 6);
+        mouse(&mut model, MouseEventKind::ScrollDown, 6, 3);
+        assert_eq!(model.live.as_ref().unwrap().scroll, 3);
+        // What the agent writes meanwhile does not move the view: it is
+        // further back.
+        output(&mut model, 1, b"line 81\r\nline 82\r\n");
+        assert_eq!(model.live.as_ref().unwrap().scroll, 5);
+        // Typing comes back to the newest lines.
+        press(&mut model, "x");
+        assert_eq!(model.live.as_ref().unwrap().scroll, 0);
     }
 
     #[test]
