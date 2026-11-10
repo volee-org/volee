@@ -12,17 +12,30 @@ const SIZE: Size = Size { cols: 60, rows: 12 };
 /// Starts a host running `command` in a temporary directory, and waits for
 /// its socket.
 fn start(dir: &HostDir, id: &str, command: &[&str]) -> thread::JoinHandle<()> {
+    start_with(dir, id, command, None)
+}
+
+/// Like [`start`], for a host that ends its program once nobody has held
+/// its input for `idle_exit`.
+fn start_with(
+    dir: &HostDir,
+    id: &str,
+    command: &[&str],
+    idle_exit: Option<Duration>,
+) -> thread::JoinHandle<()> {
     let config = HostConfig {
         id: id.to_owned(),
         dir: dir.clone(),
         command: command.iter().map(|part| (*part).to_owned()).collect(),
         cwd: dir.path().to_path_buf(),
         env: Vec::new(),
+        env_remove: Vec::new(),
         size: SIZE,
         profile: "generic".to_owned(),
         name: None,
         scrollback: 100,
         linger: Duration::from_millis(300),
+        idle_exit,
     };
     let handle = thread::spawn(move || {
         run(config).expect("host runs");
@@ -273,6 +286,53 @@ fn a_program_that_suspends_itself_on_ctrl_z_is_resumed() {
         .expect("key");
     watch_until(&mut watch, |w| screen_has(w, "resumed"));
 
+    owner.sender().expect("sender").stop().expect("stop");
+    host.join().expect("host thread");
+}
+
+#[test]
+fn a_host_nobody_uses_ends_its_program_when_asked_to() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dir = HostDir::new(root.path().join("hosts"));
+    let idle = Some(Duration::from_millis(400));
+    let host = start_with(&dir, "view", &["cat"], idle);
+
+    // Someone holds the input: the program stays, however long.
+    let owner = control(&dir.socket("view"), SIZE);
+    let mut watch = Watch::start(&dir.socket("view"), "test").expect("watch");
+    thread::sleep(Duration::from_millis(900));
+    watch.pump();
+    assert!(watch.exit().is_none(), "it runs while someone uses it");
+
+    // They leave; a watcher does not keep it: the host ends the program.
+    drop(owner);
+    watch_until(&mut watch, |w| w.exit().is_some());
+    host.join().expect("host thread");
+    let records = dir.list().expect("list");
+    assert!(records[0].0.exit.is_some(), "the record says it ended");
+}
+
+#[test]
+fn a_host_nobody_ever_used_ends_too() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dir = HostDir::new(root.path().join("hosts"));
+    let idle = Some(Duration::from_millis(300));
+    let host = start_with(&dir, "unused", &["cat"], idle);
+    host.join().expect("host thread");
+    let records = dir.list().expect("list");
+    assert!(records[0].0.exit.is_some());
+}
+
+#[test]
+fn a_host_without_an_idle_limit_keeps_its_program() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dir = HostDir::new(root.path().join("hosts"));
+    let host = start(&dir, "kept", &["cat"]);
+    let mut watch = Watch::start(&dir.socket("kept"), "test").expect("watch");
+    thread::sleep(Duration::from_millis(700));
+    watch.pump();
+    assert!(watch.exit().is_none());
+    let owner = control(&dir.socket("kept"), SIZE);
     owner.sender().expect("sender").stop().expect("stop");
     host.join().expect("host thread");
 }

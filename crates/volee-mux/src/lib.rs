@@ -119,6 +119,15 @@ pub trait Multiplexer: fmt::Debug + Send + Sync {
     fn attach_command(&self, _target: &str) -> Option<Vec<String>> {
         None
     }
+
+    /// The command that shows the pane at `target` alone in a terminal and
+    /// sends it what is typed there, without attaching to its session, and
+    /// without ending anything when it stops; none when the multiplexer has
+    /// no such command. volee runs it in a terminal of its own to open an
+    /// agent where it runs (ADR 0027).
+    fn view_command(&self, _target: &str) -> Option<Vec<String>> {
+        None
+    }
 }
 
 /// Splits a pane address into its session and its pane. The pane part is the

@@ -226,6 +226,10 @@ enum HostCommand {
         /// Seconds the last screen stays after the program ends.
         #[arg(long, default_value_t = 600)]
         linger: u64,
+        /// End the program once nobody has held the host's input for this
+        /// many seconds: for a host that only exists while someone uses it.
+        #[arg(long)]
+        idle_exit: Option<u64>,
         /// The command line, after `--`.
         #[arg(last = true, required = true)]
         command: Vec<String>,
@@ -274,6 +278,8 @@ enum HostCommand {
         name: Option<String>,
         #[arg(long)]
         linger: u64,
+        #[arg(long)]
+        idle_exit: Option<u64>,
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
@@ -540,6 +546,7 @@ fn host(args: HostArgs) -> anyhow::Result<()> {
             profile,
             name,
             linger,
+            idle_exit,
             command,
         } => cmd::host::spawn(
             &dir,
@@ -550,6 +557,7 @@ fn host(args: HostArgs) -> anyhow::Result<()> {
                 profile,
                 name,
                 linger,
+                idle_exit,
                 command,
             },
         ),
@@ -566,6 +574,7 @@ fn host(args: HostArgs) -> anyhow::Result<()> {
             profile,
             name,
             linger,
+            idle_exit,
             command,
         } => cmd::host::run(volee_host::HostConfig {
             id,
@@ -573,11 +582,13 @@ fn host(args: HostArgs) -> anyhow::Result<()> {
             command,
             cwd,
             env: Vec::new(),
+            env_remove: Vec::new(),
             size: volee_host::Size { cols, rows },
             profile,
             name,
             scrollback: 1_000,
             linger: std::time::Duration::from_secs(linger),
+            idle_exit: idle_exit.map(std::time::Duration::from_secs),
         }),
     }
 }

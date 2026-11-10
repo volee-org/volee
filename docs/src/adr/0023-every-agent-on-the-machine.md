@@ -1,6 +1,6 @@
 # 0023. volee shows every agent on the machine, and adopts the ones it did not start
 
-- Status: Accepted (supersedes [0018](0018-panes-that-show-background-sessions.md); amends [0004](0004-sources-and-reconciliation.md) and [0015](0015-tuios-location-adapter.md))
+- Status: Accepted (supersedes [0018](0018-panes-that-show-background-sessions.md); amends [0004](0004-sources-and-reconciliation.md) and [0015](0015-tuios-location-adapter.md)). Amended by [0027](0027-open-without-owning.md): an agent volee did not start is no longer read only, opening it needs no adoption, and adopting one is a choice.
 - Date: 2026-11-08
 
 ## Context

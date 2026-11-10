@@ -174,6 +174,170 @@ fn agents_sort_by_urgency_then_recency() {
     assert_eq!(order, [agent_id(4), agent_id(3), agent_id(2), agent_id(1)]);
 }
 
+/// A session someone else started, as discovery registers it.
+fn watch(registry: &mut Registry, id: AgentId, session: &str) {
+    for kind in [
+        EventKind::AgentRegistered {
+            agent: id,
+            name: format!("session {session}"),
+            role: Role::Independent,
+            harness: HarnessKind::ClaudeCode,
+            launched_by: LaunchedBy::Outside,
+            parent: None,
+            mission: None,
+            workspace: Workspace::at("/work"),
+            location: Location::Background,
+        },
+        EventKind::SessionLinked {
+            agent: id,
+            session: SessionKey::claude(session),
+            origin: SessionOrigin::Discovered,
+        },
+    ] {
+        registry.apply(&Event::new(at(1), kind)).unwrap();
+    }
+}
+
+#[test]
+fn a_watched_failure_sorts_after_the_agents_that_run() {
+    let mut registry = Registry::new();
+    register(&mut registry, agent_id(1), Role::Worker, None);
+    register(&mut registry, agent_id(2), Role::Worker, None);
+    watch(&mut registry, agent_id(3), "s3");
+    watch(&mut registry, agent_id(4), "s4");
+    set_state(&mut registry, agent_id(1), AgentState::Idle, 10);
+    // A launch that failed calls for the person; a session started
+    // elsewhere that failed is history, below the stopped ones that ended
+    // after it.
+    set_state(&mut registry, agent_id(2), AgentState::Failed, 11);
+    set_state(&mut registry, agent_id(3), AgentState::Failed, 12);
+    set_state(&mut registry, agent_id(4), AgentState::Stopped, 13);
+    let order: Vec<AgentId> = registry.agents_by_urgency().iter().map(|a| a.id).collect();
+    assert_eq!(order, [agent_id(2), agent_id(1), agent_id(4), agent_id(3)]);
+}
+
+#[test]
+fn a_renamed_agent_keeps_everything_but_its_name() {
+    let mut registry = Registry::new();
+    watch(&mut registry, agent_id(1), "s1");
+    registry
+        .apply(&Event::new(
+            at(7),
+            EventKind::AgentRenamed {
+                agent: agent_id(1),
+                name: "fix the login flow".into(),
+            },
+        ))
+        .unwrap();
+    let agent = registry.agent(agent_id(1)).unwrap();
+    assert_eq!(agent.name, "fix the login flow");
+    assert_eq!(agent.updated_at, at(7));
+    assert!(agent.owns_session(&SessionKey::claude("s1")));
+    let unknown = Event::new(
+        at(8),
+        EventKind::AgentRenamed {
+            agent: agent_id(9),
+            name: "x".into(),
+        },
+    );
+    assert_eq!(
+        registry.apply(&unknown),
+        Err(ApplyError::UnknownAgent(agent_id(9)))
+    );
+}
+
+#[test]
+fn a_released_session_is_nobodys_and_can_be_linked_again() {
+    let mut registry = Registry::new();
+    watch(&mut registry, agent_id(1), "s1");
+    watch(&mut registry, agent_id(2), "s2");
+    let link = |agent, session: &str| {
+        Event::new(
+            at(3),
+            EventKind::SessionLinked {
+                agent,
+                session: SessionKey::claude(session),
+                origin: SessionOrigin::Forked,
+            },
+        )
+    };
+    registry.apply(&link(agent_id(1), "copy")).unwrap();
+    let release = |agent, session: &str| {
+        Event::new(
+            at(4),
+            EventKind::SessionReleased {
+                agent,
+                session: SessionKey::claude(session),
+            },
+        )
+    };
+    registry.apply(&release(agent_id(1), "copy")).unwrap();
+    let first = registry.agent(agent_id(1)).unwrap();
+    assert_eq!(first.sessions.len(), 1);
+    assert_eq!(
+        first.current_session().unwrap().key,
+        SessionKey::claude("s1")
+    );
+    assert!(
+        registry
+            .agent_for_session(&SessionKey::claude("copy"))
+            .is_none()
+    );
+    assert!(!registry.is_ignored(&SessionKey::claude("copy")));
+    // Another agent may own it now.
+    registry.apply(&link(agent_id(2), "copy")).unwrap();
+    assert_eq!(
+        registry
+            .agent_for_session(&SessionKey::claude("copy"))
+            .unwrap()
+            .id,
+        agent_id(2)
+    );
+    // Releasing a session the agent does not hold takes nothing from the
+    // agent that does.
+    registry.apply(&release(agent_id(1), "copy")).unwrap();
+    assert_eq!(
+        registry
+            .agent_for_session(&SessionKey::claude("copy"))
+            .unwrap()
+            .id,
+        agent_id(2)
+    );
+}
+
+#[test]
+fn an_expired_agent_is_gone_and_its_sessions_are_not_ignored() {
+    let mut registry = Registry::new();
+    watch(&mut registry, agent_id(1), "s1");
+    watch(&mut registry, agent_id(2), "s2");
+    registry
+        .apply(&Event::new(
+            at(5),
+            EventKind::AgentExpired { agent: agent_id(1) },
+        ))
+        .unwrap();
+    assert!(registry.agent(agent_id(1)).is_none());
+    assert!(
+        registry
+            .agent_for_session(&SessionKey::claude("s1"))
+            .is_none()
+    );
+    assert!(!registry.is_ignored(&SessionKey::claude("s1")));
+    // A forgotten one is ignored for good.
+    registry
+        .apply(&Event::new(
+            at(6),
+            EventKind::AgentForgotten { agent: agent_id(2) },
+        ))
+        .unwrap();
+    assert!(registry.is_ignored(&SessionKey::claude("s2")));
+    let again = Event::new(at(7), EventKind::AgentExpired { agent: agent_id(1) });
+    assert_eq!(
+        registry.apply(&again),
+        Err(ApplyError::UnknownAgent(agent_id(1)))
+    );
+}
+
 #[test]
 fn forgetting_an_agent_makes_its_children_roots() {
     let mut registry = Registry::new();

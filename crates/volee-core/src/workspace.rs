@@ -61,7 +61,8 @@ pub enum Location {
         id: String,
     },
     /// A background session of its harness, started by an earlier volee or
-    /// by hand. volee shows it and can adopt it into a host (ADR 0023).
+    /// by hand. volee shows it and opens it with the harness's own command
+    /// (ADR 0027).
     Background,
     /// Inside a terminal multiplexer pane.
     Pane {

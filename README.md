@@ -44,17 +44,22 @@ code, not by trust.
 
 - Each agent volee launches runs in a volee host, a small process that holds
   its terminal and its exact screen, so it survives closed windows, the
-  interface and the daemon. Take one over with `a` or `volee attach`, come
+  interface and the daemon. Open one with `enter` or `volee attach`, come
   back with `Ctrl+Q`.
 - Previews, a full-screen view and a wall of live screens show each agent
   volee hosts exactly as its terminal does, status line included, without
   resizing it.
-- volee launches Claude Code and OpenCode agents. Agents started elsewhere
-  are shown read only, and a key adopts one into a host.
+- volee launches Claude Code and OpenCode agents. A session you started
+  yourself opens the same way, where it runs: `enter` or a double click
+  puts a terminal on it inside volee (`claude attach` on a background
+  session, the pane of a tuios session), with nothing stopped or restarted.
+- The list is what runs now, one row per session, as Claude Code's own
+  agents view lists them: a session that is gone leaves it.
 - After a reboot, the daemon resumes the agents the reboot interrupted, with
   their conversation. `volee daemon install` starts it at login, if you want.
 - Sessions you started by hand in a tuios or tmux pane are found in that
-  pane: their preview is the pane's screen, and `a` brings the pane forward.
+  pane: their preview is the pane's screen, `enter` opens a tuios pane
+  inside volee and brings a tmux pane forward.
 - Each new worktree can run your setup commands, such as `bun install`,
   before its agent starts.
 - A small local daemon keeps the registry, the event log and the messages in

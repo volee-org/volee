@@ -35,13 +35,15 @@ do*. volee shows what they do.
   that holds its terminal, so its preview is the exact screen, and a wall
   shows the screens of many agents at once. The agent survives closed
   windows, the interface and the daemon, and comes back after a reboot.
-- **Your terminal, your tools**: take over an agent with a key and come back
-  with `Ctrl+Q`; open its worktree in your editor, your diff viewer or your
+- **Your terminal, your tools**: open an agent with a key, type into it
+  inside volee and come back with `Ctrl+Q`; open its worktree in your
+  editor, your diff viewer or your
   git interface. None of them is required, and no multiplexer either; a
   session you started in a tuios or tmux pane is shown and reached there.
-- **Claude Code and OpenCode**: volee launches agents of both, shows the
-  ones started elsewhere read only, and adopts one into a host when you
-  want to take it over.
+- **Claude Code and OpenCode**: volee launches agents of both, and shows
+  the ones started elsewhere. A Claude Code session you started yourself
+  opens where it runs, in the background or in a tuios pane, with nothing
+  stopped or restarted; the list is what runs now.
 - **Worktrees ready to work**: your setup commands, such as `bun install`,
   run in each new worktree before its agent starts.
 

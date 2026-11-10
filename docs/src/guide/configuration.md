@@ -201,7 +201,7 @@ there:
 
 ```toml
 [tui.keys]
-take-over = "ctrl-a"
+take-over = ["enter", "ctrl-a"]   # opening an agent
 new-agent = ["c", "space n"]
 adopt = []
 

@@ -52,8 +52,11 @@ pub(crate) enum Phase {
 pub(crate) enum Outcome {
     /// The screen changed.
     Drawn,
-    /// The program ended.
-    Exited,
+    /// The program ended, with an error or not.
+    Exited {
+        /// It ended with a status other than success, or on a signal.
+        failed: bool,
+    },
     /// Another terminal took the input.
     InputTaken,
 }
@@ -151,10 +154,12 @@ impl Live {
                 self.size = size;
                 Outcome::Drawn
             }
-            Update::Event(HostEvent::Exited { .. }) => {
+            Update::Event(HostEvent::Exited { exit }) => {
                 self.exited = true;
                 self.editing = false;
-                Outcome::Exited
+                Outcome::Exited {
+                    failed: exit.signal.is_some() || exit.code.is_some_and(|code| code != 0),
+                }
             }
             Update::Event(HostEvent::InputTaken) => {
                 self.editing = false;

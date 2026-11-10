@@ -13,6 +13,7 @@ mod control;
 mod discovery;
 mod error;
 mod evidence;
+mod files;
 mod handlers;
 mod join;
 mod launch;
@@ -27,6 +28,7 @@ mod setup;
 mod sqlite;
 mod state;
 mod tidy;
+mod views;
 mod watchers;
 
 pub use clock::{Clock, ManualClock, SystemClock};

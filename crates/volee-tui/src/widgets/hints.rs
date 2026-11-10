@@ -265,8 +265,9 @@ fn render_prompt(model: &Model, prompt: Prompt, area: Rect, buf: &mut Buffer) {
             let mut spans = vec![
                 Span::styled(
                     format!(
-                        "{} runs in the background, where volee cannot type. Move it into a \
-                         volee host and take it over? Its conversation goes on.",
+                        "Move {} into a volee host? Its session is stopped and resumed there \
+                         with volee's settings in place of its own. Opening it (enter) needs \
+                         none of this.",
                         model.name_of(agent)
                     ),
                     theme.style(StyleRole::Input),

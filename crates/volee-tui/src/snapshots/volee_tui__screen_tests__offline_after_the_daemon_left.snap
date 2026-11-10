@@ -40,5 +40,5 @@ expression: draw(&model)
 "│ delivery 1 commit · pushed     ││   ? for shortcuts                                                                  │"
 "│ last     Bash bun test tools … ││                                                                                    │"
 "╰────────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────╯"
-" h/j/k/l move   gg/G first/last   enter subtree   ' jump   / filter   n/N match   tab/⇧tab panel   1-4 views            "
+" h/j/k/l move   gg/G first/last   s subtree   ' jump   / filter   n/N match   tab/⇧tab panel   1-4 views   H/L view     "
 "  Lost the connection to the volee daemon: what you see is no longer updated.                                           "

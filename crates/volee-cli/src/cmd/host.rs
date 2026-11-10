@@ -31,6 +31,7 @@ pub(crate) struct Spawn {
     pub(crate) profile: String,
     pub(crate) name: Option<String>,
     pub(crate) linger: u64,
+    pub(crate) idle_exit: Option<u64>,
     pub(crate) command: Vec<String>,
 }
 
@@ -67,6 +68,9 @@ pub(crate) fn spawn(dir: &HostDir, spawn: Spawn) -> anyhow::Result<()> {
         .args(["--linger", &spawn.linger.to_string()]);
     if let Some(name) = &spawn.name {
         command.args(["--name", name]);
+    }
+    if let Some(idle_exit) = spawn.idle_exit {
+        command.args(["--idle-exit", &idle_exit.to_string()]);
     }
     let mut child = command
         .arg("--")

@@ -1139,11 +1139,11 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &["N"], A::PreviousMatch, "previous match", Some("match"), "the previous agent that matches the filter, round the list"),
         bind(C::Global, &["m"], A::Message, "message", Some("message"), "write a message to the selected agent"),
         bind(C::Global, &["d"], A::Diff, "diff", Some("diff"), "show the selected agent's changes"),
-        bind(C::Global, &["i", "a"], A::TakeOver, "edit", Some("edit"), "edit mode: the selected agent's live screen, full size, takes your keys; the leave key (ctrl-q) comes back"),
+        bind(C::Global, &["enter", "i", "a"], A::TakeOver, "open", Some("open"), "open the selected agent: its own terminal, full size inside volee, takes your keys; the leave key (ctrl-q) comes back and the agent keeps running"),
         bind(C::Global, &["z"], A::FullScreen, "full screen", Some("full screen"), "show the selected agent's screen full size"),
         bind(C::Global, &["I", "space i"], A::Messages, "messages", Some("messages"), "your messages, questions waiting for you first"),
         bind(C::Global, &["o", "space o"], A::OpenWith, "open with…", None, "open the selected agent's worktree in your editor, diff viewer or git tool"),
-        bind(C::Global, &["A", "space a"], A::Adopt, "adopt", Some("adopt"), "adopt the selected agent into a volee host, so that you can take it over"),
+        bind(C::Global, &["A", "space a"], A::Adopt, "adopt", None, "move the selected agent into a volee host (asks first): its session is stopped and resumed there with volee's settings; opening it needs no adoption"),
         bind(C::Global, &["F", "space f"], A::Forget, "forget", None, "forget the selected agent: stop listing it (asks first)"),
         bind(C::Global, &["space n"], A::NewAgent, "new agent", None, "launch an agent in a new worktree"),
         bind(C::Global, &["space N"], A::NewMission, "new mission", None, "create a mission, which launches its coordinator"),
@@ -1171,7 +1171,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Agents, &["G", "end"], A::Last, "last", Some("first/last"), "last agent"),
         bind(C::Agents, &["ctrl-d", "pgdn"], A::HalfPageDown, "half page down", None, "half a page of agents down"),
         bind(C::Agents, &["ctrl-u", "pgup"], A::HalfPageUp, "half page up", None, "half a page of agents up"),
-        bind(C::Agents, &["enter"], A::FocusSubtree, "subtree", Some("subtree"), "show the agent's subtree in the hierarchy"),
+        bind(C::Agents, &["s"], A::FocusSubtree, "subtree", Some("subtree"), "show the agent's subtree in the hierarchy"),
         // The list has the keyboard at first: the zoom keys reach the view
         // beside it from there too.
         bind(C::Agents, &["+", "="], A::ZoomIn, "zoom in", None, "more detail in the view beside the list"),
@@ -1184,7 +1184,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Hierarchy, &["l", "right"], A::Right, "right", Some("move"), "card on the right"),
         bind(C::Hierarchy, &["g g", "home"], A::First, "first", Some("first/last"), "first card"),
         bind(C::Hierarchy, &["G", "end"], A::Last, "last", Some("first/last"), "last card"),
-        bind(C::Hierarchy, &["enter"], A::FocusSubtree, "subtree", Some("subtree"), "show only the selected agent and its descendants"),
+        bind(C::Hierarchy, &["s"], A::FocusSubtree, "subtree", Some("subtree"), "show only the selected agent and its descendants"),
         bind(C::Hierarchy, &["+", "="], A::ZoomIn, "zoom in", Some("zoom"), "more detail on cards"),
         bind(C::Hierarchy, &["_"], A::ZoomOut, "zoom out", Some("zoom"), "less detail on cards"),
         bind(C::Hierarchy, &["0"], A::ZoomAuto, "auto zoom", None, "choose the detail level from the size"),
@@ -1226,7 +1226,6 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Detail, &["ctrl-d", "pgdn"], A::HalfPageDown, "half page down", None, "scroll the preview half a page down"),
         bind(C::Detail, &["ctrl-u", "pgup"], A::HalfPageUp, "half page up", None, "scroll the preview half a page up"),
         bind(C::Detail, &["r"], A::Refresh, "refresh", Some("refresh"), "refresh the preview"),
-        bind(C::Detail, &["enter"], A::FullScreen, "full screen", Some("full screen"), "show the agent's screen full size"),
 
         bind(C::Screen, &["k", "up"], A::Up, "scroll up", Some("scroll"), "scroll up, to older lines"),
         bind(C::Screen, &["j", "down"], A::Down, "scroll down", Some("scroll"), "scroll down, to newer lines"),
@@ -1235,7 +1234,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Screen, &["g g", "home"], A::First, "top", None, "the top of the screen"),
         bind(C::Screen, &["G", "end"], A::Last, "bottom", None, "the bottom, the newest lines"),
         bind(C::Screen, &["r"], A::Refresh, "refresh", Some("refresh"), "refresh the screen"),
-        bind(C::Screen, &["i", "a"], A::TakeOver, "edit", Some("edit"), "edit mode: your keys go to the agent; the leave key (ctrl-q) comes back"),
+        bind(C::Screen, &["enter", "i", "a"], A::TakeOver, "open", Some("open"), "open the agent: your keys go to it; the leave key (ctrl-q) comes back"),
         bind(C::Screen, &["z", "esc", "q"], A::Back, "back", Some("back"), "come back to the interface"),
         bind(C::Screen, &["ctrl-c"], A::Quit, "quit", None, "quit volee"),
 

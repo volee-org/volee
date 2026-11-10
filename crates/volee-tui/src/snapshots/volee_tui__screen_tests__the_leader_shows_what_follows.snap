@@ -40,5 +40,5 @@ expression: draw(&model)
 "│ delivery 1 commit · pushed     ││   ? for shortcuts                                            │ w  wall            ││"
 "│ last     Bash bun test tools … ││                                                              │ t  theme…          ││"
 "╰────────────────────────────────╯╰──────────────────────────────────────────────────────────────│ k  all keys        │╯"
-" h/j/k/l move   gg/G first/last   enter subtree   ' jump   / filter   n/N match   tab/⇧tab panel ╰────────────────────╯ "
-" m message   d diff   i edit   z full screen   I messages   A adopt   : commands   ␣ more   q quit               ? help "
+" h/j/k/l move   gg/G first/last   s subtree   ' jump   / filter   n/N match   tab/⇧tab panel   1-╰────────────────────╯ "
+" m message   d diff   enter open   z full screen   I messages   : commands   ␣ more   q quit                     ? help "

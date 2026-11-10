@@ -158,6 +158,24 @@ unchanged for about six seconds is idle, a program that ended is stopped.
 When the daemon starts, it resumes the agents whose host is gone without
 recording an end ([ADR 0024](../adr/0024-agents-come-back-after-a-reboot.md)).
 
+## Views
+
+A session volee did not start has no host: it runs in Claude Code's
+background, or in a pane of a multiplexer. To show it inside the interface
+and type into it, the daemon runs the session's own door in a host, a
+**view** ([ADR 0027](../adr/0027-open-without-owning.md)): `claude attach
+<id>` for a Claude Code background session, `tuios pane-view` for a tuios
+pane. `agents.open` answers with the view's socket, and the interface
+connects to it as to any host, in edit mode.
+
+A view differs from an agent's host on three points. It runs in a thread
+of the daemon, under `<state>/views`, and ends with it. It ends its
+program once nobody has held its input for 15 seconds (`idle_exit`, also
+`volee host spawn --idle-exit <seconds>`): the program is a door, so
+ending it ends nothing else. And it leaves no file: its socket and its
+record go when it ends, and a daemon that starts clears what a killed one
+left.
+
 ## Limits
 
 - An agent survives the interface and the daemon, but not its host: a host

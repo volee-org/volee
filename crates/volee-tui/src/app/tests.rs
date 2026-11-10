@@ -8,6 +8,7 @@ use ratatui::crossterm::event::{
 };
 use volee_core::AgentId;
 use volee_core::time::Timestamp;
+use volee_core::workspace::Location;
 
 use super::*;
 use crate::clock::ManualClock;
@@ -15,7 +16,7 @@ use crate::demo::{
     DemoSource, EXPLORE_HANDLERS, INFRA, INVOICE_PAGE, INVOICE_SCHEMA, INVOICE_TOOLS, INVOICING,
     LATENCY_AUDIT, TOWER, TRACE_GATEWAY,
 };
-use crate::source::{Changes, Outgoing, PaneFocus, SourceError, TakeOver};
+use crate::source::{Changes, Door, Outgoing, PaneFocus, SourceError, TakeOver};
 use crate::views::hierarchy::Zoom;
 use crate::views::timeline::Scale;
 
@@ -215,7 +216,7 @@ fn escape_closes_one_thing_at_a_time_and_never_quits() {
     press(&mut model, "/inv");
     key(&mut model, KeyCode::Enter);
     press(&mut model, "'n");
-    key(&mut model, KeyCode::Enter);
+    press(&mut model, "s");
     press(&mut model, "?");
     assert_eq!(model.overlay, Some(Overlay::Keys));
     assert_eq!(model.subtree, [id(INVOICING)]);
@@ -378,18 +379,19 @@ fn hosted(model: &mut Model, agent: AgentId) {
 }
 
 #[test]
-fn a_on_a_background_session_offers_to_adopt_it_then_takes_it_over() {
+fn adopting_asks_first_and_says_what_it_costs() {
     let mut model = model(120, 40);
     let schema = id(INVOICE_SCHEMA);
     press(&mut model, "'s");
-    // The demo's agents run in the background: `a` asks first.
-    assert_eq!(press(&mut model, "a"), []);
+    // `A` moves a session into a volee host: asked first, never needed to
+    // open it.
+    assert_eq!(press(&mut model, "A"), []);
     assert_eq!(model.prompt, Some(Prompt::AdoptAndTakeOver(schema)));
     // No: nothing happens.
     key(&mut model, KeyCode::Esc);
     assert_eq!(model.prompt, None);
     // Yes: it is adopted, then taken over once the adoption is done.
-    press(&mut model, "a");
+    press(&mut model, "A");
     let effects = press(&mut model, "y");
     assert_eq!(
         effects,
@@ -408,6 +410,21 @@ fn a_on_a_background_session_offers_to_adopt_it_then_takes_it_over() {
     );
     assert_eq!(effects, [Effect::PrepareTakeOver(schema)]);
     assert_eq!(model.pending_take_over, Some(schema));
+    // An agent already in a volee host has nothing to adopt.
+    update(
+        &mut model,
+        Msg::TakeOverReady {
+            agent: schema,
+            result: Err(SourceError::Failed("no".into())),
+        },
+    );
+    hosted(&mut model, schema);
+    assert_eq!(press(&mut model, "A"), []);
+    assert_eq!(model.prompt, None);
+    assert_eq!(
+        model.notice.as_ref().unwrap().text,
+        "invoice-schema already runs in a volee host."
+    );
 }
 
 #[test]
@@ -415,7 +432,7 @@ fn a_failed_adoption_takes_nothing_over() {
     let mut model = model(120, 40);
     let schema = id(INVOICE_SCHEMA);
     press(&mut model, "'s");
-    press(&mut model, "ay");
+    press(&mut model, "Ay");
     let effects = update(
         &mut model,
         Msg::Adopted {
@@ -430,14 +447,364 @@ fn a_failed_adoption_takes_nothing_over() {
     assert!(model.notice.as_ref().is_some_and(|notice| notice.error));
 }
 
+/// The panel an agent's terminal gets in a 120x40 interface.
+const PANEL: volee_host::Size = volee_host::Size {
+    cols: 117,
+    rows: 37,
+};
+
+fn view_socket() -> std::path::PathBuf {
+    std::path::PathBuf::from("/tmp/volee-test/views/view-1.sock")
+}
+
 #[test]
-fn a_asks_the_source_then_takes_over_the_selected_agent() {
+fn enter_i_and_a_open_the_selected_agent_where_it_runs() {
+    let schema = id(INVOICE_SCHEMA);
+    let open = [Effect::Open {
+        agent: schema,
+        size: PANEL,
+    }];
+    for keys in ["i", "a"] {
+        let mut model = model(120, 40);
+        press(&mut model, "'s");
+        assert_eq!(press(&mut model, keys), open, "{keys}");
+    }
+    let mut model = model(120, 40);
+    press(&mut model, "'s");
+    // The demo's agents run in the background: no prompt, no adoption, the
+    // source is asked for a terminal on the session.
+    assert_eq!(key(&mut model, KeyCode::Enter), open);
+    assert_eq!(model.prompt, None);
+    assert!(press(&mut model, "a").is_empty(), "one at a time");
+
+    // The source opened a view on it: edit mode, on that socket.
+    let effects = update(
+        &mut model,
+        Msg::Opened {
+            agent: schema,
+            result: Ok(Door::Host {
+                socket: view_socket(),
+                view: true,
+            }),
+        },
+    );
+    assert!(
+        effects.contains(&Effect::LiveOpen {
+            link: 1,
+            socket: view_socket(),
+            edit: true,
+            size: PANEL,
+        }),
+        "{effects:?}"
+    );
+    assert_eq!(model.overlay, Some(Overlay::Screen));
+    update(
+        &mut model,
+        Msg::LiveOpened {
+            link: 1,
+            welcome: crate::test_support::welcome(PANEL, true),
+        },
+    );
+    assert!(crate::edit::editing(&model));
+
+    // The leave key closes the view and comes back to the list; the agent
+    // keeps running where it runs.
+    let effects = update(
+        &mut model,
+        Msg::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)),
+    );
+    assert_eq!(effects, [Effect::LiveClose { link: 1 }]);
+    assert_eq!(model.overlay, None);
+    assert_eq!(model.door, None);
+    assert!(model.live.is_none());
+    assert_eq!(
+        model.notice.as_ref().unwrap().text,
+        "Left invoice-schema: it keeps running."
+    );
+    assert_eq!(model.selected, Some(schema), "back on the same row");
+
+    // Opened again: the source is asked again, and gives the view that runs
+    // or a new one.
+    assert_eq!(key(&mut model, KeyCode::Enter), open);
+}
+
+#[test]
+fn an_agent_with_no_door_says_what_to_do() {
+    let mut model = model(120, 40);
+    press(&mut model, "'i");
+    let infra = id(INFRA);
+    assert_eq!(
+        press(&mut model, "i"),
+        [Effect::Open {
+            agent: infra,
+            size: PANEL
+        }]
+    );
+    update(
+        &mut model,
+        Msg::Opened {
+            agent: infra,
+            result: Err(SourceError::Unsupported(
+                "infra runs in a terminal volee cannot reach: switch to that terminal to use it."
+                    .into(),
+            )),
+        },
+    );
+    let notice = model.notice.as_ref().unwrap();
+    assert!(notice.error);
+    assert_eq!(
+        notice.text,
+        "Cannot open infra: infra runs in a terminal volee cannot reach: switch to that \
+         terminal to use it."
+    );
+    assert_eq!(model.overlay, None);
+    assert_eq!(model.opening, None, "the next one can open");
+}
+
+#[test]
+fn a_view_that_ends_comes_back_to_the_list() {
     let mut model = model(120, 40);
     let schema = id(INVOICE_SCHEMA);
-    hosted(&mut model, schema);
     press(&mut model, "'s");
-    assert_eq!(press(&mut model, "a"), [Effect::PrepareTakeOver(schema)]);
-    assert!(press(&mut model, "a").is_empty(), "one take over at a time");
+    press(&mut model, "i");
+    let opened = || Msg::Opened {
+        agent: schema,
+        result: Ok(Door::Host {
+            socket: view_socket(),
+            view: true,
+        }),
+    };
+    update(&mut model, opened());
+    update(
+        &mut model,
+        Msg::LiveOpened {
+            link: 1,
+            welcome: crate::test_support::welcome(PANEL, true),
+        },
+    );
+    // The person leaves through the door itself (Ctrl+Z in `claude
+    // attach`): the door's program ends well, the agent goes on.
+    let exited = |code| Msg::LiveUpdate {
+        link: 1,
+        update: volee_host::Update::Event(volee_host::Event::Exited {
+            exit: volee_host::Exit {
+                code: Some(code),
+                signal: None,
+                at: 0,
+            },
+        }),
+    };
+    update(&mut model, exited(0));
+    assert_eq!(model.overlay, None);
+    assert_eq!(
+        model.notice.as_ref().unwrap().text,
+        "Left invoice-schema: it keeps running."
+    );
+
+    // A door that fails stays on screen, to be read.
+    press(&mut model, "i");
+    update(&mut model, opened());
+    update(
+        &mut model,
+        Msg::LiveOpened {
+            link: 2,
+            welcome: crate::test_support::welcome(PANEL, true),
+        },
+    );
+    let failed = Msg::LiveUpdate {
+        link: 2,
+        update: volee_host::Update::Event(volee_host::Event::Exited {
+            exit: volee_host::Exit {
+                code: Some(1),
+                signal: None,
+                at: 0,
+            },
+        }),
+    };
+    update(&mut model, failed);
+    assert_eq!(model.overlay, Some(Overlay::Screen));
+    assert!(!crate::edit::editing(&model));
+    let notice = model.notice.as_ref().unwrap();
+    assert!(notice.error);
+    assert!(
+        notice.text.contains("closed with an error"),
+        "{}",
+        notice.text
+    );
+    // Its connection closing changes nothing more.
+    update(
+        &mut model,
+        Msg::LiveClosed {
+            link: 2,
+            reason: "the host closed the connection".into(),
+        },
+    );
+    assert_eq!(model.overlay, Some(Overlay::Screen));
+    key(&mut model, KeyCode::Esc);
+    assert_eq!(model.overlay, None);
+    assert_eq!(model.door, None);
+}
+
+#[test]
+fn a_view_that_does_not_answer_is_said_plainly() {
+    let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    press(&mut model, "'s");
+    press(&mut model, "i");
+    update(
+        &mut model,
+        Msg::Opened {
+            agent: schema,
+            result: Ok(Door::Host {
+                socket: view_socket(),
+                view: true,
+            }),
+        },
+    );
+    update(
+        &mut model,
+        Msg::LiveClosed {
+            link: 1,
+            reason: "No such file or directory (os error 2)".into(),
+        },
+    );
+    assert_eq!(model.overlay, None);
+    let notice = model.notice.as_ref().unwrap();
+    assert!(notice.error);
+    assert!(
+        notice
+            .text
+            .starts_with("Cannot open invoice-schema: its terminal does not answer"),
+        "{}",
+        notice.text
+    );
+}
+
+#[test]
+fn a_door_that_closed_at_once_shows_what_it_said() {
+    let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    press(&mut model, "'s");
+    press(&mut model, "i");
+    update(
+        &mut model,
+        Msg::Opened {
+            agent: schema,
+            result: Ok(Door::Host {
+                socket: view_socket(),
+                view: true,
+            }),
+        },
+    );
+    // The session was removed meanwhile: its door said so and ended.
+    let mut welcome = crate::test_support::welcome(PANEL, true);
+    welcome.input = false;
+    welcome.exit = Some(volee_host::Exit {
+        code: Some(1),
+        signal: None,
+        at: 0,
+    });
+    update(&mut model, Msg::LiveOpened { link: 1, welcome });
+    assert_eq!(
+        model.overlay,
+        Some(Overlay::Screen),
+        "its last screen stays"
+    );
+    assert!(!crate::edit::editing(&model));
+    let notice = model.notice.as_ref().unwrap();
+    assert!(notice.error);
+    assert!(notice.text.contains("closed at once"), "{}", notice.text);
+}
+
+#[test]
+fn an_answer_nobody_waits_for_opens_nothing() {
+    let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    let effects = update(
+        &mut model,
+        Msg::Opened {
+            agent: schema,
+            result: Ok(Door::Host {
+                socket: view_socket(),
+                view: true,
+            }),
+        },
+    );
+    assert_eq!(effects, []);
+    assert_eq!(model.overlay, None);
+    assert_eq!(model.door, None);
+}
+
+#[test]
+fn a_double_click_opens_an_agent_and_a_single_one_selects_it() {
+    let mut model = model(120, 40);
+    let click = |model: &mut Model, row: u16| {
+        update(
+            model,
+            Msg::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 3,
+                row,
+                modifiers: KeyModifiers::NONE,
+            }),
+        )
+    };
+    // The rows of the list, under the top bar and the panel's title.
+    let first = model.rail[0].agent;
+    let row = (0..model.size.1)
+        .find(|row| matches!(model.hit(3, *row), Some(Hit::Agent(agent, _)) if agent == first))
+        .expect("a row of the list");
+    let effects = click(&mut model, row);
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Open { .. })),
+        "one click selects"
+    );
+    assert_eq!(model.selected, Some(first));
+    let effects = click(&mut model, row);
+    assert!(
+        effects.contains(&Effect::Open {
+            agent: first,
+            size: PANEL
+        }),
+        "{effects:?}"
+    );
+    // Two clicks far apart are two single clicks.
+    update(
+        &mut model,
+        Msg::Opened {
+            agent: first,
+            result: Err(SourceError::Unsupported("no".into())),
+        },
+    );
+    click(&mut model, row);
+    let long_ago = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(2))
+        .unwrap();
+    model.last_click = Some((first, long_ago));
+    let effects = click(&mut model, row);
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Open { .. }))
+    );
+}
+
+#[test]
+fn a_pane_only_its_multiplexer_shows_is_taken_over_the_old_way() {
+    let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    press(&mut model, "'s");
+    press(&mut model, "a");
+    let effects = update(
+        &mut model,
+        Msg::Opened {
+            agent: schema,
+            result: Ok(Door::Elsewhere),
+        },
+    );
+    assert_eq!(effects, [Effect::PrepareTakeOver(schema)]);
     let take_over = TakeOver {
         program: "claude".into(),
         args: vec!["attach".into(), "7f3k2m9q".into()],
@@ -492,11 +859,6 @@ fn a_asks_the_source_then_takes_over_the_selected_agent() {
     assert_eq!(
         notice.text,
         "Cannot take over infra: it runs in another terminal; switch to it there."
-    );
-    assert_eq!(
-        press(&mut model, "a"),
-        [Effect::PrepareTakeOver(schema)],
-        "the next take over can start"
     );
 }
 
@@ -632,9 +994,16 @@ fn the_preview_empties_when_the_last_agent_leaves() {
 fn an_agent_in_a_pane_is_brought_forward_instead_of_taken_over() {
     let mut model = model(120, 40);
     let schema = id(INVOICE_SCHEMA);
-    hosted(&mut model, schema);
     press(&mut model, "'s");
-    assert_eq!(press(&mut model, "a"), [Effect::PrepareTakeOver(schema)]);
+    press(&mut model, "a");
+    let effects = update(
+        &mut model,
+        Msg::Opened {
+            agent: schema,
+            result: Ok(Door::Elsewhere),
+        },
+    );
+    assert_eq!(effects, [Effect::PrepareTakeOver(schema)]);
     let focus = PaneFocus {
         multiplexer: "tuios".into(),
         session: "work".into(),
@@ -982,10 +1351,10 @@ fn unsupported_previews_and_a_closed_source_stop_the_refresh() {
 }
 
 #[test]
-fn enter_focuses_a_subtree_until_the_selection_leaves_it() {
+fn s_focuses_a_subtree_until_the_selection_leaves_it() {
     let mut model = model(120, 40);
     press(&mut model, "'l");
-    key(&mut model, KeyCode::Enter);
+    press(&mut model, "s");
     assert_eq!(model.subtree, [id(LATENCY_AUDIT)]);
     assert_eq!(model.focus, Pane::View);
     assert_eq!(model.scene.nodes.len(), 3);

@@ -26,7 +26,8 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `agents.activity` | `agent`, `activity` | none |
 | `agents.preview` | `agent` | `screen`: the agent's recent terminal output, with its escape sequences |
 | `agents.diff` | `agent`, optional `full` | `text`: a summary by file, or the full patch; `truncated` |
-| `agents.attach` | `agent` | `program`, `args`, `cwd`, `env_remove`, `hint`: the command that takes the agent over |
+| `agents.attach` | `agent` | `program`, `args`, `cwd`, `env_remove`, `hint`: the command that opens the agent in the client's terminal |
+| `agents.open` | `agent`, `cols`, `rows` | `socket`: a volee host to connect to, for a client that shows the agent inside its own screen; `view`: whether it is a view on a session that runs elsewhere |
 | `agents.stop` | `agent` | none |
 | `agents.adopt` | `agent` | none; the agent's conversation continues in a volee host |
 | `agents.tidy` | `agent`, optional `dry_run` | `outcome`: `removed` or `would-remove` (`worktree`, `branch`), or `kept` (`reasons`) |
@@ -108,12 +109,27 @@ For an agent in a volee host
 ([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md)),
 `agents.preview` returns a snapshot of the host's screen, `agents.attach`
 returns the `volee host attach` command for the client to run (Ctrl+Q comes
-back), and `agents.stop` asks the host to end the program. `agents.attach`
-refuses (`-32002`) a Claude Code background session that volee does not
-host: `agents.adopt` first stops it, then resumes its conversation in a new
-host. `agents.adopt` refuses an agent that already runs in a host and one
-that runs in a terminal of its own, which must be quit there first
+back), and `agents.stop` asks the host to end the program. For a Claude
+Code background session that volee does not host, `agents.attach` returns
+the harness's own command (`claude attach <id>`): nothing is stopped or
+resumed ([ADR 0027](../adr/0027-open-without-owning.md)). `agents.adopt` is
+another thing: it first stops the session, then resumes its conversation in
+a new host. It refuses an agent that already runs in a host and one that
+runs in a terminal of its own, which must be quit there first
 ([ADR 0023](../adr/0023-every-agent-on-the-machine.md)).
+
+`agents.open` is for a client that draws the agent inside its own screen,
+as the interface does. It answers with the socket of a volee host, which
+the client connects to with the host protocol: the host the agent runs in
+(`view` false), or a view (`view` true), a host the daemon starts on the
+session's own door, at `cols` by `rows`: `claude attach` for a Claude Code
+background session, running or finished, and the multiplexer's own command
+for a pane it can show alone (`tuios pane-view`). A view ends its program
+once no client has held its input for 15 seconds, and ends with the daemon;
+the session it shows is not touched. Without a `socket`, the agent runs in
+a pane only its multiplexer can show: `agents.attach` says how to bring it
+forward. It refuses (`-32002`) an agent in a terminal the daemon cannot
+reach, and says what makes it reachable.
 
 For other agents, `agents.preview`, `agents.attach` and `agents.stop` act on
 the agent's current harness session, as the last listing showed it; an agent

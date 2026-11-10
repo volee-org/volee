@@ -297,6 +297,13 @@ impl<R: CommandRunner> Multiplexer for Tuios<R> {
             Some(self.command(&["attach", session]))
         }
     }
+
+    fn view_command(&self, target: &str) -> Option<Vec<String>> {
+        let (session, window) = split_target(target).ok()?;
+        // The pane takes the viewer's size while no client of tuios shows
+        // its session, and goes back to its own when the viewer leaves.
+        Some(self.command(&["pane-view", "-s", session, "-w", window]))
+    }
 }
 
 /// Why a program could not be run: tuios (or `ps`) is missing, or did not
@@ -572,6 +579,14 @@ mod tests {
             tuios.attach_command("work:0a1b2c3d"),
             Some(vec!["tuios".into(), "attach".into(), "work".into()])
         );
+        // The pane alone, in a terminal of volee's (ADR 0027).
+        let view: Vec<String> = ["tuios", "--server", "", "pane-view"]
+            .into_iter()
+            .chain(["-s", "work", "-w", "0a1b2c3d"])
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(tuios.view_command("work:0a1b2c3d"), Some(view));
+        assert_eq!(tuios.view_command("no-pane"), None);
     }
 
     #[test]
@@ -607,6 +622,10 @@ mod tests {
                 "attach".into(),
                 "work".into()
             ])
+        );
+        assert_eq!(
+            tuios.view_command("work:0a1b2c3d").unwrap()[..4],
+            ["tuios", "--server", "lab", "pane-view"]
         );
     }
 }

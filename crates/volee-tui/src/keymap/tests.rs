@@ -323,8 +323,8 @@ fn hints_follow_the_focused_panel() {
     };
     assert_eq!(
         line(&[Context::Hierarchy, Context::Global]),
-        "h/j/k/l move · gg/G first/last · enter subtree · +/_ zoom · ' jump · / filter · \
-         n/N match · m message · d diff · i edit · z full screen · I messages · A adopt · \
+        "h/j/k/l move · gg/G first/last · s subtree · +/_ zoom · ' jump · / filter · \
+         n/N match · m message · d diff · enter open · z full screen · I messages · \
          : commands · tab/⇧tab panel · 1-4 views · H/L view · ␣ more · ? help · q quit"
     );
     assert_eq!(line(&[Context::Help]), "j/k scroll · esc close");
@@ -340,7 +340,7 @@ fn hints_follow_the_focused_panel() {
     assert_eq!(line(&[Context::Confirm]), "y yes · n no");
     assert_eq!(
         line(&[Context::Screen]),
-        "k/j scroll · r refresh · i edit · z back"
+        "k/j scroll · r refresh · enter open · z back"
     );
 }
 

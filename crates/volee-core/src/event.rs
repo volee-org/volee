@@ -114,6 +114,29 @@ pub enum EventKind {
         /// The agent.
         agent: AgentId,
     },
+    /// The agent is known under another name: its harness renamed the
+    /// session volee found it by (ADR 0027).
+    AgentRenamed {
+        /// The agent.
+        agent: AgentId,
+        /// Its new display name.
+        name: String,
+    },
+    /// A session no longer belongs to the agent. It is not ignored: listed
+    /// again, it becomes an agent of its own (ADR 0027).
+    SessionReleased {
+        /// The agent.
+        agent: AgentId,
+        /// The session.
+        session: SessionKey,
+    },
+    /// An agent volee only watched is gone: its harness no longer lists its
+    /// session, so volee stops showing it. Unlike a forgotten agent's, its
+    /// sessions are not ignored: listed again, they come back (ADR 0027).
+    AgentExpired {
+        /// The agent.
+        agent: AgentId,
+    },
     /// The human asked volee to stop an agent. volee does not resume it on
     /// its own until the human sends it a message.
     StopRequested {
@@ -182,10 +205,66 @@ pub enum EventKind {
     },
 }
 
+impl EventKind {
+    /// The agent this event takes out of the registry, if it takes one out:
+    /// a person forgot it, or it expired. Everything kept about an agent
+    /// outside the registry is dropped on such an event.
+    pub const fn removed_agent(&self) -> Option<AgentId> {
+        match self {
+            Self::AgentForgotten { agent } | Self::AgentExpired { agent } => Some(*agent),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ulid::Ulid;
+
+    #[test]
+    fn only_forgetting_and_expiring_remove_an_agent() {
+        let agent = AgentId::from_ulid(Ulid::from_parts(5, 6));
+        assert_eq!(
+            EventKind::AgentForgotten { agent }.removed_agent(),
+            Some(agent)
+        );
+        assert_eq!(
+            EventKind::AgentExpired { agent }.removed_agent(),
+            Some(agent)
+        );
+        let renamed = EventKind::AgentRenamed {
+            agent,
+            name: "other".into(),
+        };
+        assert_eq!(renamed.removed_agent(), None);
+    }
+
+    #[test]
+    fn the_radar_events_keep_their_names_on_the_wire() {
+        let agent = AgentId::from_ulid(Ulid::from_parts(5, 6));
+        let tag = |kind: EventKind| {
+            serde_json::to_value(Event::new(Timestamp::from_millis(1), kind)).unwrap()["type"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(tag(EventKind::AgentExpired { agent }), "agent-expired");
+        assert_eq!(
+            tag(EventKind::AgentRenamed {
+                agent,
+                name: "n".into()
+            }),
+            "agent-renamed"
+        );
+        assert_eq!(
+            tag(EventKind::SessionReleased {
+                agent,
+                session: SessionKey::claude("s")
+            }),
+            "session-released"
+        );
+    }
 
     #[test]
     fn events_serialize_flat_with_a_type_tag() {

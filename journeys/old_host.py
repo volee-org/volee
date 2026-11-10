@@ -41,8 +41,9 @@ def main():
         j.keys("Enter")
         j.check("typed text reaches the agent through the older host",
                 j.sees("FRUIT", timeout=90, every=1))
-        j.keys("ctrl+z", 1.0)
-        j.check("Ctrl+Z is kept back, with a word why", "Ctrl+Z is not sent" in j.screen())
+        j.keys("ctrl+z", 0.5)
+        j.check("Ctrl+Z is kept back, with a word why",
+                j.sees("Ctrl+Z is not sent", timeout=5, every=0.3))
         j.show("Ctrl+Z on an older host")
         # The notice goes away on its own; the agent must not be frozen meanwhile.
         j.wait(lambda: False, 4)

@@ -40,5 +40,5 @@ expression: draw(&model)
 "│ delivery 1 commit · pushed     ││   ? for shortcuts                                                                  │"
 "│ last     Bash bun test tools … ││                                                                                    │"
 "╰────────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────╯"
-" esc back   h/j/k/l move   gg/G first/last   enter subtree   ' jump   / filter   n/N match   tab/⇧tab panel             "
+" esc back   h/j/k/l move   gg/G first/last   s subtree   ' jump   / filter   n/N match   tab/⇧tab panel   1-4 views     "
 " jump to: press the letter of an agent   esc cancel                                                                     "

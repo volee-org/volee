@@ -225,6 +225,29 @@ impl Registry {
                     self.ignored_sessions.insert(link.key);
                 }
             }
+            EventKind::AgentRenamed { agent, name } => {
+                let record = self.agent_mut(*agent)?;
+                record.name.clone_from(name);
+                record.updated_at = at;
+            }
+            EventKind::SessionReleased { agent, session } => {
+                let record = self.agent_mut(*agent)?;
+                record.sessions.retain(|link| &link.key != session);
+                record.updated_at = at;
+                if self.by_session.get(session) == Some(agent) {
+                    self.by_session.remove(session);
+                }
+            }
+            EventKind::AgentExpired { agent } => {
+                let record = self
+                    .agents
+                    .remove(agent)
+                    .ok_or(ApplyError::UnknownAgent(*agent))?;
+                // Not ignored: a session listed again comes back.
+                for link in record.sessions {
+                    self.by_session.remove(&link.key);
+                }
+            }
             EventKind::StopRequested { agent } => {
                 let record = self.agent_mut(*agent)?;
                 // A finished mission's hold is the stronger one: nothing
@@ -399,13 +422,13 @@ impl Registry {
 
     /// Agents sorted by urgency: those who need a person first, then failed,
     /// working, done, idle, stopped and lost. Within a group, the most recent
-    /// change comes first.
+    /// change comes first. A failed agent that volee only watches sorts with
+    /// the stopped ones ([`Agent::urgency`]).
     pub fn agents_by_urgency(&self) -> Vec<&Agent> {
         let mut agents: Vec<&Agent> = self.agents.values().collect();
         agents.sort_by(|a, b| {
-            a.state
-                .category()
-                .cmp(&b.state.category())
+            a.urgency()
+                .cmp(&b.urgency())
                 .then(b.state_since.cmp(&a.state_since))
                 .then(a.id.cmp(&b.id))
         });

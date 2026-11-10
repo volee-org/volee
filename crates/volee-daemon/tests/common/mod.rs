@@ -32,6 +32,7 @@ pub(crate) struct FakeHarness {
     keep_on_remove: Mutex<bool>,
     listings: Mutex<usize>,
     listing_delay: Mutex<Duration>,
+    door: Mutex<Option<Vec<String>>>,
 }
 
 impl FakeHarness {
@@ -50,6 +51,14 @@ impl FakeHarness {
     /// create: it keeps the session (and leaves the worktree locked).
     pub(crate) fn keep_on_remove(&self, keep: bool) {
         *self.keep_on_remove.lock().unwrap() = keep;
+    }
+
+    /// The program that opens a session in a terminal, in place of `claude
+    /// attach`: a test that runs the command gives a program of its own.
+    /// It gets the session's handle as its last argument.
+    #[allow(dead_code)] // Not every test file opens sessions.
+    pub(crate) fn set_door(&self, command: &[&str]) {
+        *self.door.lock().unwrap() = Some(command.iter().map(|part| (*part).to_owned()).collect());
     }
 
     /// Every action on a session so far, as `(action, handle)`.
@@ -204,6 +213,14 @@ impl Harness for FakeHarness {
 
     fn attach_command(&self, session: &ListedSession) -> Result<Command, HarnessError> {
         let handle = self.act("attach", session)?;
+        if let Some(door) = self.door.lock().unwrap().as_deref() {
+            let mut command = Command::new(&door[0]);
+            command
+                .args(&door[1..])
+                .arg(handle)
+                .env_remove("CLAUDECODE");
+            return Ok(command);
+        }
         let mut command = Command::new("claude");
         command.arg("attach").arg(handle).env_remove("CLAUDECODE");
         Ok(command)

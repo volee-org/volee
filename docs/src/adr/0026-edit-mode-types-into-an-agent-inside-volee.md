@@ -1,6 +1,6 @@
 # 0026. Edit mode types into an agent inside volee; the host encodes keys
 
-- Status: Proposed
+- Status: Proposed. Amended by [0027](0027-open-without-owning.md): Enter and a double click enter edit mode too, and an agent that runs in no volee host is edited through a view.
 - Date: 2026-11-10
 
 ## Context

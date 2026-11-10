@@ -34,8 +34,12 @@ Code's own list of sessions and looks for OpenCode in the process table (at
 once when the interface opens, then every two to ten seconds while it is
 open, more often while sessions change, and every thirty seconds otherwise),
 and it hears the hooks of the agents it launches itself, which report at
-once. The agents you did not start through volee are shown read only: volee
-never types into them until you adopt one (step 5).
+once. The list is what runs now: a session you close leaves it after a
+minute, a background session stays for as long as Claude Code keeps it, and
+a session started outside volee shows once it has lived ten seconds.
+
+Press `enter` on any of them, or double click it: volee opens it where it
+runs, in a terminal inside the interface, and you type there (step 5).
 
 ## 3. Tell volee about your repositories
 
@@ -88,16 +92,25 @@ volee stop invoices         # stop it; its conversation is kept
 A message reaches the agent at the end of its turn, wakes it if it is idle,
 and resumes it in a new host if it stopped. `volee attach` hands your
 terminal to the agent, from any terminal; `Ctrl+Q` returns to where you were,
-and the agent keeps running. In the interface, `a` does the same, `z` shows
-the agent's screen full size, and `5` shows every agent of the list as a
-wall of live screens. After `volee stop`, volee does not resume the agent on
-its own, even when other agents write to it: your next message to it does.
+and the agent keeps running. In the interface, `enter` opens the agent
+inside volee and sends it your keys until `Ctrl+Q`, `z` shows its screen
+full size, and `5` shows every agent of the list as a wall of live screens.
+After `volee stop`, volee does not resume the agent on its own, even when
+other agents write to it: your next message to it does.
 
-A Claude Code session you started yourself with `claude --bg`, or one that
-volee 0.7 launched, is shown but not taken over. `volee adopt <agent>` (`A`
-in the interface) stops it and resumes its conversation in a host, where it
-waits at its prompt; then `volee attach` works on it. Quit a session that
-runs in a terminal of its own before you adopt it.
+The sessions you started yourself open the same way, where they run, and
+stay what they are: `enter` (or `volee attach`) on a background session
+runs Claude Code's own `claude attach` on it, and `enter` on a session in a
+tuios pane shows that pane. Nothing is stopped or restarted, and `Ctrl+Q`
+leaves the session running as it was. Messages are for the agents volee
+launched: to say something to another session, open it and type. A session
+in a terminal volee cannot reach says so; in Claude Code, the left arrow on
+its empty prompt moves it to the background, where volee opens it.
+
+`volee adopt <agent>` (`A` in the interface, which asks first) is for a
+session you want volee to drive from now on: it stops the session and
+resumes its conversation in a volee host, with volee's settings, where it
+receives messages and comes back after a reboot.
 
 ## 6. Run a mission
 
@@ -146,8 +159,9 @@ volee daemon install
   hooks and tools on their own command line.
 - It never resumes an agent you stopped until you write to it, and never
   resumes the agents of a finished mission.
-- It never types into, resizes or stops an agent it did not start, until
-  you adopt it.
+- It never stops, restarts or reconfigures a session it did not start: it
+  opens it where it runs, and what you type there is yours. Only `volee
+  adopt`, which asks, moves one into a volee host.
 - It never installs anything that starts at login unless you run
   `volee daemon install`.
 - It never forces anything on you: no multiplexer, editor or git client is
