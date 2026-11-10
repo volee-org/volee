@@ -17,7 +17,7 @@ use ratatui::widgets::{Clear, Widget};
 
 use super::{panel, put_spans};
 use crate::app::Model;
-use crate::keymap::{Action, Context, KeyCombo, KeySeq, group_name};
+use crate::keymap::{Action, Context, KeyCombo, KeySeq, group_name, join_keys};
 use crate::text;
 use crate::theme::{StyleRole, Theme};
 
@@ -65,37 +65,6 @@ const PAIRS: &[(&[Action], &str)] = &[
     (&[Action::PreviousView, Action::NextView], "prev/next view"),
     (&[Action::NextPane, Action::PreviousPane], "panels"),
 ];
-
-/// Keys of actions shown together, short: `1-4`, `ctrl-d/u`, `⇧tab`.
-fn join_keys(keys: &[String]) -> String {
-    let digits: Vec<u32> = keys
-        .iter()
-        .filter_map(|key| {
-            let mut chars = key.chars();
-            match (chars.next(), chars.next()) {
-                (Some(c), None) => c.to_digit(10),
-                _ => None,
-            }
-        })
-        .collect();
-    if keys.len() > 2
-        && digits.len() == keys.len()
-        && digits.windows(2).all(|pair| pair[1] == pair[0] + 1)
-    {
-        return format!("{}-{}", digits[0], digits[digits.len() - 1]);
-    }
-    let rests: Vec<&str> = keys
-        .iter()
-        .filter_map(|key| key.strip_prefix("ctrl-"))
-        .collect();
-    if rests.len() == keys.len() && rests.iter().all(|rest| rest.chars().count() == 1) {
-        return format!("ctrl-{}", rests.join("/"));
-    }
-    keys.iter()
-        .map(|key| key.replace("shift-", "⇧"))
-        .collect::<Vec<_>>()
-        .join("/")
-}
 
 /// The entries of the current screen's popup: the focused panel's keys,
 /// then the keys of everywhere, one per action or per pair of actions,

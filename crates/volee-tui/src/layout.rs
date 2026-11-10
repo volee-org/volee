@@ -47,6 +47,9 @@ pub(crate) struct ScreenLayout {
     pub(crate) hints: Rect,
 }
 
+/// The fewest rows that get two rows of key hints.
+const TWO_HINT_ROWS: u16 = 20;
+
 /// The smallest size with room for the view next to the agents.
 const WIDE_MIN: (u16, u16) = (100, 28);
 
@@ -56,11 +59,13 @@ impl ScreenLayout {
     /// views take the place of the preview.
     pub(crate) fn compute(area: Rect, tree_view: bool) -> Self {
         let top = Rect::new(area.x, area.y, area.width, 1.min(area.height));
+        // Two rows of hints when the screen is tall enough, else one.
+        let rows = if area.height >= TWO_HINT_ROWS { 2 } else { 1 };
         let hints = Rect::new(
             area.x,
-            area.bottom().saturating_sub(1),
+            area.bottom().saturating_sub(rows),
             area.width,
-            1.min(area.height.saturating_sub(1)),
+            rows.min(area.height.saturating_sub(1)),
         );
         let main = Rect::new(
             area.x,
@@ -156,9 +161,9 @@ mod tests {
     fn small_terminals_give_other_views_the_right_side() {
         let layout = ScreenLayout::compute(Rect::new(0, 0, 80, 24), false);
         assert_eq!(layout.mode, Mode::Split);
-        assert_eq!(layout.view, Some(Rect::new(30, 1, 50, 22)));
-        assert_eq!(layout.rail, Rect::new(0, 1, 30, 14));
-        assert_eq!(layout.detail, Rect::new(0, 15, 30, 8));
+        assert_eq!(layout.view, Some(Rect::new(30, 1, 50, 21)));
+        assert_eq!(layout.rail, Rect::new(0, 1, 30, 13));
+        assert_eq!(layout.detail, Rect::new(0, 14, 30, 8));
         assert_eq!(layout.preview, None);
     }
 
@@ -170,11 +175,11 @@ mod tests {
             ScreenLayout::compute(Rect::new(0, 0, 120, 40), false)
         );
         assert_eq!(layout.mode, Mode::Wide);
-        assert_eq!(layout.rail, Rect::new(0, 1, 34, 26));
-        assert_eq!(layout.view, Some(Rect::new(34, 1, 86, 26)));
-        assert_eq!(layout.detail, Rect::new(0, 27, 34, 12));
+        assert_eq!(layout.rail, Rect::new(0, 1, 34, 25));
+        assert_eq!(layout.view, Some(Rect::new(34, 1, 86, 25)));
+        assert_eq!(layout.detail, Rect::new(0, 26, 34, 12));
         let layout = ScreenLayout::compute(Rect::new(0, 0, 200, 50), false);
-        assert_eq!(layout.view, Some(Rect::new(40, 1, 160, 34)));
+        assert_eq!(layout.view, Some(Rect::new(40, 1, 160, 33)));
     }
 
     #[test]

@@ -1,5 +1,7 @@
-//! The bottom line: key hints for the focused panel, generated from the
-//! keymap, or the prompt or the notice of the moment.
+//! The bottom lines: key hints for the focused panel, generated from the
+//! keymap, or the prompt or the notice of the moment. On the main screen,
+//! with room for two rows, the top one says how to move around and the
+//! bottom one what to do.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -14,22 +16,90 @@ use crate::theme::StyleRole;
 /// Columns between two hints.
 const SEPARATOR: &str = "   ";
 
-/// Draws the line.
+/// Which hints a row shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Row {
+    /// Every hint, on one row.
+    All,
+    /// How to move around: moves, views, panels, the filter and its matches.
+    Moves,
+    /// What to do with the selected agent and the rest.
+    Actions,
+}
+
+/// Whether a hint moves around rather than acts.
+fn moves(action: Option<Action>) -> bool {
+    matches!(
+        action,
+        Some(
+            Action::Left
+                | Action::Down
+                | Action::Up
+                | Action::Right
+                | Action::First
+                | Action::Last
+                | Action::HalfPageDown
+                | Action::HalfPageUp
+                | Action::Filter
+                | Action::NextMatch
+                | Action::PreviousMatch
+                | Action::Jump
+                | Action::JumpBack
+                | Action::ShowHierarchy
+                | Action::ShowNetwork
+                | Action::ShowRepos
+                | Action::ShowTimeline
+                | Action::PreviousView
+                | Action::NextView
+                | Action::NextPane
+                | Action::PreviousPane
+                | Action::FocusSubtree
+                | Action::ZoomIn
+                | Action::ZoomOut
+                | Action::ZoomAuto
+                | Action::PreviousEvent
+                | Action::NextEvent
+                | Action::Back
+        )
+    )
+}
+
+/// Draws the hints: two rows on the main screen when there is room, else
+/// one, at the bottom.
 pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
+    let bottom = Rect::new(area.x, area.bottom() - 1, area.width, 1);
+    let main_screen = model.contexts().contains(&Context::Global);
+    if area.height >= 2 && main_screen {
+        render_row(
+            model,
+            Row::Moves,
+            Rect::new(area.x, area.y, area.width, 1),
+            buf,
+        );
+        render_row(model, Row::Actions, bottom, buf);
+    } else {
+        render_row(model, Row::All, bottom, buf);
+    }
+}
+
+/// Draws one row of hints, or the prompt, the filter or the notice.
+fn render_row(model: &Model, row: Row, area: Rect, buf: &mut Buffer) {
     let theme = &model.theme;
     let key = theme.style(StyleRole::HintKey);
     let words = theme.style(StyleRole::HintText);
     let width = area.width.saturating_sub(1);
     let x = area.x + 1;
 
-    if let Some(prompt) = model.prompt {
+    if row != Row::Moves
+        && let Some(prompt) = model.prompt
+    {
         render_prompt(model, prompt, Rect::new(x, area.y, width, 1), buf);
         return;
     }
-    if model.filter.editing {
+    if row != Row::Moves && model.filter.editing {
         let mut spans = vec![
             Span::styled("/", key),
             Span::styled(model.filter.text.clone(), theme.style(StyleRole::Input)),
@@ -43,7 +113,9 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
         put_spans(buf, x, area.y, &spans, width);
         return;
     }
-    if let Some(notice) = &model.notice {
+    if row != Row::Moves
+        && let Some(notice) = &model.notice
+    {
         let style = theme.style(if notice.error {
             StyleRole::NoticeError
         } else {
@@ -73,6 +145,11 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
     {
         let back = vec![Span::styled(esc.short(), key), Span::styled(" back", words)];
         groups.insert(0, (Some(Action::Back), back));
+    }
+    match row {
+        Row::All => {}
+        Row::Moves => groups.retain(|(action, _)| moves(*action)),
+        Row::Actions => groups.retain(|(action, _)| !moves(*action)),
     }
     // The way to the help stays visible, at the right, whatever the width.
     let help = groups

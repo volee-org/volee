@@ -29,6 +29,15 @@ the person leaves. `volee attach <agent>` does the same from any terminal and
 returns to the shell. Before switching, it prints one line saying how to come
 back.
 
+Amended on 2026-11-10, at the product owner's request: while the person
+types, the client keeps the terminal's last row for a volee bar (the agent,
+its repository and branch, whether it works, the leave key), so that a
+taken-over agent never looks like a plain terminal. The agent gets the rows
+above; the client rewrites resets of the scrolling region so that the
+agent's scrolling never reaches the bar, and draws the bar again after each
+complete output, putting the agent's cursor and pen back from its own copy
+of the screen.
+
 **Leave with Ctrl+Q.** The client reads the person's keys and removes Ctrl+Q
 before they reach the host, in every encoding: the plain byte `0x11`, the
 kitty keyboard protocol (`CSI 113 ; 5 u`, with any event type), and xterm's
