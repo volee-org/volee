@@ -88,21 +88,49 @@ pub(crate) async fn event_loop<S: Screen, Src: Source>(
     first: Msg,
 ) -> io::Result<()> {
     let (results, mut answers) = mpsc::unbounded_channel::<Msg>();
+    let live = crate::live_links::LiveLinks::default();
+    let outcome = run_loop(
+        screen,
+        &source,
+        &mut updates,
+        model,
+        clock,
+        first,
+        &results,
+        &mut answers,
+        &live,
+    )
+    .await;
+    live.close_all();
+    outcome
+}
+
+/// The loop itself; [`event_loop`] closes the live screens it leaves open.
+#[allow(clippy::too_many_arguments)] // The loop's channels and its state.
+async fn run_loop<S: Screen, Src: Source>(
+    screen: &mut S,
+    source: &Arc<Src>,
+    updates: &mut mpsc::Receiver<Result<Event, SourceError>>,
+    model: &mut Model,
+    clock: &dyn Clock,
+    first: Msg,
+    results: &mpsc::UnboundedSender<Msg>,
+    answers: &mut mpsc::UnboundedReceiver<Msg>,
+    live: &crate::live_links::LiveLinks,
+) -> io::Result<()> {
     let mut queue = VecDeque::from([first]);
     let mut source_open = true;
     let mut last_tick = Instant::now();
     loop {
         while let Some(msg) = queue.pop_front() {
             for effect in update(model, msg) {
+                let Some(effect) = live.carry_out(effect, results) else {
+                    continue;
+                };
                 match effect {
                     Effect::Quit => return Ok(()),
                     Effect::TakeOver { agent, take_over } => {
-                        let outcome = screen.take_over(&take_over).await;
-                        let result = match outcome {
-                            Ok(status) if status.success() => Ok(()),
-                            Ok(status) => Err(format!("it ended with {status}")),
-                            Err(error) => Err(error.to_string()),
-                        };
+                        let result = ended(screen.take_over(&take_over).await);
                         // The terminal may have been resized meanwhile. Both
                         // messages come before any input typed meanwhile.
                         let (width, height) = screen.size()?;
@@ -128,7 +156,7 @@ pub(crate) async fn event_loop<S: Screen, Src: Source>(
                         queue.push_front(Msg::ToolFinished { label, result });
                         queue.push_front(Msg::Resize { width, height });
                     }
-                    request => run_request(request, &source, &results),
+                    request => run_request(request, source, results),
                 }
             }
         }
@@ -182,12 +210,26 @@ pub(crate) async fn event_loop<S: Screen, Src: Source>(
                     queue.push_back(Msg::SourceClosed(reason));
                 }
             }
-            Some(answer) = answers.recv() => queue.push_back(answer),
+            Some(answer) = answers.recv() => {
+                queue.push_back(answer);
+                // What already waits (a live screen's output) goes into the
+                // same frame.
+                queue.extend(std::iter::from_fn(|| answers.try_recv().ok()).take(BURST));
+            }
             () = tokio::time::sleep_until(deadline) => {
                 last_tick = Instant::now();
                 queue.push_back(Msg::Tick(clock.now()));
             }
         }
+    }
+}
+
+/// How a take over ended, said for a notice.
+fn ended(outcome: io::Result<ExitStatus>) -> Result<(), String> {
+    match outcome {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(format!("it ended with {status}")),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -251,6 +293,9 @@ fn run_request<Src: Source>(
         | Effect::TakeOver { .. }
         | Effect::FocusPane { .. }
         | Effect::RunTool { .. }
+        | Effect::LiveOpen { .. }
+        | Effect::LiveSend { .. }
+        | Effect::LiveClose { .. }
         | Effect::SaveTheme(_) => {}
     }
 }

@@ -286,10 +286,7 @@ mod tests {
     #[test]
     fn a_paste_is_bracketed_only_when_the_program_asks() {
         let mut screen = Screen::new(80, 24, 0).expect("screen");
-        assert_eq!(
-            screen.encode_paste("one\ntwo").expect("paste"),
-            b"one\rtwo"
-        );
+        assert_eq!(screen.encode_paste("one\ntwo").expect("paste"), b"one\rtwo");
         screen.feed(b"\x1b[?2004h");
         assert_eq!(
             screen.encode_paste("one\ntwo").expect("paste"),

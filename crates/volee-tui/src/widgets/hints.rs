@@ -113,6 +113,10 @@ fn render_row(model: &Model, row: Row, area: Rect, buf: &mut Buffer) {
         put_spans(buf, x, area.y, &spans, width);
         return;
     }
+    if row != Row::Moves && model.notice.is_none() && crate::edit::editing(model) {
+        render_editing(model, Rect::new(x, area.y, width, 1), buf);
+        return;
+    }
     if row != Row::Moves
         && let Some(notice) = &model.notice
     {
@@ -179,6 +183,33 @@ fn render_row(model: &Model, row: Row, area: Rect, buf: &mut Buffer) {
             help_width,
         );
     }
+}
+
+/// Edit mode: where the keys go, and the key that gives them back.
+fn render_editing(model: &Model, area: Rect, buf: &mut Buffer) {
+    let theme = &model.theme;
+    let name = model
+        .live
+        .as_ref()
+        .map(|live| model.name_of(live.agent))
+        .unwrap_or_default();
+    let leave = model.keymap.leave_key().short();
+    let spans = vec![
+        Span::styled(
+            " EDIT ",
+            theme
+                .style(StyleRole::Notice)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  your keys go to {name}"),
+            theme.style(StyleRole::Input),
+        ),
+        Span::raw(SEPARATOR),
+        Span::styled(leave, theme.style(StyleRole::HintKey)),
+        Span::styled(" back to volee", theme.style(StyleRole::HintText)),
+    ];
+    put_spans(buf, area.x, area.y, &spans, area.width);
 }
 
 /// The question of a prompt and its answers.

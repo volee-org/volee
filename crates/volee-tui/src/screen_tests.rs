@@ -337,6 +337,64 @@ fn composer_answering_a_question() {
     assert_snapshot!(draw(&model));
 }
 
+/// An agent in a volee host, its screen live inside volee's frame: watched
+/// with `z`, then typed into in edit mode.
+#[test]
+fn edit_mode_inside_volee() {
+    let (mut model, _) = crate::test_support::hosted_model(80, 24);
+    type_keys(&mut model, "i");
+    let size = volee_host::Size { cols: 77, rows: 21 };
+    update(
+        &mut model,
+        Msg::LiveOpened {
+            link: 1,
+            welcome: crate::test_support::welcome(size, true),
+        },
+    );
+    let screen = "\x1b[2J\x1b[H\x1b[1m⏺\x1b[0m The tests pass: 356 of 356.\r\n\r\n\
+                  \x1b[2m╭──────────────────────────────╮\x1b[0m\r\n\
+                  \x1b[2m│\x1b[0m > commit and push            \x1b[2m│\x1b[0m\r\n\
+                  \x1b[2m╰──────────────────────────────╯\x1b[0m\r\n\
+                  \x1b[4;20H";
+    update(
+        &mut model,
+        Msg::LiveUpdate {
+            link: 1,
+            update: volee_host::Update::Snapshot(screen.as_bytes().to_vec()),
+        },
+    );
+    let terminal = terminal(&model);
+    assert_snapshot!("edit_mode", terminal.backend().to_string());
+    // The agent's cursor is the terminal's: after "commit and push".
+    let mut terminal = terminal;
+    let position = terminal.get_cursor_position().unwrap();
+    assert_eq!((position.x, position.y), (2 + 19, 1 + 3));
+    terminal.backend_mut().assert_cursor_position((21, 4));
+
+    // Back to volee: the same screen, watched.
+    update(
+        &mut model,
+        Msg::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)),
+    );
+    update(
+        &mut model,
+        Msg::LiveOpened {
+            link: 2,
+            welcome: crate::test_support::welcome(size, true),
+        },
+    );
+    assert_snapshot!("watching_live", draw(&model));
+}
+
+fn type_keys(model: &mut Model, text: &str) {
+    for c in text.chars() {
+        update(
+            model,
+            Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)),
+        );
+    }
+}
+
 #[test]
 fn composer_for_a_session_started_outside_volee() {
     let (mut model, demo) = demo_model(80, 24, Theme::default());
@@ -391,7 +449,7 @@ fn offline_after_the_daemon_left() {
 fn messages_at_every_size() {
     for (width, height) in [(80, 24), (120, 40), (200, 50)] {
         let (mut model, demo) = demo_model(width, height, Theme::default());
-        type_text(&demo, &mut model, "i");
+        type_text(&demo, &mut model, "I");
         assert_snapshot!(format!("messages_at_{width}x{height}"), draw(&model));
     }
 }
@@ -401,7 +459,7 @@ fn messages_reading_a_mission_thread_with_its_summary() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     // The row after the pinned question: the Invoicing mission's thread,
     // where volee's supervisor wrote last.
-    type_text(&demo, &mut model, "ij");
+    type_text(&demo, &mut model, "Ij");
     keys(&demo, &mut model, &[KeyCode::Enter]);
     let effects = update(
         &mut model,

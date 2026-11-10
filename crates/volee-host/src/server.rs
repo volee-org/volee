@@ -146,7 +146,7 @@ pub fn run(config: HostConfig) -> Result<Exit, HostError> {
     for (name, value) in &config.env {
         command.env(name, value);
     }
-    let mut child = pair
+    let child = pair
         .slave
         .spawn_command(command)
         .map_err(|error| spawn_error(error.to_string()))?;
@@ -180,24 +180,7 @@ pub fn run(config: HostConfig) -> Result<Exit, HostError> {
     let (tx, rx) = mpsc::channel();
     spawn_reader(reader, tx.clone());
     let input = spawn_writer(writer);
-    {
-        let tx = tx.clone();
-        thread::spawn(move || {
-            let exit = match child.wait() {
-                Ok(status) => Exit {
-                    code: status.signal().is_none().then(|| status.exit_code()),
-                    signal: status.signal().map(str::to_owned),
-                    at: now(),
-                },
-                Err(error) => Exit {
-                    code: None,
-                    signal: Some(error.to_string()),
-                    at: now(),
-                },
-            };
-            let _ = tx.send(Msg::Exited(exit));
-        });
-    }
+    spawn_waiter(child, tx.clone());
     spawn_acceptor(listener, tx);
 
     let screen = Screen::new(size.cols, size.rows, config.scrollback)?;
@@ -689,6 +672,25 @@ fn spawn_reader(mut reader: Box<dyn Read + Send>, tx: Sender<Msg>) {
             }
         }
         let _ = tx.send(Msg::OutputClosed);
+    });
+}
+
+/// Waits for the program to end and says how.
+fn spawn_waiter(mut child: Box<dyn portable_pty::Child + Send + Sync>, tx: Sender<Msg>) {
+    thread::spawn(move || {
+        let exit = match child.wait() {
+            Ok(status) => Exit {
+                code: status.signal().is_none().then(|| status.exit_code()),
+                signal: status.signal().map(str::to_owned),
+                at: now(),
+            },
+            Err(error) => Exit {
+                code: None,
+                signal: Some(error.to_string()),
+                at: now(),
+            },
+        };
+        let _ = tx.send(Msg::Exited(exit));
     });
 }
 

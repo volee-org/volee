@@ -602,9 +602,9 @@ popups and the hints.
 | `N` | the previous agent that matches the filter, round the list | `previous-match` |
 | `m` | write a message to the selected agent | `message` |
 | `d` | show the selected agent's changes | `diff` |
-| `a` | take over the selected agent in this terminal | `take-over` |
+| `i`, `a` | edit mode: the selected agent's live screen, full size, takes your keys; the leave key (ctrl-q) comes back | `take-over` |
 | `z` | show the selected agent's screen full size | `full-screen` |
-| `i` | your messages, questions waiting for you first | `messages` |
+| `I`, `space i` | your messages, questions waiting for you first | `messages` |
 | `o`, `space o` | open the selected agent's worktree in your editor, diff viewer or git tool | `open-with` |
 | `A`, `space a` | adopt the selected agent into a volee host, so that you can take it over | `adopt` |
 | `F`, `space f` | forget the selected agent: stop listing it (asks first) | `forget` |
@@ -724,7 +724,7 @@ popups and the hints.
 | `gg`, `home` | the top of the screen | `first` |
 | `G`, `end` | the bottom, the newest lines | `last` |
 | `r` | refresh the screen | `refresh` |
-| `a` | take over the agent in this terminal | `take-over` |
+| `i`, `a` | edit mode: your keys go to the agent; the leave key (ctrl-q) comes back | `take-over` |
 | `z`, `esc`, `q` | come back to the interface | `back` |
 | `ctrl-c` | quit volee | `quit` |
 
@@ -784,7 +784,7 @@ popups and the hints.
 | `enter` | read the thread, which marks its messages read | `apply` |
 | `r` | reply: the answer to the question, else a note to the agent | `reply` |
 | `s` | summarize the thread with a model, when summaries are on | `summarize` |
-| `esc`, `q`, `i` | leave the thread, then close the messages | `back` |
+| `esc`, `q`, `I` | leave the thread, then close the messages | `back` |
 | `ctrl-c` | quit volee | `quit` |
 
 ### Open with (`tools`)
@@ -879,9 +879,9 @@ popups and the hints.
 | `q`, `esc` | leave the wall | `back` |
 | `ctrl-c` | leave the wall | `quit` |
 
-### Taken over (`attached`)
+### Edit mode (`attached`)
 
 | Keys | What it does | Action |
 | --- | --- | --- |
-| `ctrl-q` | leave the agent you took over and come back; Control and a letter only | `leave` |
+| `ctrl-q` | leave edit mode, or an agent taken over from a shell, and come back; Control and a letter only | `leave` |
 <!-- keys:end -->

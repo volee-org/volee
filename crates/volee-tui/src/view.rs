@@ -69,6 +69,7 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
         detail::render_preview(model, preview, buf);
     }
     hints::render(model, layout.hints, buf);
+    let mut cursor = None;
     match &model.overlay {
         Some(Overlay::Keys) => keys::render_screen(model, area, buf),
         Some(Overlay::Help { scroll }) => help::render(model, *scroll, area, buf),
@@ -93,11 +94,15 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
         Some(Overlay::Inbox(inbox)) => inbox::render(model, inbox, area, buf),
         Some(Overlay::Tools(menu)) => tools::render(model, *menu, area, buf),
         Some(Overlay::Launch(dialog)) => launch::render(model, dialog, area, buf),
-        Some(Overlay::Screen) => detail::render_full_screen(model, area, buf),
+        Some(Overlay::Screen) => cursor = detail::render_full_screen(model, area, buf),
         None => {}
     }
     if !model.pending_keys.is_empty() {
         keys::render_pending(model, area, buf);
+    }
+    // In edit mode, the agent's cursor is the terminal's.
+    if let Some(cursor) = cursor {
+        frame.set_cursor_position(cursor);
     }
 }
 

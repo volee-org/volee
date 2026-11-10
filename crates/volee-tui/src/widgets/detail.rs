@@ -2,15 +2,16 @@
 //! agent's terminal screen).
 
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::Span;
 use volee_core::Agent;
 use volee_core::agent::Hold;
 use volee_core::time::Elapsed;
 
-use super::{panel, put_spans, state_glyph, truncated};
+use super::{panel, panel_with, put_spans, state_glyph, truncated};
 use crate::app::{Model, Pane};
+use crate::live::{Live, Phase};
 use crate::preview::Fit;
 use crate::text;
 use crate::theme::StyleRole;
@@ -174,18 +175,80 @@ pub(crate) fn render_preview(model: &Model, area: Rect, buf: &mut Buffer) {
 }
 
 /// Draws the selected agent's screen over the whole interface but its hint
-/// line (`z`).
-pub(crate) fn render_full_screen(model: &Model, area: Rect, buf: &mut Buffer) {
+/// line (`z`): live for an agent in a volee host, else as the source last
+/// read it. Returns where the cursor goes in edit mode.
+pub(crate) fn render_full_screen(model: &Model, area: Rect, buf: &mut Buffer) -> Option<Position> {
     let window = Rect {
         height: area.height.saturating_sub(1),
         ..area
     };
     if window.width < 10 || window.height < 3 {
-        return;
+        return None;
     }
     ratatui::widgets::Widget::render(ratatui::widgets::Clear, window, buf);
     buf.set_style(window, model.theme.style(StyleRole::Background));
+    if let Some(live) = model
+        .live
+        .as_ref()
+        .filter(|live| live.has_screen() && model.preview.agent == Some(live.agent))
+    {
+        return draw_live(model, live, window, buf);
+    }
     draw_screen(model, window, buf, "Screen", true, Fit::Wrap);
+    None
+}
+
+/// The live screen of an agent in a volee host: cell for cell when it fits,
+/// as in edit mode, where the agent has the panel's size; otherwise wrapped
+/// like the screen the source reads.
+fn draw_live(model: &Model, live: &Live, area: Rect, buf: &mut Buffer) -> Option<Position> {
+    let theme = &model.theme;
+    let dim = theme.style(StyleRole::TextDim);
+    let mut title = Vec::new();
+    if live.editing {
+        title.push(Span::styled(
+            " EDIT ",
+            theme.style(StyleRole::Notice).add_modifier(Modifier::BOLD),
+        ));
+        title.push(Span::raw(" "));
+    }
+    title.push(Span::raw("Screen"));
+    title.push(Span::styled(
+        format!(" · {}", model.name_of(live.agent)),
+        dim,
+    ));
+    let state = match &live.phase {
+        _ if live.exited => Some("ended"),
+        Phase::Connecting => Some("connecting"),
+        Phase::Closed(_) => Some("disconnected"),
+        Phase::Live if live.editing => None,
+        Phase::Live => Some("live"),
+    };
+    if let Some(state) = state {
+        title.push(Span::styled(format!(" · {state}"), dim));
+    }
+    if live.scroll > 0 {
+        title.push(Span::styled(format!(" · {} lines back", live.scroll), dim));
+    }
+    let inner = if live.editing {
+        panel_with(buf, area, title, theme.style(StyleRole::Input))
+    } else {
+        panel(buf, area, title, true, theme)
+    };
+    let screen = Rect::new(
+        inner.x + 1,
+        inner.y,
+        inner.width.saturating_sub(1),
+        inner.height,
+    );
+    if live.fits(screen) {
+        let cursor = live.render_exact(screen, buf, theme);
+        return cursor.filter(|_| live.editing);
+    }
+    if let Some(preview) = live.preview(theme) {
+        preview.render(screen, buf, model.preview.scroll, Fit::Wrap, theme);
+    }
+    None
 }
 
 /// The panel of an agent's screen, titled `name`, its rows fitted as `fit`

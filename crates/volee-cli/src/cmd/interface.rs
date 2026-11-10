@@ -17,6 +17,8 @@ use crate::tools;
 /// the configuration.
 pub(crate) async fn run(theme: Option<&str>) -> Result<()> {
     let mut options = options(theme)?;
+    // Agents in volee hosts are shown live and typed into in edit mode.
+    options.hosts = Some(paths()?.state_dir.join("hosts"));
     // The theme picked in the interface is kept in the configuration file;
     // the demo leaves it alone.
     let file = paths()?.config_file();

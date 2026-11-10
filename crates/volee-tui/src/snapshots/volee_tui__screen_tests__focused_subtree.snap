@@ -41,4 +41,4 @@ expression: draw(&model)
 "│                                ││                                                                                    │"
 "╰────────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────╯"
 " esc back   h/j/k/l move   gg/G first/last   enter subtree   +/_ zoom   ' jump   / filter   n/N match   tab/⇧tab panel  "
-" m message   d diff   a take over   z full screen   i messages   A adopt   : commands   ␣ more   q quit          ? help "
+" m message   d diff   i edit   z full screen   I messages   A adopt   : commands   ␣ more   q quit               ? help "

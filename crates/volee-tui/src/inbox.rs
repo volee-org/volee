@@ -442,9 +442,9 @@ mod tests {
         }
 
         #[test]
-        fn i_opens_the_messages_and_enter_reads_a_thread() {
+        fn capital_i_opens_the_messages_and_enter_reads_a_thread() {
             let mut model = model(120, 40);
-            press(&mut model, "i");
+            press(&mut model, "I");
             assert_eq!(model.contexts(), [Context::Inbox]);
             let rows = rows(&model.registry);
             assert_eq!(view(&model).selected, Some(rows[0]), "the question first");
@@ -475,7 +475,7 @@ mod tests {
         fn r_answers_the_question_and_comes_back_to_the_messages() {
             let mut model = model(120, 40);
             let tools = id(INVOICE_TOOLS);
-            press(&mut model, "ir");
+            press(&mut model, "Ir");
             assert_eq!(model.overlay, Some(Overlay::Composer));
             let draft = model.draft.clone().unwrap();
             assert_eq!(draft.to, tools);
@@ -512,7 +512,7 @@ mod tests {
         #[test]
         fn s_summarizes_the_thread_or_says_why_not() {
             let mut model = model(120, 40);
-            press(&mut model, "i");
+            press(&mut model, "I");
             let thread = thread_of(&model.registry, rows(&model.registry)[0]).unwrap();
             assert_eq!(press(&mut model, "s"), [Effect::Summarize(thread)]);
             assert_eq!(view(&model).summary, Some((thread, SummaryState::Loading)));
@@ -542,7 +542,7 @@ mod tests {
                         if model.registry.thread(*thread).is_some_and(|t| t.title == "volee"))
                 })
                 .unwrap();
-            press(&mut model, "i");
+            press(&mut model, "I");
             press(&mut model, &"j".repeat(alerts));
             press(&mut model, "r");
             assert_eq!(view(&model).selected, Some(rows[alerts]));

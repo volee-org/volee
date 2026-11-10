@@ -570,8 +570,9 @@ contexts! {
     Themes => "themes", "Theme picker",
     /// The wall of live screens.
     Wall => "wall", "Wall of screens",
-    /// An agent you took over, in a volee host.
-    Attached => "attached", "Taken over",
+    /// Edit mode, and an agent taken over from a shell: every key goes to
+    /// the agent but the leave key.
+    Attached => "attached", "Edit mode",
 }
 
 impl Context {
@@ -1138,9 +1139,9 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &["N"], A::PreviousMatch, "previous match", Some("match"), "the previous agent that matches the filter, round the list"),
         bind(C::Global, &["m"], A::Message, "message", Some("message"), "write a message to the selected agent"),
         bind(C::Global, &["d"], A::Diff, "diff", Some("diff"), "show the selected agent's changes"),
-        bind(C::Global, &["a"], A::TakeOver, "take over", Some("take over"), "take over the selected agent in this terminal"),
+        bind(C::Global, &["i", "a"], A::TakeOver, "edit", Some("edit"), "edit mode: the selected agent's live screen, full size, takes your keys; the leave key (ctrl-q) comes back"),
         bind(C::Global, &["z"], A::FullScreen, "full screen", Some("full screen"), "show the selected agent's screen full size"),
-        bind(C::Global, &["i"], A::Messages, "messages", Some("messages"), "your messages, questions waiting for you first"),
+        bind(C::Global, &["I", "space i"], A::Messages, "messages", Some("messages"), "your messages, questions waiting for you first"),
         bind(C::Global, &["o", "space o"], A::OpenWith, "open with…", None, "open the selected agent's worktree in your editor, diff viewer or git tool"),
         bind(C::Global, &["A", "space a"], A::Adopt, "adopt", Some("adopt"), "adopt the selected agent into a volee host, so that you can take it over"),
         bind(C::Global, &["F", "space f"], A::Forget, "forget", None, "forget the selected agent: stop listing it (asks first)"),
@@ -1234,7 +1235,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Screen, &["g g", "home"], A::First, "top", None, "the top of the screen"),
         bind(C::Screen, &["G", "end"], A::Last, "bottom", None, "the bottom, the newest lines"),
         bind(C::Screen, &["r"], A::Refresh, "refresh", Some("refresh"), "refresh the screen"),
-        bind(C::Screen, &["a"], A::TakeOver, "take over", Some("take over"), "take over the agent in this terminal"),
+        bind(C::Screen, &["i", "a"], A::TakeOver, "edit", Some("edit"), "edit mode: your keys go to the agent; the leave key (ctrl-q) comes back"),
         bind(C::Screen, &["z", "esc", "q"], A::Back, "back", Some("back"), "come back to the interface"),
         bind(C::Screen, &["ctrl-c"], A::Quit, "quit", None, "quit volee"),
 
@@ -1274,7 +1275,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Inbox, &["enter"], A::Apply, "read", Some("read"), "read the thread, which marks its messages read"),
         bind(C::Inbox, &["r"], A::Reply, "reply", Some("reply"), "reply: the answer to the question, else a note to the agent"),
         bind(C::Inbox, &["s"], A::Summarize, "summarize", Some("summarize"), "summarize the thread with a model, when summaries are on"),
-        bind(C::Inbox, &["esc", "q", "i"], A::Back, "close", Some("close"), "leave the thread, then close the messages"),
+        bind(C::Inbox, &["esc", "q", "I"], A::Back, "close", Some("close"), "leave the thread, then close the messages"),
         bind(C::Inbox, &["ctrl-c"], A::Quit, "quit", None, "quit volee"),
 
         bind(C::Tools, &["e"], A::OpenEditor, "editor", Some("editor"), "your editor ($VISUAL, $EDITOR or [tui.tools] editor)"),
@@ -1335,7 +1336,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Wall, &["q", "esc"], A::Back, "back", Some("back"), "leave the wall"),
         bind(C::Wall, &["ctrl-c"], A::Quit, "quit", None, "leave the wall"),
 
-        bind(C::Attached, &["ctrl-q"], A::Leave, "leave", None, "leave the agent you took over and come back; Control and a letter only"),
+        bind(C::Attached, &["ctrl-q"], A::Leave, "leave", Some("back to volee"), "leave edit mode, or an agent taken over from a shell, and come back; Control and a letter only"),
     ]
 }
 
