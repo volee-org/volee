@@ -19,9 +19,9 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use rustix::process::{Pid, Signal, kill_process_group};
-use volee_term::{Boundary, Screen};
+use volee_term::{Boundary, KeyInput, Screen};
 
-use crate::proto::{self, Event, Exit, Hello, Kind, PROTOCOL, Role, Size, Welcome};
+use crate::proto::{self, Event, Exit, Hello, KeyPress, Kind, PROTOCOL, Role, Size, Welcome};
 use crate::record::{HostDir, HostRecord, now};
 
 /// Frames queued for one client before it counts as lagging.
@@ -37,6 +37,18 @@ const EXIT_DRAIN: Duration = Duration::from_millis(500);
 const STUCK_AFTER: Duration = Duration::from_secs(30);
 /// How long a client has to say hello.
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long after a Ctrl+Z the program gets `SIGCONT`. A program that
+/// suspends itself on Ctrl+Z (Claude Code does) waits for a shell to resume
+/// it; in a host there is none, so the host does, once the program has had
+/// time to stop.
+const RESUME_AFTER_SUSPEND: Duration = Duration::from_millis(300);
+
+/// Whether keys hold a Ctrl+Z, on which the program may suspend itself: the
+/// legacy byte, or the kitty keyboard protocol's sequence.
+fn suspends(bytes: &[u8]) -> bool {
+    const KITTY: &[u8] = b"\x1b[122;5u";
+    bytes.contains(&0x1a) || bytes.windows(KITTY.len()).any(|window| window == KITTY)
+}
 
 /// What a host runs, and how.
 #[derive(Clone, Debug)]
@@ -198,9 +210,11 @@ pub fn run(config: HostConfig) -> Result<Exit, HostError> {
         input,
         clients: BTreeMap::new(),
         owner: None,
+        owner_embedded: false,
         pending_exit: None,
         stop_deadline: None,
         linger_deadline: None,
+        resume_deadline: None,
     };
     let exit = host.serve(&rx);
     let _ = std::fs::remove_file(&socket);
@@ -221,6 +235,14 @@ enum Msg {
     Input {
         id: u64,
         bytes: Vec<u8>,
+    },
+    Key {
+        id: u64,
+        press: KeyPress,
+    },
+    Paste {
+        id: u64,
+        text: String,
     },
     Resize {
         id: u64,
@@ -260,9 +282,13 @@ struct Host {
     input: Sender<Vec<u8>>,
     clients: BTreeMap<u64, Client>,
     owner: Option<u64>,
+    /// The input owner draws the screen itself and answers no query.
+    owner_embedded: bool,
     pending_exit: Option<(Exit, Instant)>,
     stop_deadline: Option<Instant>,
     linger_deadline: Option<Instant>,
+    /// When to send `SIGCONT` after a Ctrl+Z.
+    resume_deadline: Option<Instant>,
 }
 
 impl Host {
@@ -285,6 +311,12 @@ impl Host {
             {
                 self.signal(Signal::KILL);
                 self.stop_deadline = None;
+            }
+            if self.resume_deadline.is_some_and(|deadline| now >= deadline) {
+                self.resume_deadline = None;
+                if self.record.exit.is_none() {
+                    self.signal(Signal::CONT);
+                }
             }
             if self.linger_deadline.is_some_and(|deadline| now >= deadline) {
                 break;
@@ -314,7 +346,25 @@ impl Host {
             Msg::Connected { id, hello, tx } => self.connect(id, &hello, tx),
             Msg::Input { id, bytes } => {
                 if self.owner == Some(id) && self.record.exit.is_none() {
+                    if suspends(&bytes) {
+                        self.resume_soon();
+                    }
                     let _ = self.input.send(bytes);
+                }
+            }
+            Msg::Key { id, press } => {
+                if self.owner == Some(id) && self.record.exit.is_none() {
+                    self.key(&press);
+                }
+            }
+            Msg::Paste { id, text } => {
+                if self.owner == Some(id) && self.record.exit.is_none() {
+                    match self.screen.encode_paste(&text) {
+                        Ok(bytes) => {
+                            let _ = self.input.send(bytes);
+                        }
+                        Err(error) => tracing::warn!(%error, "cannot encode a paste"),
+                    }
                 }
             }
             Msg::Resize { id, size } => {
@@ -332,9 +382,35 @@ impl Host {
                 self.clients.remove(&id);
                 if self.owner == Some(id) {
                     self.owner = None;
+                    self.owner_embedded = false;
                 }
             }
         }
+    }
+
+    /// Encodes a key the way the program asked and sends it.
+    fn key(&mut self, press: &KeyPress) {
+        let input = KeyInput {
+            key: press.key.clone(),
+            shift: press.shift,
+            alt: press.alt,
+            ctrl: press.ctrl,
+        };
+        match self.screen.encode_key(&input) {
+            Ok(bytes) if !bytes.is_empty() => {
+                if press.ctrl && !press.alt && press.key.eq_ignore_ascii_case("z") {
+                    self.resume_soon();
+                }
+                let _ = self.input.send(bytes);
+            }
+            Ok(_) => tracing::debug!(key = %press.key, "a key with no encoding"),
+            Err(error) => tracing::warn!(%error, "cannot encode a key"),
+        }
+    }
+
+    /// Schedules the `SIGCONT` that follows a Ctrl+Z.
+    fn resume_soon(&mut self) {
+        self.resume_deadline = Some(Instant::now() + RESUME_AFTER_SUSPEND);
     }
 
     /// Feeds output to the screen, answers queries when no person's terminal
@@ -343,12 +419,14 @@ impl Host {
         self.screen.feed(bytes);
         let replies = self.screen.take_replies();
         // An owner waiting for its snapshot does not see this output, so its
-        // terminal cannot answer: the host does.
-        let owner_answers = self.owner.is_some_and(|id| {
-            self.clients
-                .get(&id)
-                .is_some_and(|client| client.state == ClientState::Live)
-        });
+        // terminal cannot answer: the host does. An embedded owner never
+        // answers.
+        let owner_answers = !self.owner_embedded
+            && self.owner.is_some_and(|id| {
+                self.clients
+                    .get(&id)
+                    .is_some_and(|client| client.state == ClientState::Live)
+            });
         if !owner_answers && !replies.is_empty() && self.record.exit.is_none() {
             let _ = self.input.send(replies);
         }
@@ -374,6 +452,7 @@ impl Host {
                 self.clients.remove(&previous);
             }
             self.owner = Some(id);
+            self.owner_embedded = hello.embedded;
         }
         let welcome = Welcome {
             protocol: PROTOCOL,
@@ -386,6 +465,7 @@ impl Host {
             title: self.screen.title(),
             exit: self.record.exit.clone(),
             input: wants_input,
+            keys: true,
         };
         let Ok(payload) = serde_json::to_vec(&welcome) else {
             return;
@@ -708,6 +788,14 @@ fn serve_client(id: u64, stream: &UnixStream, tx: &Sender<Msg>) {
             Kind::Input => Msg::Input {
                 id,
                 bytes: frame.payload,
+            },
+            Kind::Key => match proto::parse::<KeyPress>(&frame) {
+                Ok(press) => Msg::Key { id, press },
+                Err(_) => continue,
+            },
+            Kind::Paste => match String::from_utf8(frame.payload) {
+                Ok(text) => Msg::Paste { id, text },
+                Err(_) => continue,
             },
             Kind::Resize => match proto::parse::<Size>(&frame) {
                 Ok(size) => Msg::Resize { id, size },

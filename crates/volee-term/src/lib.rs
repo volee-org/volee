@@ -12,11 +12,13 @@
 #![warn(missing_docs)]
 
 mod boundary;
+mod keys;
 mod screen;
 mod style;
 mod widget;
 
 pub use boundary::Boundary;
+pub use keys::KeyInput;
 pub use screen::{Frame, Screen, Signals, StyledCell};
 pub use widget::FrameView;
 

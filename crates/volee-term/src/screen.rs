@@ -12,6 +12,7 @@ use libghostty_vt::terminal::{
 };
 
 use crate::Error;
+use crate::keys::{self, KeyInput};
 
 /// How volee answers a version query (XTVERSION) when it answers for the
 /// person's terminal.
@@ -144,6 +145,18 @@ impl Screen {
         )
     }
 
+    /// The bytes for a key, encoded the way the program asked: keyboard
+    /// protocol (legacy or kitty), cursor and keypad modes.
+    pub fn encode_key(&self, input: &KeyInput) -> Result<Vec<u8>, Error> {
+        keys::encode_key(&self.terminal, input)
+    }
+
+    /// The bytes for pasted text: in bracketed paste when the program turned
+    /// it on, with control characters made harmless.
+    pub fn encode_paste(&self, text: &str) -> Result<Vec<u8>, Error> {
+        keys::encode_paste(&self.terminal, text)
+    }
+
     /// The window title the program set, if any.
     pub fn title(&self) -> Option<String> {
         self.terminal
@@ -212,39 +225,6 @@ impl Screen {
         }
         if !self.terminal.is_cursor_visible()? {
             bytes.extend_from_slice(b"\x1b[?25l");
-        }
-        Ok(bytes)
-    }
-
-    /// VT sequences that put the cursor back where the program left it,
-    /// after something else drew elsewhere on the terminal: its position,
-    /// a pending wrap, its pen (the style of what it prints next) and
-    /// whether it shows.
-    pub fn cursor_restore(&mut self) -> Result<Vec<u8>, Error> {
-        let (x, y) = (self.terminal.cursor_x()?, self.terminal.cursor_y()?);
-        let mut bytes = format!("\x1b[{};{}H", y + 1, x + 1).into_bytes();
-        if self.terminal.is_cursor_pending_wrap()? {
-            // Placing the cursor cancels a pending wrap; printing the last
-            // cell again restores it.
-            let frame = self.frame()?;
-            if let Some(cell) = frame
-                .rows
-                .get(usize::from(y))
-                .and_then(|row| row.get(usize::from(x)))
-            {
-                bytes.extend_from_slice(&crate::style::to_sgr(cell.style));
-                let symbol = if cell.symbol.is_empty() {
-                    " "
-                } else {
-                    &cell.symbol
-                };
-                bytes.extend_from_slice(symbol.as_bytes());
-            }
-        }
-        let pen = crate::style::to_ratatui(&self.terminal.cursor_style()?);
-        bytes.extend_from_slice(&crate::style::to_sgr(pen));
-        if self.terminal.is_cursor_visible()? {
-            bytes.extend_from_slice(b"\x1b[?25h");
         }
         Ok(bytes)
     }

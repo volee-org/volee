@@ -13,17 +13,14 @@
 #![warn(missing_docs)]
 
 pub mod attach;
-mod bar;
 pub mod client;
 pub mod keys;
 pub mod proto;
 pub mod record;
 pub mod server;
 
-pub use attach::{
-    AttachBar, AttachEnd, AttachOptions, attach, attach_leaving, attach_with, terminal_size,
-};
+pub use attach::{AttachEnd, attach, attach_leaving, terminal_size};
 pub use client::{Connection, HostSender, Update, Watch, snapshot, stop};
-pub use proto::{Event, Exit, Role, Size};
+pub use proto::{Event, Exit, KeyPress, Role, Size, Welcome};
 pub use record::{HostDir, HostRecord};
 pub use server::{HostConfig, HostError, run};

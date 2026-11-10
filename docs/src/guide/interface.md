@@ -436,18 +436,8 @@ form your terminal sends it once the agent turned on a keyboard protocol
 volee turns off what the agent left on in your terminal, such as mouse
 reporting or bracketed paste, and restores your screen.
 
-The last row of your terminal keeps a volee bar while you type, so you
-always know where you are: the agent's name, its repository and branch,
-whether it is working, and the key that comes back:
-
-```text
- volee │ billing · shop › feat/invoices │ ▸ working │ Ctrl+Q back to volee
-```
-
-The agent gets every row above the bar; its scrolling never reaches it.
-
-While you type, your terminal's size, less the bar's row, is the agent's
-size, and it stays when you leave. Only the terminal that takes over sets it: the preview, the
+While you type, your terminal's size is the agent's size, and it stays when
+you leave. Only the terminal that takes over sets it: the preview, the
 full-screen view and the wall never resize an agent. Taking the same agent
 over from a second terminal, with `volee attach`, moves the input there,
 and the first terminal comes back to volee.
