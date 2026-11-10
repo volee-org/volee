@@ -473,11 +473,11 @@ fn a_click_selects_a_tile_and_a_second_one_opens_it() {
 
 #[test]
 fn a_page_holds_what_the_terminal_shows_at_a_readable_size() {
-    // Four in a small terminal, nine in a usual one, more only where each
+    // Two in a small terminal, nine in a large one, more only where each
     // tile stays roomy.
-    assert_eq!(capacity((80, 24)), (2, 2));
+    assert_eq!(capacity((80, 24)), (2, 1));
     assert_eq!(capacity((100, 30)), (2, 2));
-    assert_eq!(capacity((120, 40)), (3, 3));
+    assert_eq!(capacity((120, 40)), (3, 2));
     assert_eq!(capacity((200, 50)), (3, 3));
     assert_eq!(capacity((308, 80)), (4, 3));
     assert_eq!(capacity((320, 100)), (4, 4));
@@ -536,10 +536,10 @@ fn a_page_holds_what_the_terminal_shows_at_a_readable_size() {
     assert_eq!(model.selected, Some(all[6]));
     assert_eq!(
         shown(&model),
-        listed[position / 4 * 4..position / 4 * 4 + 4]
+        listed[position / 2 * 2..position / 2 * 2 + 2]
     );
     assert_eq!(
         model.wall.as_ref().unwrap().pages(),
-        (position / 4, listed.len().div_ceil(4))
+        (position / 2, listed.len().div_ceil(2))
     );
 }

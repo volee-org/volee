@@ -32,8 +32,10 @@ use crate::source::SourceError;
 const REFRESH_MILLIS: u64 = 5_000;
 
 /// The smallest tile worth reading, border included: a row or a column of
-/// the wall holds up to three of them.
-const TILE: (u16, u16) = (40, 10);
+/// the wall holds up to three of them. A tile shows the bottom of a screen,
+/// where an agent's interface keeps its prompt and its status lines: under
+/// fourteen rows, little of what the agent says is left above them.
+const TILE: (u16, u16) = (40, 14);
 
 /// The size past which a row or a column holds a fourth tile: a terminal
 /// that large shows sixteen screens at the size a small one shows four.
