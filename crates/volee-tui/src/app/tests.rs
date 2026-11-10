@@ -681,6 +681,42 @@ fn a_view_that_does_not_answer_is_said_plainly() {
 }
 
 #[test]
+fn a_door_that_closed_at_once_shows_what_it_said() {
+    let mut model = model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    press(&mut model, "'s");
+    press(&mut model, "i");
+    update(
+        &mut model,
+        Msg::Opened {
+            agent: schema,
+            result: Ok(Door::Host {
+                socket: view_socket(),
+                view: true,
+            }),
+        },
+    );
+    // The session was removed meanwhile: its door said so and ended.
+    let mut welcome = crate::test_support::welcome(PANEL, true);
+    welcome.input = false;
+    welcome.exit = Some(volee_host::Exit {
+        code: Some(1),
+        signal: None,
+        at: 0,
+    });
+    update(&mut model, Msg::LiveOpened { link: 1, welcome });
+    assert_eq!(
+        model.overlay,
+        Some(Overlay::Screen),
+        "its last screen stays"
+    );
+    assert!(!crate::edit::editing(&model));
+    let notice = model.notice.as_ref().unwrap();
+    assert!(notice.error);
+    assert!(notice.text.contains("closed at once"), "{}", notice.text);
+}
+
+#[test]
 fn an_answer_nobody_waits_for_opens_nothing() {
     let mut model = model(120, 40);
     let schema = id(INVOICE_SCHEMA);

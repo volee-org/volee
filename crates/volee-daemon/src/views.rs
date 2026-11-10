@@ -294,8 +294,12 @@ fn start(dir: &HostDir, config: HostConfig) -> Result<(), String> {
     let deadline = Instant::now() + START_TIMEOUT;
     loop {
         // The record is written once the program has started: a socket
-        // alone may be the moment before a start that fails.
-        if runs(dir, &id) {
+        // alone may be the moment before a start that fails. A program
+        // that already ended counts: the view keeps its last screen for a
+        // moment, which says why (a session removed meanwhile).
+        if std::os::unix::net::UnixStream::connect(dir.socket(&id)).is_ok()
+            && HostRecord::read(&dir.record(&id)).is_ok()
+        {
             return Ok(());
         }
         match early.try_recv() {
@@ -380,6 +384,50 @@ mod tests {
         let second = view(&views, &dir, agent(1), "alpha", cat, SIZE).unwrap();
         assert_ne!(second, first);
         stop(&dir, &second);
+    }
+
+    #[test]
+    fn a_door_that_closes_at_once_still_shows_what_it_said() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = HostDir::new(root.path().join("views"));
+        let views = Views::default();
+        let refused = door(
+            &["sh", "-c", "echo 'No session found with that id'; exit 1"],
+            root.path(),
+        );
+        let id = view(&views, &dir, agent(1), "alpha", refused.clone(), SIZE).unwrap();
+        // What the door printed stays on the view's screen.
+        let said = || {
+            volee_host::snapshot(&dir.socket(&id), "test", Duration::from_secs(3)).is_ok_and(
+                |(_, screen)| String::from_utf8_lossy(&screen).contains("No session found"),
+            )
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !said() {
+            assert!(Instant::now() < deadline, "the door's words never showed");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // The host records how the program ended a moment after its last
+        // output.
+        let ended = || {
+            HostRecord::read(&dir.record(&id))
+                .ok()
+                .and_then(|record| record.exit)
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while ended().is_none() {
+            assert!(Instant::now() < deadline, "the end was never recorded");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(ended().unwrap().code, Some(1));
+        // It is not kept for the next time: opening again starts anew.
+        let again = view(&views, &dir, agent(1), "alpha", refused, SIZE).unwrap();
+        assert_ne!(again, id);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while dir.record(&id).exists() || dir.record(&again).exists() {
+            assert!(Instant::now() < deadline, "the views never ended");
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     #[test]

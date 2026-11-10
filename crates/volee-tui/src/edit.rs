@@ -248,10 +248,22 @@ pub(crate) fn opened(model: &mut Model, link: u64, welcome: &Welcome) -> bool {
     let (agent, editing) = (live.agent, live.editing);
     if wanted && !editing {
         let name = model.name_of(agent);
-        model.notify(
-            format!("{name} has ended: there is nothing to type into."),
-            true,
-        );
+        if is_view(model, agent) {
+            // The door's program ended before anyone was there: what it
+            // printed says why.
+            model.notify(
+                format!(
+                    "The terminal on {name} closed at once: its last lines are shown. Esc \
+                     comes back."
+                ),
+                true,
+            );
+        } else {
+            model.notify(
+                format!("{name} has ended: there is nothing to type into."),
+                true,
+            );
+        }
     }
     true
 }
