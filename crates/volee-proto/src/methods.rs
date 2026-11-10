@@ -705,6 +705,13 @@ pub struct HookParams {
     pub event: String,
     /// The JSON payload the harness passed to the hook.
     pub payload: serde_json::Value,
+    /// The process that ran the hook command: the harness, or a shell it
+    /// started. For an agent in a volee host, the daemon heeds only hooks
+    /// from the host's program and its descendants; another session that
+    /// shares the agent's settings (a fork Claude Code started in the
+    /// background) is not that agent. Older clients leave it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
 }
 
 /// The result of [`HookIngest`].
@@ -731,6 +738,9 @@ pub struct WaitParams {
     pub agent: AgentId,
     /// How long to wait before giving up, in milliseconds.
     pub timeout_ms: u64,
+    /// The process that ran the hook command, as in [`HookParams::pid`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
 }
 
 /// The result of [`HookWait`].

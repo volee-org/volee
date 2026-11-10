@@ -351,6 +351,12 @@ async fn hook_ingest(
     params: HookParams,
     delivery: Delivery,
 ) -> Result<HookReply, DaemonError> {
+    // Another session that inherited the agent's hooks is not the agent. A
+    // replayed hook's process is gone: it is the agent's.
+    if delivery == Delivery::Live && crate::lineage::foreign(shared, params.agent, params.pid).await
+    {
+        return Ok(HookReply::default());
+    }
     let payload = hook_payload(&params)?;
     let signal = interpret(&payload);
     let mut state = shared.state.lock().await;
@@ -534,6 +540,10 @@ fn summarize(text: &str, max: usize) -> String {
 }
 
 async fn hook_wait(shared: &Arc<Shared>, params: WaitParams) -> Result<WaitReply, DaemonError> {
+    // A session that inherited the agent's hooks must not take its messages.
+    if crate::lineage::foreign(shared, params.agent, params.pid).await {
+        return Ok(WaitReply { text: None });
+    }
     let (token, receiver) = {
         let mut state = shared.state.lock().await;
         require_agent(&state, params.agent)?;

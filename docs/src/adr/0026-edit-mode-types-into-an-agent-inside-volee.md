@@ -67,6 +67,18 @@ any client, the host sends `SIGCONT` to the program's process group 300 ms
 later. A program that suspends itself comes back at once; for one that
 does not, the signal changes nothing.
 
+**A hosted agent's hooks come from its host.** Claude Code's own agents
+view, opened inside a hosted agent (`←` on an empty prompt), can revive or
+fork a background session that inherits the agent's `--settings`, so its
+hooks name the hosted agent. The daemon took that session for the agent's:
+the agent moved to the background, and its messages went to the other
+session. `volee hook` now sends the process that ran it (its parent), and
+for an agent in a running host whose program's pid is known, the daemon
+heeds a hook or a wait only from that program or one of its descendants
+(one `ps` when the pid is not the program's own). Other hooks are dropped;
+the other session shows as an agent of its own once Claude Code lists it.
+Replayed hooks, whose process is gone, are not checked.
+
 **`volee attach` stays.** From a shell, `volee attach` and `volee host
 attach` still take an agent over in the whole terminal as ADR 0021 says.
 Taking over in one place ends edit mode in the other, which says so and

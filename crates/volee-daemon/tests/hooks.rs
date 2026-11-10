@@ -76,6 +76,7 @@ async fn hook(daemon: &Running, event: &str, payload: Value) -> Option<String> {
             agent: agent_id(),
             event: event.into(),
             payload,
+            pid: None,
         })
         .await
         .unwrap()

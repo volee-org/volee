@@ -38,6 +38,7 @@ pub(crate) fn run(event: &str, agent: AgentId, timeout_secs: u64) -> ExitCode {
         agent,
         event: event.to_owned(),
         payload,
+        pid: Some(std::os::unix::process::parent_id()),
     };
     match blocking::call::<HookIngest>(&paths.socket, params.clone(), INGEST_TIMEOUT) {
         Ok(reply) => {
@@ -57,6 +58,7 @@ fn wait(paths: &Paths, agent: AgentId, timeout_secs: u64) -> ExitCode {
     let params = WaitParams {
         agent,
         timeout_ms: timeout_secs.saturating_mul(1_000),
+        pid: Some(std::os::unix::process::parent_id()),
     };
     let deadline = Duration::from_secs(timeout_secs.saturating_add(5));
     match blocking::call::<HookWait>(&paths.socket, params, deadline) {
