@@ -27,8 +27,8 @@ use volee_core::{AgentId, MessageId, Registry, ThreadId};
 
 use crate::clock::Clock;
 use crate::source::{
-    Changes, MissionRequest, NewMission, Outgoing, Source, SourceError, SpawnRequest, Subscription,
-    Summary, TakeOver,
+    Changes, Door, MissionRequest, NewMission, Outgoing, Source, SourceError, SpawnRequest,
+    Subscription, Summary, TakeOver,
 };
 
 /// A [`Source`] with a simulated team of agents, for `volee demo`,
@@ -265,6 +265,16 @@ impl Source for DemoSource {
 
     fn attach(&self, agent: AgentId) -> impl Future<Output = Result<TakeOver, SourceError>> + Send {
         std::future::ready(self.take_over(agent))
+    }
+
+    /// The demo has no terminal to show inside the interface: opening an
+    /// agent runs the stand-in of [`Source::attach`], in this terminal.
+    fn open(
+        &self,
+        agent: AgentId,
+        _size: (u16, u16),
+    ) -> impl Future<Output = Result<Door, SourceError>> + Send {
+        std::future::ready(self.take_over(agent).map(|_| Door::Elsewhere))
     }
 
     async fn mark_read(&self, message: MessageId) -> Result<(), SourceError> {

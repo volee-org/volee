@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::sync::Arc;
 
-use volee_core::harness::SessionKey;
+use volee_core::harness::{HarnessKind, SessionKey};
 use volee_core::message::{Message, MessageKind, Party, Receipt};
 use volee_core::reconcile::{ListedSession, Listing};
 use volee_core::workspace::Location;
@@ -164,6 +164,52 @@ fn own_terminal(name: &str) -> DaemonError {
     ))
 }
 
+/// Why volee cannot open the agent `name`, which runs in a terminal volee
+/// cannot reach, and what makes it reachable (ADR 0027).
+pub(crate) fn in_a_terminal(name: &str, harness: &HarnessKind) -> DaemonError {
+    let way = if *harness == HarnessKind::ClaudeCode {
+        " To use it from volee, press the left arrow on its empty prompt there: Claude Code \
+         moves it to the background, where volee opens it."
+    } else {
+        ""
+    };
+    DaemonError::Refused(format!(
+        "{name} runs in a terminal volee cannot reach: switch to that terminal to use it.{way}"
+    ))
+}
+
+/// The command with which the harness itself opens the session of `agent`
+/// in a terminal (for Claude Code, `claude attach` on a background
+/// session), or why it has none.
+pub(crate) async fn attach_command(
+    shared: &Arc<Shared>,
+    agent: AgentId,
+) -> Result<std::process::Command, DaemonError> {
+    let terminal = {
+        let state = shared.state.lock().await;
+        state.registry().agent(agent).and_then(|record| {
+            matches!(record.location, Location::Terminal | Location::Pane { .. })
+                .then(|| in_a_terminal(&record.name, &record.harness))
+        })
+    };
+    let Target {
+        harness,
+        name,
+        session,
+        ..
+    } = match target(shared, agent).await {
+        Ok(target) => target,
+        // An agent in a terminal has no door: say what does.
+        Err(DaemonError::Refused(_)) if terminal.is_some() => {
+            return Err(terminal.unwrap_or_else(|| own_terminal("it")));
+        }
+        Err(error) => return Err(error),
+    };
+    harness
+        .attach_command(&session)
+        .map_err(|error| harness_error(&name, error))
+}
+
 /// A harness failure about the agent `name`, said for people.
 fn harness_error(name: &str, error: HarnessError) -> DaemonError {
     match error {
@@ -226,14 +272,6 @@ const HOST_CLIENT: &str = concat!("volee daemon ", env!("CARGO_PKG_VERSION"));
 
 /// What a person reads before taking over an agent in a host.
 const HOST_ATTACH_HINT: &str = "Press Ctrl+Q to come back; the agent keeps running.";
-
-/// A background session volee does not host: shown, never driven (ADR 0023).
-fn background_refusal(name: &str) -> DaemonError {
-    DaemonError::Refused(format!(
-        "{name} runs as a Claude Code background session, which volee only shows: press A to \
-         adopt it into a volee host, then take it over"
-    ))
-}
 
 /// A multiplexer failure about the pane of the agent `name`, said for
 /// people.
@@ -387,16 +425,6 @@ pub(crate) async fn attach(
             focus: None,
         });
     }
-    {
-        let state = shared.state.lock().await;
-        // A daemon that hosts its agents only shows background sessions.
-        if let Some(record) = state.registry().agent(params.agent)
-            && record.location == Location::Background
-            && shared.hosts
-        {
-            return Err(background_refusal(&record.name));
-        }
-    }
     if let Some(Pane {
         adapter,
         target,
@@ -423,15 +451,8 @@ pub(crate) async fn attach(
             }),
         });
     }
-    let Target {
-        harness,
-        name,
-        session,
-        ..
-    } = target(shared, params.agent).await?;
-    let command = harness
-        .attach_command(&session)
-        .map_err(|error| harness_error(&name, error))?;
+    // Any other session: its harness opens it itself (ADR 0027).
+    let command = attach_command(shared, params.agent).await?;
     let text = |value: &OsStr| value.to_string_lossy().into_owned();
     Ok(AttachCommand {
         program: text(command.get_program()),
@@ -493,7 +514,7 @@ pub(crate) async fn stop(shared: &Arc<Shared>, params: AgentParams) -> Result<Em
     if !managed {
         return Err(DaemonError::Refused(format!(
             "{name} was not launched by volee, which stops only the agents it launched or \
-             adopted: stop it where it was started, or adopt it first"
+             adopted: open it and stop it there"
         )));
     }
     // Recorded before the session ends: the end must find the hold, or a

@@ -631,11 +631,11 @@ popups and the hints.
 | `N` | the previous agent that matches the filter, round the list | `previous-match` |
 | `m` | write a message to the selected agent | `message` |
 | `d` | show the selected agent's changes | `diff` |
-| `i`, `a` | edit mode: the selected agent's live screen, full size, takes your keys; the leave key (ctrl-q) comes back | `take-over` |
+| `enter`, `i`, `a` | open the selected agent: its own terminal, full size inside volee, takes your keys; the leave key (ctrl-q) comes back and the agent keeps running | `take-over` |
 | `z` | show the selected agent's screen full size | `full-screen` |
 | `I`, `space i` | your messages, questions waiting for you first | `messages` |
 | `o`, `space o` | open the selected agent's worktree in your editor, diff viewer or git tool | `open-with` |
-| `A`, `space a` | adopt the selected agent into a volee host, so that you can take it over | `adopt` |
+| `A`, `space a` | move the selected agent into a volee host (asks first): its session is stopped and resumed there with volee's settings; opening it needs no adoption | `adopt` |
 | `F`, `space f` | forget the selected agent: stop listing it (asks first) | `forget` |
 | `space n` | launch an agent in a new worktree | `new-agent` |
 | `space N` | create a mission, which launches its coordinator | `new-mission` |
@@ -667,7 +667,7 @@ popups and the hints.
 | `G`, `end` | last agent | `last` |
 | `ctrl-d`, `pgdn` | half a page of agents down | `half-page-down` |
 | `ctrl-u`, `pgup` | half a page of agents up | `half-page-up` |
-| `enter` | show the agent's subtree in the hierarchy | `focus-subtree` |
+| `s` | show the agent's subtree in the hierarchy | `focus-subtree` |
 | `+`, `=` | more detail in the view beside the list | `zoom-in` |
 | `_` | less detail in the view beside the list | `zoom-out` |
 | `0` | the view's detail chosen from the size again | `zoom-auto` |
@@ -682,7 +682,7 @@ popups and the hints.
 | `l`, `→` | card on the right | `right` |
 | `gg`, `home` | first card | `first` |
 | `G`, `end` | last card | `last` |
-| `enter` | show only the selected agent and its descendants | `focus-subtree` |
+| `s` | show only the selected agent and its descendants | `focus-subtree` |
 | `+`, `=` | more detail on cards | `zoom-in` |
 | `_` | less detail on cards | `zoom-out` |
 | `0` | choose the detail level from the size | `zoom-auto` |
@@ -740,7 +740,6 @@ popups and the hints.
 | `ctrl-d`, `pgdn` | scroll the preview half a page down | `half-page-down` |
 | `ctrl-u`, `pgup` | scroll the preview half a page up | `half-page-up` |
 | `r` | refresh the preview | `refresh` |
-| `enter` | show the agent's screen full size | `full-screen` |
 
 ### Full screen (`screen`)
 
@@ -753,7 +752,7 @@ popups and the hints.
 | `gg`, `home` | the top of the screen | `first` |
 | `G`, `end` | the bottom, the newest lines | `last` |
 | `r` | refresh the screen | `refresh` |
-| `i`, `a` | edit mode: your keys go to the agent; the leave key (ctrl-q) comes back | `take-over` |
+| `enter`, `i`, `a` | open the agent: your keys go to it; the leave key (ctrl-q) comes back | `take-over` |
 | `z`, `esc`, `q` | come back to the interface | `back` |
 | `ctrl-c` | quit volee | `quit` |
 

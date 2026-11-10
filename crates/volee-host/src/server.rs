@@ -68,6 +68,9 @@ pub struct HostConfig {
     pub cwd: PathBuf,
     /// Variables added to the host's own environment.
     pub env: Vec<(String, String)>,
+    /// Variables of the host's environment that the program must not
+    /// inherit, such as the ones that tie a process to another session.
+    pub env_remove: Vec<String>,
     /// The size before any input owner sets one.
     pub size: Size,
     /// The harness profile (ADR 0022).
@@ -78,6 +81,11 @@ pub struct HostConfig {
     pub scrollback: usize,
     /// How long the last screen stays after the program ends.
     pub linger: Duration,
+    /// For a host that only exists while someone uses it, such as a view on
+    /// a session that lives elsewhere (ADR 0027): once nobody has held its
+    /// input for this long, the host ends its program, as a stop does.
+    /// `None`: the program runs until it ends or is stopped.
+    pub idle_exit: Option<Duration>,
 }
 
 /// Why a host could not run.
@@ -151,6 +159,9 @@ pub fn run(config: HostConfig) -> Result<Exit, HostError> {
     for (name, value) in &config.env {
         command.env(name, value);
     }
+    for name in &config.env_remove {
+        command.env_remove(name);
+    }
     let child = pair
         .slave
         .spawn_command(command)
@@ -203,6 +214,7 @@ pub fn run(config: HostConfig) -> Result<Exit, HostError> {
         stop_deadline: None,
         linger_deadline: None,
         resume_deadline: None,
+        idle_since: None,
     };
     let exit = host.serve(&rx);
     let _ = std::fs::remove_file(&socket);
@@ -277,6 +289,8 @@ struct Host {
     linger_deadline: Option<Instant>,
     /// When to send `SIGCONT` after a Ctrl+Z.
     resume_deadline: Option<Instant>,
+    /// Since when nobody holds the input, for `idle_exit`.
+    idle_since: Option<Instant>,
 }
 
 impl Host {
@@ -306,6 +320,7 @@ impl Host {
                     self.signal(Signal::CONT);
                 }
             }
+            self.end_when_idle(now);
             if self.linger_deadline.is_some_and(|deadline| now >= deadline) {
                 break;
             }
@@ -378,6 +393,23 @@ impl Host {
                     self.owner_embedded = false;
                 }
             }
+        }
+    }
+
+    /// Ends the program of a host that nobody has used for `idle_exit`.
+    fn end_when_idle(&mut self, now: Instant) {
+        let Some(limit) = self.config.idle_exit else {
+            return;
+        };
+        if self.owner.is_some() || self.record.exit.is_some() || self.pending_exit.is_some() {
+            self.idle_since = None;
+            return;
+        }
+        let since = *self.idle_since.get_or_insert(now);
+        if now.duration_since(since) >= limit && self.stop_deadline.is_none() {
+            tracing::info!("nobody holds the input any more: ending the program");
+            self.signal(Signal::HUP);
+            self.stop_deadline = Some(now + STOP_GRACE);
         }
     }
 

@@ -504,6 +504,44 @@ method!(
     AttachCommand
 );
 
+/// Parameters of [`Open`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenParams {
+    /// The agent.
+    pub agent: AgentId,
+    /// The columns of the panel that will show its terminal.
+    pub cols: u16,
+    /// Its rows.
+    pub rows: u16,
+}
+
+/// The result of [`Open`]: where the client finds the agent's terminal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Opened {
+    /// The socket of a volee host to connect to: the host the agent runs
+    /// in, or a host that shows its session through the session's own door
+    /// (ADR 0027). `None` when the agent's terminal cannot be shown inside
+    /// the client and [`Attach`] says how to reach it instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket: Option<std::path::PathBuf>,
+    /// Whether the host is a view: closing it ends nothing but the view,
+    /// and it ends by itself once nobody uses it.
+    #[serde(default)]
+    pub view: bool,
+}
+
+method!(
+    /// A terminal on the agent, for a client that shows it inside its own
+    /// screen: the agent's volee host, or a view on the session where it
+    /// runs (a Claude Code background session, a multiplexer pane). Nothing
+    /// is stopped, forked or resumed to get it (ADR 0027). Refused for an
+    /// agent in a terminal volee cannot reach.
+    Open,
+    "agents.open",
+    OpenParams,
+    Opened
+);
+
 method!(
     /// Stops an agent's session; its conversation is kept and can be
     /// resumed. Refused for agents volee did not launch (ADR 0011).
@@ -786,6 +824,7 @@ mod tests {
             Preview::NAME,
             Diff::NAME,
             Attach::NAME,
+            Open::NAME,
             Stop::NAME,
             Adopt::NAME,
             SendMessage::NAME,

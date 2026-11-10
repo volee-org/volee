@@ -1,6 +1,10 @@
 //! The full-screen view of an agent in a volee host, live, and its edit
-//! mode (ADR 0026): `i` or `a` sends your keys to the agent inside volee's
-//! frame, the leave key (Ctrl+Q) gives them back to volee.
+//! mode (ADR 0026): your keys go to the agent inside volee's frame, the
+//! leave key (Ctrl+Q) gives them back to volee.
+//!
+//! An agent that runs in no volee host is opened the same way, through a
+//! view: a host the source starts on the session's own door (ADR 0027).
+//! Leaving a view closes it; the agent keeps running where it runs.
 
 use std::path::PathBuf;
 
@@ -22,7 +26,7 @@ pub(crate) fn screen_area(size: (u16, u16)) -> Rect {
 }
 
 /// The size edit mode gives the agent's terminal.
-fn edit_size(model: &Model) -> Size {
+pub(crate) fn edit_size(model: &Model) -> Size {
     let area = screen_area(model.size);
     Size {
         cols: area.width.max(10),
@@ -30,12 +34,31 @@ fn edit_size(model: &Model) -> Size {
     }
 }
 
-/// The socket of the volee host an agent runs in, when the interface knows
-/// where hosts live.
+/// The socket of an agent's terminal: the one the source opened on it, or
+/// the volee host it runs in, when the interface knows where hosts live.
 pub(crate) fn host_socket(model: &Model, agent: AgentId) -> Option<PathBuf> {
+    if let Some((opened, socket, _)) = &model.door
+        && *opened == agent
+    {
+        return Some(socket.clone());
+    }
     let hosts = model.hosts.as_ref()?;
     let host = model.registry.agent(agent)?.location.host()?;
     Some(hosts.socket(host))
+}
+
+/// Whether the terminal open on `agent` is a view on a session that runs
+/// elsewhere (ADR 0027).
+pub(crate) fn is_view(model: &Model, agent: AgentId) -> bool {
+    matches!(&model.door, Some((opened, _, true)) if *opened == agent)
+}
+
+/// Closes the view open on an agent and comes back to the interface.
+fn close_view(model: &mut Model, effects: &mut Vec<Effect>) {
+    close(model, effects);
+    if model.overlay == Some(Overlay::Screen) {
+        model.overlay = None;
+    }
 }
 
 /// Whether the keys go to an agent.
@@ -104,18 +127,28 @@ pub(crate) fn edit(model: &mut Model, agent: AgentId, effects: &mut Vec<Effect>)
     connect(model, agent, true, effects)
 }
 
-/// Leaves edit mode: the keys come back to volee, the screen stays, live.
+/// Leaves edit mode: the keys come back to volee. The screen of an agent in
+/// a volee host stays, live; a view closes, and its agent keeps running.
 pub(crate) fn leave(model: &mut Model, effects: &mut Vec<Effect>) {
-    if let Some(agent) = model.live.as_ref().map(|live| live.agent) {
+    let Some(agent) = model.live.as_ref().map(|live| live.agent) else {
+        return;
+    };
+    if is_view(model, agent) {
+        let name = model.name_of(agent);
+        close_view(model, effects);
+        model.notify(format!("Left {name}: it keeps running."), false);
+    } else {
         connect(model, agent, false, effects);
     }
 }
 
-/// Closes the live screen, when the full-screen view closes.
+/// Closes the live screen, when the full-screen view closes, and forgets
+/// the terminal the source opened for it.
 pub(crate) fn close(model: &mut Model, effects: &mut Vec<Effect>) {
     if let Some(live) = model.live.take() {
         effects.push(Effect::LiveClose { link: live.link });
     }
+    model.door = None;
 }
 
 /// A key in edit mode: the leave key comes back, every other key goes to
@@ -199,7 +232,7 @@ pub(crate) fn on_resize(model: &mut Model, effects: &mut Vec<Effect>) {
 pub(crate) fn on_msg(model: &mut Model, msg: Msg, effects: &mut Vec<Effect>) -> bool {
     match msg {
         Msg::LiveOpened { link, welcome } => opened(model, link, &welcome),
-        Msg::LiveUpdate { link, update } => updated(model, link, update),
+        Msg::LiveUpdate { link, update } => updated(model, link, update, effects),
         Msg::LiveClosed { link, reason } => closed(model, link, &reason, effects),
         _ => false,
     }
@@ -224,7 +257,12 @@ pub(crate) fn opened(model: &mut Model, link: u64, welcome: &Welcome) -> bool {
 }
 
 /// An update from a host.
-pub(crate) fn updated(model: &mut Model, link: u64, update: Update) -> bool {
+pub(crate) fn updated(
+    model: &mut Model,
+    link: u64,
+    update: Update,
+    effects: &mut Vec<Effect>,
+) -> bool {
     let Some(live) = model.live.as_mut().filter(|live| live.link == link) else {
         return false;
     };
@@ -232,7 +270,25 @@ pub(crate) fn updated(model: &mut Model, link: u64, update: Update) -> bool {
     let agent = live.agent;
     match live.apply(update) {
         Outcome::Drawn => {}
-        Outcome::Exited => {
+        // The program of a view is the door, not the agent: it ends when
+        // the person leaves through it (Ctrl+Z in `claude attach`), and the
+        // agent keeps running.
+        Outcome::Exited { failed } if is_view(model, agent) => {
+            let name = model.name_of(agent);
+            if failed {
+                model.notify(
+                    format!(
+                        "The terminal on {name} closed with an error: its last lines are \
+                         shown. Esc comes back."
+                    ),
+                    true,
+                );
+            } else {
+                close_view(model, effects);
+                model.notify(format!("Left {name}: it keeps running."), false);
+            }
+        }
+        Outcome::Exited { .. } => {
             let name = model.name_of(agent);
             model.notify(format!("{name} has ended."), !was_editing);
         }
@@ -262,6 +318,25 @@ pub(crate) fn closed(
     let ended = live.exited;
     live.closed(reason.to_owned());
     let name = model.name_of(agent);
+    if is_view(model, agent) {
+        // A view that ended with an error stays, to be read.
+        if !ended {
+            close_view(model, effects);
+            let reason = text::clause(reason).to_owned();
+            if never_opened {
+                model.notify(
+                    format!("Cannot open {name}: its terminal does not answer ({reason})."),
+                    true,
+                );
+            } else {
+                model.notify(
+                    format!("The terminal on {name} closed: it keeps running."),
+                    false,
+                );
+            }
+        }
+        return true;
+    }
     if never_opened {
         let reason = text::clause(reason).to_owned();
         if was_editing {
@@ -505,6 +580,7 @@ mod tests {
         assert!(!editing(&model));
         assert_eq!(model.contexts(), [Context::Screen]);
         // Updates of an old connection are dropped.
-        assert!(!updated(&mut model, 7, Update::Output(b"x".to_vec())));
+        let update = Update::Output(b"x".to_vec());
+        assert!(!updated(&mut model, 7, update, &mut Vec::new()));
     }
 }

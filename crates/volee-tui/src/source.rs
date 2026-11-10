@@ -53,6 +53,24 @@ pub trait Source: Send + Sync + 'static {
     /// in another terminal.
     fn attach(&self, agent: AgentId) -> impl Future<Output = Result<TakeOver, SourceError>> + Send;
 
+    /// A terminal on an agent, for the interface to show inside its own
+    /// screen and type into, `size` being the columns and rows of the panel
+    /// that will show it (ADR 0027). Nothing is stopped, forked or resumed
+    /// to get it. Fails with [`SourceError::Unsupported`] when the agent has
+    /// no terminal the source can reach, with what to do instead.
+    fn open(
+        &self,
+        agent: AgentId,
+        size: (u16, u16),
+    ) -> impl Future<Output = Result<Door, SourceError>> + Send {
+        let _ = (agent, size);
+        async {
+            Err(SourceError::Unsupported(
+                "this source cannot open agents".into(),
+            ))
+        }
+    }
+
     /// Marks a message to the person as read. The change comes back as an
     /// event.
     fn mark_read(&self, message: MessageId)
@@ -183,6 +201,23 @@ pub struct Changes {
     pub text: String,
     /// Whether `text` holds only the beginning of a longer diff.
     pub truncated: bool,
+}
+
+/// Where the interface finds an agent's terminal ([`Source::open`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Door {
+    /// A volee host to connect to.
+    Host {
+        /// Its socket.
+        socket: PathBuf,
+        /// Whether it is a view on a session that runs elsewhere, as
+        /// opposed to the host the agent runs in: leaving a view ends
+        /// nothing but the view.
+        view: bool,
+    },
+    /// Not inside the interface: [`Source::attach`] says how to reach it,
+    /// such as bringing its multiplexer pane forward.
+    Elsewhere,
 }
 
 /// How to take over an agent: a program that runs in this terminal until

@@ -14,7 +14,6 @@ use volee_core::event::{Event, EventKind};
 use volee_core::message::{MessageKind, Party};
 use volee_core::role::Role;
 use volee_core::time::Timestamp;
-use volee_core::workspace::Location;
 use volee_core::{Agent, AgentId, MessageId, Registry, ThreadId};
 
 use crate::activity::ActivityLog;
@@ -29,8 +28,8 @@ use crate::live::{Live, LiveInput};
 use crate::preview::{Fit, PreviewScreen};
 use crate::pulses::Pulses;
 use crate::source::{
-    Changes, MissionRequest, NewMission, Outgoing, PaneFocus, SourceError, SpawnRequest, Summary,
-    TakeOver,
+    Changes, Door, MissionRequest, NewMission, Outgoing, PaneFocus, SourceError, SpawnRequest,
+    Summary, TakeOver,
 };
 use crate::text;
 use crate::theme::Theme;
@@ -166,8 +165,8 @@ pub(crate) enum Prompt {
     Quit,
     /// Forget this agent: stop listing it?
     Forget(AgentId),
-    /// This agent runs as a background session that volee only shows:
-    /// adopt it into a host and take it over?
+    /// Move this agent into a volee host, which stops its session and
+    /// resumes it there, then open it? Opening it needs no adoption.
     AdoptAndTakeOver(AgentId),
 }
 
@@ -341,6 +340,14 @@ pub(crate) enum Msg {
         /// The changes, or why they could not be read.
         result: Result<Changes, SourceError>,
     },
+    /// The source opened an agent: where its terminal is, or why it has
+    /// none (ADR 0027).
+    Opened {
+        /// The agent.
+        agent: AgentId,
+        /// Its terminal, or why there is none.
+        result: Result<Door, SourceError>,
+    },
     /// The source said how to take over an agent, or why it cannot.
     TakeOverReady {
         /// The agent.
@@ -444,6 +451,14 @@ pub(crate) enum Effect {
         agent: AgentId,
         /// The full patch rather than the summary.
         full: bool,
+    },
+    /// Ask the source for a terminal on an agent that runs in no volee
+    /// host, to show in a panel of `size` (ADR 0027).
+    Open {
+        /// The agent.
+        agent: AgentId,
+        /// The panel's columns and rows.
+        size: volee_host::Size,
     },
     /// Ask the source how to take over an agent.
     PrepareTakeOver(AgentId),
@@ -605,6 +620,13 @@ pub(crate) struct Model {
     pub(crate) live: Option<Live>,
     /// The number of the last live screen connection.
     pub(crate) next_link: u64,
+    /// The agent the source is opening (ADR 0027).
+    pub(crate) opening: Option<AgentId>,
+    /// The terminal the source opened on the agent shown live, when the
+    /// agent runs in no volee host: its socket, and whether it is a view.
+    pub(crate) door: Option<(AgentId, std::path::PathBuf, bool)>,
+    /// The last click on an agent, to tell a double click.
+    pub(crate) last_click: Option<(AgentId, std::time::Instant)>,
     /// Where volee hosts live, when the source runs agents in them.
     pub(crate) hosts: Option<volee_host::HostDir>,
     /// Why the source stopped, once it has: the screen no longer updates.
@@ -684,6 +706,9 @@ impl Model {
             edit_when_hosted: None,
             live: None,
             next_link: 0,
+            opening: None,
+            door: None,
+            last_click: None,
             hosts: None,
             offline: None,
             settings: Settings::default(),
@@ -1276,6 +1301,7 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         answer @ (Msg::PreviewLoaded { .. }
         | Msg::DiffLoaded { .. }
         | Msg::TakeOverReady { .. }
+        | Msg::Opened { .. }
         | Msg::MessageSent { .. }
         | Msg::MarkedRead(_)
         | Msg::Summarized { .. }
@@ -1406,6 +1432,7 @@ fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool 
                 return false;
             }
         }
+        Msg::Opened { agent, result } => opened(model, agent, result, effects),
         Msg::TakeOverReady { agent, result } => {
             model.pending_take_over = None;
             match result {
@@ -1755,7 +1782,7 @@ pub(crate) fn perform(
         Action::Message => open_composer(model),
         Action::FullScreen => open_full_screen(model, effects),
         Action::Forget => ask_forget(model),
-        Action::Adopt => adopt_selected(model, effects),
+        Action::Adopt => adopt_selected(model),
         Action::ShowWall => show_wall(model, effects),
         Action::Diff => {
             if let Some(agent) = model.selected {
@@ -1883,25 +1910,62 @@ fn zoom(model: &mut Model, context: Context, action: Action) {
     }
 }
 
-/// Takes over the selected agent. A background session cannot be typed
-/// into: volee offers to move it into a host first, then takes it over
-/// (ADR 0023).
+/// Opens the selected agent (ADR 0027).
 fn take_over_selected(model: &mut Model, effects: &mut Vec<Effect>) {
-    let Some(agent) = model.selected else {
-        return;
-    };
-    if model.pending_take_over.is_some() {
+    if let Some(agent) = model.selected {
+        open_agent(model, agent, effects);
+    }
+}
+
+/// Opens an agent: its terminal inside volee, taking your keys. An agent
+/// in a volee host is opened at once; for any other, the source gives a
+/// terminal on the session where it runs, through the session's own door.
+/// Nothing is stopped, forked or adopted for it.
+pub(crate) fn open_agent(model: &mut Model, agent: AgentId, effects: &mut Vec<Effect>) {
+    if model.pending_take_over.is_some() || model.opening.is_some() {
         return;
     }
-    let background = model
-        .registry
-        .agent(agent)
-        .is_some_and(|record| record.location == Location::Background);
-    if background {
-        model.prompt = Some(Prompt::AdoptAndTakeOver(agent));
-    } else if !crate::edit::edit(model, agent, effects) {
-        model.pending_take_over = Some(agent);
-        effects.push(Effect::PrepareTakeOver(agent));
+    if crate::edit::edit(model, agent, effects) {
+        return;
+    }
+    model.opening = Some(agent);
+    effects.push(Effect::Open {
+        agent,
+        size: crate::edit::edit_size(model),
+    });
+}
+
+/// The source answered an [`Effect::Open`].
+fn opened(
+    model: &mut Model,
+    agent: AgentId,
+    result: Result<Door, SourceError>,
+    effects: &mut Vec<Effect>,
+) {
+    let wanted = model.opening.take() == Some(agent);
+    let name = model.name_of(agent);
+    match result {
+        // Asked for, and still there: typed into at once.
+        Ok(Door::Host { socket, view }) if wanted && model.registry.agent(agent).is_some() => {
+            model.select(agent, effects);
+            crate::edit::close(model, effects);
+            model.door = Some((agent, socket, view));
+            crate::edit::edit(model, agent, effects);
+        }
+        Ok(Door::Host { .. }) => {}
+        // A pane only its multiplexer shows: brought forward.
+        Ok(Door::Elsewhere) => {
+            if model.pending_take_over.is_none() {
+                model.pending_take_over = Some(agent);
+                effects.push(Effect::PrepareTakeOver(agent));
+            }
+        }
+        Err(error) => {
+            let reason = error.to_string();
+            // The source's sentences end by themselves.
+            let reason = reason.trim_end_matches('.');
+            model.notify(format!("Cannot open {name}: {reason}."), true);
+        }
     }
 }
 
@@ -1912,15 +1976,21 @@ fn ask_forget(model: &mut Model) {
     }
 }
 
-/// Asks the source to adopt the selected agent into a volee host.
-fn adopt_selected(model: &mut Model, effects: &mut Vec<Effect>) {
-    if let Some(agent) = model.selected {
-        let name = model
-            .registry
-            .agent(agent)
-            .map_or_else(|| agent.short(), |record| record.name.clone());
-        model.notify(format!("Adopting {name}..."), false);
-        effects.push(Effect::Adopt { agent, name });
+/// Asks before adopting the selected agent into a volee host: opening it
+/// needs no adoption, and an adoption restarts its session (ADR 0027).
+fn adopt_selected(model: &mut Model) {
+    let Some(agent) = model.selected else {
+        return;
+    };
+    let hosted = model
+        .registry
+        .agent(agent)
+        .is_some_and(|record| record.location.host().is_some());
+    if hosted {
+        let name = model.name_of(agent);
+        model.notify(format!("{name} already runs in a volee host."), false);
+    } else {
+        model.prompt = Some(Prompt::AdoptAndTakeOver(agent));
     }
 }
 
@@ -2510,6 +2580,9 @@ fn on_overlay_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effe
 }
 
 /// Handles the mouse; returns whether anything changed.
+/// The longest time between the two clicks of a double click.
+const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(450);
+
 fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> bool {
     let (column, row) = (mouse.column, mouse.row);
     if model.prompt.is_some() {
@@ -2523,6 +2596,16 @@ fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> 
             Some(Hit::Agent(agent, pane)) => {
                 model.focus = pane;
                 model.select(agent, effects);
+                // A second click on the same agent, soon after: open it.
+                let now = std::time::Instant::now();
+                let double = model.last_click.take().is_some_and(|(last, at)| {
+                    last == agent && now.duration_since(at) <= DOUBLE_CLICK
+                });
+                if double {
+                    open_agent(model, agent, effects);
+                } else {
+                    model.last_click = Some((agent, now));
+                }
                 true
             }
             Some(Hit::Tab(tab)) => {

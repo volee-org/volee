@@ -61,7 +61,8 @@ fn outlook(agent: &Agent) -> String {
     if !agent.managed() {
         return format!(
             "volee did not launch {name}, so nothing hands it this message: {name} sees it only if \
-             it reads its messages with volee's MCP tools, or once you adopt it."
+             it reads its messages with volee's MCP tools. To talk to it now, open it and type \
+             there: `volee attach {name}`, or enter in the interface."
         );
     }
     if agent.state.is_live() {

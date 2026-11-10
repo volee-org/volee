@@ -527,6 +527,8 @@ mod tests {
                 "=my work".into()
             ])
         );
+        // tmux has no command that shows one pane alone.
+        assert_eq!(tmux.view_command("my work:%1"), None);
     }
 
     #[test]

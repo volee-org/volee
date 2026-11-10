@@ -23,8 +23,8 @@ use volee_proto::replica::{self, Feed, FeedEnd, ReplicaError, Updates};
 use volee_proto::rpc;
 
 use crate::source::{
-    Changes, MissionRequest, NewMission, Outgoing, PaneFocus, Source, SourceError, SpawnRequest,
-    Subscription, Summary, TakeOver,
+    Changes, Door, MissionRequest, NewMission, Outgoing, PaneFocus, Source, SourceError,
+    SpawnRequest, Subscription, Summary, TakeOver,
 };
 
 /// What the interface says once the daemon is gone.
@@ -175,6 +175,25 @@ impl Source for DaemonSource {
                 steps: focus.steps,
                 attach: focus.attach,
             }),
+        })
+    }
+
+    async fn open(&self, agent: AgentId, size: (u16, u16)) -> Result<Door, SourceError> {
+        let opened = self
+            .client
+            .call::<volee_proto::methods::Open>(volee_proto::methods::OpenParams {
+                agent,
+                cols: size.0,
+                rows: size.1,
+            })
+            .await
+            .map_err(|error| failure(error, "this volee daemon cannot open agents yet"))?;
+        Ok(match opened.socket {
+            Some(socket) => Door::Host {
+                socket,
+                view: opened.view,
+            },
+            None => Door::Elsewhere,
         })
     }
 

@@ -123,7 +123,8 @@ impl Agent {
     /// one of volee's hosts, as an adopted agent does
     /// ([ADR 0023](https://volee-org.github.io/volee/adr/0023-every-agent-on-the-machine.html)).
     /// volee hands messages to such an agent, stops it and resumes it; any
-    /// other agent is read only.
+    /// other agent is the person's to drive, in the terminal volee opens on
+    /// it ([`Agent::watched`]).
     pub fn managed(&self) -> bool {
         self.launched_by != LaunchedBy::Outside || self.location.host().is_some()
     }

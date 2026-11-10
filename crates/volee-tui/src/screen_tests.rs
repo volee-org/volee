@@ -160,8 +160,7 @@ fn zoom_dots() {
 #[test]
 fn focused_subtree() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
-    type_text(&demo, &mut model, "'n");
-    keys(&demo, &mut model, &[KeyCode::Enter]);
+    type_text(&demo, &mut model, "'ns");
     assert_snapshot!(draw(&model));
 }
 

@@ -28,6 +28,7 @@ mod setup;
 mod sqlite;
 mod state;
 mod tidy;
+mod views;
 mod watchers;
 
 pub use clock::{Clock, ManualClock, SystemClock};
