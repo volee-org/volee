@@ -333,7 +333,7 @@ async fn claim(shared: &Arc<Shared>, agent: AgentId) -> Result<LaunchGuard, Daem
         && launch::host_runs(shared, &host)
     {
         return Err(DaemonError::Refused(format!(
-            "{name} still runs in its volee host: press a to take it over"
+            "{name} still runs in its volee host: press i in volee to type into it"
         )));
     }
     shared
@@ -527,7 +527,7 @@ async fn adoption(
     }
     if why == Rehost::Adopt && record.location.host().is_some() && record.state.is_live() {
         return Err(DaemonError::Refused(format!(
-            "{} already runs in a volee host: press a to take it over",
+            "{} already runs in a volee host: press i in volee to type into it",
             record.name
         )));
     }

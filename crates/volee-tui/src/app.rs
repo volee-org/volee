@@ -1498,7 +1498,7 @@ fn on_window_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -
                 }
                 Ok(()) => model.notify(
                     format!(
-                        "Adopted {name}: it continues in a volee host. Press a to take it over."
+                        "Adopted {name}: it continues in a volee host. Press i to type into it."
                     ),
                     false,
                 ),
