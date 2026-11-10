@@ -402,9 +402,9 @@ gone without recording an end.
 Every command takes `--dir` to use another directory of hosts than
 `<state>/hosts` (`~/.local/state/volee/hosts` by default). Hosts keep there
 a socket, a record and a log each, readable only by you.
-`volee host wall --ids <id>,<id>` shows only
-these hosts; the interface opens the wall this way on the agents of its
-list ([the wall](interface.md#the-wall-of-screens)).
+`volee host wall --ids <id>,<id>` shows only these hosts. The interface
+has a wall of its own, on every agent of its list that runs, in a volee
+host or not ([the wall](interface.md#the-wall-of-screens)).
 
 ## Isolated runs
 

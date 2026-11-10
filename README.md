@@ -46,9 +46,10 @@ code, not by trust.
   its terminal and its exact screen, so it survives closed windows, the
   interface and the daemon. Open one with `enter` or `volee attach`, come
   back with `Ctrl+Q`.
-- Previews, a full-screen view and a wall of live screens show each agent
-  volee hosts exactly as its terminal does, status line included, without
-  resizing it.
+- A preview, a full-screen view and a wall of screens show every agent
+  that runs. An agent volee hosts shows live, exactly as its terminal
+  does, status line included, without being resized; any other shows as
+  its harness or its multiplexer replays it.
 - volee launches Claude Code and OpenCode agents. A session you started
   yourself opens the same way, where it runs: `enter` or a double click
   puts a terminal on it inside volee (`claude attach` on a background

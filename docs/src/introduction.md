@@ -32,8 +32,8 @@ do*. volee shows what they do.
 - **Missions**: give a goal across several repositories to a coordinator
   agent; volee supervises its workers and checks that the work was delivered.
 - **Every screen, exactly**: each agent volee launches runs in a volee host
-  that holds its terminal, so its preview is the exact screen, and a wall
-  shows the screens of many agents at once. The agent survives closed
+  that holds its terminal, so its preview is its live screen, and a wall
+  shows the screens of every agent that runs, hosted by volee or not. The agent survives closed
   windows, the interface and the daemon, and comes back after a reboot.
 - **Your terminal, your tools**: open an agent with a key, type into it
   inside volee and come back with `Ctrl+Q`; open its worktree in your

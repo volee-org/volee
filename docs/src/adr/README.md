@@ -34,6 +34,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0025](0025-key-sequences-a-leader-and-which-key-popups.md) | Key sequences, a leader key and which-key popups; every key configurable | Proposed |
 | [0026](0026-edit-mode-types-into-an-agent-inside-volee.md) | Edit mode types into an agent inside volee; the host encodes keys | Proposed |
 | [0027](0027-open-without-owning.md) | volee opens every agent where it runs, and its list shows what runs (amends 0023, 0026, 0021 and 0004) | Accepted |
+| [0028](0028-one-emulator-and-the-wall-inside-the-interface.md) | One emulator for every screen, and the wall inside the interface (completes 0020; amends 0021, 0026 and 0027) | Accepted |
 
 ## Not built yet
 
@@ -57,15 +58,6 @@ to come:
   cannot remove a worktree without delivery evidence.
 - [0012](0012-language-license-and-scope.md): the Homebrew formula and the
   crates.io release.
-- [0020](0020-libghostty-vt-emulates-terminals.md): the interface still draws
-  previews and the full-screen view with the `vt100` crate, fed with the
-  host's snapshot; hosts and the wall already use
-  libghostty-vt.
-- [0021](0021-take-over-watch-and-the-wall-of-screens.md): the wall of
-  screens is a full-screen view that `5` opens over the interface (it runs
-  as `volee host wall`), not a tab of the top bar, and it shows up to nine
-  tiles per page whatever the size of the terminal. Ctrl+Q cannot be moved
-  to another key yet.
 - [0022](0022-harness-profiles.md): profiles for Codex CLI, Gemini CLI,
   Grok Build and the others the ADR lists. Only Claude Code and OpenCode
   (measured on OpenCode 2.2.5) have one; other programs run in a host with
@@ -77,8 +69,11 @@ to come:
   found through `claude agents --json`), and adopting them (`codex resume`,
   `gemini --resume`), which needs their profiles.
 - [0027](0027-open-without-owning.md): a door for a session in a tmux pane
-  (the pane is brought forward instead), for an OpenCode agent started
-  elsewhere, and the mouse inside an opened agent.
+  (the pane is brought forward instead) and for an OpenCode agent started
+  elsewhere.
+- [0028](0028-one-emulator-and-the-wall-inside-the-interface.md): a tile or
+  a preview that leaves out a harness's prompt and status lines, to show
+  more of the conversation in a small space.
 - [0024](0024-agents-come-back-after-a-reboot.md): with
   `resume_after_reboot = false`, interrupted agents show as stopped and
   resume when you write to them, rather than offering a resume action.

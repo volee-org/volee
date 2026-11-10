@@ -84,15 +84,22 @@ keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
 | Journeys | Scripts that drive the real interface by keyboard with a real agent are the gate of every release | Done |
 | The list is what runs | One row per session the harness lists, finished background sessions included; a session that is gone leaves the list; a one-off run of a few seconds never shows ([ADR 0027](../adr/0027-open-without-owning.md)) | Done |
 | Open without owning | `enter`, a double click or `i` opens any agent where it runs, inside volee: `claude attach` on a background session, `tuios pane-view` on a tuios pane; nothing is stopped or restarted ([ADR 0027](../adr/0027-open-without-owning.md)) | Done |
-| Release | v0.11.0 | Next |
+| Release | v0.11.0 | Done: v0.11.0 |
+
+## 0.12: one emulator, and a wall of every agent
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| One emulator | The preview, the full-screen view, edit mode and the wall read every screen through libghostty-vt; `vt100` is gone ([ADR 0028](../adr/0028-one-emulator-and-the-wall-inside-the-interface.md)) | Done |
+| Live preview | The preview of an agent in a volee host is its live screen, on the connection the full-screen view and edit mode use | Done |
+| The mouse | In edit mode, clicks, drags and the wheel reach a program that asked for them, on its own cells | Done |
+| The wall, inside | `5` shows the screen of every agent of the list that runs, in a volee host or not, as many to a page as the terminal shows at a readable size; what is opened from the wall comes back to it | Done |
+| Release | v0.12.0 | Next |
 
 ## Next
 
 In this order, one release per step:
 
-- One terminal component for the preview, the full-screen view, the wall
-  and edit mode, emulated by libghostty-vt everywhere, with the mouse
-  forwarded to an opened agent.
 - Other harnesses: finding their agents wherever they run, a door on each,
   and `volee run -- <command>` to start any program in a host.
 - Missions as a lead agent runs them, with the rules that make a lead a
