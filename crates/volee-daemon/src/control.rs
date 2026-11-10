@@ -71,6 +71,11 @@ impl Sessions {
         self.listed.get(key)
     }
 
+    /// Every session of the last listings.
+    pub(crate) fn all(&self) -> impl Iterator<Item = &ListedSession> {
+        self.listed.values()
+    }
+
     /// The session to act on for `agent`: its current session as the last
     /// listing showed it, else the session the daemon started or resumed for
     /// it, known by the handle the launch printed (`expected`).

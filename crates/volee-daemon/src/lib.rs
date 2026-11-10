@@ -13,6 +13,7 @@ mod control;
 mod discovery;
 mod error;
 mod evidence;
+mod files;
 mod handlers;
 mod join;
 mod launch;

@@ -229,6 +229,13 @@ impl Daemon {
             Ok(count) => tracing::info!(count, "joined agents wait for their MCP server"),
             Err(error) => tracing::warn!(%error, "cannot stop the joined agents"),
         }
+        // What agents that left before this daemon started left behind.
+        let swept = crate::files::sweep(&config.paths, state.registry());
+        if swept > 0 {
+            tracing::info!(count = swept, "removed the files of agents that are gone");
+        }
+        // Subscribed before anything can commit: no removal is missed.
+        let removals = state.subscribe();
         let (shutdown, mut stop) = watch::channel(false);
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
@@ -280,6 +287,7 @@ impl Daemon {
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
         let resumer = crate::resume::spawn(&shared);
+        let files = crate::files::spawn(&shared, removals);
         // Agents a reboot interrupted come back in new hosts (ADR 0024).
         tokio::spawn(crate::resume::resume_interrupted(Arc::clone(&shared)));
         tracing::info!(socket = ?listener.local_addr().ok(), "volee daemon ready");
@@ -298,7 +306,7 @@ impl Daemon {
         }
         tracing::info!("volee daemon stopping");
         connections.abort_all();
-        for task in [refresher, resumer].into_iter().flatten() {
+        for task in [refresher, resumer, Some(files)].into_iter().flatten() {
             task.abort();
         }
         Ok(())

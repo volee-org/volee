@@ -27,7 +27,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 
 use volee_core::harness::HarnessKind;
-use volee_core::reconcile::{Listing, reconcile};
+use volee_core::reconcile::{Listing, continued, reconcile, settling};
 use volee_core::role::LaunchedBy;
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
@@ -297,6 +297,15 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
             Err(error) => tracing::error!(%error, "cannot link sessions started by volee"),
         }
     }
+    // Before the listing replaces the previous one: a session that changed
+    // its id inside the same process keeps its agent.
+    let moved = continued(state.registry(), state.sessions().all(), &listing, now);
+    if !moved.is_empty() {
+        match state.commit(moved) {
+            Ok(_) => linked = true,
+            Err(error) => tracing::error!(%error, "cannot follow sessions that changed their id"),
+        }
+    }
     state.sessions_mut().record(&listing);
     let mut events = reconcile(state.registry(), &listing, now, || state.new_agent_id());
     // An agent whose volee host runs stays in it, even when Claude Code moved
@@ -334,6 +343,9 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
             Err(error) => tracing::error!(%error, "cannot record stalled launches"),
         }
     }
+    // A session that waits to become an agent is a change under way: the
+    // next listing comes soon, not after the longest wait.
+    changed |= settling(state.registry(), &listing, now);
     Listed {
         succeeded: true,
         changed,

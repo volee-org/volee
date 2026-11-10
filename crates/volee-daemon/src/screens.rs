@@ -16,8 +16,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use volee_core::harness::HarnessKind;
-use volee_core::reconcile::reconcile;
-use volee_core::role::LaunchedBy;
+use volee_core::reconcile::{gone, reconcile};
 use volee_core::state::AgentState;
 use volee_core::{AgentId, Event, EventKind};
 
@@ -226,7 +225,8 @@ async fn opencode_processes(shared: &Arc<Shared>) {
     state.sessions_mut().record(&listing);
     let mut events = reconcile(state.registry(), &listing, now, || state.new_agent_id());
     // The listing is never complete: an agent started elsewhere whose
-    // process is gone stops here.
+    // process is gone stops here, then leaves the list like any agent volee
+    // only watches (ADR 0027).
     let running: HashSet<_> = listing
         .sessions
         .iter()
@@ -234,14 +234,15 @@ async fn opencode_processes(shared: &Arc<Shared>) {
         .collect();
     let kind = volee_harness::opencode::kind();
     for agent in state.registry().agents() {
-        let gone = agent.harness == kind
-            && agent.launched_by == LaunchedBy::Outside
-            && agent.location.host().is_none()
-            && agent.state.is_live()
+        let absent = agent.harness == kind
+            && agent.watched()
             && agent
                 .current_session()
                 .is_some_and(|link| !running.contains(&link.key));
-        if gone {
+        if !absent {
+            continue;
+        }
+        if agent.state.is_live() {
             events.push(Event::new(
                 now,
                 EventKind::StateChanged {
@@ -250,6 +251,8 @@ async fn opencode_processes(shared: &Arc<Shared>) {
                     detail: Some("its process ended".to_owned()),
                 },
             ));
+        } else {
+            events.extend(gone(agent, now));
         }
     }
     if !events.is_empty()

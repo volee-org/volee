@@ -214,6 +214,9 @@ fn agent_of(kind: &EventKind) -> Option<AgentId> {
         | EventKind::ModelChanged { agent, .. }
         | EventKind::DeliveryUpdated { agent, .. }
         | EventKind::AgentForgotten { agent }
+        | EventKind::AgentRenamed { agent, .. }
+        | EventKind::SessionReleased { agent, .. }
+        | EventKind::AgentExpired { agent }
         | EventKind::StopRequested { agent }
         | EventKind::MembershipChanged { agent, .. } => Some(*agent),
         EventKind::WorkerAssessed { worker, .. } => Some(*worker),

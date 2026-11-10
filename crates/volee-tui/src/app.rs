@@ -900,15 +900,17 @@ impl Model {
                 EventKind::ActivityRecorded { agent, .. } => {
                     self.activity.record(*agent, event.at);
                 }
-                EventKind::AgentForgotten { agent } => {
-                    self.letters.release(*agent);
-                    self.activity.forget(*agent);
-                    self.subtree.retain(|root| root != agent);
-                    if self.previous == Some(*agent) {
-                        self.previous = None;
+                kind => {
+                    // Forgotten by the person, or gone with its session.
+                    if let Some(agent) = kind.removed_agent() {
+                        self.letters.release(agent);
+                        self.activity.forget(agent);
+                        self.subtree.retain(|root| *root != agent);
+                        if self.previous == Some(agent) {
+                            self.previous = None;
+                        }
                     }
                 }
-                _ => {}
             }
         }
     }

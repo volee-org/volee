@@ -15,6 +15,7 @@ use tokio::net::UnixListener;
 use volee_core::harness::SessionKey;
 use volee_core::reconcile::ListedSession;
 use volee_core::state::AgentState;
+use volee_core::time::Timestamp;
 use volee_core::{Event, Registry};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_harness::Harness;
@@ -36,6 +37,8 @@ fn session(id: &str, name: &str, state: AgentState, alive: bool) -> ListedSessio
 struct Running {
     socket: PathBuf,
     harness: Arc<FakeHarness>,
+    clock: Arc<ManualClock>,
+    paths: Paths,
     _dir: tempfile::TempDir,
 }
 
@@ -65,10 +68,11 @@ fn start_cadence(watched: Duration, longest: Duration, idle: Duration) -> Runnin
     let socket = paths.socket.clone();
     let listener = UnixListener::bind(&socket).unwrap();
     let harness = Arc::new(FakeHarness::default());
+    let clock = Arc::new(ManualClock::at(10_000));
     let config = Config {
-        paths,
+        paths: paths.clone(),
         log: Box::new(MemoryLog::with(vec![])),
-        clock: Arc::new(ManualClock::at(10_000)),
+        clock: Arc::clone(&clock) as Arc<dyn volee_daemon::Clock>,
         harnesses: vec![],
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
@@ -84,6 +88,8 @@ fn start_cadence(watched: Duration, longest: Duration, idle: Duration) -> Runnin
     Running {
         socket,
         harness,
+        clock,
+        paths,
         _dir: dir,
     }
 }
@@ -220,9 +226,14 @@ async fn listed_sessions_become_agents_that_follow_their_state() {
         session("aaaa1111-0000", "invoices", AgentState::Working, true),
         session("bbbb2222-0000", "docs", AgentState::Done, false),
     ]);
-    let registry = until(&daemon.socket, |r| r.agents().count() == 1).await;
-    // A finished session nobody owns is history, not an agent.
-    assert!(registry.agents().all(|agent| agent.name != "docs"));
+    let registry = until(&daemon.socket, |r| r.agents().count() == 2).await;
+    // A finished session its harness still lists is one the person can
+    // still open: it is an agent too (ADR 0027).
+    let docs = registry
+        .agents()
+        .find(|agent| agent.name == "docs")
+        .unwrap();
+    assert_eq!(docs.state, AgentState::Done);
     let invoices = registry
         .agents()
         .find(|agent| agent.name == "invoices")
@@ -245,7 +256,155 @@ async fn listed_sessions_become_agents_that_follow_their_state() {
             .any(|agent| agent.name == "invoices" && agent.state == AgentState::Idle)
     })
     .await;
-    assert_eq!(registry.agents().count(), 1, "no duplicate agents");
+    assert_eq!(registry.agents().count(), 2, "no duplicate agents");
+}
+
+#[tokio::test]
+async fn a_session_that_is_no_longer_listed_leaves_the_list_after_a_while() {
+    let daemon = start();
+    daemon.harness.set(vec![
+        session("aaaa1111-0000", "invoices", AgentState::Working, true),
+        session("bbbb2222-0000", "docs", AgentState::Stopped, false),
+    ]);
+    let registry = until(&daemon.socket, |r| r.agents().count() == 2).await;
+    let invoices = registry
+        .agents()
+        .find(|agent| agent.name == "invoices")
+        .unwrap()
+        .id;
+    // What an earlier volee may have left for it.
+    let files = daemon.paths.agent_dir(invoices);
+    std::fs::create_dir_all(&files).unwrap();
+    std::fs::write(files.join("settings.json"), "{}").unwrap();
+
+    // The person removes both sessions. The one that ran is shown lost for
+    // a while; the one that had finished long ago has nothing left to say.
+    daemon.clock.advance(120_000);
+    daemon.harness.set(vec![]);
+    let registry = until(&daemon.socket, |r| r.agents().count() == 1).await;
+    let left = registry.agents().next().unwrap();
+    assert_eq!(left.id, invoices);
+    assert_eq!(left.state, AgentState::Lost);
+
+    // A minute later it is gone too, and so are its files.
+    daemon.clock.advance(60_000);
+    until(&daemon.socket, |r| r.agents().count() == 0).await;
+    eventually("the files of an agent that left are removed", || {
+        !files.exists()
+    })
+    .await;
+
+    // Listed again, the session comes back as an agent.
+    daemon.harness.set(vec![session(
+        "aaaa1111-0000",
+        "invoices",
+        AgentState::Idle,
+        true,
+    )]);
+    let registry = until(&daemon.socket, |r| r.agents().count() == 1).await;
+    assert_ne!(registry.agents().next().unwrap().id, invoices);
+}
+
+/// An interactive session, as Claude Code lists one a person runs in a
+/// terminal: no handle, its process and when it started.
+fn in_terminal(id: &str, pid: u32, started: i64) -> ListedSession {
+    let mut session = ListedSession::new(SessionKey::claude(id), "/work/alpha", AgentState::Idle);
+    session.name = Some("alpha-f7".to_owned());
+    session.alive = true;
+    session.pid = Some(pid);
+    session.started_at = Some(Timestamp::from_millis(started));
+    session
+}
+
+#[tokio::test]
+async fn a_session_that_changes_its_id_in_place_keeps_its_row() {
+    // The clock stands at ten seconds: a session started at zero has settled.
+    let daemon = start();
+    daemon
+        .harness
+        .set(vec![in_terminal("first-0000-0000", 29_159, 0)]);
+    let registry = until(&daemon.socket, |r| r.agents().count() == 1).await;
+    let agent = registry.agents().next().unwrap().id;
+
+    // `/clear` in that terminal: the same process under another session id.
+    daemon
+        .harness
+        .set(vec![in_terminal("second-000-0000", 29_159, 0)]);
+    let second = SessionKey::claude("second-000-0000");
+    let registry = until(&daemon.socket, |r| r.agent_for_session(&second).is_some()).await;
+    assert_eq!(
+        registry.agents().count(),
+        1,
+        "the same row, not a second one"
+    );
+    let kept = registry.agent(agent).unwrap();
+    assert_eq!(kept.sessions.len(), 1);
+    assert_eq!(kept.state, AgentState::Idle);
+}
+
+#[tokio::test]
+async fn a_run_of_a_few_seconds_never_becomes_an_agent() {
+    let daemon = start();
+    // Started one second ago, by a program that wants one answer.
+    daemon
+        .harness
+        .set(vec![in_terminal("blip-0000-0000", 77, 9_000)]);
+    let listed = daemon.harness.listings();
+    eventually("discovery listed it a few times", || {
+        daemon.harness.listings() >= listed + 3
+    })
+    .await;
+    assert_eq!(registry(&daemon.socket).await.agents().count(), 0);
+    // Gone before it settled: nothing ever showed.
+    daemon.harness.set(vec![]);
+    daemon.clock.advance(60_000);
+    let listed = daemon.harness.listings();
+    eventually("discovery listed again", || {
+        daemon.harness.listings() >= listed + 2
+    })
+    .await;
+    let events = Client::connect(&daemon.socket)
+        .await
+        .unwrap()
+        .call::<EventsSince>(SinceParams::default())
+        .await
+        .unwrap()
+        .events;
+    assert_eq!(events.len(), 0, "{events:?}");
+
+    // A session that lasts shows once it has lived ten seconds.
+    daemon
+        .harness
+        .set(vec![in_terminal("real-0000-0000", 78, 70_000)]);
+    daemon.clock.advance(9_000);
+    let listed = daemon.harness.listings();
+    eventually("discovery listed the young session", || {
+        daemon.harness.listings() >= listed + 2
+    })
+    .await;
+    assert_eq!(registry(&daemon.socket).await.agents().count(), 0);
+    daemon.clock.advance(1_000);
+    until(&daemon.socket, |r| r.agents().count() == 1).await;
+}
+
+#[tokio::test]
+async fn a_session_about_to_show_keeps_discovery_at_the_short_wait() {
+    // Watched: 10 ms after a change, an hour while nothing changes.
+    let daemon = start_backing_off(Duration::from_millis(10), HOUR);
+    daemon
+        .harness
+        .set(vec![in_terminal("young-000-0000", 78, 9_000)]);
+    let _interface = subscribe(&daemon.socket, true).await;
+    // Nothing changes in the registry, yet the listings go on: without
+    // them the session would show an hour late.
+    eventually("discovery keeps listing while a session settles", || {
+        daemon.harness.listings() >= 6
+    })
+    .await;
+    // Ten seconds after it started.
+    daemon.clock.advance(9_000);
+    until(&daemon.socket, |r| r.agents().count() == 1).await;
+    quiet(&daemon.harness).await;
 }
 
 #[tokio::test]

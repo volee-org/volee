@@ -251,10 +251,10 @@ impl Refresher {
     }
 
     fn on_event(self: &Arc<Self>, kind: &EventKind) {
-        if let EventKind::AgentForgotten { agent } = kind {
+        if let Some(agent) = kind.removed_agent() {
             let mut book = self.book();
-            book.recorded.remove(agent);
-            book.queue.remove(agent);
+            book.recorded.remove(&agent);
+            book.queue.remove(&agent);
             return;
         }
         let wanted = {

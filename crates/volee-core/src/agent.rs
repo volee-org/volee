@@ -6,7 +6,7 @@ use crate::delivery::Delivery;
 use crate::harness::{HarnessKind, SessionKey, SessionOrigin};
 use crate::ids::{AgentId, MissionId};
 use crate::role::{LaunchedBy, Role};
-use crate::state::AgentState;
+use crate::state::{AgentState, StateCategory};
 use crate::time::Timestamp;
 use crate::workspace::{Location, Workspace};
 
@@ -128,8 +128,106 @@ impl Agent {
         self.launched_by != LaunchedBy::Outside || self.location.host().is_some()
     }
 
+    /// Whether volee only watches the agent
+    /// ([ADR 0027](https://volee-org.github.io/volee/adr/0027-open-without-owning.html)):
+    /// someone else started it, it runs in none of volee's hosts, and volee
+    /// knows it by a session its harness lists. Such an agent is one session:
+    /// it carries the session's name, and it leaves the registry when its
+    /// harness no longer lists the session.
+    pub fn watched(&self) -> bool {
+        self.launched_by == LaunchedBy::Outside
+            && self.location.host().is_none()
+            && !self.sessions.is_empty()
+    }
+
+    /// Where the agent sorts when agents are listed by urgency: the family
+    /// of its state, except that a watched agent that failed sorts with the
+    /// stopped ones. A failure calls for the person who launched the work
+    /// through volee; a session started elsewhere that ended, however it
+    /// ended, is history.
+    pub fn urgency(&self) -> StateCategory {
+        match self.state.category() {
+            StateCategory::Failed if self.watched() => StateCategory::Stopped,
+            category => category,
+        }
+    }
+
     /// Whether `key` is one of the agent's sessions, current or past.
     pub fn owns_session(&self, key: &SessionKey) -> bool {
         self.sessions.iter().any(|link| &link.key == key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::{Event, EventKind};
+    use crate::registry::Registry;
+    use ulid::Ulid;
+
+    fn agent(launched_by: LaunchedBy, location: Location, session: Option<&str>) -> Agent {
+        let id = AgentId::from_ulid(Ulid::from_parts(7, 7));
+        let at = Timestamp::from_millis(1);
+        let mut registry = Registry::new();
+        registry
+            .apply(&Event::new(
+                at,
+                EventKind::AgentRegistered {
+                    agent: id,
+                    name: "a".into(),
+                    role: Role::Independent,
+                    harness: HarnessKind::ClaudeCode,
+                    launched_by,
+                    parent: None,
+                    mission: None,
+                    workspace: Workspace::at("/work"),
+                    location,
+                },
+            ))
+            .unwrap();
+        if let Some(session) = session {
+            registry
+                .apply(&Event::new(
+                    at,
+                    EventKind::SessionLinked {
+                        agent: id,
+                        session: SessionKey::claude(session),
+                        origin: SessionOrigin::Discovered,
+                    },
+                ))
+                .unwrap();
+        }
+        registry.agent(id).unwrap().clone()
+    }
+
+    #[test]
+    fn only_a_session_started_elsewhere_and_outside_a_host_is_watched() {
+        let host = Location::Host { id: "h".into() };
+        assert!(agent(LaunchedBy::Outside, Location::Background, Some("s")).watched());
+        assert!(agent(LaunchedBy::Outside, Location::Terminal, Some("s")).watched());
+        assert!(
+            !agent(LaunchedBy::Human, Location::Background, Some("s")).watched(),
+            "volee launched it"
+        );
+        assert!(
+            !agent(LaunchedBy::Outside, host, Some("s")).watched(),
+            "adopted into a host"
+        );
+        assert!(
+            !agent(LaunchedBy::Outside, Location::Unknown, None).watched(),
+            "joined through the MCP server: no session"
+        );
+    }
+
+    #[test]
+    fn a_watched_failure_sorts_with_the_stopped() {
+        let mut watched = agent(LaunchedBy::Outside, Location::Background, Some("s"));
+        watched.state = AgentState::Failed;
+        assert_eq!(watched.urgency(), StateCategory::Stopped);
+        watched.state = AgentState::Working;
+        assert_eq!(watched.urgency(), StateCategory::Working);
+        let mut launched = agent(LaunchedBy::Human, Location::Background, Some("s"));
+        launched.state = AgentState::Failed;
+        assert_eq!(launched.urgency(), StateCategory::Failed);
     }
 }

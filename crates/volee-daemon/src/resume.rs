@@ -215,13 +215,19 @@ struct Plan {
 /// Resumes `agent` with its pending messages. `Ok(None)` when it no longer
 /// needs it (a hook or another resume got there first).
 async fn resume(shared: &Arc<Shared>, agent: AgentId) -> Result<Option<usize>, DaemonError> {
-    let opencode = shared
-        .state
-        .lock()
-        .await
-        .registry()
-        .agent(agent)
-        .is_some_and(|record| record.harness == volee_harness::opencode::kind());
+    let opencode = {
+        let state = shared.state.lock().await;
+        let registry = state.registry();
+        let Some(record) = registry.agent(agent) else {
+            return Ok(None);
+        };
+        // Every agent that stops comes here, and most have nothing waiting:
+        // those claim nothing and get no file written.
+        if !needs_resume(registry, record) {
+            return Ok(None);
+        }
+        record.harness == volee_harness::opencode::kind()
+    };
     // A conversation whose host still runs, or that another path is
     // launching, gets no second host: its hooks deliver the messages.
     let Ok(_claimed) = claim(shared, agent).await else {

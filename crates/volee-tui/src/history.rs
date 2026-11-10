@@ -271,10 +271,11 @@ impl History {
                     lane.mark(at, MarkKind::Verdict(*verdict));
                 }
             }
-            EventKind::AgentForgotten { agent } => {
-                self.lanes.remove(agent);
+            kind => {
+                if let Some(agent) = kind.removed_agent() {
+                    self.lanes.remove(&agent);
+                }
             }
-            _ => {}
         }
     }
 
