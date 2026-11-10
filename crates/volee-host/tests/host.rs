@@ -233,6 +233,30 @@ fn keys_and_pastes_are_encoded_by_the_host() {
 }
 
 #[test]
+fn keys_sent_together_reach_the_program_in_one_read() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dir = HostDir::new(root.path().join("hosts"));
+    // Reads once, as a program that tells a burst from typing does.
+    let script = "stty raw -echo; n=$(dd bs=1024 count=1 2>/dev/null | wc -c | tr -d ' '); \
+                  stty sane; echo; echo \"read $n\"; sleep 5";
+    let host = start(&dir, "burst", &["sh", "-c", script]);
+
+    let owner = Connection::open_embedded(&dir.socket("burst"), SIZE, "test").expect("connect");
+    // Let the program reach its read.
+    thread::sleep(Duration::from_millis(300));
+    let sender = owner.sender().expect("sender");
+    for key in "abcdefghijklmnopqrst".chars() {
+        sender.key(&press(&key.to_string(), false)).expect("key");
+    }
+    let mut watch = Watch::start(&dir.socket("burst"), "test").expect("watch");
+    watch_until(&mut watch, |w| screen_has(w, "read "));
+    assert!(screen_has(&mut watch, "read 20"), "{:?}", watch.text());
+
+    sender.stop().expect("stop");
+    host.join().expect("host thread");
+}
+
+#[test]
 fn a_program_that_suspends_itself_on_ctrl_z_is_resumed() {
     let root = tempfile::tempdir().expect("tempdir");
     let dir = HostDir::new(root.path().join("hosts"));

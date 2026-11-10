@@ -151,6 +151,14 @@ impl Screen {
         keys::encode_key(&self.terminal, input)
     }
 
+    /// The kitty keyboard protocol flags the program turned on (0 when it
+    /// uses the usual encoding), for diagnostics.
+    pub fn keyboard_flags(&self) -> u8 {
+        self.terminal
+            .kitty_keyboard_flags()
+            .map_or(0, |flags| flags.bits())
+    }
+
     /// The bytes for pasted text: in bracketed paste when the program turned
     /// it on, with control characters made harmless.
     pub fn encode_paste(&self, text: &str) -> Result<Vec<u8>, Error> {

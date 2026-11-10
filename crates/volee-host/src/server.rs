@@ -37,6 +37,11 @@ const EXIT_DRAIN: Duration = Duration::from_millis(500);
 const STUCK_AFTER: Duration = Duration::from_secs(30);
 /// How long a client has to say hello.
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
+/// Input that arrives within this of the previous input goes out in the same
+/// write.
+const KEY_BURST: Duration = Duration::from_millis(3);
+/// The most input gathered into one write.
+const WRITE_BATCH: usize = 64 * 1024;
 /// How long after a Ctrl+Z the program gets `SIGCONT`. A program that
 /// suspends itself on Ctrl+Z (Claude Code does) waits for a shell to resume
 /// it; in a host there is none, so the host does, once the program has had
@@ -384,6 +389,19 @@ impl Host {
                 if press.ctrl && !press.alt && press.key.eq_ignore_ascii_case("z") {
                     self.resume_soon();
                 }
+                // Named keys and shortcuts only: what people type stays out
+                // of the log.
+                if press.key.chars().count() > 1 || press.ctrl || press.alt {
+                    tracing::debug!(
+                        key = %press.key,
+                        ctrl = press.ctrl,
+                        alt = press.alt,
+                        shift = press.shift,
+                        kitty = self.screen.keyboard_flags(),
+                        bytes = ?String::from_utf8_lossy(&bytes),
+                        "key"
+                    );
+                }
                 let _ = self.input.send(bytes);
             }
             Ok(_) => tracing::debug!(key = %press.key, "a key with no encoding"),
@@ -411,6 +429,7 @@ impl Host {
                     .is_some_and(|client| client.state == ClientState::Live)
             });
         if !owner_answers && !replies.is_empty() && self.record.exit.is_none() {
+            tracing::debug!(replies = ?String::from_utf8_lossy(&replies), "answered the program's queries");
             let _ = self.input.send(replies);
         }
         let signals = self.screen.take_signals();
@@ -697,7 +716,18 @@ fn spawn_waiter(mut child: Box<dyn portable_pty::Child + Send + Sync>, tx: Sende
 fn spawn_writer(mut writer: Box<dyn Write + Send>) -> Sender<Vec<u8>> {
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
     thread::spawn(move || {
-        for bytes in rx {
+        while let Ok(mut bytes) = rx.recv() {
+            // Keys that arrive together go out in one write, as a terminal
+            // sends a burst (text a tool types, a paste without bracketed
+            // paste): programs such as Claude Code tell a paste from typing
+            // by that, and a burst cut into single keys made Claude Code take
+            // the Enter that followed as part of the text.
+            while bytes.len() < WRITE_BATCH {
+                match rx.recv_timeout(KEY_BURST) {
+                    Ok(more) => bytes.extend(more),
+                    Err(_) => break,
+                }
+            }
             if writer
                 .write_all(&bytes)
                 .and_then(|()| writer.flush())
