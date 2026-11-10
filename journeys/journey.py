@@ -91,6 +91,8 @@ class Journey:
         self.agents = []
         self.branches = []
         self.background = []
+        # Names of the sessions the journey started by hand, in a pane.
+        self.by_hand = []
 
     # ---- output -----------------------------------------------------------------
 
@@ -183,6 +185,43 @@ class Journey:
         except json.JSONDecodeError:
             return []
 
+    def claude_session(self, name):
+        """The session Claude Code lists under exactly `name`, if any."""
+        return next((session for session in self.claude_sessions()
+                     if session.get("name") == name), None)
+
+    def background_session(self, name, prompt):
+        """Starts a Claude Code background session by hand, in the sandbox, as a
+        person would outside volee, and waits until its first turn is over. Returns
+        what Claude Code lists for it."""
+        self.background.append(name)
+        started = self.claude("--bg", "--model", self.model, "--name", name, "--", prompt,
+                              cwd=self.sandbox)
+        if started.returncode != 0:
+            self.say((started.stdout + started.stderr).strip()[:300])
+            return None
+
+        def settled():
+            session = self.claude_session(name)
+            return session if session and session.get("state") in ("idle", "done") else None
+        return self.wait(settled, 120, 2)
+
+    def views(self):
+        """The views the journey's daemon holds open now (ADR 0027)."""
+        directory = os.path.join(self.vars.get("VOLEE_STATE_DIR", ""), "views")
+        try:
+            return sorted(os.listdir(directory))
+        except OSError:
+            return []
+
+    def session_of(self, agent):
+        """The id of the harness session a row of `volee ls --json` stands for."""
+        sessions = (agent or {}).get("sessions") or []
+        if not sessions:
+            return None
+        key = sessions[-1].get("key", sessions[-1])
+        return key.get("id") if isinstance(key, dict) else None
+
     # ---- the interface, in a tuios window -----------------------------------------
 
     def tuios(self, *args):
@@ -227,6 +266,9 @@ class Journey:
     def select(self, name):
         """Selects the agent called `name` with the filter, and checks that the
         selected row is that agent's: no key must ever go to another agent."""
+        # A filter left by an earlier call is cleared first, or the name would be
+        # typed after it.
+        self.keys("Escape", 0.3)
         self.keys("/")
         self.type(name)
         self.keys("Enter", 1.0)
@@ -280,8 +322,16 @@ class Journey:
         status = self.run([own, "daemon", "status"], env=self.clean).stdout
         if not status.startswith("volee daemon "):
             return
-        for name in self.agents:
-            self.run([own, "forget", name], env=self.clean)
+        # A volee from before 0.11 keeps the rows of sessions that are gone, one per
+        # session id: by id, since several rows may carry the same name.
+        names = set(self.agents + self.background + self.by_hand)
+        try:
+            data = json.loads(self.run([own, "ls", "--json"], env=self.clean).stdout or "[]")
+        except json.JSONDecodeError:
+            return
+        for agent in data if isinstance(data, list) else data.get("agents", []):
+            if agent.get("name") in names:
+                self.run([own, "forget", agent["id"]], env=self.clean)
 
     def remove_branches(self):
         """Removes the worktrees and branches the journey made in the sandbox."""
