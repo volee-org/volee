@@ -66,6 +66,23 @@ The commands below release `0.2.0`: replace it with your version.
 > **v0.1.0**, the first release, needs no version change: the workspace is
 > already at `0.1.0`. Skip `cargo set-version` in step 2.
 
+### 0. Run the journeys
+
+A release ships only what a person can do with it. Before anything else, on
+the commit of `main` you are about to release, run the
+[journeys](journeys/README.md): the real interface, driven by keyboard, with a
+real agent.
+
+```sh
+cargo build --release --locked -p volee-cli
+python3 journeys/edit_mode.py --volee target/release/volee --sandbox <trusted repository>
+python3 journeys/old_host.py --volee target/release/volee --old-volee <an older volee> --sandbox <trusted repository>
+```
+
+Every check must pass. A failed check is a bug to fix on `main` first, never
+a note in the release. A pull request that changes what a person does in the
+interface adds or updates the journey that covers it.
+
 ### 1. Choose the version
 
 volee follows [Semantic Versioning](https://semver.org). While it is 0.x, a
@@ -194,6 +211,13 @@ docker run --rm ubuntu:24.04 sh -c '
   apt-get update -qq && apt-get install -y -qq ca-certificates curl xz-utils >/dev/null &&
   curl --proto "=https" --tlsv1.2 -LsSf https://github.com/volee-org/volee/releases/download/v0.2.0/volee-cli-installer.sh | sh &&
   ~/.local/bin/volee --version'
+```
+
+Then run the journey of the installed version, which uses your own daemon and
+your own list of agents:
+
+```sh
+python3 journeys/installed.py --sandbox <trusted repository> --expect 0.2.0
 ```
 
 Finally, check that the [installation guide](docs/src/guide/installation.md)
