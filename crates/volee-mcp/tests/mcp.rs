@@ -493,6 +493,7 @@ async fn the_coordinator_closes_its_mission_after_reporting() {
             agent: agent(11),
             event: "stop".into(),
             payload: serde_json::json!({}),
+            pid: None,
         })
         .await
         .unwrap();

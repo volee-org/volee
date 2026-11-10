@@ -493,6 +493,7 @@ async fn a_change_worker_is_judged_only_on_evidence_checked_after_it_stopped() {
             agent: agent(WORKER),
             event: "stop".into(),
             payload: serde_json::json!({ "last_assistant_message": "Done." }),
+            pid: None,
         })
         .await
         .unwrap();

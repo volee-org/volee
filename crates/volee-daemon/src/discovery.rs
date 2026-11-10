@@ -298,7 +298,10 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
         }
     }
     state.sessions_mut().record(&listing);
-    let events = reconcile(state.registry(), &listing, now, || state.new_agent_id());
+    let mut events = reconcile(state.registry(), &listing, now, || state.new_agent_id());
+    // An agent whose volee host runs stays in it, even when Claude Code moved
+    // its conversation to a background process that the host shows (ADR 0026).
+    events.retain(|event| !leaves_running_host(shared, state.registry(), event));
     let mut changed = linked;
     if !events.is_empty() {
         let count = events.len();
@@ -390,6 +393,18 @@ fn stalled_launches(
         ));
     }
     events
+}
+
+/// Whether `event` moves an agent out of a volee host that still runs.
+fn leaves_running_host(shared: &Shared, registry: &volee_core::Registry, event: &Event) -> bool {
+    let EventKind::LocationChanged { agent, location } = &event.kind else {
+        return false;
+    };
+    location.host().is_none()
+        && registry
+            .agent(*agent)
+            .and_then(|record| record.location.host())
+            .is_some_and(|host| crate::launch::host_runs(shared, host))
 }
 
 /// Links the sessions the daemon started or resumed, recognized by the

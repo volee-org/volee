@@ -12,6 +12,7 @@ use libghostty_vt::terminal::{
 };
 
 use crate::Error;
+use crate::keys::{self, KeyInput};
 
 /// How volee answers a version query (XTVERSION) when it answers for the
 /// person's terminal.
@@ -142,6 +143,26 @@ impl Screen {
             self.terminal.cols().unwrap_or(0),
             self.terminal.rows().unwrap_or(0),
         )
+    }
+
+    /// The bytes for a key, encoded the way the program asked: keyboard
+    /// protocol (legacy or kitty), cursor and keypad modes.
+    pub fn encode_key(&self, input: &KeyInput) -> Result<Vec<u8>, Error> {
+        keys::encode_key(&self.terminal, input)
+    }
+
+    /// The kitty keyboard protocol flags the program turned on (0 when it
+    /// uses the usual encoding), for diagnostics.
+    pub fn keyboard_flags(&self) -> u8 {
+        self.terminal
+            .kitty_keyboard_flags()
+            .map_or(0, |flags| flags.bits())
+    }
+
+    /// The bytes for pasted text: in bracketed paste when the program turned
+    /// it on, with control characters made harmless.
+    pub fn encode_paste(&self, text: &str) -> Result<Vec<u8>, Error> {
+        keys::encode_paste(&self.terminal, text)
     }
 
     /// The window title the program set, if any.

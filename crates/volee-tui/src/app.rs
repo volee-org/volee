@@ -25,6 +25,7 @@ use crate::keymap::{Action, Context, KeyCombo, Keymap, Resolved};
 use crate::launch::LaunchDialog;
 use crate::layout::{Mode, ScreenLayout};
 use crate::letters::Letters;
+use crate::live::{Live, LiveInput};
 use crate::preview::{Fit, PreviewScreen};
 use crate::pulses::Pulses;
 use crate::source::{
@@ -407,6 +408,27 @@ pub(crate) enum Msg {
         /// How it went.
         result: Result<(), SourceError>,
     },
+    /// A volee host welcomed a live screen's connection.
+    LiveOpened {
+        /// Which connection.
+        link: u64,
+        /// The host's welcome.
+        welcome: Box<volee_host::Welcome>,
+    },
+    /// A volee host sent a live screen an update.
+    LiveUpdate {
+        /// Which connection.
+        link: u64,
+        /// The update.
+        update: volee_host::Update,
+    },
+    /// A live screen's connection ended, or could not open.
+    LiveClosed {
+        /// Which connection.
+        link: u64,
+        /// Why.
+        reason: String,
+    },
 }
 
 /// What the run loop must do after an update.
@@ -466,6 +488,30 @@ pub(crate) enum Effect {
     },
     /// Keep the theme chosen in the picker.
     SaveTheme(String),
+    /// Connect to an agent's volee host for its live screen: as a watcher,
+    /// or as the input owner of edit mode, of `size` (ADR 0026).
+    LiveOpen {
+        /// The connection's number.
+        link: u64,
+        /// The host's socket.
+        socket: std::path::PathBuf,
+        /// Edit mode: take the input and give the agent `size`.
+        edit: bool,
+        /// The panel's size, for edit mode.
+        size: volee_host::Size,
+    },
+    /// Send keys, a paste or a size to a live screen's host.
+    LiveSend {
+        /// The connection.
+        link: u64,
+        /// What to send.
+        input: LiveInput,
+    },
+    /// Close a live screen's connection.
+    LiveClose {
+        /// The connection.
+        link: u64,
+    },
     /// Run a tool on a worktree: in this terminal, or detached in a window
     /// of its own.
     RunTool {
@@ -552,6 +598,15 @@ pub(crate) struct Model {
     pub(crate) pending_take_over: Option<AgentId>,
     /// The agent to take over as soon as its adoption is done.
     pub(crate) take_over_after_adopt: Option<AgentId>,
+    /// The agent to edit as soon as the interface sees it in a volee host.
+    pub(crate) edit_when_hosted: Option<AgentId>,
+    /// The live screen of the full-screen view, for an agent in a volee
+    /// host (ADR 0026).
+    pub(crate) live: Option<Live>,
+    /// The number of the last live screen connection.
+    pub(crate) next_link: u64,
+    /// Where volee hosts live, when the source runs agents in them.
+    pub(crate) hosts: Option<volee_host::HostDir>,
     /// Why the source stopped, once it has: the screen no longer updates.
     pub(crate) offline: Option<String>,
     /// What the configuration and the machine offer.
@@ -626,6 +681,10 @@ impl Model {
             draft: None,
             pending_take_over: None,
             take_over_after_adopt: None,
+            edit_when_hosted: None,
+            live: None,
+            next_link: 0,
+            hosts: None,
             offline: None,
             settings: Settings::default(),
             awaited: None,
@@ -698,6 +757,9 @@ impl Model {
             Some(Overlay::Inbox(_)) => return vec![Context::Inbox],
             Some(Overlay::Tools(_)) => return vec![Context::Tools],
             Some(Overlay::Launch(_)) => return vec![Context::Dialog],
+            Some(Overlay::Screen) if crate::edit::editing(self) => {
+                return vec![Context::Attached];
+            }
             Some(Overlay::Screen) => return vec![Context::Screen],
             None => {}
         }
@@ -772,7 +834,7 @@ impl Model {
     }
 
     /// Selects an agent, remembering the previous one.
-    fn select(&mut self, agent: AgentId, effects: &mut Vec<Effect>) {
+    pub(crate) fn select(&mut self, agent: AgentId, effects: &mut Vec<Effect>) {
         if self.selected == Some(agent) {
             return;
         }
@@ -790,7 +852,7 @@ impl Model {
         self.request_preview(agent, effects);
     }
 
-    fn request_preview(&mut self, agent: AgentId, effects: &mut Vec<Effect>) {
+    pub(crate) fn request_preview(&mut self, agent: AgentId, effects: &mut Vec<Effect>) {
         if self.preview.agent != Some(agent) {
             self.preview = PreviewState {
                 agent: Some(agent),
@@ -1176,13 +1238,26 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::Key(key) => {
             if key.kind == KeyEventKind::Release {
                 dirty = false;
+            } else if crate::edit::editing(model) {
+                crate::edit::on_key(model, &key, &mut effects);
             } else {
                 on_key(model, KeyCombo::from_event(&key), &mut effects);
             }
         }
+        // In edit mode the mouse does nothing: the keys are the agent's.
+        Msg::Mouse(_) if crate::edit::editing(model) => dirty = false,
         Msg::Mouse(mouse) => dirty = on_mouse(model, mouse, &mut effects),
+        Msg::Paste(text) if crate::edit::editing(model) => {
+            crate::edit::on_paste(model, &text, &mut effects);
+        }
         Msg::Paste(text) => dirty = on_paste(model, &text),
-        Msg::Resize { width, height } => model.size = (width, height),
+        Msg::Resize { width, height } => {
+            model.size = (width, height);
+            crate::edit::on_resize(model, &mut effects);
+        }
+        live @ (Msg::LiveOpened { .. } | Msg::LiveUpdate { .. } | Msg::LiveClosed { .. }) => {
+            dirty = crate::edit::on_msg(model, live, &mut effects);
+        }
         Msg::Tick(now) => dirty = on_tick(model, now, &mut effects),
         Msg::Events(events) => model.apply(events),
         Msg::SourceClosed(reason) => {
@@ -1207,16 +1282,7 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         | Msg::ToolFinished { .. }
         | Msg::Forgot { .. }
         | Msg::Adopted { .. }) => dirty = on_answer(model, answer, &mut effects),
-        Msg::Resumed { agent, result } => {
-            let name = model.name_of(agent);
-            match result {
-                Ok(()) => model.notify(format!("Back from {name}."), false),
-                Err(error) => model.notify(format!("Could not take over {name}: {error}"), true),
-            }
-            if let Some(selected) = model.selected {
-                model.request_preview(selected, &mut effects);
-            }
-        }
+        Msg::Resumed { agent, result } => resumed(model, agent, result, &mut effects),
         Msg::PaneFocused {
             agent,
             focus,
@@ -1259,6 +1325,7 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             }
         }
     }
+    crate::edit::settle(model, &mut effects);
     model.relayout();
     // The layout pass may have moved the selection (the agent left, or the
     // filter hides it): the preview follows, and shows nothing once nothing
@@ -1272,6 +1339,23 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     }
     model.dirty |= dirty;
     effects
+}
+
+/// The interface is back after a take over in the terminal.
+fn resumed(
+    model: &mut Model,
+    agent: AgentId,
+    result: Result<(), String>,
+    effects: &mut Vec<Effect>,
+) {
+    let name = model.name_of(agent);
+    match result {
+        Ok(()) => model.notify(format!("Back from {name}."), false),
+        Err(error) => model.notify(format!("Could not take over {name}: {error}"), true),
+    }
+    if let Some(selected) = model.selected {
+        model.request_preview(selected, effects);
+    }
 }
 
 /// An answer of the source to a request; returns whether anything changed.
@@ -1403,6 +1487,10 @@ fn on_window_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -
         } => {
             let take_over = model.take_over_after_adopt.take() == Some(agent);
             match result {
+                Ok(()) if take_over && model.hosts.is_some() => {
+                    model.notify(format!("Adopted {name}: opening it in edit mode..."), false);
+                    model.edit_when_hosted = Some(agent);
+                }
                 Ok(()) if take_over && model.pending_take_over.is_none() => {
                     model.notify(format!("Adopted {name}: taking it over..."), false);
                     model.pending_take_over = Some(agent);
@@ -1410,7 +1498,7 @@ fn on_window_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -
                 }
                 Ok(()) => model.notify(
                     format!(
-                        "Adopted {name}: it continues in a volee host. Press a to take it over."
+                        "Adopted {name}: it continues in a volee host. Press i to type into it."
                     ),
                     false,
                 ),
@@ -1465,7 +1553,11 @@ fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool
         .preview
         .requested_at
         .is_none_or(|at| at.millis_until(now) >= PREVIEW_REFRESH_MILLIS);
-    let wanted = !model.preview.loading && !model.preview.unsupported && model.offline.is_none();
+    let live = model
+        .selected
+        .is_some_and(|agent| crate::edit::live_for(model, agent));
+    let wanted =
+        !model.preview.loading && !model.preview.unsupported && model.offline.is_none() && !live;
     if busy
         && wanted
         && due
@@ -1625,7 +1717,12 @@ pub(crate) fn perform(
         return;
     }
     match action {
-        Action::Back => back(model),
+        Action::Back => {
+            if model.overlay == Some(Overlay::Screen) {
+                crate::edit::close(model, effects);
+            }
+            back(model);
+        }
         Action::NextPane | Action::PreviousPane => {
             let panes = model.panes();
             let index = panes
@@ -1702,6 +1799,10 @@ pub(crate) fn perform(
                 open_diff(model, agent, full, effects);
             } else if let Some(agent) = model.selected {
                 model.request_preview(agent, effects);
+                // The live screen connects again: a new snapshot.
+                if model.overlay == Some(Overlay::Screen) {
+                    crate::edit::watch(model, agent, effects);
+                }
             }
         }
         // The other actions belong to prompts and the composer, handled
@@ -1796,7 +1897,7 @@ fn take_over_selected(model: &mut Model, effects: &mut Vec<Effect>) {
         .is_some_and(|record| record.location == Location::Background);
     if background {
         model.prompt = Some(Prompt::AdoptAndTakeOver(agent));
-    } else {
+    } else if !crate::edit::edit(model, agent, effects) {
         model.pending_take_over = Some(agent);
         effects.push(Effect::PrepareTakeOver(agent));
     }
@@ -1869,6 +1970,7 @@ fn open_full_screen(model: &mut Model, effects: &mut Vec<Effect>) {
         model.overlay = Some(Overlay::Screen);
         model.preview.scroll = 0;
         model.request_preview(agent, effects);
+        crate::edit::watch(model, agent, effects);
     }
 }
 
@@ -2086,22 +2188,7 @@ fn navigate(model: &mut Model, context: Context, action: Action, effects: &mut V
                 _ => scroll.saturating_sub(1),
             };
         }
-        Context::Screen => {
-            // The screen fills the terminal but its frame, its margin and
-            // the hint line: it scrolls until its first line is in sight.
-            let (columns, rows) = model.size;
-            let lines = model.preview.screen.as_ref().map_or(0, |screen| {
-                screen.line_count(columns.saturating_sub(3), Fit::Wrap)
-            });
-            let most = lines.saturating_sub(rows.saturating_sub(3));
-            let scroll = &mut model.preview.scroll;
-            *scroll = match action {
-                Action::Up => scroll.saturating_add(1).min(most),
-                Action::First => most,
-                Action::Last => 0,
-                _ => scroll.saturating_sub(1),
-            };
-        }
+        Context::Screen => scroll_screen(model, action),
         Context::Hierarchy => {
             let target = match action {
                 Action::First => model.scene.first(),
@@ -2260,6 +2347,52 @@ fn half_page(model: &mut Model, context: Context, action: Action, effects: &mut 
     for _ in 0..rows {
         perform(model, context, step, effects);
     }
+}
+
+/// Scrolls the agent's screen in the full-screen view.
+fn scroll_screen(model: &mut Model, action: Action) {
+    // A live screen drawn cell for cell scrolls through its history.
+    let area = crate::edit::screen_area(model.size);
+    if let Some(live) = model
+        .live
+        .as_mut()
+        .filter(|live| live.has_screen() && live.fits(area))
+    {
+        match action {
+            Action::Up => {
+                live.scroll_by(1);
+            }
+            Action::Down => {
+                live.scroll_by(-1);
+            }
+            Action::First => {
+                live.scroll_by(isize::MAX);
+            }
+            _ => live.scroll_to_bottom(),
+        }
+        return;
+    }
+    // The screen fills the terminal but its frame, its margin and
+    // the hint line: it scrolls until its first line is in sight.
+    let (columns, rows) = model.size;
+    let live = model
+        .live
+        .as_ref()
+        .and_then(|live| live.preview(&model.theme));
+    let lines = live
+        .as_ref()
+        .or(model.preview.screen.as_ref())
+        .map_or(0, |screen| {
+            screen.line_count(columns.saturating_sub(3), Fit::Wrap)
+        });
+    let most = lines.saturating_sub(rows.saturating_sub(3));
+    let scroll = &mut model.preview.scroll;
+    *scroll = match action {
+        Action::Up => scroll.saturating_add(1).min(most),
+        Action::First => most,
+        Action::Last => 0,
+        _ => scroll.saturating_sub(1),
+    };
 }
 
 /// `n` and `N`: the next or previous agent of the filtered list, round it.

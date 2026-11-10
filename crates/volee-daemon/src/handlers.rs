@@ -351,6 +351,9 @@ async fn hook_ingest(
     params: HookParams,
     delivery: Delivery,
 ) -> Result<HookReply, DaemonError> {
+    // A replayed hook's process is gone: it is the agent's.
+    let foreign = delivery == Delivery::Live
+        && crate::lineage::foreign(shared, params.agent, params.pid).await;
     let payload = hook_payload(&params)?;
     let signal = interpret(&payload);
     let mut state = shared.state.lock().await;
@@ -360,6 +363,18 @@ async fn hook_ingest(
         .agent(agent)
         .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {agent}")))?
         .clone();
+    // A hook from outside the agent's volee host comes from a background
+    // session that inherited its settings (ADR 0026). One that starts a
+    // session continues the agent's conversation elsewhere: Claude Code's
+    // agents view moved it to the background, and the host now shows it.
+    // Any other counts only for the agent's current session.
+    if foreign
+        && !matches!(signal, HookSignal::SessionStarted { .. })
+        && !crate::lineage::is_current(&current, &payload.session_id)
+    {
+        tracing::info!(%agent, session = %payload.session_id, "a hook of another session than the agent's, ignored");
+        return Ok(HookReply::default());
+    }
     let now = state.now();
     let mut events = Vec::new();
     let mut reply = HookReply::default();
@@ -534,6 +549,20 @@ fn summarize(text: &str, max: usize) -> String {
 }
 
 async fn hook_wait(shared: &Arc<Shared>, params: WaitParams) -> Result<WaitReply, DaemonError> {
+    // A session that inherited the agent's hooks takes its messages only
+    // when it carries the agent's conversation.
+    if crate::lineage::foreign(shared, params.agent, params.pid).await {
+        let state = shared.state.lock().await;
+        let current = state.registry().agent(params.agent).is_some_and(|agent| {
+            params
+                .session
+                .as_deref()
+                .is_some_and(|session| crate::lineage::is_current(agent, session))
+        });
+        if !current {
+            return Ok(WaitReply { text: None });
+        }
+    }
     let (token, receiver) = {
         let mut state = shared.state.lock().await;
         require_agent(&state, params.agent)?;

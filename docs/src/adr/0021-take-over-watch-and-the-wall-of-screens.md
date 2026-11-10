@@ -1,7 +1,12 @@
 # 0021. Take over with `a` or `volee attach`, leave with Ctrl+Q, watch on a wall
 
-- Status: Accepted
+- Status: Accepted; taking over from the interface amended by [0026](0026-edit-mode-types-into-an-agent-inside-volee.md)
 - Date: 2026-11-08
+
+Since [ADR 0026](0026-edit-mode-types-into-an-agent-inside-volee.md), `i`
+or `a` in the interface enters edit mode inside volee's full-screen view
+instead of handing over the whole terminal, and that view is live. `volee
+attach`, the leave key, the size rules and the wall stay as below.
 
 ## Context
 

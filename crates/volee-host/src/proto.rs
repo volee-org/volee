@@ -36,6 +36,14 @@ pub enum Kind {
     Event = 7,
     /// Client to host, empty: end the program.
     Stop = 8,
+    /// Input owner to host, JSON [`KeyPress`]: a key for the host to encode
+    /// the way the program asked (keyboard protocol, cursor mode). Only to a
+    /// host whose [`Welcome::keys`] is true; an older host would drop the
+    /// connection.
+    Key = 9,
+    /// Input owner to host, UTF-8 text pasted, for the host to wrap in
+    /// bracketed paste when the program turned it on. Same condition.
+    Paste = 10,
 }
 
 impl Kind {
@@ -49,6 +57,8 @@ impl Kind {
             6 => Self::Resize,
             7 => Self::Event,
             8 => Self::Stop,
+            9 => Self::Key,
+            10 => Self::Paste,
             _ => return None,
         })
     }
@@ -141,6 +151,11 @@ pub struct Hello {
     pub size: Size,
     /// Who it is, for logs (`volee 0.8.0 attach`).
     pub client: String,
+    /// The client draws the screen in its own window and answers none of
+    /// the program's queries, so the host answers them even while this
+    /// client owns the input (ADR 0026). Older clients leave it out.
+    #[serde(default)]
+    pub embedded: bool,
 }
 
 /// How a program ended.
@@ -177,6 +192,29 @@ pub struct Welcome {
     pub exit: Option<Exit>,
     /// Whether this client got the input.
     pub input: bool,
+    /// Whether the host encodes [`Kind::Key`] and [`Kind::Paste`] frames.
+    /// Hosts started before this field existed leave it out.
+    #[serde(default)]
+    pub keys: bool,
+}
+
+/// A key the input owner pressed (ADR 0026).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyPress {
+    /// One character (`a`, `A`, `/`, `é`), or a key's name: `enter`, `tab`,
+    /// `backspace`, `escape`, `space`, `up`, `down`, `left`, `right`,
+    /// `home`, `end`, `pageup`, `pagedown`, `insert`, `delete`, `f1` to
+    /// `f12`.
+    pub key: String,
+    /// Shift was held.
+    #[serde(default)]
+    pub shift: bool,
+    /// Alt (Option) was held.
+    #[serde(default)]
+    pub alt: bool,
+    /// Control was held.
+    #[serde(default)]
+    pub ctrl: bool,
 }
 
 /// Something that happened, sent to every client.

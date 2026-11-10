@@ -260,6 +260,7 @@ async fn a_stop_hook_hands_pending_messages_to_the_agent() {
             agent: agent(2),
             event: "stop".into(),
             payload: serde_json::json!({ "last_assistant_message": "Done." }),
+            pid: None,
         })
         .await
         .unwrap();
@@ -285,6 +286,7 @@ async fn a_stop_without_messages_marks_the_agent_done() {
             agent: agent(2),
             event: "stop".into(),
             payload: serde_json::json!({ "last_assistant_message": "\nAll tests pass.\nBye" }),
+            pid: None,
         })
         .await
         .unwrap();
@@ -304,6 +306,8 @@ async fn a_waiting_agent_wakes_up_when_a_message_arrives() {
             .call::<HookWait>(WaitParams {
                 agent: agent(2),
                 timeout_ms: 5_000,
+                pid: None,
+                session: None,
             })
             .await
     });
@@ -334,6 +338,8 @@ async fn a_wait_times_out_without_a_message() {
         .call::<HookWait>(WaitParams {
             agent: agent(2),
             timeout_ms: 50,
+            pid: None,
+            session: None,
         })
         .await
         .unwrap();
@@ -350,6 +356,7 @@ async fn forgetting_an_unknown_agent_is_not_found() {
             agent: agent(3),
             event: "session-end".into(),
             payload: serde_json::json!({ "hook_event_name": "SessionEnd", "reason": "other" }),
+            pid: None,
         })
         .await
         .unwrap();

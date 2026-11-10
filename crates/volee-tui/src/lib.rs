@@ -29,6 +29,7 @@ mod clock;
 mod commands;
 mod daemon;
 mod demo;
+mod edit;
 mod editor;
 mod history;
 mod inbox;
@@ -36,6 +37,8 @@ pub mod keymap;
 mod launch;
 mod layout;
 mod letters;
+mod live;
+mod live_links;
 mod preview;
 mod pulses;
 mod run;
@@ -100,6 +103,10 @@ pub struct Options {
     /// Keeps a theme chosen in the picker; without one, the choice lasts
     /// for the session.
     pub theme_saver: Option<ThemeSaver>,
+    /// Where volee hosts live (`<state>/hosts`): the full-screen view then
+    /// shows agents in hosts live, and edit mode types into them (ADR 0026).
+    /// Without it, taking over runs the source's command in the terminal.
+    pub hosts: Option<std::path::PathBuf>,
 }
 
 impl Default for Options {
@@ -115,6 +122,7 @@ impl Default for Options {
             themes: Vec::new(),
             theme_name: Theme::DEFAULT.to_owned(),
             theme_saver: None,
+            hosts: None,
         }
     }
 }
@@ -156,6 +164,7 @@ pub async fn run(source: impl Source, options: Options) -> Result<(), TuiError> 
     model.settings.claude_code_available = claude_code_available;
     model.themes = themes::ThemeMenu::new(options.themes, &options.theme_name);
     model.themes.saver = options.theme_saver;
+    model.hosts = options.hosts.map(volee_host::HostDir::new);
     if options.reduced_motion {
         model.motion = Motion::Reduced;
     }

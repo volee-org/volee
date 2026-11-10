@@ -16,6 +16,7 @@ mod evidence;
 mod handlers;
 mod join;
 mod launch;
+mod lineage;
 mod log;
 mod missions;
 mod panes;

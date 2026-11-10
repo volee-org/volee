@@ -705,6 +705,14 @@ pub struct HookParams {
     pub event: String,
     /// The JSON payload the harness passed to the hook.
     pub payload: serde_json::Value,
+    /// The process that ran the hook command: the harness, or a shell it
+    /// started. For an agent in a volee host, a hook from another process
+    /// (a background session that inherited the agent's settings) counts
+    /// only when it starts a session, which then continues the agent's
+    /// conversation, or belongs to the agent's current session. Older
+    /// clients leave it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
 }
 
 /// The result of [`HookIngest`].
@@ -725,12 +733,20 @@ method!(
 );
 
 /// Parameters of [`HookWait`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitParams {
     /// The idle agent waiting for a message.
     pub agent: AgentId,
     /// How long to wait before giving up, in milliseconds.
     pub timeout_ms: u64,
+    /// The process that ran the hook command, as in [`HookParams::pid`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    /// The harness's session the hook belongs to, from its payload. A wait
+    /// from another process than a hosted agent's program counts only for
+    /// the agent's current session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
 }
 
 /// The result of [`HookWait`].

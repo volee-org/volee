@@ -233,7 +233,13 @@ impl PreviewScreen {
         };
         let mut parser = vt100::Parser::new(rows, columns, 0);
         parser.process(output.as_bytes());
-        let screen = parser.screen();
+        Self::from_screen(parser.screen(), depth)
+    }
+
+    /// The cells of an emulated screen, as the preview keeps them.
+    pub(crate) fn from_screen(screen: &vt100::Screen, depth: ColorDepth) -> Self {
+        let (rows, columns) = screen.size();
+        let (height, width) = (rows.get(), columns.get());
         let mut parsed: Vec<Vec<PreviewCell>> = Vec::with_capacity(usize::from(height));
         let mut last_text = 0;
         for row in 0..height {
@@ -427,7 +433,7 @@ fn color(color: vt100::Color, depth: ColorDepth) -> Option<Color> {
     }
 }
 
-fn style_of(cell: &vt100::Cell, depth: ColorDepth) -> Style {
+pub(crate) fn style_of(cell: &vt100::Cell, depth: ColorDepth) -> Style {
     let mut style = Style {
         fg: color(cell.fgcolor(), depth),
         bg: color(cell.bgcolor(), depth),

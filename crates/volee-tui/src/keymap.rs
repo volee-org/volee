@@ -570,8 +570,9 @@ contexts! {
     Themes => "themes", "Theme picker",
     /// The wall of live screens.
     Wall => "wall", "Wall of screens",
-    /// An agent you took over, in a volee host.
-    Attached => "attached", "Taken over",
+    /// Edit mode, and an agent taken over from a shell: every key goes to
+    /// the agent but the leave key.
+    Attached => "attached", "Edit mode",
 }
 
 impl Context {
@@ -658,6 +659,41 @@ pub(crate) struct Next {
     pub(crate) label: &'static str,
     /// Whether it opens a group of longer sequences.
     pub(crate) group: bool,
+}
+
+/// Keys of actions shown together, short: `1-4`, `ctrl-d/u`, `tab/⇧tab`,
+/// `h/j/k/l`.
+pub(crate) fn join_keys(keys: &[String]) -> String {
+    let digits: Vec<u32> = keys
+        .iter()
+        .filter_map(|key| {
+            let mut chars = key.chars();
+            match (chars.next(), chars.next()) {
+                (Some(c), None) => c.to_digit(10),
+                _ => None,
+            }
+        })
+        .collect();
+    if keys.len() > 2
+        && digits.len() == keys.len()
+        && digits.windows(2).all(|pair| pair[1] == pair[0] + 1)
+    {
+        return format!("{}-{}", digits[0], digits[digits.len() - 1]);
+    }
+    let rests: Vec<&str> = keys
+        .iter()
+        .filter_map(|key| key.strip_prefix("ctrl-"))
+        .collect();
+    if keys.len() > 1
+        && rests.len() == keys.len()
+        && rests.iter().all(|rest| rest.chars().count() == 1)
+    {
+        return format!("ctrl-{}", rests.join("/"));
+    }
+    keys.iter()
+        .map(|key| key.replace("shift-", "⇧"))
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// The name of a group of sequences, shown in the which-key popup.
@@ -984,6 +1020,7 @@ impl Keymap {
     /// leader key is announced when sequences start with it.
     pub(crate) fn hints(&self, contexts: &[Context]) -> Vec<Hint> {
         let mut hints: Vec<Hint> = Vec::new();
+        let mut merged: Vec<Vec<String>> = Vec::new();
         let mut shown: Vec<Action> = Vec::new();
         for context in contexts {
             let mut previous: Option<&'static str> = None;
@@ -999,19 +1036,22 @@ impl Keymap {
                     continue;
                 }
                 shown.push(binding.action);
-                match hints.last_mut() {
-                    Some(last) if previous == Some(text) => {
-                        last.keys.push('/');
-                        last.keys.push_str(&seq.short());
+                match (hints.last_mut(), merged.last_mut()) {
+                    (Some(_), Some(keys)) if previous == Some(text) => keys.push(seq.short()),
+                    _ => {
+                        hints.push(Hint {
+                            keys: String::new(),
+                            text,
+                            action: Some(binding.action),
+                        });
+                        merged.push(vec![seq.short()]);
                     }
-                    _ => hints.push(Hint {
-                        keys: seq.short(),
-                        text,
-                        action: Some(binding.action),
-                    }),
                 }
                 previous = Some(text);
             }
+        }
+        for (hint, keys) in hints.iter_mut().zip(&merged) {
+            hint.keys = join_keys(keys);
         }
         let leader = KeyCombo::char(' ');
         if self.resolve(contexts, &[], leader) == Resolved::Prefix {
@@ -1095,30 +1135,30 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &["'"], A::Jump, "jump to…", Some("jump"), "jump to an agent: press ' then its letter"),
         bind(C::Global, &["-"], A::JumpBack, "jump back", None, "back to the agent selected before"),
         bind(C::Global, &["/"], A::Filter, "filter", Some("filter"), "filter agents by name, repository, branch or mission"),
-        bind(C::Global, &["n"], A::NextMatch, "next match", None, "the next agent that matches the filter, round the list"),
-        bind(C::Global, &["N"], A::PreviousMatch, "previous match", None, "the previous agent that matches the filter, round the list"),
+        bind(C::Global, &["n"], A::NextMatch, "next match", Some("match"), "the next agent that matches the filter, round the list"),
+        bind(C::Global, &["N"], A::PreviousMatch, "previous match", Some("match"), "the previous agent that matches the filter, round the list"),
         bind(C::Global, &["m"], A::Message, "message", Some("message"), "write a message to the selected agent"),
         bind(C::Global, &["d"], A::Diff, "diff", Some("diff"), "show the selected agent's changes"),
-        bind(C::Global, &["a"], A::TakeOver, "take over", Some("take over"), "take over the selected agent in this terminal"),
+        bind(C::Global, &["i", "a"], A::TakeOver, "edit", Some("edit"), "edit mode: the selected agent's live screen, full size, takes your keys; the leave key (ctrl-q) comes back"),
         bind(C::Global, &["z"], A::FullScreen, "full screen", Some("full screen"), "show the selected agent's screen full size"),
-        bind(C::Global, &["i"], A::Messages, "messages", Some("messages"), "your messages, questions waiting for you first"),
+        bind(C::Global, &["I", "space i"], A::Messages, "messages", Some("messages"), "your messages, questions waiting for you first"),
         bind(C::Global, &["o", "space o"], A::OpenWith, "open with…", None, "open the selected agent's worktree in your editor, diff viewer or git tool"),
-        bind(C::Global, &["A", "space a"], A::Adopt, "adopt", None, "adopt the selected agent into a volee host, so that you can take it over"),
+        bind(C::Global, &["A", "space a"], A::Adopt, "adopt", Some("adopt"), "adopt the selected agent into a volee host, so that you can take it over"),
         bind(C::Global, &["F", "space f"], A::Forget, "forget", None, "forget the selected agent: stop listing it (asks first)"),
         bind(C::Global, &["space n"], A::NewAgent, "new agent", None, "launch an agent in a new worktree"),
         bind(C::Global, &["space N"], A::NewMission, "new mission", None, "create a mission, which launches its coordinator"),
         bind(C::Global, &["space w", "5"], A::ShowWall, "wall", None, "show the agents in volee hosts as a wall of live screens"),
         bind(C::Global, &["space t"], A::PickTheme, "theme…", None, "pick a colour theme, with a live preview; volee keeps your choice"),
         bind(C::Global, &["space k"], A::AllKeys, "all keys", None, "list every key, in every context"),
-        bind(C::Global, &[":"], A::Commands, "commands", None, "the command palette: type part of a command's name and press enter"),
-        bind(C::Global, &["tab"], A::NextPane, "next panel", None, "focus the next panel"),
-        bind(C::Global, &["shift-tab"], A::PreviousPane, "previous panel", None, "focus the previous panel"),
-        bind(C::Global, &["1"], A::ShowHierarchy, "hierarchy", None, "show the hierarchy"),
-        bind(C::Global, &["2"], A::ShowNetwork, "network", None, "show the network"),
-        bind(C::Global, &["3"], A::ShowRepos, "repositories", None, "show repositories and worktrees"),
-        bind(C::Global, &["4"], A::ShowTimeline, "timeline", None, "show the timeline"),
-        bind(C::Global, &["H"], A::PreviousView, "previous view", None, "show the previous view"),
-        bind(C::Global, &["L"], A::NextView, "next view", None, "show the next view"),
+        bind(C::Global, &[":"], A::Commands, "commands", Some("commands"), "the command palette: type part of a command's name and press enter"),
+        bind(C::Global, &["tab"], A::NextPane, "next panel", Some("panel"), "focus the next panel"),
+        bind(C::Global, &["shift-tab"], A::PreviousPane, "previous panel", Some("panel"), "focus the previous panel"),
+        bind(C::Global, &["1"], A::ShowHierarchy, "hierarchy", Some("views"), "show the hierarchy"),
+        bind(C::Global, &["2"], A::ShowNetwork, "network", Some("views"), "show the network"),
+        bind(C::Global, &["3"], A::ShowRepos, "repositories", Some("views"), "show repositories and worktrees"),
+        bind(C::Global, &["4"], A::ShowTimeline, "timeline", Some("views"), "show the timeline"),
+        bind(C::Global, &["H"], A::PreviousView, "previous view", Some("view"), "show the previous view"),
+        bind(C::Global, &["L"], A::NextView, "next view", Some("view"), "show the next view"),
         bind(C::Global, &["?"], A::Help, "keys", Some("help"), "show the keys of this screen; ? again lists every key"),
         bind(C::Global, &["esc"], A::Back, "back", None, "close, cancel or go back (never quits)"),
         bind(C::Global, &["q", "ctrl-c"], A::Quit, "quit", Some("quit"), "quit volee (asks first when a draft would be lost)"),
@@ -1127,8 +1167,8 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Agents, &["j", "down"], A::Down, "next", Some("move"), "next agent"),
         bind(C::Agents, &["k", "up"], A::Up, "previous", Some("move"), "previous agent"),
         bind(C::Agents, &["l", "right"], A::Right, "child", Some("move"), "first child agent"),
-        bind(C::Agents, &["g g", "home"], A::First, "first", None, "first agent"),
-        bind(C::Agents, &["G", "end"], A::Last, "last", None, "last agent"),
+        bind(C::Agents, &["g g", "home"], A::First, "first", Some("first/last"), "first agent"),
+        bind(C::Agents, &["G", "end"], A::Last, "last", Some("first/last"), "last agent"),
         bind(C::Agents, &["ctrl-d", "pgdn"], A::HalfPageDown, "half page down", None, "half a page of agents down"),
         bind(C::Agents, &["ctrl-u", "pgup"], A::HalfPageUp, "half page up", None, "half a page of agents up"),
         bind(C::Agents, &["enter"], A::FocusSubtree, "subtree", Some("subtree"), "show the agent's subtree in the hierarchy"),
@@ -1142,8 +1182,8 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Hierarchy, &["j", "down"], A::Down, "below", Some("move"), "card below"),
         bind(C::Hierarchy, &["k", "up"], A::Up, "above", Some("move"), "card above"),
         bind(C::Hierarchy, &["l", "right"], A::Right, "right", Some("move"), "card on the right"),
-        bind(C::Hierarchy, &["g g", "home"], A::First, "first", None, "first card"),
-        bind(C::Hierarchy, &["G", "end"], A::Last, "last", None, "last card"),
+        bind(C::Hierarchy, &["g g", "home"], A::First, "first", Some("first/last"), "first card"),
+        bind(C::Hierarchy, &["G", "end"], A::Last, "last", Some("first/last"), "last card"),
         bind(C::Hierarchy, &["enter"], A::FocusSubtree, "subtree", Some("subtree"), "show only the selected agent and its descendants"),
         bind(C::Hierarchy, &["+", "="], A::ZoomIn, "zoom in", Some("zoom"), "more detail on cards"),
         bind(C::Hierarchy, &["_"], A::ZoomOut, "zoom out", Some("zoom"), "less detail on cards"),
@@ -1153,8 +1193,8 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Network, &["j", "down"], A::Down, "below", Some("move"), "agent below"),
         bind(C::Network, &["k", "up"], A::Up, "above", Some("move"), "agent above"),
         bind(C::Network, &["l", "right"], A::Right, "right", Some("move"), "agent on the right"),
-        bind(C::Network, &["g g", "home"], A::First, "first", None, "first agent, top left"),
-        bind(C::Network, &["G", "end"], A::Last, "last", None, "last agent, bottom right"),
+        bind(C::Network, &["g g", "home"], A::First, "first", Some("first/last"), "first agent, top left"),
+        bind(C::Network, &["G", "end"], A::Last, "last", Some("first/last"), "last agent, bottom right"),
         bind(C::Network, &["+", "="], A::ZoomIn, "zoom in", Some("zoom"), "more detail on agents"),
         bind(C::Network, &["_"], A::ZoomOut, "zoom out", Some("zoom"), "less detail on agents"),
         bind(C::Network, &["0"], A::ZoomAuto, "auto zoom", None, "choose the detail level from the size"),
@@ -1163,8 +1203,8 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Repos, &["k", "up"], A::Up, "previous", Some("move"), "previous agent"),
         bind(C::Repos, &["h", "left"], A::Left, "previous repo", Some("repository"), "previous repository"),
         bind(C::Repos, &["l", "right"], A::Right, "next repo", Some("repository"), "next repository"),
-        bind(C::Repos, &["g g", "home"], A::First, "first", None, "first agent"),
-        bind(C::Repos, &["G", "end"], A::Last, "last", None, "last agent"),
+        bind(C::Repos, &["g g", "home"], A::First, "first", Some("first/last"), "first agent"),
+        bind(C::Repos, &["G", "end"], A::Last, "last", Some("first/last"), "last agent"),
         bind(C::Repos, &["+", "="], A::ZoomIn, "zoom in", Some("zoom"), "more detail per agent"),
         bind(C::Repos, &["_"], A::ZoomOut, "zoom out", Some("zoom"), "less detail per agent"),
         bind(C::Repos, &["0"], A::ZoomAuto, "auto zoom", None, "choose the detail level from the size"),
@@ -1175,8 +1215,8 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Timeline, &["l", "right"], A::Right, "forward in time", Some("scrub"), "move the cursor forward in time"),
         bind(C::Timeline, &["["], A::PreviousEvent, "previous event", Some("event"), "cursor to the selected agent's previous event"),
         bind(C::Timeline, &["]"], A::NextEvent, "next event", Some("event"), "cursor to the selected agent's next event"),
-        bind(C::Timeline, &["g g", "home"], A::First, "first", None, "first agent"),
-        bind(C::Timeline, &["G", "end"], A::Last, "last", None, "last agent"),
+        bind(C::Timeline, &["g g", "home"], A::First, "first", Some("first/last"), "first agent"),
+        bind(C::Timeline, &["G", "end"], A::Last, "last", Some("first/last"), "last agent"),
         bind(C::Timeline, &["+", "="], A::ZoomIn, "zoom in", Some("zoom"), "shorter time span, more detail"),
         bind(C::Timeline, &["_"], A::ZoomOut, "zoom out", Some("zoom"), "longer time span"),
         bind(C::Timeline, &["0"], A::ZoomAuto, "now", None, "back to now and the default time span"),
@@ -1195,7 +1235,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Screen, &["g g", "home"], A::First, "top", None, "the top of the screen"),
         bind(C::Screen, &["G", "end"], A::Last, "bottom", None, "the bottom, the newest lines"),
         bind(C::Screen, &["r"], A::Refresh, "refresh", Some("refresh"), "refresh the screen"),
-        bind(C::Screen, &["a"], A::TakeOver, "take over", Some("take over"), "take over the agent in this terminal"),
+        bind(C::Screen, &["i", "a"], A::TakeOver, "edit", Some("edit"), "edit mode: your keys go to the agent; the leave key (ctrl-q) comes back"),
         bind(C::Screen, &["z", "esc", "q"], A::Back, "back", Some("back"), "come back to the interface"),
         bind(C::Screen, &["ctrl-c"], A::Quit, "quit", None, "quit volee"),
 
@@ -1235,7 +1275,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Inbox, &["enter"], A::Apply, "read", Some("read"), "read the thread, which marks its messages read"),
         bind(C::Inbox, &["r"], A::Reply, "reply", Some("reply"), "reply: the answer to the question, else a note to the agent"),
         bind(C::Inbox, &["s"], A::Summarize, "summarize", Some("summarize"), "summarize the thread with a model, when summaries are on"),
-        bind(C::Inbox, &["esc", "q", "i"], A::Back, "close", Some("close"), "leave the thread, then close the messages"),
+        bind(C::Inbox, &["esc", "q", "I"], A::Back, "close", Some("close"), "leave the thread, then close the messages"),
         bind(C::Inbox, &["ctrl-c"], A::Quit, "quit", None, "quit volee"),
 
         bind(C::Tools, &["e"], A::OpenEditor, "editor", Some("editor"), "your editor ($VISUAL, $EDITOR or [tui.tools] editor)"),
@@ -1296,7 +1336,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Wall, &["q", "esc"], A::Back, "back", Some("back"), "leave the wall"),
         bind(C::Wall, &["ctrl-c"], A::Quit, "quit", None, "leave the wall"),
 
-        bind(C::Attached, &["ctrl-q"], A::Leave, "leave", None, "leave the agent you took over and come back; Control and a letter only"),
+        bind(C::Attached, &["ctrl-q"], A::Leave, "leave", Some("back to volee"), "leave edit mode, or an agent taken over from a shell, and come back; Control and a letter only"),
     ]
 }
 

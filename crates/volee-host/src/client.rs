@@ -10,7 +10,7 @@ use std::thread;
 
 use volee_term::{Frame, Screen};
 
-use crate::proto::{self, Event, Exit, Hello, Kind, PROTOCOL, Role, Size, Welcome};
+use crate::proto::{self, Event, Exit, Hello, KeyPress, Kind, PROTOCOL, Role, Size, Welcome};
 
 /// How long a host has to answer a hello.
 const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
@@ -37,17 +37,41 @@ pub struct Connection {
 impl Connection {
     /// Connects to the host at `socket` and says hello.
     pub fn open(socket: &Path, role: Role, size: Size, client: &str) -> io::Result<Self> {
+        Self::greet(
+            socket,
+            &Hello {
+                protocol: PROTOCOL,
+                role,
+                size,
+                client: client.to_owned(),
+                embedded: false,
+            },
+        )
+    }
+
+    /// Connects as the input owner of a screen drawn inside another
+    /// program's window (ADR 0026): the host keeps answering the program's
+    /// queries. Send keys with [`HostSender::key`] when [`Welcome::keys`] is
+    /// true, else as bytes with [`HostSender::input`].
+    pub fn open_embedded(socket: &Path, size: Size, client: &str) -> io::Result<Self> {
+        Self::greet(
+            socket,
+            &Hello {
+                protocol: PROTOCOL,
+                role: Role::Control,
+                size,
+                client: client.to_owned(),
+                embedded: true,
+            },
+        )
+    }
+
+    fn greet(socket: &Path, hello: &Hello) -> io::Result<Self> {
         let stream = UnixStream::connect(socket)?;
         // A wedged host must not hang its client: the greeting has a deadline.
         stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
         stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
-        let hello = Hello {
-            protocol: PROTOCOL,
-            role,
-            size,
-            client: client.to_owned(),
-        };
-        proto::write_json(&stream, Kind::Hello, &hello)?;
+        proto::write_json(&stream, Kind::Hello, hello)?;
         let frame = proto::read_frame(&stream)?
             .filter(|frame| frame.kind == Kind::Welcome)
             .ok_or_else(|| {
@@ -136,6 +160,18 @@ impl HostSender {
     /// Sends keys.
     pub fn input(&self, keys: &[u8]) -> io::Result<()> {
         proto::write_frame(&self.stream, Kind::Input, keys)
+    }
+
+    /// Sends a key for the host to encode. Only to a host whose
+    /// [`Welcome::keys`] is true: an older one drops the connection.
+    pub fn key(&self, press: &KeyPress) -> io::Result<()> {
+        proto::write_json(&self.stream, Kind::Key, press)
+    }
+
+    /// Sends pasted text for the host to encode. Same condition as
+    /// [`HostSender::key`].
+    pub fn paste(&self, text: &str) -> io::Result<()> {
+        proto::write_frame(&self.stream, Kind::Paste, text.as_bytes())
     }
 
     /// Sends the terminal's new size.

@@ -19,7 +19,7 @@ pub(crate) mod top_bar;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Modifier;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Widget};
 use volee_core::{Agent, AgentState};
@@ -55,13 +55,36 @@ pub(crate) fn panel(
     } else {
         StyleRole::Border
     });
-    let title_style = if focused {
-        theme
-            .style(StyleRole::BorderFocused)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        theme.style(StyleRole::Title)
-    };
+    if focused {
+        return panel_with(buf, area, title, border);
+    }
+    framed(buf, area, title, border, theme.style(StyleRole::Title))
+}
+
+/// Draws a panel whose border and bold title take `border`, such as the
+/// screen of an agent in edit mode, and returns the area inside.
+pub(crate) fn panel_with(
+    buf: &mut Buffer,
+    area: Rect,
+    title: Vec<Span<'_>>,
+    border: Style,
+) -> Rect {
+    framed(
+        buf,
+        area,
+        title,
+        border,
+        border.add_modifier(Modifier::BOLD),
+    )
+}
+
+fn framed(
+    buf: &mut Buffer,
+    area: Rect,
+    title: Vec<Span<'_>>,
+    border: Style,
+    title_style: Style,
+) -> Rect {
     let mut spans = vec![Span::raw(" ")];
     for span in title {
         let style = title_style.patch(span.style);

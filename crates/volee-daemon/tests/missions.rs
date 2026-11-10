@@ -199,6 +199,7 @@ async fn stops(client: &Client, n: u128) {
             agent: agent(n),
             event: "stop".into(),
             payload: serde_json::json!({ "last_assistant_message": "Done." }),
+            pid: None,
         })
         .await
         .unwrap();

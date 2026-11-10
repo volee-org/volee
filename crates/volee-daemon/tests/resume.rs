@@ -167,6 +167,7 @@ async fn hook(client: &Client, agent: AgentId, event: &str, payload: serde_json:
             agent,
             event: event.into(),
             payload,
+            pid: None,
         })
         .await
         .unwrap();
