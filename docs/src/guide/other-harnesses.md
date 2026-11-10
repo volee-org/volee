@@ -39,10 +39,11 @@ stop it with `volee stop`, like any agent in a host.
   the process table (not the background service,
   `opencode serve --service`), with its directory, and so its repository
   and branch. It is
-  shown read only and stops when its process ends. To take it over, quit
-  it, then adopt it (`A`, or `volee adopt`): volee resumes it in a host,
-  which only works when it was started with `--session`, since volee needs
-  the session id.
+  shown until its process ends, then leaves the list a minute later. volee
+  has no door on an OpenCode agent in a terminal yet: to type into it from
+  volee, quit it, then adopt it (`A`, or `volee adopt`): volee resumes it
+  in a host, which only works when it was started with `--session`, since
+  volee needs the session id.
 
 ## Join
 

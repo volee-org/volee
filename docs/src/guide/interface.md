@@ -36,7 +36,8 @@ Everything on the screen comes from the daemon, and so do the actions:
 | The agents, their states and messages | Its own records, kept up to date as hosts and sessions come and go. |
 | The preview of an agent's screen | The agent's volee host, which holds its exact screen. For agents volee does not host: tuios or tmux, for a session in one of their panes (`capture-pane`); Claude Code, which replays a background session's output (`claude logs`). volee's setup log, for an agent whose session has not started yet. |
 | An agent's changes (`d`) | git, in the agent's worktree or folder. |
-| Edit mode (`i`, `a`) and the live full-screen view (`z`) | The agent's volee host, which the interface connects to; tuios or tmux, which bring forward the pane of a session in one of their panes. |
+| Opening an agent (`enter`, `i`, `a`, a double click) | A terminal on the agent, which the interface connects to: the volee host it runs in, or a view the daemon starts on the session where it runs (`claude attach` on a Claude Code background session, `tuios pane-view` on a tuios pane). tmux brings forward the pane of a session in one of its panes. |
+| The live full-screen view (`z`) | The agent's volee host. |
 | Adopting an agent (`A`) | Claude Code, which stops the background session (`claude stop`), then a new volee host, which resumes its conversation. |
 | The wall of screens (`5`) | The volee hosts of the agents in the list. |
 | Writing to an agent (`m`) | Its own records and the agent's hooks. |
@@ -71,8 +72,8 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
 │ invoice-tools        ││ ⏺ Before I go on, one question:                                       │
 │ ! needs you · 1 min  ││   Should create_invoice accept a draft flag?                          │
 ╰──────────────────────╯╰───────────────────────────────────────────────────────────────────────╯
- h/j/k/l move   gg/G first/last   enter subtree   ' jump   / filter   n/N match   1-4 views
- m message   d diff   i edit   z full screen   I messages   A adopt   ␣ more   ? help
+ h/j/k/l move   gg/G first/last   s subtree   ' jump   / filter   n/N match   1-4 views
+ m message   d diff   enter open   z full screen   I messages   ␣ more   ? help
 ```
 
 - **Top bar.** The views, numbered (press the number to switch; `5` opens
@@ -101,13 +102,13 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   size: looking at an agent never resizes it. The bottom of the screen,
   where the latest output is, stays in view; scroll it with `j` and `k` when
   the panel has the keyboard. Lines wider than the panel are cut at its
-  edge. `z` (or `enter` in the preview) shows that screen full size, its
+  edge. `z` shows that screen full size, its
   whole conversation in view, from its newest lines: lines wider than the
   window go on over several lines, between words where they can, so that
   nothing is cut but the padding and frames the agent's interface draws to
   its own edge. For an agent in a volee host, that view is live: volee
   watches the host and draws each change as it comes. `j` and `k` scroll
-  it, `i` types into the agent ([edit mode](#edit-mode-typing-into-an-agent)),
+  it, `enter` types into the agent ([edit mode](#edit-mode-typing-into-an-agent)),
   and `z` or `esc` comes back. For a session
   in a tuios or tmux pane, the screen is the pane's. A Claude Code
   background session that volee does not host (one that volee 0.7
@@ -115,12 +116,12 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   `claude logs`, which keeps only the session's recent output: in a session
   that has run for hours, parts of the screen drawn long ago and never
   redrawn since, such as a list that has not changed, can show gaps. A
-  recent session shows whole, and [adopting](#adopting-an-agent) it moves
-  it into a host, whose screen is exact.
+  recent session shows whole, and [opening](#edit-mode-typing-into-an-agent)
+  it (`enter`) shows its exact screen.
 - **Hints.** The keys that apply to the panel that has the keyboard, on two
   rows from 20 rows up: the top one says how to move around (moves, first
   and last, the filter and its matches, panels and views), the bottom one
-  what to do (edit, message, diff, adopt, the leader, commands, quit),
+  what to do (message, diff, open, the leader, commands, quit),
   with `? help` at the right. Smaller terminals and the windows keep one
   row. They come from the same table as the help (`?`), so they are always
   right.
@@ -309,7 +310,7 @@ of a page shows the next one.
 Each tile shows its agent's screen at the agent's own size, cut on the
 right when the tile is narrower, and never resizes the agent; its title is
 the agent's name and the title its program set. Agents volee does not host
-are not on the wall: [adopt](#adopting-an-agent) one to see it there.
+are not on the wall.
 
 | Keys | What it does |
 | --- | --- |
@@ -343,7 +344,8 @@ is open. From a shell, `volee host wall` opens it on every running host
   previous agent that matches, round the list.
 - `1` to `4` show a view; `H` and `L` the previous and the next one.
 - `Tab` moves the keyboard to the next panel. Clicking a row, a card, a
-  node, a lane or a tab selects it.
+  node, a lane or a tab selects it; a second click on an agent, soon after,
+  opens it.
 
 `Esc` closes or leaves one thing at a time (a popup, the timeline's
 cursor, the subtree, the filter, then the panel), and never quits volee.
@@ -428,10 +430,10 @@ and launch again. The new agent is selected as soon as it appears.
 
 ## Edit mode: typing into an agent
 
-`i` (or `a`) types into the selected agent without leaving volee. The
-full-screen view opens on the agent's live screen, its frame takes the
-input colour, and its title and the bottom line say **EDIT** and whose
-keys these are now:
+`enter` opens the selected agent and types into it without leaving volee
+(`i`, `a` and a double click do the same). The full-screen view opens on
+the agent's live screen, its frame takes the input colour, and its title
+and the bottom line say **EDIT** and whose keys these are now:
 
 ```text
 ╭  EDIT  Screen · invoicing ─────────────────────────────────────────────╮
@@ -463,15 +465,34 @@ terminal instead; `Ctrl+Q` comes back there too. Taking an agent over in
 one place ends edit mode in another: volee says so and watches the agent
 again.
 
-volee types only into the agents it hosts. On a Claude Code background
-session that volee does not host, `i` asks first, on the bottom line,
-whether to move it into a volee host: `y` adopts it (below) and opens edit
-mode as soon as its host runs, `n` or `Esc` leaves it alone. In a
-repository Claude Code does not trust yet, the agent's screen then shows
-Claude Code's trust question: answer it there, once. Agents running in
-another terminal cannot be typed into from here; volee tells you where they
-are instead, and brings forward the pane of an agent in a tuios or tmux
-pane (below).
+### Opening a session volee did not start
+
+A session started outside volee opens the same way, where it runs, through
+the door it already has
+([ADR 0027](../adr/0027-open-without-owning.md)):
+
+| Where it runs | What `enter` does |
+| --- | --- |
+| A Claude Code background session, running or finished | shows it with Claude Code's own `claude attach`, in a terminal inside volee |
+| A tuios pane | shows that pane, with `tuios pane-view` |
+| A tmux pane | brings the pane forward (below) |
+| A terminal volee cannot reach | says so, on the bottom line |
+
+Nothing is stopped, restarted or adopted for it: it is the same session, in
+the same process, with its own tools and settings. `Ctrl+Q` closes the
+terminal volee opened and comes back to the list, and the bottom line says
+that the agent keeps running. While it is open, the session takes the size
+of volee's panel; a tuios pane goes back to its own size when you leave.
+
+A finished background session is still in the list, as in Claude Code's
+own agents view: opening it starts it again, under the same session, as
+`claude attach` does. Leaving the terminal the way Claude Code offers
+(`Ctrl+Z`) closes it too, and the left arrow on the session's empty prompt
+shows Claude Code's own agents view there, as in any terminal.
+
+A Claude Code session in a terminal volee cannot reach becomes reachable
+when you press the left arrow on its empty prompt, in that terminal:
+Claude Code moves it to the background, where volee opens it.
 
 Agents volee launched before 0.10 run in older hosts, which outlive an
 upgrade: edit mode sends them the bytes a terminal sends, so typing works,
@@ -482,23 +503,26 @@ next time it is stopped and resumed.
 
 ### Adopting an agent
 
+Opening a session needs no adoption. Adopt one when you want volee to
+drive it from now on, like the agents it launches: messages reach it,
+`volee stop` stops it, a message resumes it, and it comes back after a
+reboot.
+
 `A` moves the selected agent's conversation into a volee host, as
-`volee adopt` does, so that you can take it over and see its exact screen.
-It works on Claude Code background sessions (the agents volee 0.7 launched
-with `claude --bg`, and any `claude --bg` you started by hand), on agents
-whose session ended, and on OpenCode agents started with `--session`. volee
-first stops the background session (`claude stop`), so that two programs
-never write the same conversation, then resumes the conversation in a new
-host, in the same directory, where the agent waits at its prompt. An agent
-that runs in a terminal of its own must be quit there first: volee refuses
-it until then and says so on the bottom line. The agent keeps its name and
-its history; once adopted, `a` takes it over, and volee handles it like the
-agents it launches: messages reach it, `volee stop` stops it, and a message
-resumes it.
+`volee adopt` does. It asks first, on the bottom line, because it changes
+the session: volee stops it (`claude stop`), so that two programs never
+write the same conversation, then resumes the conversation in a new host,
+in the same directory, with volee's settings in place of the session's own
+(its hooks, its MCP servers, its permission mode). `y` adopts and opens the
+agent as soon as its host runs; `n` or `Esc` leaves it alone. It works on
+Claude Code background sessions, on agents whose session ended, and on
+OpenCode agents started with `--session`. An agent that runs in a terminal
+of its own must be quit there first: volee refuses it until then and says
+so on the bottom line. The agent keeps its name and its history.
 
 The conversation resumes in the agent's worktree. In a repository Claude
-Code does not trust yet, it asks first, in the host: take the agent over
-(`a`) to answer, once for the repository. When the resumed program fails, the agent is
+Code does not trust yet, it asks first, in the host: open the agent
+(`enter`) to answer, once for the repository. When the resumed program fails, the agent is
 `stopped` and its detail quotes the program's last line (Claude Code's
 trust message, for example). The conversation is not lost: fix the cause
 and send the agent a message, or resume it in the background yourself,
@@ -511,13 +535,15 @@ A Claude Code session you started by hand in a
 when tuios is installed and its server runs: the daemon asks tuios each
 time it looks for sessions, and the Detail panel says where it runs
 (`tuios · work`: tuios, and the session that holds the pane). Its preview
-is the pane's screen, and `a` brings the pane forward instead of taking the
-agent over: tuios focuses it, shows its workspace and, when volee runs in a
-tuios pane itself, switches your tuios window to the pane's session. volee
-stays where it was. When no tuios window shows that session (none is
-attached), volee says the agent is in front in its session and how to see
-it: `tuios attach <session>`. Nothing is typed into the pane, and no pane is
-opened, closed or moved.
+is the pane's screen, and `enter` opens the pane inside volee: the daemon
+runs `tuios pane-view` on it, and what you type goes to the pane. While no
+tuios window shows the pane's session, the pane takes the size of volee's
+panel, and goes back to its own when you leave with `Ctrl+Q`. No pane is
+opened, closed or moved, and the session in it is none the wiser.
+
+The session shows in volee ten seconds after it starts, like any session
+started outside volee. `/clear` in the pane starts a new session in the
+same process: its row stays the same row.
 
 volee uses the default tuios server, or the one `TUIOS_SERVER` names when
 you run `volee daemon run` yourself. The commands that bring a pane forward
@@ -537,7 +563,7 @@ whether volee found tuios
 A Claude Code session you started by hand in a [tmux](https://github.com/tmux/tmux)
 pane is found the same way, when tmux is installed and its server runs: volee
 follows the session's process to the pane that runs it. The Detail panel
-says `tmux · work`, the preview is the pane's screen, and `a` makes the pane
+says `tmux · work`, the preview is the pane's screen, and `enter` makes the pane
 current in its window and session, then switches your tmux client to it when
 volee runs in a client of that same tmux server. From anywhere else (outside
 tmux, or in a client of another server), volee switches no client, not even
@@ -599,7 +625,7 @@ and an empty list unbinds it. Keys are written like `q`, `ctrl-c`,
 
 ```toml
 [tui.keys]
-take-over = "ctrl-a"           # edit mode, everywhere it has a key
+take-over = "ctrl-a"           # opening an agent, everywhere it has a key
 new-agent = ["c", "space n"]   # several keys
 adopt = []                     # no key
 

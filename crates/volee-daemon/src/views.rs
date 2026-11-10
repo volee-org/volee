@@ -23,6 +23,7 @@ use volee_core::harness::HarnessKind;
 use volee_core::workspace::Location;
 use volee_host::{HostConfig, HostDir, HostRecord, Size};
 use volee_proto::methods::{OpenParams, Opened};
+use volee_proto::paths::Paths;
 
 use crate::error::DaemonError;
 use crate::launch::blocking;
@@ -71,8 +72,42 @@ struct Door {
 
 /// Where views live: `<state>/views`. Apart from the hosts of agents, so
 /// that nothing takes a view for an agent's terminal.
-fn views_dir(shared: &Shared) -> HostDir {
-    HostDir::new(shared.paths.state_dir.join("views"))
+fn views_dir(paths: &Paths) -> HostDir {
+    HostDir::new(paths.state_dir.join("views"))
+}
+
+/// Removes what the views of an earlier daemon left when it was killed:
+/// they lived in its threads, so none of them runs any more.
+pub(crate) fn clear(paths: &Paths) {
+    let _ = std::fs::remove_dir_all(views_dir(paths).path());
+}
+
+/// How long the daemon waits, when it stops, for the programs of its views
+/// to end.
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
+
+impl Views {
+    /// Ends every view, when the daemon stops, and removes their files.
+    /// Their programs are doors, not agents: the sessions they showed keep
+    /// running. Blocks for a moment.
+    pub(crate) fn close_all(&self, paths: &Paths) {
+        let dir = views_dir(paths);
+        let open: Vec<View> = self
+            .open
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain()
+            .map(|(_, view)| view)
+            .collect();
+        for view in &open {
+            let _ = volee_host::stop(&dir.socket(&view.id), "volee daemon");
+        }
+        let deadline = Instant::now() + CLOSE_TIMEOUT;
+        while open.iter().any(|view| runs(&dir, &view.id)) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        clear(paths);
+    }
 }
 
 /// Whether the host `id` of `dir` still runs its program.
@@ -85,7 +120,7 @@ fn runs(dir: &HostDir, id: &str) -> bool {
 /// inside its own screen.
 pub(crate) async fn open(shared: &Arc<Shared>, params: OpenParams) -> Result<Opened, DaemonError> {
     let agent = params.agent;
-    let (name, location, harness) = {
+    let (name, location, harness, cwd) = {
         let state = shared.state.lock().await;
         let record = state
             .registry()
@@ -95,6 +130,7 @@ pub(crate) async fn open(shared: &Arc<Shared>, params: OpenParams) -> Result<Ope
             record.name.clone(),
             record.location.clone(),
             record.harness.clone(),
+            record.workspace.cwd.clone(),
         )
     };
     // An agent in a volee host: the host is its terminal.
@@ -109,7 +145,7 @@ pub(crate) async fn open(shared: &Arc<Shared>, params: OpenParams) -> Result<Ope
             view: false,
         });
     }
-    let Some(door) = door(shared, agent, &name, &location, &harness).await? else {
+    let Some(door) = door(shared, agent, &name, &location, &harness, &cwd).await? else {
         // A pane only its multiplexer can show: the client brings it
         // forward (`agents.attach`).
         return Ok(Opened {
@@ -117,7 +153,7 @@ pub(crate) async fn open(shared: &Arc<Shared>, params: OpenParams) -> Result<Ope
             view: false,
         });
     };
-    let dir = views_dir(shared);
+    let dir = views_dir(&shared.paths);
     let size = Size {
         cols: params.cols.clamp(MIN_SIZE.cols, MAX_SIZE.cols),
         rows: params.rows.clamp(MIN_SIZE.rows, MAX_SIZE.rows),
@@ -142,7 +178,18 @@ async fn door(
     name: &str,
     location: &Location,
     harness: &HarnessKind,
+    cwd: &Path,
 ) -> Result<Option<Door>, DaemonError> {
+    // A door runs where its session runs: a harness asked there for
+    // anything more than the session (Claude Code's own agents view, one
+    // key away in `claude attach`) is in a directory the person already
+    // trusts it with, never in `/`. A directory that is gone leaves the
+    // daemon's own.
+    let cwd = if cwd.is_dir() {
+        cwd.to_path_buf()
+    } else {
+        shared.paths.state_dir.clone()
+    };
     // In a multiplexer pane: the multiplexer shows it, when it can.
     if let Location::Pane {
         multiplexer,
@@ -154,7 +201,7 @@ async fn door(
         };
         return Ok(adapter.view_command(target).map(|command| Door {
             command,
-            cwd: PathBuf::from("/"),
+            cwd,
             env_remove: Vec::new(),
         }));
     }
@@ -167,9 +214,7 @@ async fn door(
             .chain(command.get_args())
             .map(text)
             .collect(),
-        cwd: command
-            .get_current_dir()
-            .map_or_else(|| PathBuf::from("/"), Path::to_path_buf),
+        cwd: command.get_current_dir().map_or(cwd, Path::to_path_buf),
         env_remove: command
             .get_envs()
             .filter(|(_, value)| value.is_none())

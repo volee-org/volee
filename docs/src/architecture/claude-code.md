@@ -38,10 +38,15 @@ you start by hand. volee shows them and does not drive them:
 | Stop | `claude stop <id>` | Before an adoption, and for the sessions volee 0.7 launched. The conversation is kept. |
 | Delete | `claude rm <id>` | Never with `--discard-unpushed` or `--force-remove-worktree`. |
 
-Taking over a background session needs it adopted first
-([ADR 0023](../adr/0023-every-agent-on-the-machine.md)), which stops it with
-`claude stop` and resumes its conversation in a host; in the interface, `a`
-offers to do both. A conversation whose worktree still exists resumes in
+A background session volee did not start is opened with `claude attach
+<id>`, in the person's terminal (`volee attach`) or in a view inside the
+interface ([ADR 0027](../adr/0027-open-without-owning.md)): the same
+session in the same process, running or finished. The view runs in the
+session's directory, so that Claude Code's own agents view, one key away in
+`claude attach`, opens in a directory the person already trusts it with.
+Adopting a session ([ADR 0023](../adr/0023-every-agent-on-the-machine.md))
+is something else: it stops it with `claude stop` and resumes its
+conversation in a host. A conversation whose worktree still exists resumes in
 that worktree rather than with `--worktree` from the main checkout: a
 repository Claude Code trusts covers its worktrees, and in one it does not
 trust yet Claude Code asks in the host instead of exiting.

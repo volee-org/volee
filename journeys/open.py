@@ -19,31 +19,6 @@ from journey import Journey, arguments
 SETTLE = 10
 
 
-def compare(j):
-    """What Claude Code lists against what volee lists: (sessions without a row,
-    rows without a session, sessions with more than one row)."""
-    now = time.time() * 1000
-    listed = {}
-    for session in j.claude_sessions():
-        background = session.get("kind") == "background"
-        settled = now - (session.get("startedAt") or 0) >= (SETTLE + 5) * 1000
-        if background or (session.get("pid") and settled):
-            listed[session.get("sessionId")] = session.get("name") or session.get("id")
-    rows = {}
-    watched = {}
-    for agent in j.agents_listed():
-        session = j.session_of(agent)
-        rows.setdefault(session, []).append(agent["name"])
-        outside = (agent.get("launched_by") or {}).get("by") == "outside"
-        if outside and agent["location"]["kind"] != "host" and session:
-            watched[session] = agent["name"]
-    current = {session.get("sessionId") for session in j.claude_sessions()}
-    missing = sorted(name for session, name in listed.items() if session not in rows)
-    orphans = sorted(name for session, name in watched.items() if session not in current)
-    twice = sorted(str(names) for session, names in rows.items() if session and len(names) > 1)
-    return missing, orphans, twice
-
-
 def main():
     args = arguments(__doc__)
     j = Journey("open", args)
@@ -67,7 +42,7 @@ def main():
         j.check("its row is that session", j.session_of(row) == session_id,
                 "{} / {}".format(j.session_of(row), session_id))
         time.sleep(SETTLE + 6)
-        missing, orphans, twice = compare(j)
+        missing, orphans, twice = j.compare(SETTLE)
         j.check("every session Claude Code lists has one row", not missing and not twice,
                 "no row for {}; several rows for {}".format(missing, twice))
         j.check("no row without a session Claude Code lists", not orphans, str(orphans))

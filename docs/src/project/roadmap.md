@@ -58,11 +58,45 @@ deliberately out of scope. Dates are targets, not promises.
 | Take over and watch | `a` and `volee attach` take an agent over from any terminal, `Ctrl+Q` comes back; the preview and `z` show the exact screen without resizing the agent ([ADR 0021](../adr/0021-take-over-watch-and-the-wall-of-screens.md)) | Done |
 | Wall of screens | `5` shows the hosted agents of the list as tiles of live screens; `volee host wall` opens it from a shell | Done |
 | OpenCode | `volee spawn --harness opencode` and the launch dialog launch OpenCode agents in hosts, follow their state from their screen and resume them ([ADR 0022](../adr/0022-harness-profiles.md)) | Done |
-| Every agent on the machine | OpenCode agents started elsewhere are found in the process table; agents volee does not host are read only, and `A` or `volee adopt` moves one into a host ([ADR 0023](../adr/0023-every-agent-on-the-machine.md)) | Done |
+| Every agent on the machine | OpenCode agents started elsewhere are found in the process table; `A` or `volee adopt` moves an agent volee does not host into a host ([ADR 0023](../adr/0023-every-agent-on-the-machine.md)) | Done |
 | Back after a reboot | The daemon resumes the agents a reboot interrupted, in new hosts; `volee daemon install` starts it at login ([ADR 0024](../adr/0024-agents-come-back-after-a-reboot.md)) | Done |
 | Hosts by hand | `volee host spawn`, `ls`, `peek`, `attach`, `stop` and `wall` run any command line in a host, without the daemon | Done |
 | Mirrors removed | The 0.7.0 previews of background sessions read from tuios panes by their title are gone; tuios and tmux still show the sessions started by hand in their panes | Done |
-| Release | v0.8.0 | Next |
+| Release | v0.8.0 | Done: v0.8.0 |
+
+## 0.9 and 0.10: keys, and typing inside volee
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| Keys | A popup of the keys of each screen, a leader key, vim keys, every key configurable, a theme picker ([ADR 0025](../adr/0025-key-sequences-a-leader-and-which-key-popups.md)) | Done: v0.9.0 |
+| Edit mode | The full-screen view of an agent in a volee host is live, and typing goes to the agent inside volee's frame until `Ctrl+Q` ([ADR 0026](../adr/0026-edit-mode-types-into-an-agent-inside-volee.md)) | Done: v0.10.0 |
+
+## 0.11: open every agent where it runs
+
+An audit on 2026-11-10 found that volee owned the agents it showed, where it
+should plug into them: typing into a session volee did not start needed an
+adoption, and the list kept sessions that were gone. The plan that followed
+has five steps, each released only once a person can make its trip by
+keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| Journeys | Scripts that drive the real interface by keyboard with a real agent are the gate of every release | Done |
+| The list is what runs | One row per session the harness lists, finished background sessions included; a session that is gone leaves the list; a one-off run of a few seconds never shows ([ADR 0027](../adr/0027-open-without-owning.md)) | Done |
+| Open without owning | `enter`, a double click or `i` opens any agent where it runs, inside volee: `claude attach` on a background session, `tuios pane-view` on a tuios pane; nothing is stopped or restarted ([ADR 0027](../adr/0027-open-without-owning.md)) | Done |
+| Release | v0.11.0 | Next |
+
+## Next
+
+In this order, one release per step:
+
+- One terminal component for the preview, the full-screen view, the wall
+  and edit mode, emulated by libghostty-vt everywhere, with the mouse
+  forwarded to an opened agent.
+- Other harnesses: finding their agents wherever they run, a door on each,
+  and `volee run -- <command>` to start any program in a host.
+- Missions as a lead agent runs them, with the rules that make a lead a
+  good one.
 
 ## Later
 

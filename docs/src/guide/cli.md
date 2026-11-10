@@ -110,8 +110,8 @@ for an agent, you can type its name, that short id, or its full id.
 volee logs <agent>          # its screen as it looks now
 volee diff <agent>          # its changes against the branch it started from, by file
 volee diff <agent> --full   # the same changes, as a full patch
-volee attach <agent>        # take it over in this terminal; Ctrl+Q comes back
-volee adopt <agent>         # move an agent volee does not host into a volee host
+volee attach <agent>        # open it in this terminal, where it runs
+volee adopt <agent>         # move a session volee did not start into a volee host
 volee stop <agent>          # stop it; volee does not resume it until you message it
 volee forget <agent>        # stop listing an agent that no longer runs
 ```
@@ -125,28 +125,42 @@ redrawn.
 base of its base branch, and lists the files it created; a very long diff is
 cut, and the rest is in the worktree.
 
-`volee attach` hands this terminal to the agent until you press `Ctrl+Q`;
-the agent keeps running after you leave. `Ctrl+Q` never reaches the agent,
-whatever keyboard protocol the agent turned on. While you type, your
-terminal's size is the agent's size, and it stays when you leave; nothing
-else resizes an agent. Taking the same agent over from a second terminal
-moves the input there, and the first terminal returns to its shell.
+`volee attach` hands this terminal to the agent, where it runs. For an
+agent in a volee host, `Ctrl+Q` comes back; the agent keeps running after
+you leave. `Ctrl+Q` never reaches the agent, whatever keyboard protocol the
+agent turned on. While you type, your terminal's size is the agent's size,
+and it stays when you leave; nothing else resizes an agent. Taking the same
+agent over from a second terminal moves the input there, and the first
+terminal returns to its shell.
+
+For a Claude Code background session volee did not start, `volee attach`
+runs Claude Code's own `claude attach` on it: it is the same session, with
+nothing stopped or restarted, and `Ctrl+Z` comes back to your shell, as
+Claude Code says. In the interface, `enter` opens it the same way inside
+volee ([opening a session](interface.md#opening-a-session-volee-did-not-start)).
 
 Where an agent runs decides what these commands can do:
 
 | The agent runs | `volee logs` | `volee attach` | `volee stop` |
 | --- | --- | --- | --- |
 | In a volee host: launched or adopted by volee | the exact screen | takes it over | ends it, like a closed terminal |
-| As a Claude Code background session: launched by volee 0.7, or by hand with `claude --bg` | a replay of `claude logs` | refused: adopt it first (in the interface, `a` offers to) | stops it if volee launched it |
-| Interactive, in a tuios or tmux pane | the pane's screen | brings the pane forward ([panes](interface.md#agents-in-tuios-panes)) | refused |
-| Interactive, in another terminal (Claude Code or OpenCode) | refused: only that terminal shows it | refused | refused |
+| As a Claude Code background session: launched by volee 0.7, or by hand with `claude --bg` | a replay of `claude logs` | opens it with `claude attach` | stops it if volee launched it |
+| Interactive, in a tuios or tmux pane | the pane's screen | brings the pane forward ([panes](interface.md#agents-in-tuios-panes)); in the interface, `enter` opens a tuios pane inside volee | refused |
+| Interactive, in another terminal (Claude Code or OpenCode) | refused: only that terminal shows it | refused, with what makes it reachable | refused |
 
-volee only shows the agents it did not start: it never types into them,
-resizes or stops them, and you stop them where they were started.
-`volee adopt` moves one into a volee host, so that you can take it over:
-volee stops a background session first (`claude stop`), so that two programs
-never write the same conversation, then resumes its conversation in a new
-host, in the same directory, where it waits at its prompt. It also adopts
+The list is what runs now ([ADR 0027](../adr/0027-open-without-owning.md)).
+A session volee did not start is one row for as long as its harness lists
+it: a finished background session stays, like in Claude Code's own agents
+view, and a session that is gone leaves the list a minute later. A session
+started outside volee, in a terminal, shows once it has lived ten seconds,
+so that a program's one-off call never becomes a row.
+
+volee never stops or restarts a session it did not start: you stop it where
+it was started. `volee adopt` is for a session you want volee to drive from
+now on: volee stops a background session first (`claude stop`), so that two
+programs never write the same conversation, then resumes its conversation
+in a new host, in the same directory, with volee's settings in place of the
+session's own, where it waits at its prompt. It also adopts
 an agent whose session ended. An agent that runs in a terminal of its own
 must be quit there first: volee refuses it until then. An OpenCode agent can
 be adopted when it was started with `--session`, once you quit it. The agent

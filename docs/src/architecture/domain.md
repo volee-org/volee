@@ -60,6 +60,9 @@ group.
 | `workspace-updated`, `location-changed`, `model-changed` | Better knowledge of where and how the agent runs. |
 | `delivery-updated` | New delivery evidence from git or the forge. |
 | `agent-forgotten` | The agent is removed; its sessions are ignored from then on. |
+| `agent-renamed` | The harness renamed the session of an agent volee only watches: the agent takes that name (ADR 0027). |
+| `session-released` | A session no longer belongs to the agent, and is not ignored: listed again, it becomes an agent of its own (ADR 0027). |
+| `agent-expired` | An agent volee only watched is gone with its session and is removed. Its sessions are not ignored: listed again, they come back (ADR 0027). |
 | `stop-requested` | The human stopped the agent: it is held, and volee does not resume it on its own. A later `message-posted` from the human to it lifts the hold. |
 | `membership-changed` | An agent that joined through volee's MCP server takes part in a mission, or no longer does (ADR 0014). Only such agents change missions. |
 | `thread-opened`, `message-posted`, `message-delivered`, `message-read` | Conversations and receipts. |

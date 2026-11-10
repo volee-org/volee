@@ -33,11 +33,15 @@ by a coordinator agent and delivered by worker agents.
   over. See [Hosts](hosts.md) and
   [ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md), which
   supersedes ADR 0002.
-- **Every agent on the machine, read only unless volee runs it.** Agents
-  started elsewhere are found through their harness and the process table,
-  and shown; volee never types into them, resizes or stops them. Adopting
-  one moves its conversation into a host. See
-  [ADR 0023](../adr/0023-every-agent-on-the-machine.md).
+- **Every agent on the machine, opened where it runs.** Agents started
+  elsewhere are found through their harness and the process table, and
+  shown: one row per session the harness lists, gone when the session is.
+  Opening one puts a terminal on its own door (`claude attach`, `tuios
+  pane-view`) in a view, a host the daemon runs for as long as someone
+  uses it; volee never stops, forks or restarts a session it did not
+  start. Adopting one, which moves its conversation into a host, is a
+  choice. See [ADR 0023](../adr/0023-every-agent-on-the-machine.md) and
+  [ADR 0027](../adr/0027-open-without-owning.md).
 - **One source of truth.** A small daemon (`volee daemon`) keeps the registry, the
   event log, the messages and the missions in SQLite. Every client (the TUI,
   the CLI, the MCP server used by agents) reads and writes through it. See
@@ -92,7 +96,7 @@ Everything ships as **one binary**, `volee`, with subcommands:
 | `volee daemon install` | Starts the daemon at login, on request only. |
 | `volee spawn`, `volee mission ...` | Launch agents and missions. |
 | `volee ls`, `volee msg send`, `volee diff`, `volee tidy` | Scriptable views, messaging and cleanup. |
-| `volee attach`, `volee adopt` | Take an agent over in this terminal; move an agent volee does not host into a host. |
+| `volee attach`, `volee adopt` | Open an agent in this terminal, where it runs; move a session volee did not start into a host. |
 | `volee host ...` | Run any command line in a host, list, watch, take over and stop hosts. The daemon starts every agent through `volee host spawn`, which runs `volee host run` detached. |
 | `volee hook <event>` | Called by Claude Code hooks of the agents volee launched. |
 | `volee mcp` | MCP server over stdio, used by agents to talk to each other. |
@@ -177,7 +181,7 @@ requests; **analysis** missions deliver reports.
 | `volee-term` | Terminal emulation with libghostty-vt ([ADR 0020](../adr/0020-libghostty-vt-emulates-terminals.md)): a screen fed with bytes, rendered back as VT sequences, answering terminal queries, drawn into a ratatui buffer. | none |
 | `volee-host` | The volee host ([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md)): the process that holds an agent's terminal, its socket protocol, its record, watchers, and taking over with Ctrl+Q. | term |
 | `volee-mux` | Location adapters ([ADR 0015](../adr/0015-tuios-location-adapter.md)): the multiplexer panes agents run in. tuios and tmux: find, capture, focus. | core, harness |
-| `volee-daemon` | The daemon: reconcilers, message router, mission supervisor, launches and their setup commands, adoption, resumes after a reboot. | core, config, proto, store, git, harness, host, mux |
+| `volee-daemon` | The daemon: reconcilers, message router, mission supervisor, launches and their setup commands, views on sessions started elsewhere, adoption, resumes after a reboot. | core, config, proto, store, git, harness, host, mux |
 | `volee-mcp` | MCP server exposed to agents. | core, proto |
 | `volee-tui` | The ratatui interface, and the wall of screens. | core, proto, host, term |
 | `volee-cli` | The `volee` binary and its subcommands. | all |

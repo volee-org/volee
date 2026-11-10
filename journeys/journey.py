@@ -208,11 +208,46 @@ class Journey:
 
     def views(self):
         """The views the journey's daemon holds open now (ADR 0027)."""
-        directory = os.path.join(self.vars.get("VOLEE_STATE_DIR", ""), "views")
+        state = self.vars.get("VOLEE_STATE_DIR") or self.clean.get("XDG_STATE_HOME")
+        if state and "VOLEE_STATE_DIR" not in self.vars:
+            state = os.path.join(state, "volee")
+        state = state or os.path.expanduser("~/.local/state/volee")
+        directory = os.path.join(state, "views")
         try:
             return sorted(os.listdir(directory))
         except OSError:
             return []
+
+    def compare(self, settle=10):
+        """What Claude Code lists against what volee lists, as three lists of names:
+        sessions without a row, rows without a session, sessions with several rows.
+        A session started elsewhere shows once it has lived `settle` seconds; one
+        that is younger is not expected yet."""
+        now = time.time() * 1000
+        sessions = self.claude_sessions()
+        listed = {}
+        for session in sessions:
+            background = session.get("kind") == "background"
+            settled = now - (session.get("startedAt") or 0) >= (settle + 5) * 1000
+            if background or (session.get("pid") and settled):
+                listed[session.get("sessionId")] = session.get("name") or session.get("id")
+        rows = {}
+        watched = {}
+        for agent in self.agents_listed():
+            session = self.session_of(agent)
+            rows.setdefault(session, []).append(agent["name"])
+            outside = (agent.get("launched_by") or {}).get("by") == "outside"
+            # A session that just ended shows stopped or lost for a minute.
+            state = (agent.get("state") or {}).get("state")
+            leaving = state in ("stopped", "lost") and now - agent.get("state_since", 0) < 75_000
+            if outside and agent["location"]["kind"] != "host" and session and not leaving:
+                watched[session] = agent["name"]
+        current = {session.get("sessionId") for session in sessions}
+        missing = sorted(name for session, name in listed.items() if session not in rows)
+        orphans = sorted(name for session, name in watched.items() if session not in current)
+        twice = sorted(str(names) for session, names in rows.items()
+                       if session and len(names) > 1)
+        return missing, orphans, twice
 
     def session_of(self, agent):
         """The id of the harness session a row of `volee ls --json` stands for."""

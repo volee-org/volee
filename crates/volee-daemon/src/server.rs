@@ -231,6 +231,8 @@ impl Daemon {
             Ok(count) => tracing::info!(count, "joined agents wait for their MCP server"),
             Err(error) => tracing::warn!(%error, "cannot stop the joined agents"),
         }
+        // No view of an earlier daemon outlived it.
+        crate::views::clear(&config.paths);
         // What agents that left before this daemon started left behind.
         let swept = crate::files::sweep(&config.paths, state.registry());
         if swept > 0 {
@@ -309,6 +311,9 @@ impl Daemon {
         }
         tracing::info!("volee daemon stopping");
         connections.abort_all();
+        // The views end with the daemon; the sessions they showed go on.
+        let closing = Arc::clone(&shared);
+        let _ = tokio::task::spawn_blocking(move || closing.views.close_all(&closing.paths)).await;
         for task in [refresher, resumer, Some(files)].into_iter().flatten() {
             task.abort();
         }

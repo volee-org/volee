@@ -75,6 +75,8 @@ real agent.
 
 ```sh
 cargo build --release --locked -p volee-cli
+python3 journeys/open.py --volee target/release/volee --sandbox <trusted repository>
+python3 journeys/pane.py --volee target/release/volee --sandbox <trusted repository>
 python3 journeys/edit_mode.py --volee target/release/volee --sandbox <trusted repository>
 python3 journeys/old_host.py --volee target/release/volee --old-volee <an older volee> --sandbox <trusted repository>
 ```

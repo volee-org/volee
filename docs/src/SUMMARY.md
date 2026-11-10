@@ -53,6 +53,7 @@
   - [0024. Agents come back after a reboot](adr/0024-agents-come-back-after-a-reboot.md)
   - [0025. Key sequences, a leader and which-key popups](adr/0025-key-sequences-a-leader-and-which-key-popups.md)
   - [0026. Edit mode inside volee](adr/0026-edit-mode-types-into-an-agent-inside-volee.md)
+  - [0027. Open without owning](adr/0027-open-without-owning.md)
   - [Template](adr/template.md)
 
 # Project

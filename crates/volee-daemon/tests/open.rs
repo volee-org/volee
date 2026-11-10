@@ -87,7 +87,7 @@ impl Multiplexer for FakeMux {
 struct Running {
     socket: PathBuf,
     harness: Arc<FakeHarness>,
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
 }
 
 /// A daemon with a fake harness listed every 10 ms and `mux`.
@@ -104,7 +104,7 @@ fn start(mux: FakeMux) -> Running {
     let harness = Arc::new(FakeHarness::default());
     // The door of a session: a program that says which one it opened, then
     // repeats what is typed. Never the real Claude Code.
-    harness.set_door(&["sh", "-c", "echo \"door of $0\"; exec cat"]);
+    harness.set_door(&["sh", "-c", "echo \"door of $0 in $(pwd)\"; exec cat"]);
     let config = Config {
         paths,
         log: Box::new(MemoryLog::with(vec![])),
@@ -124,7 +124,7 @@ fn start(mux: FakeMux) -> Running {
     Running {
         socket,
         harness,
-        _dir: dir,
+        dir,
     }
 }
 
@@ -290,6 +290,46 @@ async fn a_finished_background_session_opens_too() {
     tokio::task::spawn_blocking(move || sees(&shown, "door of 0a1b2c3d"))
         .await
         .unwrap();
+    close(&socket);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_door_runs_in_its_session_s_directory_never_in_the_root() {
+    let daemon = start(FakeMux::default());
+    // A session in a directory that exists: its door runs there.
+    let work = daemon.dir.path().canonicalize().unwrap().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let mut here = background(BACKGROUND, true);
+    here.cwd.clone_from(&work);
+    // One whose directory is gone (a worktree removed since): the daemon's
+    // own directory, not `/`.
+    let mut gone = background("1b2c3d4e-0000-4000-8000-000000000009", true);
+    gone.name = Some("gone".to_owned());
+    gone.cwd = work.join("removed");
+    daemon.harness.set(vec![here, gone]);
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let registry = until(&client, |r| r.agents().count() == 2).await;
+    let agent = |name: &str| registry.agents().find(|a| a.name == name).unwrap().id;
+
+    let opened = client.call::<Open>(open(agent("invoices"))).await.unwrap();
+    let socket = opened.socket.unwrap();
+    let (shown, expected) = (socket.clone(), format!("in {}", work.display()));
+    tokio::task::spawn_blocking(move || sees(&shown, &expected))
+        .await
+        .unwrap();
+    close(&socket);
+
+    let opened = client.call::<Open>(open(agent("gone"))).await.unwrap();
+    let socket = opened.socket.unwrap();
+    let shown = socket.clone();
+    let screen = tokio::task::spawn_blocking(move || sees(&shown, "door of 1b2c3d4e in "))
+        .await
+        .unwrap();
+    assert!(screen.contains("/state"), "{screen}");
+    assert!(
+        !screen.contains("in /\n") && !screen.contains("in / "),
+        "{screen}"
+    );
     close(&socket);
 }
 
