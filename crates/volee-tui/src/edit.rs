@@ -103,10 +103,72 @@ fn connect(model: &mut Model, agent: AgentId, edit: bool, effects: &mut Vec<Effe
     true
 }
 
-/// Shows the agent's screen live in the full-screen view, when it runs in
-/// a volee host; returns whether it does.
+/// Shows the agent's screen live, when it runs in a volee host; returns
+/// whether it does. A screen the interface already follows is kept.
 pub(crate) fn watch(model: &mut Model, agent: AgentId, effects: &mut Vec<Effect>) -> bool {
+    following(model, agent) || connect(model, agent, false, effects)
+}
+
+/// Whether the interface follows `agent`'s screen without holding its
+/// input.
+fn following(model: &Model, agent: AgentId) -> bool {
+    model.live.as_ref().is_some_and(|live| {
+        live.agent == agent && !live.editing && !matches!(live.phase, Phase::Closed(_))
+    })
+}
+
+/// Connects again to the agent's host, for a new snapshot of its screen.
+pub(crate) fn refresh(model: &mut Model, agent: AgentId, effects: &mut Vec<Effect>) -> bool {
     connect(model, agent, false, effects)
+}
+
+/// Follows the screen of the selected agent when it runs in a volee host:
+/// one connection serves the preview, the full-screen view and edit mode
+/// (ADR 0028). Called on every tick, so that moving through the list opens
+/// no connection per row. Returns whether anything changed.
+pub(crate) fn follow_selected(model: &mut Model, effects: &mut Vec<Effect>) -> bool {
+    // The full-screen view and an agent being opened manage their own.
+    if model.overlay == Some(Overlay::Screen) || model.opening.is_some() {
+        return false;
+    }
+    let selected = model.selected;
+    let followed = model.live.as_ref().map(|live| live.agent);
+    // Followed already, or tried: a host that did not answer is not asked
+    // again until the selection changes.
+    if followed.is_some() && followed == selected {
+        return false;
+    }
+    let mut changed = false;
+    if followed.is_some() {
+        close(model, effects);
+        changed = true;
+    }
+    let Some(agent) = selected else {
+        return changed;
+    };
+    let runs = model
+        .registry
+        .agent(agent)
+        .is_some_and(|record| record.state.is_live());
+    if model.offline.is_some() || !runs || host_socket(model, agent).is_none() {
+        return changed;
+    }
+    connect(model, agent, false, effects)
+}
+
+/// The full-screen view closes. A view on a session that runs elsewhere
+/// closes with it; the screen of an agent in a volee host stays followed,
+/// for the preview.
+pub(crate) fn leave_screen(model: &mut Model, effects: &mut Vec<Effect>) {
+    let Some(live) = &model.live else {
+        return;
+    };
+    let (agent, editing, live_now) = (live.agent, live.editing, live.phase == Phase::Live);
+    if is_view(model, agent) || !live_now {
+        close(model, effects);
+    } else if editing {
+        connect(model, agent, false, effects);
+    }
 }
 
 /// Enters edit mode on the agent: its screen full size inside volee, your
@@ -351,7 +413,6 @@ pub(crate) fn updated(
     let was_editing = live.editing;
     let agent = live.agent;
     match live.apply(update) {
-        Outcome::Drawn => {}
         // The program of a view is the door, not the agent: it ends when
         // the person leaves through it (Ctrl+Z in `claude attach`), and the
         // agent keeps running.
@@ -370,10 +431,14 @@ pub(crate) fn updated(
                 model.notify(format!("Left {name}: it keeps running."), false);
             }
         }
-        Outcome::Exited { .. } => {
+        // Said where the person looks at that screen, not for a preview.
+        Outcome::Exited { .. } if model.overlay == Some(Overlay::Screen) => {
             let name = model.name_of(agent);
             model.notify(format!("{name} has ended."), !was_editing);
         }
+        // The end of a program whose screen only fills the preview needs
+        // no word: the list says it.
+        Outcome::Drawn | Outcome::Exited { .. } => {}
         Outcome::InputTaken => {
             let name = model.name_of(agent);
             model.notify(
@@ -706,6 +771,108 @@ mod tests {
             edit: true,
             size: SIZE,
         }));
+    }
+
+    /// One second later.
+    fn tick(model: &mut Model, seconds: i64) -> Vec<Effect> {
+        let at = crate::test_support::start().plus_millis(seconds * 1_000);
+        update(model, Msg::Tick(at))
+    }
+
+    fn opens(effects: &[Effect]) -> Vec<(u64, bool)> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::LiveOpen { link, edit, .. } => Some((*link, *edit)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn closes(effects: &[Effect]) -> Vec<u64> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::LiveClose { link } => Some(*link),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_selected_agent_s_screen_is_followed_for_the_preview() {
+        let (mut model, agent) = hosted_model(120, 40);
+        // Nothing at once: moving through the list opens no connection per
+        // row. On the next tick, one watcher.
+        assert!(model.live.is_none());
+        assert_eq!(opens(&tick(&mut model, 1)), [(1, false)]);
+        assert_eq!(model.overlay, None, "no view opens by itself");
+        answer(&mut model, 1, true);
+        assert!(live_for(&model, agent));
+        // The same connection, tick after tick.
+        assert_eq!(opens(&tick(&mut model, 2)), []);
+
+        // `z` shows that screen full size: the connection is there already.
+        let effects = press(&mut model, "z");
+        assert_eq!(opens(&effects), Vec::<(u64, bool)>::new());
+        assert_eq!(model.overlay, Some(Overlay::Screen));
+        // Back: the preview goes on following it.
+        let effects = press(&mut model, "z");
+        assert_eq!(closes(&effects), Vec::<u64>::new());
+        assert_eq!(model.overlay, None);
+        assert!(live_for(&model, agent));
+
+        // Edit mode takes the input on a connection of its own, and gives
+        // the watcher back when the full-screen view closes.
+        let effects = press(&mut model, "i");
+        assert_eq!(
+            (closes(&effects), opens(&effects)),
+            (vec![1], vec![(2, true)])
+        );
+        answer(&mut model, 2, true);
+        let effects = ctrl(&mut model, 'q');
+        assert_eq!(
+            (closes(&effects), opens(&effects)),
+            (vec![2], vec![(3, false)])
+        );
+        answer(&mut model, 3, true);
+        press(&mut model, "z");
+        assert!(live_for(&model, agent));
+    }
+
+    #[test]
+    fn another_selection_drops_the_screen_that_was_followed() {
+        let (mut model, _) = hosted_model(120, 40);
+        tick(&mut model, 1);
+        answer(&mut model, 1, true);
+        // Another agent, which runs in no volee host.
+        press(&mut model, "j");
+        let effects = tick(&mut model, 2);
+        assert_eq!((closes(&effects), opens(&effects)), (vec![1], vec![]));
+        assert!(model.live.is_none());
+        // Back on the hosted one: followed again.
+        press(&mut model, "k");
+        assert_eq!(opens(&tick(&mut model, 3)), [(2, false)]);
+    }
+
+    #[test]
+    fn a_host_that_does_not_answer_is_not_asked_at_every_tick() {
+        let (mut model, _) = hosted_model(120, 40);
+        assert_eq!(opens(&tick(&mut model, 1)), [(1, false)]);
+        update(
+            &mut model,
+            Msg::LiveClosed {
+                link: 1,
+                reason: "No such file or directory (os error 2)".into(),
+            },
+        );
+        assert!(
+            model.notice.is_none(),
+            "a preview that cannot connect says nothing"
+        );
+        for second in 2..6 {
+            assert_eq!(opens(&tick(&mut model, second)), []);
+        }
     }
 
     #[test]

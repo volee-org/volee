@@ -1593,6 +1593,8 @@ fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool
     {
         model.request_preview(selected, effects);
     }
+    // The selected agent's own screen, live, when it runs in a volee host.
+    changed |= crate::edit::follow_selected(model, effects);
     changed
 }
 
@@ -1747,7 +1749,7 @@ pub(crate) fn perform(
     match action {
         Action::Back => {
             if model.overlay == Some(Overlay::Screen) {
-                crate::edit::close(model, effects);
+                crate::edit::leave_screen(model, effects);
             }
             back(model);
         }
@@ -1829,7 +1831,7 @@ pub(crate) fn perform(
                 model.request_preview(agent, effects);
                 // The live screen connects again: a new snapshot.
                 if model.overlay == Some(Overlay::Screen) {
-                    crate::edit::watch(model, agent, effects);
+                    crate::edit::refresh(model, agent, effects);
                 }
             }
         }

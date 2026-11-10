@@ -123,6 +123,32 @@ fn the_leader_shows_what_follows() {
 }
 
 #[test]
+fn the_preview_of_a_hosted_agent_is_its_live_screen() {
+    let (mut model, _) = crate::test_support::hosted_model(120, 40);
+    update(
+        &mut model,
+        Msg::Tick(crate::test_support::start().plus_millis(1_000)),
+    );
+    let size = volee_host::Size { cols: 80, rows: 12 };
+    update(
+        &mut model,
+        Msg::LiveOpened {
+            link: 1,
+            welcome: crate::test_support::welcome(size, true),
+        },
+    );
+    let screen = b"\x1b[2J\x1b[H\x1b[32m\xe2\x8f\xba\x1b[0m The tests pass: 356 of 356.\r\n\r\n> commit and push";
+    update(
+        &mut model,
+        Msg::LiveUpdate {
+            link: 1,
+            update: volee_host::Update::Snapshot(screen.to_vec()),
+        },
+    );
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
 fn the_command_palette() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     type_text(&demo, &mut model, ":show");

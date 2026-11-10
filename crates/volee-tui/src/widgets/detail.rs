@@ -269,14 +269,30 @@ fn draw_screen(
             theme.style(StyleRole::TextDim),
         ));
     }
-    if model.preview.loading && model.preview.screen.is_none() {
+    // The screen of an agent in a volee host is followed live (ADR 0028);
+    // any other is what the source read last.
+    let live = model
+        .live
+        .as_ref()
+        .filter(|live| {
+            live.has_screen()
+                && live.phase == Phase::Live
+                && model.preview.agent == Some(live.agent)
+        })
+        .and_then(|live| live.preview(theme));
+    if live.is_some() {
+        title.push(Span::styled(" · live", theme.style(StyleRole::TextDim)));
+    } else if model.preview.loading && model.preview.screen.is_none() {
         title.push(Span::styled(" · loading", theme.style(StyleRole::TextDim)));
     }
     let inner = panel(buf, area, title, focused, theme);
     if inner.is_empty() {
         return;
     }
-    let message = match (&model.preview.screen, &model.preview.error) {
+    let message = match (
+        live.as_ref().or(model.preview.screen.as_ref()),
+        &model.preview.error,
+    ) {
         (Some(screen), _) => {
             screen.render(
                 Rect::new(
