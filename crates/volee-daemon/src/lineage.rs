@@ -2,18 +2,21 @@
 //!
 //! volee gives each agent its hooks through `claude --settings`, with the
 //! agent's id on the command line. Another session can inherit them: Claude
-//! Code's own agents view, opened inside a hosted agent, revives or forks a
-//! background session with the same settings. Its hooks then name the
-//! hosted agent, and the daemon took that session for the agent's: the
-//! agent moved to the background and its messages went to the other
-//! session. For an agent in a running volee host, a hook counts only when
-//! it comes from the host's program or one of its descendants.
+//! Code's own agents view (`←` on an empty prompt), opened inside a hosted
+//! agent, moves the conversation to a background process, which the host's
+//! program then shows, and it can revive an older session of the agent.
+//! Their hooks name the hosted agent. For an agent in a running volee host,
+//! the daemon tells the hooks of the host's program and its descendants
+//! from the others: another process's hook counts only when it starts a
+//! session (the conversation going on elsewhere) or belongs to the agent's
+//! current session, and such an agent stays in its host.
 
 use std::collections::HashMap;
 use std::process::Command;
 use std::sync::Arc;
 
-use volee_core::AgentId;
+use volee_core::harness::SessionKey;
+use volee_core::{Agent, AgentId};
 
 use crate::server::Shared;
 
@@ -61,10 +64,18 @@ pub(crate) async fn foreign(shared: &Arc<Shared>, agent: AgentId, pid: Option<u3
             %agent,
             pid,
             program,
-            "a hook from another program than the agent's volee host, ignored"
+            "a hook from another program than the agent's volee host"
         );
     }
     !ours
+}
+
+/// Whether `session` (a Claude Code session id) is the agent's current one.
+pub(crate) fn is_current(agent: &Agent, session: &str) -> bool {
+    !session.is_empty()
+        && agent
+            .current_session()
+            .is_some_and(|link| link.key == SessionKey::claude(session))
 }
 
 /// Every process's parent, from `ps`; `None` when it cannot run.
@@ -84,8 +95,8 @@ fn parents(output: &str) -> HashMap<u32, u32> {
         .filter_map(|line| {
             let mut fields = line.split_whitespace();
             let pid = fields.next()?.parse().ok()?;
-            let ppid = fields.next()?.parse().ok()?;
-            Some((pid, ppid))
+            let parent = fields.next()?.parse().ok()?;
+            Some((pid, parent))
         })
         .collect()
 }

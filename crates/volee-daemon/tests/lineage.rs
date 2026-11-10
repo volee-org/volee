@@ -1,25 +1,34 @@
-//! An agent in a volee host heeds hooks only from its host's program and the
-//! program's descendants (ADR 0026): another session that inherited its
-//! hooks, such as a background fork Claude Code started, is not the agent.
+//! Hooks of an agent in a volee host from other processes (ADR 0026).
+//!
+//! Claude Code's agents view, opened inside a hosted agent, moves the
+//! conversation to a background process that the host's program then shows;
+//! its hooks name the hosted agent. That session continues the agent's
+//! conversation, and the agent stays in its host while the host runs. The
+//! hooks of any other session from another process are not the agent's.
 
 // In tests, a failed unwrap is a failed test with a clear location.
 #![allow(clippy::unwrap_used)]
+
+mod common;
 
 use std::os::unix::net::UnixListener as StdListener;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use common::FakeHarness;
 use serde_json::{Value, json};
 use tokio::net::UnixListener;
 use ulid::Ulid;
 use volee_core::harness::{HarnessKind, SessionKey};
+use volee_core::reconcile::ListedSession;
 use volee_core::role::{LaunchedBy, Role};
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
 use volee_core::workspace::{Location, Workspace};
 use volee_core::{Agent, AgentId, Event, EventKind, Registry};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
+use volee_harness::Harness;
 use volee_host::{HostRecord, Size};
 use volee_proto::client::Client;
 use volee_proto::methods::{
@@ -36,17 +45,19 @@ fn program() -> u32 {
     std::process::id()
 }
 
-/// Launchd: never a descendant of this test.
+/// Launchd: never a descendant of this test, like Claude Code's background
+/// supervisor.
 const ELSEWHERE: u32 = 1;
 
 struct Running {
     socket: PathBuf,
-    _host: StdListener,
+    harness: Arc<FakeHarness>,
+    host: Option<StdListener>,
     _dir: tempfile::TempDir,
 }
 
 /// A daemon with one agent in a running volee host `h1`, whose program is
-/// this test process.
+/// this test process; it lists sessions every 10 ms.
 fn start() -> Running {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::rooted(dir.path());
@@ -84,16 +95,17 @@ fn start() -> Running {
             location: Location::Host { id: "h1".into() },
         },
     );
+    let harness = Arc::new(FakeHarness::default());
     let config = Config {
         paths,
         log: Box::new(MemoryLog::with(vec![registered])),
         clock: Arc::new(ManualClock::at(10_000)),
         harnesses: vec![],
         spool: None,
-        harness: None,
-        discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
-        max_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
-        idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
+        harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
+        discovery_interval: Duration::from_millis(10),
+        max_discovery_interval: Duration::from_millis(10),
+        idle_discovery_interval: Duration::from_millis(10),
         evidence: EvidenceSources::default(),
         volee_bin: None,
         multiplexers: Vec::new(),
@@ -102,12 +114,13 @@ fn start() -> Running {
     tokio::spawn(Daemon::serve(listener, config));
     Running {
         socket,
-        _host: host,
+        harness,
+        host: Some(host),
         _dir: dir,
     }
 }
 
-async fn hook(daemon: &Running, event: &str, payload: Value, pid: u32) -> Option<String> {
+async fn hook(daemon: &Running, event: &str, payload: Value, pid: u32) {
     let client = Client::connect(&daemon.socket).await.unwrap();
     client
         .call::<HookIngest>(HookParams {
@@ -117,8 +130,7 @@ async fn hook(daemon: &Running, event: &str, payload: Value, pid: u32) -> Option
             pid: Some(pid),
         })
         .await
-        .unwrap()
-        .stdout
+        .unwrap();
 }
 
 async fn agent(daemon: &Running) -> Agent {
@@ -136,15 +148,110 @@ async fn agent(daemon: &Running) -> Agent {
 }
 
 fn session_start(session: &str, source: &str) -> Value {
+    json!({ "hook_event_name": "SessionStart", "session_id": session, "source": source })
+}
+
+fn stop(session: &str) -> Value {
+    json!({ "hook_event_name": "Stop", "session_id": session, "last_assistant_message": "Done." })
+}
+
+fn tool(session: &str) -> Value {
     json!({
-        "hook_event_name": "SessionStart",
+        "hook_event_name": "PreToolUse",
         "session_id": session,
-        "source": source,
+        "tool_name": "Bash",
+        "tool_input": { "command": "cargo test" },
     })
 }
 
+fn listed(id: &str, state: AgentState) -> ListedSession {
+    let mut session = ListedSession::new(SessionKey::claude(id), "/work/alpha", state);
+    session.alive = true;
+    session.background = true;
+    session.handle = Some(id.to_owned());
+    session
+}
+
+fn current(agent: &Agent) -> Option<SessionKey> {
+    agent.current_session().map(|link| link.key.clone())
+}
+
 #[tokio::test]
-async fn a_fork_with_the_agent_s_hooks_does_not_take_its_place() {
+async fn a_conversation_moved_to_the_background_stays_the_hosted_agent_s() {
+    let mut daemon = start();
+    hook(
+        &daemon,
+        "session-start",
+        session_start("own", "startup"),
+        program(),
+    )
+    .await;
+    assert_eq!(
+        current(&agent(&daemon).await),
+        Some(SessionKey::claude("own"))
+    );
+
+    // `←` in the hosted Claude: the conversation goes on in a background
+    // process, which the host's program shows.
+    hook(
+        &daemon,
+        "session-start",
+        session_start("moved", "fork"),
+        ELSEWHERE,
+    )
+    .await;
+    daemon
+        .harness
+        .set(vec![listed("moved", AgentState::Working)]);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let moved = agent(&daemon).await;
+    assert_eq!(current(&moved), Some(SessionKey::claude("moved")));
+    assert_eq!(
+        moved.location,
+        Location::Host { id: "h1".into() },
+        "it stays in its host"
+    );
+
+    // Its hooks are the agent's.
+    hook(&daemon, "stop", stop("moved"), ELSEWHERE).await;
+    assert_eq!(agent(&daemon).await.state, AgentState::Done);
+
+    // Another session from another process is not the agent: an older one
+    // the agents view revived without starting a session.
+    hook(&daemon, "pre-tool-use", tool("older"), ELSEWHERE).await;
+    hook(
+        &daemon,
+        "user-prompt-submit",
+        json!({ "hook_event_name": "UserPromptSubmit", "session_id": "older" }),
+        ELSEWHERE,
+    )
+    .await;
+    let after = agent(&daemon).await;
+    assert_eq!(
+        after.state,
+        AgentState::Done,
+        "the other session changed nothing"
+    );
+    assert_eq!(after.last_activity, None, "nor its activity");
+
+    // Once the host is gone, the conversation that goes on in the background
+    // is where the agent is.
+    drop(daemon.host.take());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if agent(&daemon).await.location == Location::Background {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the agent never followed its conversation"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn hooks_through_a_shell_of_the_program_are_the_agent_s() {
     let daemon = start();
     hook(
         &daemon,
@@ -153,58 +260,28 @@ async fn a_fork_with_the_agent_s_hooks_does_not_take_its_place() {
         program(),
     )
     .await;
-    let own = agent(&daemon).await;
-    assert!(own.owns_session(&SessionKey::claude("own")));
-
-    // Claude Code's agents view forked a background session with the same
-    // settings: its hooks name the hosted agent.
-    hook(
-        &daemon,
-        "session-start",
-        session_start("fork", "fork"),
-        ELSEWHERE,
-    )
-    .await;
-    hook(
-        &daemon,
-        "stop",
-        json!({ "hook_event_name": "Stop", "last_assistant_message": "Done." }),
-        ELSEWHERE,
-    )
-    .await;
-    let after = agent(&daemon).await;
-    assert!(!after.owns_session(&SessionKey::claude("fork")));
-    assert_eq!(
-        after.current_session().map(|link| link.key.clone()),
-        Some(SessionKey::claude("own"))
-    );
-    assert_eq!(
-        after.state,
-        AgentState::Idle,
-        "the fork's stop changed nothing"
-    );
-    assert_eq!(after.location, Location::Host { id: "h1".into() });
-
-    // A hook run through a shell the program started still counts.
     let mut shell = std::process::Command::new("sh")
         .args(["-c", "sleep 30"])
         .spawn()
         .unwrap();
-    hook(
-        &daemon,
-        "stop",
-        json!({ "hook_event_name": "Stop", "last_assistant_message": "Done." }),
-        shell.id(),
-    )
-    .await;
+    // Even for a session the agent does not know yet, as after `/clear`.
+    hook(&daemon, "pre-tool-use", tool("cleared"), shell.id()).await;
+    hook(&daemon, "stop", stop("cleared"), shell.id()).await;
     let _ = shell.kill();
     let _ = shell.wait();
     assert_eq!(agent(&daemon).await.state, AgentState::Done);
 }
 
 #[tokio::test]
-async fn a_fork_does_not_take_the_agent_s_messages() {
+async fn only_the_agent_s_conversation_takes_its_messages() {
     let daemon = start();
+    hook(
+        &daemon,
+        "session-start",
+        session_start("own", "startup"),
+        program(),
+    )
+    .await;
     let client = Client::connect(&daemon.socket).await.unwrap();
     client
         .call::<SendMessage>(SendParams {
@@ -218,26 +295,26 @@ async fn a_fork_does_not_take_the_agent_s_messages() {
         })
         .await
         .unwrap();
-    let started = Instant::now();
+    let wait = |session: Option<&str>, pid: u32| WaitParams {
+        agent: agent_id(),
+        timeout_ms: 5_000,
+        pid: Some(pid),
+        session: session.map(str::to_owned),
+    };
+    for session in [None, Some("older")] {
+        let started = Instant::now();
+        let reply = client
+            .call::<HookWait>(wait(session, ELSEWHERE))
+            .await
+            .unwrap();
+        assert_eq!(reply.text, None, "{session:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "it did not wait"
+        );
+    }
     let reply = client
-        .call::<HookWait>(WaitParams {
-            agent: agent_id(),
-            timeout_ms: 5_000,
-            pid: Some(ELSEWHERE),
-        })
-        .await
-        .unwrap();
-    assert_eq!(reply.text, None);
-    assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "it did not wait"
-    );
-    let reply = client
-        .call::<HookWait>(WaitParams {
-            agent: agent_id(),
-            timeout_ms: 5_000,
-            pid: Some(program()),
-        })
+        .call::<HookWait>(wait(Some("own"), ELSEWHERE))
         .await
         .unwrap();
     assert!(reply.text.is_some_and(|text| text.contains("keep going")));

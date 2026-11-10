@@ -31,7 +31,10 @@ pub(crate) fn run(event: &str, agent: AgentId, timeout_secs: u64) -> ExitCode {
         return ExitCode::SUCCESS;
     };
     if event == "wait" {
-        return wait(&paths, agent, timeout_secs);
+        let session = serde_json::from_str::<Value>(&input)
+            .ok()
+            .and_then(|payload| payload.get("session_id")?.as_str().map(str::to_owned));
+        return wait(&paths, agent, timeout_secs, session);
     }
     let payload = serde_json::from_str(&input).unwrap_or(Value::Null);
     let params = HookParams {
@@ -54,11 +57,12 @@ pub(crate) fn run(event: &str, agent: AgentId, timeout_secs: u64) -> ExitCode {
 
 /// Waits for a message for an idle agent; exits with status 2 and the
 /// messages on stderr to wake it up.
-fn wait(paths: &Paths, agent: AgentId, timeout_secs: u64) -> ExitCode {
+fn wait(paths: &Paths, agent: AgentId, timeout_secs: u64, session: Option<String>) -> ExitCode {
     let params = WaitParams {
         agent,
         timeout_ms: timeout_secs.saturating_mul(1_000),
         pid: Some(std::os::unix::process::parent_id()),
+        session,
     };
     let deadline = Duration::from_secs(timeout_secs.saturating_add(5));
     match blocking::call::<HookWait>(&paths.socket, params, deadline) {

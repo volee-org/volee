@@ -307,6 +307,7 @@ async fn a_waiting_agent_wakes_up_when_a_message_arrives() {
                 agent: agent(2),
                 timeout_ms: 5_000,
                 pid: None,
+                session: None,
             })
             .await
     });
@@ -338,6 +339,7 @@ async fn a_wait_times_out_without_a_message() {
             agent: agent(2),
             timeout_ms: 50,
             pid: None,
+            session: None,
         })
         .await
         .unwrap();

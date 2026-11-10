@@ -67,17 +67,26 @@ any client, the host sends `SIGCONT` to the program's process group 300 ms
 later. A program that suspends itself comes back at once; for one that
 does not, the signal changes nothing.
 
-**A hosted agent's hooks come from its host.** Claude Code's own agents
-view, opened inside a hosted agent (`←` on an empty prompt), can revive or
-fork a background session that inherits the agent's `--settings`, so its
-hooks name the hosted agent. The daemon took that session for the agent's:
-the agent moved to the background, and its messages went to the other
-session. `volee hook` now sends the process that ran it (its parent), and
-for an agent in a running host whose program's pid is known, the daemon
-heeds a hook or a wait only from that program or one of its descendants
-(one `ps` when the pid is not the program's own). Other hooks are dropped;
-the other session shows as an agent of its own once Claude Code lists it.
-Replayed hooks, whose process is gone, are not checked.
+**A hosted agent stays in its host.** Claude Code's own agents view,
+opened inside a hosted agent (`←` on an empty prompt), moves the
+conversation to a background process: measured on 2.1.322, the view says
+"Your conversation moved to the background", `Esc` twice comes back, and
+from then on the host's program shows that process, which runs the
+conversation and its hooks. Those hooks, inherited through `--settings`,
+name the hosted agent. Until 0.9, the daemon then moved the agent to the
+background, and `i` offered to adopt it, which made a second copy of the
+conversation. Now `volee hook` sends the process that ran it (its
+parent), and for an agent in a running host whose program's pid is known,
+the daemon tells the hooks of that program and its descendants (one `ps`
+when the pid is not the program's own) from the others. Another process's
+hook counts when it starts a session, which becomes the agent's current
+one (the conversation going on elsewhere), or when it belongs to the
+agent's current session; any other is dropped, such as those of an older
+session the view revived. A wait for messages follows the same rule, with
+the session id the hook's payload carries. And discovery never moves an
+agent out of a host that still runs: once the host ends, the agent follows
+its conversation to the background as before. Replayed hooks, whose
+process is gone, are not checked.
 
 **`volee attach` stays.** From a shell, `volee attach` and `volee host
 attach` still take an agent over in the whole terminal as ADR 0021 says.
