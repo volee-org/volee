@@ -225,20 +225,31 @@ pub(crate) struct PreviewScreen {
 }
 
 impl PreviewScreen {
-    /// Runs raw terminal output through the emulator (libghostty-vt, as
-    /// everywhere in volee: ADR 0020).
+    /// Runs the replay of a session's output through the emulator
+    /// (libghostty-vt, as everywhere in volee: ADR 0020). A replay is not
+    /// the session's screen: its size is told by what it writes, and it
+    /// leaves blank what it never redrew.
     pub(crate) fn parse(output: &str, depth: ColorDepth) -> Self {
         let (height, width) = screen_size(output);
         let Ok(mut screen) = Screen::new(width, height, 0) else {
             return Self::default();
         };
         screen.feed(output.as_bytes());
-        Self::from_emulator(&mut screen, depth).unwrap_or_default()
+        Self::read(&mut screen, depth, true).unwrap_or_default()
     }
 
-    /// The cells of an emulated screen, as the preview keeps them; `None`
-    /// when the emulator cannot be read.
+    /// The cells of a screen volee holds exactly (an agent in a volee host,
+    /// a view on a session): row for row, as the full-screen view draws
+    /// them, so that a view that crops them shows the same cells (ADR
+    /// 0028). `None` when the emulator cannot be read.
     pub(crate) fn from_emulator(screen: &mut Screen, depth: ColorDepth) -> Option<Self> {
+        Self::read(screen, depth, false)
+    }
+
+    /// Reads the emulator's cells. Each row keeps its cells down to the
+    /// last one that shows something; of a `replay`, a run of blank rows
+    /// is kept as one.
+    fn read(screen: &mut Screen, depth: ColorDepth, replay: bool) -> Option<Self> {
         let frame = screen.frame().ok()?;
         let height = frame.rows.len();
         if height == 0 {
@@ -247,7 +258,13 @@ impl PreviewScreen {
         let mut parsed: Vec<Vec<PreviewCell>> = Vec::with_capacity(height);
         let mut last_text = 0;
         for (row, drawn) in frame.rows.iter().enumerate() {
-            let mut cells: Vec<PreviewCell> = drawn
+            // What a row ends with that shows nothing is left out. A blank in
+            // reverse video, underlined or struck shows: it stays.
+            let kept = drawn
+                .iter()
+                .rposition(|cell| cell.continuation || !cell.shows_nothing())
+                .map_or(0, |last| last + 1);
+            let cells: Vec<PreviewCell> = drawn[..kept]
                 .iter()
                 .map(|cell| PreviewCell {
                     symbol: if cell.symbol.is_empty() {
@@ -259,12 +276,6 @@ impl PreviewScreen {
                     continuation: cell.continuation,
                 })
                 .collect();
-            while cells
-                .last()
-                .is_some_and(|cell| cell.symbol == " " && cell.style.bg.is_none())
-            {
-                cells.pop();
-            }
             if !cells.is_empty() {
                 last_text = row;
             }
@@ -272,6 +283,12 @@ impl PreviewScreen {
         }
         let (_, cursor_row) = screen.cursor_position();
         let anchor = last_text.max(usize::from(cursor_row)).min(height - 1);
+        if !replay {
+            return Some(Self {
+                rows: parsed,
+                anchor: u16::try_from(anchor).unwrap_or(u16::MAX),
+            });
+        }
         // A replay leaves blank what it never redrew: on a tall Claude Code
         // screen, rows of nothing between the conversation and the status
         // line, where the frame of the prompt was drawn before the replay

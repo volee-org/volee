@@ -43,6 +43,22 @@ pub struct StyledCell {
     pub continuation: bool,
 }
 
+impl StyledCell {
+    /// Whether the cell shows nothing: a blank, with no background and no
+    /// attribute that draws on a blank. Reverse video, an underline and a
+    /// strike do: an agent's interface draws its cursor as a blank in
+    /// reverse video.
+    pub fn shows_nothing(&self) -> bool {
+        use ratatui::style::Modifier;
+        self.symbol.trim().is_empty()
+            && self.style.bg.is_none()
+            && !self
+                .style
+                .add_modifier
+                .intersects(Modifier::REVERSED | Modifier::UNDERLINED | Modifier::CROSSED_OUT)
+    }
+}
+
 /// The visible screen at one moment, row by row, with the cursor.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Frame {
@@ -55,10 +71,9 @@ pub struct Frame {
 impl Frame {
     /// The index of the last row that shows something, if any.
     pub fn last_drawn_row(&self) -> Option<usize> {
-        self.rows.iter().rposition(|row| {
-            row.iter()
-                .any(|cell| !cell.symbol.trim().is_empty() || cell.style.bg.is_some())
-        })
+        self.rows
+            .iter()
+            .rposition(|row| row.iter().any(|cell| !cell.shows_nothing()))
     }
 }
 
@@ -375,6 +390,35 @@ mod tests {
         let mut screen = Screen::new(cols, rows, 1000).expect("screen");
         screen.feed(bytes);
         screen
+    }
+
+    #[test]
+    fn a_blank_that_draws_is_not_nothing() {
+        // A letter, a plain blank, then blanks in reverse video, underlined,
+        // struck and on a colored background: only the plain one shows
+        // nothing.
+        let mut screen = screen_after(
+            10,
+            4,
+            b"a \x1b[7m \x1b[0m\x1b[4m \x1b[0m\x1b[9m \x1b[0m\x1b[44m \x1b[0m",
+        );
+        let frame = screen.frame().expect("frame");
+        let shows: Vec<bool> = frame.rows[0][..7]
+            .iter()
+            .map(|cell| !cell.shows_nothing())
+            .collect();
+        assert_eq!(shows, [true, false, true, true, true, true, false]);
+    }
+
+    #[test]
+    fn a_row_that_holds_only_a_cursor_block_is_drawn() {
+        // An agent's interface draws its cursor as a blank in reverse video:
+        // alone on the last row, it is still the last row drawn.
+        let mut screen = screen_after(10, 6, b"text\r\n\r\n\x1b[7m \x1b[27m");
+        let frame = screen.frame().expect("frame");
+        assert_eq!(frame.last_drawn_row(), Some(2));
+        let mut screen = screen_after(10, 6, b"text\r\n\r\n ");
+        assert_eq!(screen.frame().expect("frame").last_drawn_row(), Some(0));
     }
 
     /// Replays a snapshot on a blank screen of the same size.
