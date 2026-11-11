@@ -88,8 +88,8 @@ record comes first, as [ADR 0023](0023-every-agent-on-the-machine.md)
 orders the joins: a session or a process whose process is the one the host
 started, or any process below it (a command may go through `npx`, a shell
 or a version manager), is the agent volee already has, and makes no second
-one. The process table gives the processes below, with one `ps` per round,
-only while such an agent runs.
+one. The process table gives the processes below: one `ps` with each
+listing, only while such an agent runs.
 
 **The daemon only records.** `agents.run` refuses an id that does not name
 a file of its hosts directory, a host it does not find, a program that

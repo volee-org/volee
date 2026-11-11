@@ -185,10 +185,16 @@ def main():
         j.keys("q", 1.0)
 
         # ---- `volee attach` opens it in a terminal again; quit there -----------------
+        # The program takes the size of the terminal that opens it, and draws its
+        # screen again for it: the terminal is compared with the screen volee holds
+        # then, not with the one it held in the interface's panel.
         typed_in("again", home, "attach " + shlex.quote(name))
+
+        def on_it_again():
+            held = [cells(line) for line in logs(name).splitlines()]
+            return bool(held) and same_tail(rows_of("again"), held, 80)[0]
         j.check("`volee attach` opens it in a terminal again, with its screen",
-                j.wait(lambda: printed and same_tail(rows_of("again"), printed, 80)[0], 20, 1),
-                screen_of("again")[-200:])
+                j.wait(on_it_again, 30, 1), screen_of("again")[-200:])
         keys_in("again", "ctrl+c")
         j.check("quit there, it stops: its program ended",
                 j.wait(lambda: state(name) == "stopped", 60, 1),

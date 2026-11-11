@@ -4,8 +4,10 @@
 use std::io::IsTerminal;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+use volee_proto::client::ClientError;
 use volee_proto::methods::{Run, RunParams};
+use volee_proto::rpc;
 
 use crate::cmd::host;
 use crate::connect::connect_or_start;
@@ -59,9 +61,7 @@ pub(crate) async fn run(name: Option<String>, command: Vec<String>) -> Result<()
         Err(error) => {
             // No list shows it: it must not keep running unseen.
             host::end(&dir, &id);
-            return Err(anyhow::Error::new(error).context(format!(
-                "{program} was started, then stopped: it is not an agent"
-            )));
+            bail!("{}", not_taken(&program, &error));
         }
     };
     drop(client);
@@ -75,6 +75,25 @@ pub(crate) async fn run(name: Option<String>, command: Vec<String>) -> Result<()
         .context("the task that takes the program over failed")?
 }
 
+/// What to say when the daemon did not make an agent of the program this
+/// command had started, and ended for that reason.
+fn not_taken(program: &str, error: &ClientError) -> String {
+    let why = match error {
+        // A daemon from before `volee run`: it keeps running across an
+        // upgrade until someone stops it.
+        ClientError::Rpc(refusal) if refusal.code == rpc::METHOD_NOT_FOUND => {
+            "the running daemon is older than this volee: stop it with `volee daemon stop` \
+             and run the command again"
+                .to_owned()
+        }
+        ClientError::Rpc(refusal) => refusal.message.clone(),
+        other => other.to_string(),
+    };
+    format!(
+        "{program} was started, then ended, since the daemon did not take it as an agent: {why}"
+    )
+}
+
 /// The name of a directory, for an agent that was given none.
 fn folder(cwd: &Path) -> Option<String> {
     cwd.file_name()
@@ -85,6 +104,34 @@ fn folder(cwd: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refusal_says_that_the_program_was_ended_and_why() {
+        let refusal = |code, message: &str| {
+            ClientError::Rpc(rpc::RpcError {
+                code,
+                message: message.to_owned(),
+                data: None,
+            })
+        };
+        let said = not_taken(
+            "codex",
+            &refusal(rpc::REFUSED, "the volee host h1 already runs an agent"),
+        );
+        assert!(said.starts_with("codex was started, then ended"), "{said}");
+        assert!(
+            said.ends_with("the volee host h1 already runs an agent"),
+            "{said}"
+        );
+        // A daemon that does not know the method is an older one.
+        let old = not_taken(
+            "codex",
+            &refusal(rpc::METHOD_NOT_FOUND, "unknown method agents.run"),
+        );
+        assert!(old.contains("older than this volee"), "{old}");
+        assert!(old.contains("`volee daemon stop`"), "{old}");
+        assert!(!old.contains("unknown method"), "{old}");
+    }
 
     #[test]
     fn an_agent_is_named_after_its_directory() {
