@@ -69,8 +69,11 @@ agent's.
 - Type as a person or a tool does: `type()` sends a burst, `keys()` named
   keys, `paste()` a paste. Waiting for a screen is `sees()`, never a fixed
   sleep followed by one look.
-- Ask the agent for answers that cannot be on the screen already (a word in
-  uppercase), and check the answer, not the prompt.
+- Ask the agent for answers that cannot be on the screen already, and check
+  the answer, not the prompt: `said()` looks for the word in a line the
+  agent wrote, whatever its case. Asked for a word in uppercase, a small
+  model wrote it in lowercase once in some hundred answers, and a journey
+  that waited for the uppercase word failed for that.
 - Keep apart what volee does and what the agent says. `answered()` tells
   that the typed text became a turn and that the agent wrote under it; what
   it wrote is another check, which says the answer it got. An agent that

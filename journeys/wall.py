@@ -17,7 +17,7 @@ and the comparison only counts when the screen did not change while it was made.
 
     python3 journeys/wall.py --volee target/release/volee --sandbox ~/code/sandbox
 """
-from journey import Journey, arguments, cells, in_order, same_tail
+from journey import Journey, answered_with, arguments, cells, in_order, same_tail
 
 SPELL = "Reply only with the word made of these letters, in uppercase: "
 
@@ -145,8 +145,10 @@ def main():
                        str(j.claude_session(outside))[:200]):
             return
         session_id, pid = session["sessionId"], session.get("pid")
-        answered = j.wait(lambda: "HOSTED" in j.volee_run("logs", hosted).stdout, 120, 2)
-        if not j.check("the launched agent answered", answered):
+        answered = j.wait(
+            lambda: answered_with(j.volee_run("logs", hosted).stdout, "hosted"), 120, 2)
+        if not j.check("the launched agent answered", answered,
+                       "" if answered else j.volee_run("logs", hosted).stdout[-300:]):
             return
         j.check("volee lists both", j.wait(lambda: j.agent(hosted) and j.agent(outside), 60, 1))
 
@@ -162,7 +164,8 @@ def main():
         if not j.select(hosted):
             return
         j.check("the preview of an agent in a volee host is its live screen",
-                j.sees("Preview · " + hosted + " · live", "HOSTED", timeout=15))
+                j.sees("Preview · " + hosted + " · live", timeout=15)
+                and j.said("hosted", timeout=15))
         # Only the journey's two agents: the wall shows the agents of the list, and
         # the filter keeps the list to them. No key goes to anyone else's agent.
         j.keys("Escape", 0.5)
@@ -188,7 +191,7 @@ def main():
                 j.wait(lambda: any(hosted in line and "live" in line
                                    for line in j.screen().splitlines()), 15))
         j.check("each tile shows its agent's screen",
-                j.sees("HOSTED", "OUTSIDE", timeout=30, every=1))
+                j.said("hosted", timeout=30) and j.said("outside", timeout=30))
         j.show("the wall")
         j.check("the wall opened no terminal on the session it only shows", not j.views(),
                 str(j.views()))
@@ -206,7 +209,8 @@ def main():
                 j.sees("your keys go to " + outside, timeout=20))
         j.type(SPELL + "b a c k")
         j.keys("Enter")
-        j.check("typed text reaches it and it answers", j.sees("BACK", timeout=90, every=1))
+        j.check("typed text reaches it and it answers", j.said("back"),
+                "it answered: " + j.last_answer())
         now = j.claude_session(outside) or {}
         j.check("it is the same session in the same process: nothing stopped or forked",
                 now.get("sessionId") == session_id and now.get("pid") == pid,
@@ -216,7 +220,7 @@ def main():
         j.check("the leave key comes back to the wall",
                 j.sees("Wall", "2 agents run", timeout=10))
         j.check("on the tile that was opened", outside in selected_tile(j), selected_tile(j))
-        j.check("the tile shows what was just said", j.sees("BACK", timeout=30, every=1))
+        j.check("the tile shows what was just said", j.said("back", timeout=30))
 
         # ---- an agent in a volee host, opened from the wall --------------------------
         if not j.check("a key moves the selection back", move_to(j, hosted), selected_tile(j)):
@@ -226,14 +230,15 @@ def main():
                 j.sees(" EDIT ", "your keys go to " + hosted, timeout=10))
         j.type(SPELL + "t i l e")
         j.keys("Enter")
-        j.check("typed text reaches it and it answers", j.sees("TILE", timeout=90, every=1))
+        j.check("typed text reaches it and it answers", j.said("tile"),
+                "it answered: " + j.last_answer())
         j.keys("ctrl+q", 1.5)
         j.check("the leave key gives the keys back, the screen stays",
                 j.sees("Screen · " + hosted + " · live", timeout=10))
         j.keys("Escape", 1.5)
         j.check("back comes back to the wall",
                 j.sees("Wall", "2 agents run", timeout=10))
-        j.check("whose tile shows what was just said", j.sees("TILE", timeout=15, every=1))
+        j.check("whose tile shows what was just said", j.said("tile", timeout=15))
 
         # ---- full size, and out -------------------------------------------------------
         j.keys("z", 1.5)

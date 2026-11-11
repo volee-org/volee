@@ -12,7 +12,7 @@ the row stays the same row. Quit, the session leaves the list.
 """
 import shlex
 
-from journey import Journey, arguments
+from journey import Journey, answered_with, arguments
 
 PANE = "agent"
 
@@ -66,8 +66,8 @@ def main():
                 j.sees("your keys go to " + name, timeout=20))
         j.type("Reply only with the word fruit in uppercase")
         j.keys("Enter")
-        j.check("typed text reaches the session and it answers",
-                j.sees("FRUIT", timeout=90, every=1))
+        j.check("typed text reaches the session and it answers", j.said("fruit"),
+                "it answered: " + j.last_answer())
         j.show("a tuios pane opened where it runs")
         now = j.claude_session(name) or {}
         j.check("it is the same session in the same process",
@@ -77,7 +77,8 @@ def main():
         j.check("the leave key comes back to the list and says it keeps running",
                 j.sees("Left " + name + ": it keeps running", "Agents", timeout=10))
         j.check("the pane goes on as before, with what was said in it",
-                j.wait(lambda: "FRUIT" in pane_screen(), 15, 1), pane_screen()[-200:])
+                j.wait(lambda: answered_with(pane_screen(), "fruit"), 15, 1),
+                pane_screen()[-200:])
         j.check("the view ends by itself once nobody uses it",
                 j.wait(lambda: not j.views(), 40, 2), str(j.views()))
 
