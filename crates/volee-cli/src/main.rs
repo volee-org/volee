@@ -71,6 +71,18 @@ enum Command {
         #[arg(long)]
         harness: Option<String>,
     },
+    /// Start a lead here and talk to it: it launches agents and missions
+    /// for you, and never codes; Ctrl+Q leaves it running.
+    Lead {
+        /// What you ask of it at once; without it, the lead waits for you.
+        task: Option<String>,
+        /// A display name; `lead-<this directory>` when absent.
+        #[arg(long)]
+        name: Option<String>,
+        /// The model; the configured one, else Claude Code's default.
+        #[arg(long)]
+        model: Option<String>,
+    },
     /// Run any program as an agent, in this terminal; Ctrl+Q leaves it
     /// running.
     Run {
@@ -498,6 +510,7 @@ fn async_main(command: Command) -> ExitCode {
             Command::Attach { agent } => cmd::agent::attach(&agent).await,
             Command::Logs { agent } => cmd::agent::logs(&agent).await,
             Command::Run { name, command } => cmd::run::run(name, command).await,
+            Command::Lead { task, name, model } => cmd::lead::run(task, name, model).await,
             Command::Diff { agent, full } => cmd::agent::diff(&agent, full).await,
             Command::Stop { agent } => cmd::agent::stop(&agent).await,
             Command::Adopt { agent } => cmd::agent::adopt(&agent).await,

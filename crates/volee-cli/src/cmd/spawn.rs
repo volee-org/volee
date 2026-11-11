@@ -22,6 +22,10 @@ pub(crate) struct SpawnRequest {
 
 /// Launches an agent that answers to the human.
 pub(crate) async fn run(request: SpawnRequest) -> Result<()> {
+    resolve::as_the_person(
+        "launches an agent from the command line (a lead calls spawn_agent, so that the agent \
+         reports to it)",
+    )?;
     let config = resolve::load_config()?;
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
     let repo = resolve::repository(&config, &cwd, &request.repo)?;

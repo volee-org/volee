@@ -129,6 +129,10 @@ pub struct StatusInfo {
     /// (ADR 0015); none when none is installed.
     #[serde(default)]
     pub multiplexers: Vec<MultiplexerStatus>,
+    /// The repositories of the configuration, by name: where agents and
+    /// missions can be launched without giving a path.
+    #[serde(default)]
+    pub repos: Vec<String>,
 }
 
 /// What the daemon knows about a terminal multiplexer on this machine.
@@ -405,6 +409,41 @@ method!(
     "agents.spawn",
     SpawnParams,
     Spawned
+);
+
+/// Parameters of [`StartLead`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeadParams {
+    /// The directory the lead runs in: an absolute path.
+    pub cwd: String,
+    /// What the person asks of it at once; without it, the lead says that
+    /// it is ready and waits.
+    #[serde(default)]
+    pub task: Option<String>,
+    /// A display name; `lead-<directory>` when absent.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The model; the configured one, else the harness default, when absent.
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// The result of [`StartLead`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeadStarted {
+    /// The new agent.
+    pub agent: AgentId,
+    /// The name it is listed under.
+    pub name: String,
+}
+
+method!(
+    /// Starts a lead: an agent the person talks to, which launches agents
+    /// and missions and never codes (ADR 0033). It has no worktree.
+    StartLead,
+    "agents.lead",
+    LeadParams,
+    LeadStarted
 );
 
 /// Parameters of [`Run`].

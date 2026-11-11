@@ -164,6 +164,32 @@ volee mission ls --all
 volee mission abort invoicing --reason "wrong approach"   # nothing is deleted
 ```
 
+## 7. Or talk to a lead
+
+```sh
+cd ~/code
+volee lead
+```
+
+A lead is the agent you talk to: it launches the others. `volee lead` starts
+one in the current directory and opens it in your terminal; `Ctrl+Q` leaves
+it running, and `enter` on its row in the interface, or `volee attach`,
+comes back to it. Tell it what you want in your own words:
+
+```text
+Add invoices to billing and expose them in the API, with tests.
+```
+
+It looks at what already runs, launches an agent for a task in one
+repository or a mission for several, tells you in one line what it
+launched, and gives the hand back. It never codes, and it does not watch
+its agents: volee wakes it when one reports, and it tells you in three
+lines what is done, the proof and what is left. Before a merge you are
+asked, as in the section above; a lead never answers for you.
+
+`volee lead "Add invoices to billing and to the API."` starts it with the
+request at once.
+
 ## After a reboot
 
 A reboot ends every host, but not the conversations: the first time the

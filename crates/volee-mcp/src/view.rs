@@ -68,6 +68,9 @@ pub(crate) struct WhoAmI {
     pub(crate) worktree: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) base_branch: Option<String>,
+    /// For a lead: the repositories it can launch agents and missions in.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) repos: Vec<String>,
     pub(crate) hint: &'static str,
 }
 
