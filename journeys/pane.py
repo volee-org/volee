@@ -8,17 +8,104 @@ box shows in the preview, and leaves the wall once erased: the agent rests, and 
 screen is still read. `/clear` in the pane starts a new session in the same process:
 the row stays the same row. Quit, the session leaves the list.
 
+In between, the proof asked of the one terminal component (ADR 0028), for a pane:
+what tuios captures of the pane is the pane's screen, and the preview, the tile of
+the wall, the full-screen view and `volee logs` must show it row for row, blank
+rows included: the pane's input box is left holding two marks with four blank rows
+between them. The reference is the pane's screen as tuios itself gives it, which
+volee has no part in. A capture tells the characters, not the colors (a test
+compares those).
+
     python3 journeys/pane.py --volee target/release/volee --sandbox ~/code/sandbox
 """
 import shlex
 
-from journey import Journey, answered_with, arguments
+from journey import Journey, answered_with, arguments, cells, cut, same_tail
 
 PANE = "agent"
 
 # Typed in the pane and left in its input box: the screen changes, the agent does
 # nothing, and nothing is asked of the model.
 LEFT = "left-here-42"
+
+# Two marks typed in the pane's input box and left there, with five line feeds
+# between them: the box then holds four blank rows. As for LEFT, the screen changes,
+# the agent does nothing, and nothing is asked of the model.
+TOP, END = "top-42", "end-42"
+FEEDS = 5
+
+
+def gap(rows):
+    """How many blank rows lie between the two marks on a screen, given as rows of
+    cells; -1 when the marks do not show, or when something shows between them."""
+    texts = [cut(row, len(row)) for row in rows]
+    top = next((i for i, text in enumerate(texts) if text.endswith(TOP)), None)
+    end = next((i for i, text in enumerate(texts) if text.strip() == END), None)
+    if top is None or end is None or end <= top or any(texts[top + 1:end]):
+        return -1
+    return end - top - 1
+
+
+def same_screen(j, name, pane_rows):
+    """Compares the pane's own screen with each of volee's views of it. A view reads
+    the pane every few seconds: the pane is first left to come to rest, and each view
+    is given the time of a few readings to show it."""
+    def view(title, margin, screen):
+        def caught_up():
+            rows, width = j.frame(title, margin)
+            return rows is not None and same_tail(rows, screen, width)[0]
+        j.wait(caught_up, 20, 1)
+        return j.frame(title, margin)
+
+    def printed(screen):
+        def read():
+            return [cells(line) for line in j.volee_run("logs", name).stdout.splitlines()]
+        j.wait(lambda: same_tail(read(), screen, max(len(row) for row in screen))[0], 10, 1)
+        return read()
+
+    for _ in range(3):
+        before = j.still(pane_rows)
+        if not before:
+            continue
+        preview, preview_width = view("Preview · " + name, 1, before)
+        logs = printed(before)
+        j.keys("5", 2.0)
+        tile, tile_width = view(name, 0, before)
+        j.keys("q", 1.0)
+        j.keys("z", 2.0)
+        full, full_width = view("Screen · " + name, 1, before)
+        j.keys("Escape", 1.0)
+        if pane_rows() == before:
+            break
+    else:
+        j.check("the pane's screen stays still while its views are compared", False)
+        return
+    j.say("----- the pane's own screen, at rest")
+    j.say("\n".join(cut(row, len(row)) for row in before))
+    # What the comparison rests on: without the gap on the screen that was compared,
+    # a view that counts a run of blank rows as one would show the same rows.
+    if not j.check("at rest, the pane's screen still holds the gap", gap(before) == FEEDS - 1,
+                   "{} blank rows between the marks".format(gap(before))):
+        return
+    width = max(len(row) for row in before)
+    for what, shown, shown_width in (("the preview", preview, preview_width),
+                                     ("its tile on the wall", tile, tile_width),
+                                     ("the full-screen view", full, full_width),
+                                     ("volee logs", logs, width)):
+        if shown is None:
+            j.check(what + " shows the pane's screen", False, "no such frame on screen")
+            continue
+        same, compared, difference = same_tail(shown, before, shown_width)
+        j.check("{} shows the pane's screen row for row".format(what), same,
+                difference or "{} cells compared, in {} columns".format(compared, shown_width))
+        j.check("{} shows the gap as the pane holds it".format(what), gap(shown) == gap(before),
+                "{} blank rows, the pane holds {}".format(gap(shown), gap(before)))
+    whole = [cut(row, len(row)) for row in before]
+    while whole and not whole[-1]:
+        whole.pop()
+    j.check("volee logs prints the whole screen, from its first row",
+            [cut(row, len(row)) for row in logs] == whole,
+            "{} rows printed, the pane holds {}".format(len(logs), len(whole)))
 
 
 def main():
@@ -29,6 +116,9 @@ def main():
 
     def pane_screen():
         return j.tuios("capture-pane", "-s", j.session, "-w", PANE).stdout
+
+    def pane_rows():
+        return [cells(line) for line in pane_screen().splitlines()]
 
     def in_pane(text):
         j.tuios("send-text", "-s", j.session, "-w", PANE, text)
@@ -102,6 +192,20 @@ def main():
         j.keys("q", 1.0)
         j.check("and the preview", j.wait(lambda: "Agents" in j.screen()
                                           and LEFT not in j.screen(), 20, 1))
+
+        # ---- the same screen in the three views -------------------------------------
+        j.tuios("send-text", "-s", j.session, "-w", PANE, TOP)
+        j.tuios("send-keys", "-s", j.session, "-w", PANE, "ctrl+j", "--repeat", str(FEEDS))
+        j.tuios("send-text", "-s", j.session, "-w", PANE, END)
+        j.check("the pane's screen holds a gap of blank rows",
+                j.wait(lambda: gap(pane_rows()) == FEEDS - 1, 15, 1),
+                "{} blank rows between the marks".format(gap(pane_rows())))
+        if j.select(name):
+            same_screen(j, name, pane_rows)
+        j.tuios("send-keys", "-s", j.session, "-w", PANE, "Backspace", "--repeat",
+                str(len(TOP) + FEEDS + len(END)))
+        j.check("the input box is empty again",
+                j.wait(lambda: TOP not in pane_screen() and END not in pane_screen(), 10))
 
         # ---- /clear: a new session in the same process is the same row -----------
         in_pane("/clear")

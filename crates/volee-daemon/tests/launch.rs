@@ -986,6 +986,7 @@ async fn the_preview_of_a_failed_setup_is_its_log() {
         .unwrap_err();
     let agent = registry(&daemon.socket).await.agents().next().unwrap().id;
     let preview = client.call::<Preview>(AgentParams { agent }).await.unwrap();
+    assert!(!preview.exact, "a log is not the agent's screen");
     assert!(
         preview
             .screen

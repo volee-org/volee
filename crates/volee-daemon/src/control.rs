@@ -21,7 +21,7 @@ use volee_git::DiffFormat;
 use volee_harness::{Harness, HarnessError};
 use volee_mux::{Multiplexer, MuxError};
 use volee_proto::methods::{
-    AgentParams, AttachCommand, DiffParams, DiffText, Empty, PaneFocus, PreviewText,
+    AgentParams, AttachCommand, DiffParams, DiffText, Empty, PaneFocus, PreviewText, ScreenSize,
 };
 
 use crate::error::DaemonError;
@@ -298,11 +298,22 @@ pub(crate) async fn preview(
         })
         .await?;
         return match read {
-            Ok((_, screen)) => Ok(PreviewText {
+            // The host's screen, which only redraws as it is in a terminal
+            // of the host's size: the host says it.
+            Ok((welcome, screen)) => Ok(PreviewText {
                 screen: String::from_utf8_lossy(&screen).into_owned(),
+                exact: true,
+                size: Some(ScreenSize {
+                    cols: welcome.size.cols,
+                    rows: welcome.size.rows,
+                }),
             }),
             Err(_) => match setup_screen(shared, params.agent).await {
-                Some(screen) => Ok(PreviewText { screen }),
+                Some(screen) => Ok(PreviewText {
+                    screen,
+                    exact: false,
+                    size: None,
+                }),
                 None => Err(DaemonError::Unavailable(format!(
                     "{name} is not running: its volee host is gone"
                 ))),
@@ -319,7 +330,14 @@ pub(crate) async fn preview(
         let screen = blocking(move || reader.capture(&target))
             .await?
             .map_err(|error| pane_error(&name, adapter.as_ref(), &error))?;
-        return Ok(PreviewText { screen });
+        // What the multiplexer captured is the pane's screen. Each row is
+        // placed with a cursor move: it draws the same cells in any
+        // terminal large enough, and needs no size.
+        return Ok(PreviewText {
+            screen,
+            exact: true,
+            size: None,
+        });
     }
     let Target {
         harness,
@@ -330,7 +348,11 @@ pub(crate) async fn preview(
         Ok(target) => target,
         Err(error) => {
             return match setup_screen(shared, params.agent).await {
-                Some(screen) => Ok(PreviewText { screen }),
+                Some(screen) => Ok(PreviewText {
+                    screen,
+                    exact: false,
+                    size: None,
+                }),
                 None => Err(error),
             };
         }
@@ -338,8 +360,11 @@ pub(crate) async fn preview(
     let screen = blocking(move || harness.logs(&session))
         .await?
         .map_err(|error| harness_error(&name, error))?;
+    // What the harness replays of the session's output.
     Ok(PreviewText {
         screen: String::from_utf8_lossy(&screen).into_owned(),
+        exact: false,
+        size: None,
     })
 }
 

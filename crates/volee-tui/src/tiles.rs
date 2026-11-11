@@ -25,7 +25,7 @@ use crate::app::{Effect, Model, Overlay};
 use crate::keymap::Action;
 use crate::live::{Live, Phase};
 use crate::preview::PreviewScreen;
-use crate::source::SourceError;
+use crate::source::{self, SourceError};
 
 /// How long a screen read through the source stays before it is read again,
 /// while its agent works. Longer than the preview's two seconds: a page
@@ -347,7 +347,7 @@ pub(crate) fn live_mut(model: &mut Model, link: u64) -> Option<&mut Live> {
 pub(crate) fn loaded(
     model: &mut Model,
     agent: AgentId,
-    result: &Result<String, SourceError>,
+    result: &Result<source::Reading, SourceError>,
 ) -> bool {
     let depth = model.theme.color_depth();
     let now = model.now;
@@ -367,8 +367,8 @@ pub(crate) fn loaded(
     // answers.
     reading.asked_at = Some(now);
     match result {
-        Ok(text) => {
-            reading.screen = Some(PreviewScreen::parse(text, depth));
+        Ok(read) => {
+            reading.screen = Some(PreviewScreen::of(read, depth));
             reading.error = None;
             reading.unsupported = false;
         }

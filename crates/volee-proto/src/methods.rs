@@ -407,12 +407,33 @@ method!(
     Spawned
 );
 
+/// The size of a terminal, in cells.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenSize {
+    /// Its columns.
+    pub cols: u16,
+    /// Its rows.
+    pub rows: u16,
+}
+
 /// The result of [`Preview`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreviewText {
     /// The agent's recent terminal output, with ANSI sequences, to be
     /// rendered by a terminal emulator.
     pub screen: String,
+    /// Whether `screen` draws the agent's screen itself, row for row: the
+    /// snapshot of a volee host, what a multiplexer captured of a pane.
+    /// False for the replay of a session's output, which leaves blank what
+    /// it never redrew, and for a daemon from before 0.12.2, which did not
+    /// say what it had read.
+    #[serde(default)]
+    pub exact: bool,
+    /// The size of the terminal `screen` was drawn in, when the daemon
+    /// knows it: a volee host says its own. Without it, a reader tells the
+    /// size from what `screen` writes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<ScreenSize>,
 }
 
 method!(
@@ -861,6 +882,40 @@ mod tests {
             serde_json::from_value(serde_json::json!({ "agent": "ag_01jc5x8m3kq7v2c4b9e0f1g2h3" }))
                 .unwrap();
         assert!(!params.dry_run, "a request without dry_run removes");
+    }
+
+    #[test]
+    fn a_preview_says_what_was_read_and_an_older_daemon_says_nothing() {
+        // A daemon from before 0.12.2 sends the screen alone: a replay.
+        let old: PreviewText =
+            serde_json::from_value(serde_json::json!({ "screen": "hi" })).unwrap();
+        assert_eq!(
+            old,
+            PreviewText {
+                screen: "hi".into(),
+                exact: false,
+                size: None
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&old).unwrap(),
+            serde_json::json!({ "screen": "hi", "exact": false })
+        );
+        // A volee host's snapshot: the screen itself, with the host's size.
+        let held = PreviewText {
+            screen: "hi".into(),
+            exact: true,
+            size: Some(ScreenSize {
+                cols: 120,
+                rows: 60,
+            }),
+        };
+        let json = serde_json::to_value(&held).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "screen": "hi", "exact": true, "size": { "cols": 120, "rows": 60 } })
+        );
+        assert_eq!(serde_json::from_value::<PreviewText>(json).unwrap(), held);
     }
 
     #[test]

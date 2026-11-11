@@ -30,7 +30,7 @@ pub trait Source: Send + Sync + 'static {
     /// The terminal screen of an agent, as raw terminal output: text with
     /// ANSI escape sequences and cursor addressing, as replayed by the
     /// harness (for Claude Code, `claude logs` at about 200x50).
-    fn preview(&self, agent: AgentId) -> impl Future<Output = Result<String, SourceError>> + Send;
+    fn preview(&self, agent: AgentId) -> impl Future<Output = Result<Reading, SourceError>> + Send;
 
     /// The changes of an agent against its base branch: a summary
     /// (`git diff --stat`), or the full patch when `full` is true.
@@ -257,6 +257,53 @@ pub struct PaneFocus {
     /// window of the multiplexer shows it, such as `tuios attach work`;
     /// empty when unknown.
     pub attach: Vec<String>,
+}
+
+/// What a source read of an agent's screen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Reading {
+    /// Terminal output that draws the screen.
+    pub text: String,
+    /// Whether it draws the screen itself, row for row (the snapshot of a
+    /// volee host, a multiplexer's capture of a pane), or replays a
+    /// session's output, which leaves blank what it never redrew.
+    pub exact: bool,
+    /// The columns and rows of the terminal the output was drawn in, when
+    /// the source knows them.
+    pub size: Option<(u16, u16)>,
+}
+
+impl Reading {
+    /// The replay of a session's output.
+    pub fn replay(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            exact: false,
+            size: None,
+        }
+    }
+
+    /// A screen itself, row for row, drawn in a terminal of `size` (columns
+    /// and rows) when that is known.
+    pub fn screen(text: impl Into<String>, size: Option<(u16, u16)>) -> Self {
+        Self {
+            text: text.into(),
+            exact: true,
+            size,
+        }
+    }
+}
+
+impl From<String> for Reading {
+    fn from(text: String) -> Self {
+        Self::replay(text)
+    }
+}
+
+impl From<&str> for Reading {
+    fn from(text: &str) -> Self {
+        Self::replay(text)
+    }
 }
 
 /// Why a request to the source failed.

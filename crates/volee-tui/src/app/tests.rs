@@ -901,7 +901,7 @@ fn the_full_screen_view_scrolls_over_wrapped_lines() {
         &mut model,
         Msg::PreviewLoaded {
             agent: schema,
-            result: Ok(text),
+            result: Ok(text.into()),
         },
     );
     for _ in 0..40 {
@@ -1343,7 +1343,7 @@ fn unsupported_previews_and_a_closed_source_stop_the_refresh() {
         &mut model,
         Msg::PreviewLoaded {
             agent: tower,
-            result: Ok(String::new()),
+            result: Ok(Reading::replay("")),
         },
     );
     let effects = update(&mut model, Msg::Tick(start().plus_millis(5_000)));
@@ -1540,7 +1540,7 @@ fn ticks_animate_expire_notices_and_refresh_busy_previews() {
         &mut model,
         Msg::PreviewLoaded {
             agent: id(TOWER),
-            result: Ok(String::new()),
+            result: Ok(Reading::replay("")),
         },
     );
     press(&mut model, "'z");
@@ -1572,7 +1572,7 @@ fn the_preview_of_an_agent_at_rest_is_read_again_and_not_once_it_ended() {
             model,
             Msg::PreviewLoaded {
                 agent: resting,
-                result: Ok(String::new()),
+                result: Ok(Reading::replay("")),
             },
         );
     };

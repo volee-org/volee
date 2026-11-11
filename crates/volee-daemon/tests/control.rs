@@ -171,6 +171,10 @@ async fn a_launched_agent_can_be_previewed_taken_over_and_stopped_at_once() {
         "{:?}",
         preview.screen
     );
+    // What the harness gives is the replay of the session's output, not
+    // its screen, and nothing tells the size of its terminal.
+    assert!(!preview.exact);
+    assert_eq!(preview.size, None);
     assert!(
         preview.screen.contains("\u{1b}[32m"),
         "kept raw for the TUI"
@@ -233,6 +237,7 @@ async fn a_listed_session_is_acted_on_with_its_listed_id() {
 
     let preview = client.call::<Preview>(agent).await.unwrap();
     assert!(preview.screen.contains("screen of feed5678"));
+    assert!(!preview.exact, "a replay");
 
     // volee stops only the agents it launched (ADR 0011).
     let refused = rpc_error(client.call::<Stop>(agent).await);

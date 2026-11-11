@@ -47,7 +47,7 @@ fn demo_model_at(width: u16, height: u16, theme: Theme, at: Timestamp) -> (Model
 fn serve(demo: &DemoSource, model: &mut Model, effects: Vec<Effect>) {
     for effect in effects {
         if let Effect::LoadPreview(agent) = effect {
-            let result = demo.screen_at(agent, model.now);
+            let result = demo.screen_at(agent, model.now).map(Into::into);
             update(model, Msg::PreviewLoaded { agent, result });
         }
     }
@@ -207,7 +207,7 @@ fn a_tile_without_a_screen_says_why_and_what_volee_knows() {
                         .into(),
                 ))
             } else {
-                demo.screen_at(agent, model.now)
+                demo.screen_at(agent, model.now).map(Into::into)
             };
             update(&mut model, Msg::PreviewLoaded { agent, result });
         }

@@ -116,7 +116,8 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   watches the host and draws each change as it comes. `j` and `k` scroll
   it, `enter` types into the agent ([edit mode](#edit-mode-typing-into-an-agent)),
   and `z` or `esc` comes back. For a session
-  in a tuios or tmux pane, the screen is the pane's. A Claude Code
+  in a tuios or tmux pane, the screen is the pane's, row for row, as its
+  multiplexer captures it. A Claude Code
   background session that volee does not host (one that volee 0.7
   launched, or a `claude --bg` you started by hand) is replayed from
   `claude logs`, which keeps only the session's recent output: in a session

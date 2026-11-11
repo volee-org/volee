@@ -27,8 +27,8 @@ use volee_core::{AgentId, MessageId, Registry, ThreadId};
 
 use crate::clock::Clock;
 use crate::source::{
-    Changes, Door, MissionRequest, NewMission, Outgoing, Source, SourceError, SpawnRequest,
-    Subscription, Summary, TakeOver,
+    Changes, Door, MissionRequest, NewMission, Outgoing, Reading, Source, SourceError,
+    SpawnRequest, Subscription, Summary, TakeOver,
 };
 
 /// A [`Source`] with a simulated team of agents, for `volee demo`,
@@ -235,8 +235,8 @@ impl Source for DemoSource {
         }))
     }
 
-    fn preview(&self, agent: AgentId) -> impl Future<Output = Result<String, SourceError>> + Send {
-        std::future::ready(self.screen_at(agent, self.clock.now()))
+    fn preview(&self, agent: AgentId) -> impl Future<Output = Result<Reading, SourceError>> + Send {
+        std::future::ready(self.screen_at(agent, self.clock.now()).map(Reading::replay))
     }
 
     fn diff(
@@ -560,10 +560,12 @@ mod tests {
         let (demo, clock) = demo();
         let schema = agent_id(start(), INVOICE_SCHEMA);
         let screen = demo.preview(schema).await.unwrap();
-        assert!(screen.contains("bun run db:migrate"));
-        assert!(screen.contains("Do you want to proceed?"));
+        // The demo replays what its agents wrote: it holds no screen.
+        assert!(!screen.exact);
+        assert!(screen.text.contains("bun run db:migrate"));
+        assert!(screen.text.contains("Do you want to proceed?"));
         clock.advance(10_000);
-        let screen = demo.preview(schema).await.unwrap();
+        let screen = demo.preview(schema).await.unwrap().text;
         assert!(!screen.contains("Do you want to proceed?"));
         assert!(screen.contains("esc to interrupt"));
         let stranger = AgentId::from_ulid(Ulid::from_parts(1, 1));

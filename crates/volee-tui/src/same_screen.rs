@@ -11,9 +11,13 @@
 //! and a blank in reverse video at the end of a row, which is how an
 //! agent's interface draws its cursor.
 //!
-//! Twice: for an agent in a volee host, whose screen volee holds and whose
-//! views show it row for row; and for a session volee does not host, whose
-//! views all show the same replay, read through the source.
+//! Three times: for an agent in a volee host, whose screen volee holds and
+//! whose views show it row for row; for a session in a multiplexer's pane,
+//! whose views show what the multiplexer captured of it, row for row too;
+//! and for a session volee reads the replay of, whose views all show that
+//! replay, a run of blank rows counted as one.
+
+use std::fmt::Write as _;
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -27,6 +31,7 @@ use volee_term::{Frame, Screen, StyledCell};
 
 use crate::app::{Effect, Model, Msg, inner, update};
 use crate::preview::adapted;
+use crate::source::Reading;
 use crate::test_support::{hosted_model, key, model, press, start, welcome};
 use crate::theme::{StyleRole, Theme};
 use crate::view::view;
@@ -101,6 +106,25 @@ fn reference(size: Size) -> Frame {
     let mut screen = Screen::new(size.cols, size.rows, 0).unwrap();
     screen.feed(&screen_bytes());
     screen.frame().unwrap()
+}
+
+/// The same screen as a multiplexer's capture of a pane comes (volee-mux):
+/// each row placed with a cursor move, and the cursor left after the last
+/// row with text, as far right as the widest row.
+fn captured() -> String {
+    let bytes = String::from_utf8(screen_bytes()).unwrap();
+    // The capture starts on a blank screen: what clears it is left out.
+    let drawn = bytes
+        .strip_prefix("\x1b[?25l\x1b[2J\x1b[H")
+        .expect("the screen starts by clearing itself");
+    let rows: Vec<&str> = drawn.split("\r\n").collect();
+    let mut output = String::new();
+    for (number, row) in (1..).zip(&rows) {
+        // Writing to a `String` cannot fail.
+        let _ = write!(output, "\x1b[0m\x1b[{number};1H{row}");
+    }
+    let _ = write!(output, "\x1b[0m\x1b[{};{}H", rows.len(), AGENT.cols);
+    output
 }
 
 fn draw(model: &Model) -> Buffer {
@@ -278,10 +302,15 @@ fn views_of_a_held_screen() -> (Frame, Vec<Seen>) {
 }
 
 /// The three views of a session volee does not host: each shows what the
-/// source read, the same replay.
-fn views_of_a_replay() -> (Frame, Vec<Seen>) {
-    // The replay is emulated at the size its output tells, at least 200 by
-    // 50: wider and taller than what it wrote, which changes no cell of it.
+/// source read, `reading`, and of the screen the rows `shown` tells for
+/// its height.
+fn views_of_a_reading(
+    reading: &Reading,
+    shown: fn(&Frame, usize) -> Vec<usize>,
+) -> (Frame, Vec<Seen>) {
+    // What the source read is emulated at the size its output tells, at
+    // least 200 by 50: wider and taller than what it wrote, which changes
+    // no cell of it.
     let frame = reference(Size {
         cols: 200,
         rows: 50,
@@ -289,12 +318,11 @@ fn views_of_a_replay() -> (Frame, Vec<Seen>) {
     let mut model = model(INTERFACE.0, INTERFACE.1);
     let agent = model.selected.expect("an agent is selected");
     let read = |model: &mut Model| {
-        let text = String::from_utf8(screen_bytes()).unwrap();
         update(
             model,
             Msg::PreviewLoaded {
                 agent,
-                result: Ok(text),
+                result: Ok(reading.clone()),
             },
         );
     };
@@ -305,7 +333,7 @@ fn views_of_a_replay() -> (Frame, Vec<Seen>) {
         name: "the preview",
         buffer: draw(&model),
         area,
-        rows: replayed_rows(&frame, usize::from(area.height)),
+        rows: shown(&frame, usize::from(area.height)),
     };
 
     // Full size: the same reading, its long rows wrapped. None of these
@@ -314,12 +342,12 @@ fn views_of_a_replay() -> (Frame, Vec<Seen>) {
     read(&mut model);
     let window = Rect::new(0, 0, INTERFACE.0, INTERFACE.1 - 1);
     let area = inside(window);
-    assert!(AGENT.cols <= area.width, "no row of the replay wraps here");
+    assert!(AGENT.cols <= area.width, "no row of the reading wraps here");
     let full = Seen {
         name: "the full-screen view",
         buffer: draw(&model),
         area,
-        rows: replayed_rows(&frame, usize::from(area.height)),
+        rows: shown(&frame, usize::from(area.height)),
     };
 
     key(&mut model, KeyCode::Esc);
@@ -336,9 +364,25 @@ fn views_of_a_replay() -> (Frame, Vec<Seen>) {
         name: "the tile of the wall",
         buffer: draw(&model),
         area,
-        rows: replayed_rows(&frame, usize::from(area.height)),
+        rows: shown(&frame, usize::from(area.height)),
     };
     (frame, vec![preview, full, tile])
+}
+
+/// How many rows that show nothing follow one another, at most, among the
+/// rows a view shows.
+fn longest_gap(frame: &Frame, view: &Seen) -> usize {
+    let mut longest = 0;
+    let mut run = 0;
+    for row in &view.rows {
+        if frame.rows[*row].iter().all(StyledCell::shows_nothing) {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    longest
 }
 
 /// What a comparison found.
@@ -488,8 +532,30 @@ fn a_held_screen_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wa
 }
 
 #[test]
-fn a_replay_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wall() {
-    let (frame, views) = views_of_a_replay();
+fn a_capture_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wall() {
+    // What a multiplexer captured of a pane is the pane's screen: the
+    // source says so, and the views show its rows as they are.
+    let reading = Reading::screen(captured(), None);
+    let (frame, views) = views_of_a_reading(&reading, cropped_rows);
     let found = compare(&frame, &views);
     assert_the_same(&found, &views);
+    // The blank rows of the gap are in every view, as in the pane: all
+    // five full size, and as many as fit in the views that show the
+    // screen's last rows. A reading taken for a replay would show one.
+    assert_eq!(longest_gap(&frame, &views[1]), 5, "{}", views[1].name);
+    for view in &views {
+        assert!(longest_gap(&frame, view) >= 2, "{}", view.name);
+    }
+}
+
+#[test]
+fn a_replay_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wall() {
+    let text = String::from_utf8(screen_bytes()).unwrap();
+    let (frame, views) = views_of_a_reading(&Reading::replay(text), replayed_rows);
+    let found = compare(&frame, &views);
+    assert_the_same(&found, &views);
+    // A run of blank rows counts as one in every view.
+    for view in &views {
+        assert_eq!(longest_gap(&frame, view), 1, "{}", view.name);
+    }
 }
