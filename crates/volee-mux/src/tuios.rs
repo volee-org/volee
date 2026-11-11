@@ -231,17 +231,18 @@ impl<R: CommandRunner> Tuios<R> {
 
     /// For every process, the process group in the foreground of its
     /// terminal, whose leader is the program a person sees there.
+    ///
+    /// A table that cannot be read is not a multiplexer that cannot be
+    /// used: tuios answered, and its panes are there. The error says that
+    /// nothing is known this time, not that there is no pane.
     fn foregrounds(&self) -> Result<HashMap<u32, u32>, MuxError> {
+        let unreadable = || MuxError::Unexpected {
+            command: "ps -axo pid=,tpgid=".to_owned(),
+        };
         let invocation = Invocation::new("ps", TIMEOUT).args(["-axo", "pid=,tpgid="]);
-        let output = self
-            .runner
-            .run(&invocation)
-            .map_err(|error| cannot_run(&error))?;
+        let output = self.runner.run(&invocation).map_err(|_| unreadable())?;
         if !output.is_success() {
-            return Err(MuxError::Unavailable(format!(
-                "ps cannot list processes: {}",
-                first_line(&output)
-            )));
+            return Err(unreadable());
         }
         Ok(process::foregrounds(&String::from_utf8_lossy(
             &output.stdout,
@@ -649,6 +650,28 @@ mod tests {
             )));
         let tuios = Tuios::with_runner(runner);
         assert_eq!(tuios.agents(&[]).unwrap(), []);
+    }
+
+    #[test]
+    fn a_process_table_that_cannot_be_read_is_not_a_missing_server() {
+        // tuios answered: its panes are there. Without the process table
+        // nothing can be said of them this time, which is not the same as
+        // having none.
+        let failed = Output {
+            code: Some(1),
+            stdout: Vec::new(),
+            stderr: b"ps: cannot list".to_vec(),
+        };
+        let tuios = Tuios::with_runner(
+            FakeRunner::new()
+                .with_reply(Ok(reply(DETECTED)))
+                .with_reply(Ok(failed)),
+        );
+        let error = tuios.agents(&["claude-code", "opencode"]).unwrap_err();
+        assert!(
+            !matches!(error, MuxError::Unavailable(_)),
+            "an unreadable table must not read as a multiplexer without a server: {error}"
+        );
     }
 
     #[test]
