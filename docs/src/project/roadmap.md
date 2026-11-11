@@ -119,6 +119,13 @@ keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
 | Release | v0.14.0 | Done: v0.14.0 |
 | Writing to a lead | A lead does what you write to it through volee (`volee msg send`, or `m` in the interface), the same as what you type in its terminal: a message volee hands an agent as from the human is the human's own word. Found by a mission run on a real daemon after 0.14.0 was installed | Done: v0.14.1 |
 
+## 0.15: a session typed in any terminal
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| A session in a terminal of its own | `enter` on a Claude Code session typed in a terminal tab no longer fails. It says which key to press there (the left arrow on its empty prompt, which has Claude Code move the conversation to the background), waits, and opens the conversation by itself, on the same row. It is the same in every terminal application: none is asked for anything ([ADR 0034](../adr/0034-a-session-in-its-own-terminal-opens-once-it-left-it.md)) | Done |
+| Release | v0.15.0 | Done: v0.15.0 |
+
 ## Next
 
 Nothing is scheduled: the plan that ran from 0.11 to 0.14 is complete. What
@@ -136,6 +143,10 @@ comes next is chosen among the items below.
 - Finding agents of harnesses other than OpenCode in the process table, so
   that they show outside tuios too.
 - Messaging sessions started outside volee.
+- Pressing the left arrow for the person where a terminal application has a
+  door for it (Ghostty 1.4 on macOS was measured to have one), and waiting
+  from `volee attach` as the interface does
+  ([ADR 0034](../adr/0034-a-session-in-its-own-terminal-opens-once-it-left-it.md)).
 - A Homebrew tap and a crates.io release.
 
 ## Not planned
