@@ -9,12 +9,14 @@ use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use volee_core::message::{MessageKind, Party, Reference};
+use volee_core::mission::MissionKind;
 use volee_core::role::Role;
 use volee_core::{AgentId, AgentState, Registry};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    ActivityParams, ApprovalParams, Join, JoinParams, MarkRead, MarkReadParams, RecordActivity,
-    RequestApproval, SendMessage, SendParams, Spawn, SpawnParams,
+    ActivityParams, ApprovalParams, CreateMission, CreateMissionParams, Join, JoinParams, MarkRead,
+    MarkReadParams, RecordActivity, RequestApproval, SendMessage, SendParams, Spawn, SpawnParams,
+    Status, StatusParams,
 };
 use volee_proto::replica::{Replica, ReplicaError};
 
@@ -28,7 +30,9 @@ sent to you, and report when your task is done, blocked or failed. When only the
 decide, ask_human puts the question on top of their messages with the answers they choose from. \
 A mission's coordinator presents its report to the human with request_approval once every \
 worker delivered: on their approval volee merges the work and closes the mission itself, no \
-agent merges. Messages sent to you also arrive on their own at the end of your turn.";
+agent merges. A lead makes others work: spawn_agent launches an agent on a task in one \
+repository, start_mission starts a mission across several. Messages sent to you also arrive on \
+their own at the end of your turn.";
 
 /// The same for an agent of another harness that joined (ADR 0014): no
 /// hooks hand it messages, so it must read them.
@@ -227,6 +231,33 @@ pub struct SpawnArgs {
     pub base: Option<String>,
 }
 
+/// What a mission delivers.
+#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MissionKindArg {
+    /// Branches, merged once the human approved.
+    #[default]
+    Change,
+    /// Reports: nothing is changed.
+    Analysis,
+}
+
+/// Parameters of `start_mission`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MissionArgs {
+    /// A short title, which names the mission everywhere.
+    pub title: String,
+    /// The goal, as its coordinator will read it. It knows only what you
+    /// write: what to obtain in each repository, what one provides to
+    /// another, and the end criterion.
+    pub goal: String,
+    /// The repositories: names `whoami` lists, or absolute paths.
+    pub repos: Vec<String>,
+    /// What the mission delivers. Defaults to `change`.
+    #[serde(default)]
+    pub kind: MissionKindArg,
+}
+
 /// Parameters of `request_approval`.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ApprovalArgs {
@@ -305,6 +336,26 @@ impl VoleeMcp {
         let _ = self.inner.client.call::<RecordActivity>(params).await;
     }
 
+    /// Whether this agent is a lead, or the refusal to give a model that is
+    /// not; `act` says what only a lead does.
+    async fn leads(&self, act: &str) -> Result<Result<(), CallToolResult>, ErrorData> {
+        let registry = self.inner.replica.read().await;
+        let Some(me) = registry.agent(self.inner.me) else {
+            return Err(ErrorData::internal_error(
+                "this agent was forgotten by volee",
+                None,
+            ));
+        };
+        if me.role == Role::Lead {
+            return Ok(Ok(()));
+        }
+        Ok(Err(refuse(&format!(
+            "only a lead {act}: you are a {}. Ask your lead or the human with send_message; a \
+             mission's coordinator launches its workers with spawn_worker",
+            me.role.label()
+        ))))
+    }
+
     /// The mission this agent coordinates, or the refusal to give a model
     /// that coordinates none; `act` says what only a coordinator does.
     async fn coordinated(
@@ -353,6 +404,16 @@ impl VoleeMcp {
     )]
     pub async fn whoami(&self) -> Result<CallToolResult, ErrorData> {
         self.note("called whoami").await;
+        // The repositories of the person's configuration: what a lead can
+        // name when it launches. A daemon that does not say is not asked
+        // twice: the list is only a help.
+        let repos = self
+            .inner
+            .client
+            .call::<Status>(StatusParams { protocol: 0 })
+            .await
+            .map(|status| status.repos)
+            .unwrap_or_default();
         let registry = self.inner.replica.read().await;
         let Some(me) = registry.agent(self.inner.me) else {
             return Err(ErrorData::internal_error(
@@ -361,6 +422,11 @@ impl VoleeMcp {
             ));
         };
         json(&WhoAmI {
+            repos: if me.role == Role::Lead {
+                repos
+            } else {
+                Vec::new()
+            },
             agent: AgentView::of(&registry, me, None),
             cwd: me.workspace.cwd.display().to_string(),
             worktree: me
@@ -369,7 +435,12 @@ impl VoleeMcp {
                 .as_ref()
                 .map(|path| path.display().to_string()),
             base_branch: me.workspace.base.clone(),
-            hint: "Use list_agents to find who to talk to, and report when your task ends.",
+            hint: if me.role == Role::Lead {
+                "Call list_agents before you launch anything; spawn_agent for one task in one \
+                 repository, start_mission for several."
+            } else {
+                "Use list_agents to find who to talk to, and report when your task ends."
+            },
         })
     }
 
@@ -658,6 +729,103 @@ impl VoleeMcp {
                 "Launched worker {} in {}. It reports to you; volee tells you when it stops.",
                 spawned.agent, spawned.worktree
             ))),
+            Err(ClientError::Rpc(error)) => Ok(refuse(&error.message)),
+            Err(error) => Err(ErrorData::internal_error(error.to_string(), None)),
+        }
+    }
+
+    /// Launches an agent on one task, for a lead.
+    #[tool(
+        description = "For a lead: launch an agent on one task in one repository, on a new \
+                       branch in its own git worktree. It reports to you when it is done, \
+                       blocked or failed. volee refuses when an agent already works on that \
+                       branch, and names it: write to that one instead. For work across several \
+                       repositories, use start_mission."
+    )]
+    pub async fn spawn_agent(
+        &self,
+        Parameters(args): Parameters<SpawnArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.note("asked to launch an agent").await;
+        if let Err(refusal) = self.leads("launches agents").await? {
+            return Ok(refusal);
+        }
+        let spawned = self
+            .inner
+            .client
+            .call::<Spawn>(SpawnParams {
+                repo: args.repo,
+                branch: args.branch,
+                base: args.base,
+                task: args.task,
+                role: Role::Worker,
+                parent: Some(self.inner.me),
+                mission: None,
+                model: None,
+                name: args.name,
+                harness: None,
+            })
+            .await;
+        match spawned {
+            Ok(spawned) => Ok(text(&format!(
+                "Launched agent {} in {}. It reports to you. Tell the human in one line what \
+                 you launched, then end your turn: volee wakes you when it reports.",
+                spawned.agent, spawned.worktree
+            ))),
+            Err(ClientError::Rpc(error)) => Ok(refuse(&error.message)),
+            Err(error) => Err(ErrorData::internal_error(error.to_string(), None)),
+        }
+    }
+
+    /// Starts a mission, for a lead.
+    #[tool(
+        description = "For a lead: start a mission, one goal carried out across one or more \
+                       repositories by a coordinator and its workers. The coordinator plans, \
+                       launches one worker per task, checks their work, and presents its \
+                       report to the human; once they approved it, volee merges the work \
+                       itself. The coordinator reports to you. volee refuses when a \
+                       mission is already open under that title, and names its coordinator: \
+                       write to it instead."
+    )]
+    pub async fn start_mission(
+        &self,
+        Parameters(args): Parameters<MissionArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.note("asked to start a mission").await;
+        if let Err(refusal) = self.leads("starts missions").await? {
+            return Ok(refusal);
+        }
+        let title = args.title.trim().to_owned();
+        let created = self
+            .inner
+            .client
+            .call::<CreateMission>(CreateMissionParams {
+                title: title.clone(),
+                kind: match args.kind {
+                    MissionKindArg::Change => MissionKind::Change,
+                    MissionKindArg::Analysis => MissionKind::Analysis,
+                },
+                goal: args.goal,
+                repos: args.repos,
+                requested_by: Some(self.inner.me),
+            })
+            .await;
+        match created {
+            Ok(created) => Ok(text(&match created.coordinator {
+                Some(coordinator) => format!(
+                    "Started mission \"{title}\" ({}). Its coordinator {coordinator} plans and \
+                     launches the workers; it reports to you, and asks the human before \
+                     anything is merged. Tell the human in one line what you started, then end \
+                     your turn.",
+                    created.mission
+                ),
+                None => format!(
+                    "Mission \"{title}\" ({}) is recorded, but its coordinator could not \
+                     start: volee told the human why in the mission's thread. Tell the human, \
+                     and do not start it again.",
+                    created.mission
+                ),
+            })),
             Err(ClientError::Rpc(error)) => Ok(refuse(&error.message)),
             Err(error) => Err(ErrorData::internal_error(error.to_string(), None)),
         }

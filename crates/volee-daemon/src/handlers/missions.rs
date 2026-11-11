@@ -38,8 +38,44 @@ pub(super) async fn create(
             "a mission needs at least one repository".into(),
         ));
     }
-    if let Some(agent) = params.requested_by {
-        require_agent(&*shared.state.lock().await, agent)?;
+    {
+        let state = shared.state.lock().await;
+        let registry = state.registry();
+        if let Some(agent) = params.requested_by {
+            require_agent(&state, agent)?;
+            if registry
+                .agent(agent)
+                .is_some_and(|agent| agent.role != Role::Lead)
+            {
+                return Err(DaemonError::Refused(
+                    "only a lead starts a mission: ask yours, or the human".into(),
+                ));
+            }
+        }
+        // A mission already open under this title covers the subject: what
+        // there is to add goes to its coordinator.
+        if let Some(open) = registry
+            .missions()
+            .find(|mission| !mission.status.is_over() && mission.title.eq_ignore_ascii_case(title))
+        {
+            let to = open
+                .coordinator
+                .and_then(|coordinator| registry.agent(coordinator))
+                .map_or_else(
+                    || "abort it first (`volee mission abort`)".to_owned(),
+                    |coordinator| {
+                        format!(
+                            "write to its coordinator {} instead of starting it again",
+                            coordinator.name
+                        )
+                    },
+                );
+            return Err(DaemonError::Refused(format!(
+                "mission \"{}\" is already open ({}): {to}",
+                open.title,
+                open.status.label()
+            )));
+        }
     }
     // The coordinator is a Claude Code session: without Claude Code, refuse
     // before anything is recorded, rather than leave a mission to abort.

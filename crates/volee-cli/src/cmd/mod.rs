@@ -8,6 +8,7 @@ pub(crate) mod hook;
 
 pub(crate) mod host;
 pub(crate) mod interface;
+pub(crate) mod lead;
 pub(crate) mod login;
 pub(crate) mod ls;
 pub(crate) mod mcp;

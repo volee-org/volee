@@ -26,7 +26,7 @@ pub use server::{McpError, VoleeMcp};
 /// The argument types of the tools, for callers that invoke tools directly.
 pub mod tools {
     pub use crate::server::{
-        ApprovalArgs, AskArgs, KindArg, ListArgs, OutcomeArg, ReadArgs, RefArg, ReportArgs,
-        SendArgs, SpawnArgs,
+        ApprovalArgs, AskArgs, KindArg, ListArgs, MissionArgs, MissionKindArg, OutcomeArg,
+        ReadArgs, RefArg, ReportArgs, SendArgs, SpawnArgs,
     };
 }

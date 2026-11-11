@@ -571,6 +571,15 @@ fn in_the_shell_of_an_agent_the_commands_that_speak_for_the_person_refuse() {
             &["mission", "close", "invoicing"][..],
             "only the person closes a mission from the command line",
         ),
+        (
+            &["mission", "new", "Invoicing", "Add invoices", "--repo", "."][..],
+            "only the person starts a mission from the command line (a lead calls start_mission",
+        ),
+        (
+            &["spawn", ".", "feat/invoices", "Add invoices"][..],
+            "only the person launches an agent from the command line (a lead calls spawn_agent",
+        ),
+        (&["lead"][..], "only the person starts a lead"),
     ] {
         let output = as_agent(args);
         let said = String::from_utf8_lossy(&output.stderr);

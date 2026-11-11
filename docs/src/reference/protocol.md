@@ -16,7 +16,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 
 | Method | Parameters | Result |
 | --- | --- | --- |
-| `daemon.status` | `protocol` (the client's protocol version, or 0) | version, protocol, pid, start time, last event, agent count, harnesses, forge |
+| `daemon.status` | `protocol` (the client's protocol version, or 0) | version, protocol, pid, start time, last event, agent count, harnesses, forge, multiplexers, `repos` (the repositories the configuration names) |
 | `daemon.shutdown` | none | none; the daemon stops after answering |
 | `events.since` | `after` (sequence number, optional) | `events` (sequence number and event), `last_seq` |
 | `events.subscribe` | `after` (optional), `interactive` (optional, `false` by default) | the same batch, then `events.appended` notifications |
@@ -36,6 +36,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `hooks.ingest` | `agent`, `event`, `payload` | `stdout`: what the hook prints, if anything |
 | `hooks.wait` | `agent`, `timeout_ms` | `text`: messages that wake the agent, or `null` |
 | `agents.spawn` | `repo`, `branch`, `task`, `role`, optional `base`, `parent`, `mission`, `model`, `name`, `harness` (`claude-code` by default, or `opencode`) | `agent`, `worktree` |
+| `agents.lead` | `cwd` (an absolute path), optional `task`, `name`, `model` | `agent`, `name`: a lead, in a volee host, without a worktree |
 | `agents.run` | `host`: the id of a volee host the client started, in the daemon's hosts directory; optional `name` | `agent`, `name`; the program of the host is now an agent |
 | `threads.summarize` | `thread` | `summary`, `messages`, `model`; refused unless `[messages] summaries` is on |
 | `missions.create` | `title`, `kind` (`change` or `analysis`), `goal`, `repos`, optional `requested_by` | `mission`, `thread`, `coordinator` |
@@ -202,6 +203,14 @@ with `truncated` set.
 batch of events that concerns the mission, and once when it starts. Its
 decisions are ordinary events (`worker-assessed`, `mission-updated`) and
 messages from volee in the mission's thread, so every client sees them.
+
+`agents.spawn` refuses (`-32002`) a branch of a repository where an agent
+already works, and `missions.create` a title under which a mission is
+already open: each refusal names the agent to write to instead
+([ADR 0033](../adr/0033-a-lead-makes-others-work.md)). When `requested_by`
+names an agent, it must be a lead, and the mission's coordinator is
+registered with that lead as its parent. `agents.lead` refuses a lead
+under the name of one that runs in the same directory.
 
 `missions.request_approval` is refused (`-32002`) unless `by` is the
 mission's coordinator and the mission is `reporting`: every worker

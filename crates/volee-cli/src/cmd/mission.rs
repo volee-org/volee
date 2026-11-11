@@ -31,6 +31,10 @@ pub(crate) struct NewMission {
 
 /// Creates a mission.
 pub(crate) async fn new(request: NewMission) -> Result<()> {
+    resolve::as_the_person(
+        "starts a mission from the command line (a lead calls start_mission, so that the \
+         mission reports to it)",
+    )?;
     let config = resolve::load_config()?;
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
     let repos = request

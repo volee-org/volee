@@ -231,6 +231,39 @@ includes a launch the daemon could not finish because it stopped, and one
 whose session Claude Code never listed within two minutes: volee marks those
 failed at its next look for sessions.
 
+A launch on a branch where an agent already works is refused, and names
+that agent: what there is to add goes to it, with `volee msg send`.
+
+## A lead
+
+```sh
+volee lead                                   # here, and talk to it
+volee lead "Add invoices to billing and to the API."
+volee lead --name tower --model sonnet
+```
+
+A lead is the agent you talk to. It launches agents and missions for you,
+hears their reports, and never codes
+([ADR 0033](../adr/0033-a-lead-makes-others-work.md)). `volee lead` starts
+one in the current directory, in a volee host, and opens it in your
+terminal at once; `Ctrl+Q` gives the terminal back and the lead keeps
+running. Without a terminal, it says how to open it. `enter` on its row in
+the interface, or `volee attach <name>`, opens it again. It is named
+`lead-<directory>` unless `--name` says otherwise, and uses the configured
+model unless `--model` does.
+
+A lead has no worktree and Claude Code's editing tools are turned off for
+it. It gets two more MCP tools than the other agents: `spawn_agent`, for one
+task in one repository, and `start_mission`, for work across several. What
+it launches reports to it; it tells you in a line what it launched, and in
+three lines what came back. `volee lead` typed again where that lead runs
+is refused, and says how to open it; give another lead a name of its own
+with `--name`.
+
+`volee lead`, `volee spawn` and `volee mission new` refuse to run in the
+shell of an agent volee launched, like the commands that speak for you: an
+agent launches with its own tools, so that what it starts reports to it.
+
 ## Running any program as an agent
 
 ```sh
@@ -402,7 +435,8 @@ volee mission close invoicing         # yourself, once every worker delivered
 
 A repository is a name from the [configuration](configuration.md) or a
 directory. A mission is named by its title, its short id (`ms_x7k2pq`) or its
-id.
+id. While a mission is open, another one under the same title is refused,
+whatever its case: what there is to add goes to its coordinator.
 
 Creating a mission starts its coordinator: a Claude Code session in the main
 checkout of the mission's first repository, with Claude Code's editing tools

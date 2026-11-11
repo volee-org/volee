@@ -20,8 +20,8 @@ use volee_proto::methods::{
     AbortMission, Adopt, AgentParams, Attach, CloseMission, CreateMission, Diff, Empty, EventBatch,
     EventsSince, Forget, HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams,
     Method, Open, Preview, RecordActivity, RefreshDiscovery, RequestApproval, Run, SendMessage,
-    SendParams, Sent, Shutdown, SinceParams, Spawn, Status, StatusInfo, StatusParams, Stop,
-    Summarize, Tidy, WaitParams, WaitReply,
+    SendParams, Sent, Shutdown, SinceParams, Spawn, StartLead, Status, StatusInfo, StatusParams,
+    Stop, Summarize, Tidy, WaitParams, WaitReply,
 };
 use volee_proto::rpc::{self, RpcError};
 
@@ -58,6 +58,7 @@ pub(crate) async fn dispatch(
         }
         HookWait::NAME => respond(hook_wait(shared, parse::<HookWait>(params)?).await),
         Spawn::NAME => respond(crate::launch::spawn(shared, parse::<Spawn>(params)?).await),
+        StartLead::NAME => respond(crate::launch::lead(shared, parse::<StartLead>(params)?).await),
         Run::NAME => respond(crate::launch::run(shared, parse::<Run>(params)?).await),
         Preview::NAME => respond(control::preview(shared, parse::<Preview>(params)?).await),
         Diff::NAME => respond(control::diff(shared, parse::<Diff>(params)?).await),
@@ -139,6 +140,7 @@ async fn status(shared: &Arc<Shared>, params: StatusParams) -> Result<StatusInfo
         harnesses: shared.harnesses.clone(),
         forge: shared.forge_status(),
         multiplexers: shared.panes.statuses(),
+        repos: shared.settings.repos.keys().cloned().collect(),
     })
 }
 

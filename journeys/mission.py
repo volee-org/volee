@@ -1,14 +1,18 @@
-"""A mission from its goal to its end, in two repositories without a remote (ADR 0032).
+"""A mission from the person's words to its end, in two repositories without a remote
+(ADR 0032, ADR 0033).
 
-The trip: the person starts a mission across two repositories. Its coordinator plans
-it and launches one worker per repository; each worker commits its work on a branch
-of its own, which is all a repository without a remote can ask of it. The coordinator
-merges nothing: it presents its report, and the mission waits for the person. In the
-interface the question sits on top of the messages with its two answers; `1` then `y`
-says "ok merge". Only then is each worker's branch merged into the main branch of its
-repository, with a merge commit, by volee itself: no agent merges. volee then closes
-the mission, tidies the workers' worktrees, keeps their branches, stops the
-coordinator, and says so in one message.
+The trip: the person starts a lead and, in the interface, tells it what they want
+across two repositories. The lead starts a mission and gives the hand back. The
+mission's coordinator plans it and launches one worker per repository; each worker
+commits its work on a branch of its own, which is all a repository without a remote
+can ask of it. The coordinator merges nothing: it presents its report, and the mission
+waits for the person. In the interface the question sits on top of the messages with
+its two answers; `1` then `y` says "ok merge". Only then is each worker's branch
+merged into the main branch of its repository, with a merge commit, by volee itself:
+no agent merges. volee then closes the mission, tidies the workers' worktrees, keeps
+their branches, stops the coordinator, and says so in one message, which the lead
+hears too. Last, a task in one repository: the lead gives it to one agent itself,
+which commits and reports to it; nobody merges it.
 
 Real agents do the work, on a small model: the goal is a file of one line in each
 repository.
@@ -145,6 +149,15 @@ def closing(text, title):
     return text[start:end + len("branches kept).")] if end >= 0 else text[start:]
 
 
+def spoke_since(j, name, since_ms):
+    """Whether the agent called `name` took a turn after `since_ms` (milliseconds since
+    the epoch) and rests again. What it says is its own, in the language it answers in:
+    the journey shows its screen and does not look for words in it."""
+    agent = j.agent(name) or {}
+    return ((agent.get("state") or {}).get("state") in ("idle", "done")
+            and (agent.get("state_since") or 0) > since_ms)
+
+
 def missions(j):
     try:
         return json.loads(j.volee_run("mission", "ls", "--all", "--json").stdout or "[]")
@@ -162,6 +175,9 @@ def main():
     other = args.other_sandbox or os.path.join(os.path.dirname(j.sandbox), "beta")
     repos = [Repo(j, j.sandbox), Repo(j, other)]
     j.branches.append(branch)
+    # The branch of the one agent the lead launches itself, at the end.
+    solo = "journey-solo-" + j.stamp
+    j.branches.append(solo)
     try:
         if not j.check("both repositories are git checkouts with nothing uncommitted",
                        all(repo.start and repo.clean() for repo in repos),
@@ -177,21 +193,65 @@ def main():
         if not j.check("the daemon starts", j.start_daemon()):
             return
 
-        # ---- the person starts the mission -------------------------------------
-        goal = ("In each of the two repositories, add a file named `{file}` at the root "
-                "of the repository, containing exactly the line `{line}`, and commit it "
-                "with the message `test: add {file}`. One worker per repository, each on "
-                "a branch named `{branch}`. Nothing else: no test, no other file, no "
-                "other change.").format(file=file, line=line, branch=branch)
-        created = j.volee_run("mission", "new", title, goal,
-                              "--repo", repos[0].path, "--repo", repos[1].path)
-        if not j.check("`volee mission new` starts the mission and its coordinator",
-                       created.returncode == 0 and "Its coordinator" in created.stdout,
-                       (created.stdout + created.stderr).strip()[:300]):
+        # ---- the person starts a lead, and tells it what they want ---------------
+        lead = "journey-lead-" + j.stamp
+        j.agents.append(lead)
+        started = j.run([j.volee, "lead", "--name", lead], cwd=repos[0].path)
+        if not j.check("`volee lead` starts a lead and says how to open it",
+                       started.returncode == 0 and "is your lead here" in started.stdout,
+                       (started.stdout + started.stderr).strip()[:300]):
             return
-        mission = next((m for m in missions(j) if m["title"] == title), None)
-        if not j.check("the mission is listed", mission, str(missions(j))[:200]):
+        j.open_interface()
+        j.resize(160, 45)
+        row = j.wait(lambda: j.agent(lead), 30, 1) or {}
+        j.check("it is listed as a lead, without a worktree",
+                row.get("role") == "lead" and not row.get("workspace", {}).get("worktree"),
+                str((row.get("role"), row.get("workspace")))[:200])
+        ready = j.wait(lambda: ((j.agent(lead) or {}).get("state") or {}).get("state")
+                       in ("idle", "done"), 120, 1)
+        j.check("it says that it is ready, and waits", ready,
+                str((j.agent(lead) or {}).get("state")))
+        if not j.select(lead):
             return
+        j.keys("Enter", 2.0)
+        if not j.check("Enter opens the lead inside volee",
+                       j.sees("your keys go to " + lead, timeout=30)):
+            return
+        request = ("Start a mission titled `{title}` in the repositories {a} and {b}. "
+                   "Its goal: in each of the two repositories, add a file named `{file}` "
+                   "at the root of the repository, containing exactly the line `{line}`, "
+                   "and commit it with the message `test: add {file}`. One worker per "
+                   "repository, each on a branch named `{branch}`. Nothing else: no test, "
+                   "no other file, no other change.").format(
+                       title=title, a=repos[0].name, b=repos[1].name, file=file,
+                       line=line, branch=branch)
+        j.type(request)
+        j.keys("Enter")
+        mission = j.wait(lambda: next((m for m in missions(j) if m["title"] == title), None),
+                         PLANNING, 2)
+        if not j.check("the lead starts the mission it was asked for", mission,
+                       "it answered: " + j.last_answer()):
+            j.show("the lead did not start the mission")
+            return
+        j.check("in its own name: the mission says which lead asked for it",
+                mission.get("requested_by") == row.get("id"),
+                "{} / {}".format(mission.get("requested_by"), row.get("id")))
+        j.check("it tells the person what it launched, and hands back",
+                j.wait(lambda: ((j.agent(lead) or {}).get("state") or {}).get("state")
+                       in ("idle", "done"), 120, 1),
+                str((j.agent(lead) or {}).get("state")))
+        j.show("the lead, asked for a mission")
+        j.keys("ctrl+q", 1.5)
+        j.check("the leave key gives the keyboard back to volee, on the lead's screen",
+                j.wait(lambda: "your keys go to " + lead not in j.screen()
+                       and "Screen · " + lead in j.screen(), 10))
+        j.keys("Escape", 1.0)
+        j.check("Escape comes back to the list, and the lead keeps running",
+                j.sees("Agents", lead, timeout=10)
+                and ((j.agent(lead) or {}).get("state") or {}).get("state")
+                in ("idle", "done", "working"))
+        # The filter that selected the lead still narrows the list.
+        j.keys("Escape", 1.0)
 
         def members(role):
             return [agent for agent in j.agents_listed()
@@ -205,14 +265,16 @@ def main():
                 if agent["name"] not in j.agents:
                     j.agents.append(agent["name"])
 
-        j.open_interface()
-        j.resize(160, 45)
         coordinator = j.wait(lambda: members("coordinator"), 30, 1)
         remember()
         if not j.check("its coordinator shows in the list",
                        coordinator and j.sees(coordinator[0]["name"], timeout=30),
                        str(coordinator)[:160]):
+            j.show("no coordinator in the list")
             return
+        j.check("the coordinator answers to the lead",
+                coordinator[0].get("parent") == row.get("id"),
+                "{} / {}".format(coordinator[0].get("parent"), row.get("id")))
         coordinator, coordinator_id = coordinator[0]["name"], coordinator[0]["id"]
 
         # ---- the coordinator launches one worker per repository ----------------
@@ -346,6 +408,60 @@ def main():
                 "ag_" + coordinator_id[-6:])
         j.show("the mission, closed and tidied")
         j.keys("Escape", 0.5)
+
+        # ---- the lead heard it, and tells the person -------------------------------
+        ended = next(m for m in missions(j) if m["id"] == mission["id"]).get("ended_at") or 0
+        told = j.wait(lambda: spoke_since(j, lead, ended), 120, 2)
+        if j.select(lead):
+            j.keys("z", 1.5)
+            j.check("the lead takes a turn once the mission is closed, to tell the person",
+                    told, "it said: " + j.last_answer())
+            j.show("the lead, at the end")
+            j.keys("Escape", 0.5)
+        j.check("the lead is still there, for the next request",
+                ((j.agent(lead) or {}).get("state") or {}).get("state")
+                in ("idle", "done", "working"), str((j.agent(lead) or {}).get("state")))
+
+        # ---- one task in one repository: the lead gives it to one agent ------------
+        merged = repos[0].head()
+        if j.select(lead):
+            j.keys("Enter", 2.0)
+            j.check("the lead opens again for another request",
+                    j.sees("your keys go to " + lead, timeout=30))
+            j.type(("Now launch one agent in the repository {a}, on a branch named "
+                    "`{solo}`, to add a file named `{solo}.txt` at the root of the "
+                    "repository, containing exactly the line `solo {stamp}`, and to "
+                    "commit it with the message `test: add {solo}.txt`. Nothing "
+                    "else.").format(a=repos[0].name, solo=solo, stamp=j.stamp))
+            j.keys("Enter")
+
+            def launched():
+                return next((agent for agent in j.agents_listed()
+                             if agent.get("workspace", {}).get("branch") == solo), None)
+            agent = j.wait(launched, PLANNING, 2) or {}
+            if agent.get("name"):
+                j.agents.append(agent["name"])
+            j.check("the lead launches one agent on that branch, outside any mission",
+                    agent.get("role") == "worker" and not agent.get("mission")
+                    and agent.get("workspace", {}).get("repo") == repos[0].name,
+                    str((agent.get("name"), agent.get("role"), agent.get("mission")))[:200])
+            j.check("the agent answers to the lead", agent.get("parent") == row.get("id"),
+                    "{} / {}".format(agent.get("parent"), row.get("id")))
+            j.check("the agent commits its work on its branch",
+                    j.wait(lambda: repos[0].git("rev-list", "--count", merged + ".." + solo)
+                           == "1", WORKING, 3),
+                    repos[0].git("log", "--oneline", merged + ".." + solo))
+            j.check("nobody merges it: the main branch has not moved",
+                    repos[0].head() == merged)
+            # The agent reports to its lead once its work is committed.
+            committed = int(repos[0].git("log", "-1", "--format=%ct", solo) or 0) * 1000
+            j.check("the lead takes a turn once the agent reported, to tell the person",
+                    j.wait(lambda: spoke_since(j, lead, committed), 180, 2),
+                    "it said: " + j.last_answer())
+            j.show("the lead, after one agent's work")
+            j.keys("ctrl+q", 1.5)
+            j.keys("Escape", 1.0)
+            j.keys("Escape", 1.0)
         j.keys("q", 1.0)
     finally:
         if j.keep:
@@ -362,6 +478,11 @@ def main():
             j.check("{} is back where it started".format(repo.name),
                     not problem and repo.head() == repo.start and repo.clean()
                     and not repo.worktrees(branch), problem)
+        # The lone agent's worktree and branch, which nobody merged.
+        repos[0].restore(solo)
+        j.check("the lone agent's branch and worktree are gone",
+                not repos[0].worktrees(solo)
+                and not repos[0].ok("rev-parse", "--verify", "--quiet", "refs/heads/" + solo))
         j.finish()
 
 

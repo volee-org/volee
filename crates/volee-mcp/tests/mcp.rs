@@ -24,7 +24,7 @@ use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, MissionId, Registry, ThreadId};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_mcp::VoleeMcp;
-use volee_mcp::tools::{ApprovalArgs, AskArgs, ListArgs, SpawnArgs};
+use volee_mcp::tools::{ApprovalArgs, AskArgs, ListArgs, MissionArgs, MissionKindArg, SpawnArgs};
 use volee_proto::client::Client;
 use volee_proto::methods::{
     EventsSince, HookIngest, HookParams, JoinParams, SendMessage, SendParams, SinceParams,
@@ -508,7 +508,9 @@ async fn a_real_mcp_client_sees_every_tool() {
             "report",
             "request_approval",
             "send_message",
+            "spawn_agent",
             "spawn_worker",
+            "start_mission",
             "whoami"
         ]
     );
@@ -771,4 +773,85 @@ async fn only_a_coordinator_launches_workers() {
         .unwrap();
     assert!(failed(&refused));
     assert!(body(&refused).contains("coordinator"), "{}", body(&refused));
+}
+
+#[tokio::test]
+async fn only_a_lead_starts_missions_and_launches_agents() {
+    // Agent 1 is a lead; agent 2 is its worker; agent 10 coordinates a
+    // mission.
+    let fixture = start();
+    let worker = server_for(&fixture, agent(2)).await;
+    let mission = || MissionArgs {
+        title: "Invoicing".into(),
+        goal: "Add invoices to billing and to the API.".into(),
+        repos: vec!["billing".into()],
+        kind: MissionKindArg::Change,
+    };
+    let launch = || SpawnArgs {
+        repo: "billing".into(),
+        branch: "feat/more".into(),
+        task: "Do more.".into(),
+        name: None,
+        base: None,
+    };
+    for refused in [
+        worker.start_mission(Parameters(mission())).await.unwrap(),
+        worker.spawn_agent(Parameters(launch())).await.unwrap(),
+    ] {
+        assert!(failed(&refused));
+        assert!(
+            body(&refused).contains("only a lead") && body(&refused).contains("you are a worker"),
+            "{}",
+            body(&refused)
+        );
+    }
+    let coordinator = server_for(&mission_fixture(), agent(10)).await;
+    let refused = coordinator
+        .start_mission(Parameters(mission()))
+        .await
+        .unwrap();
+    assert!(
+        body(&refused).contains("you are a coordinator"),
+        "{}",
+        body(&refused)
+    );
+    assert_eq!(registry(&fixture).await.missions().count(), 0);
+
+    // The lead may: this daemon has no Claude Code to run a coordinator
+    // with, and says so; the request reached it in the lead's name.
+    let lead = server_for(&fixture, agent(1)).await;
+    let started = lead.start_mission(Parameters(mission())).await.unwrap();
+    assert!(failed(&started));
+    assert!(
+        body(&started).contains("needs Claude Code"),
+        "{}",
+        body(&started)
+    );
+    let launched = lead.spawn_agent(Parameters(launch())).await.unwrap();
+    assert!(failed(&launched));
+    assert!(
+        !body(&launched).contains("only a lead"),
+        "{}",
+        body(&launched)
+    );
+}
+
+#[tokio::test]
+async fn a_lead_learns_from_whoami_what_it_can_launch_in() {
+    let fixture = start();
+    let lead = server_for(&fixture, agent(1)).await;
+    let me: serde_json::Value = serde_json::from_str(&body(&lead.whoami().await.unwrap())).unwrap();
+    assert_eq!(me["role"], "lead");
+    assert!(
+        me["hint"].as_str().unwrap().contains("start_mission"),
+        "{me}"
+    );
+    // This daemon's configuration names no repository: the field is left
+    // out rather than empty.
+    assert!(me.get("repos").is_none(), "{me}");
+    let worker = server_for(&fixture, agent(2)).await;
+    let me: serde_json::Value =
+        serde_json::from_str(&body(&worker.whoami().await.unwrap())).unwrap();
+    assert!(me["hint"].as_str().unwrap().contains("report"), "{me}");
+    assert!(me.get("repos").is_none(), "{me}");
 }
