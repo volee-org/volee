@@ -9,11 +9,12 @@ use std::collections::{HashMap, VecDeque};
 use volee_core::AgentId;
 use volee_core::time::Timestamp;
 
-/// How many buckets a sparkline shows.
-pub(crate) const BUCKETS: usize = 8;
+/// How many buckets are kept: the widest activity a card shows, one bucket
+/// per column (eight minutes).
+pub(crate) const BUCKETS: usize = 32;
 
 /// How long one bucket lasts.
-const BUCKET_MILLIS: i64 = 30_000;
+const BUCKET_MILLIS: i64 = 15_000;
 
 /// Activity counts per agent and per bucket.
 #[derive(Clone, Debug, Default)]
@@ -67,9 +68,14 @@ impl ActivityLog {
 /// The bars of a sparkline, from low to high.
 pub(crate) const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
-/// The bar of each count, scaled to the highest one; `None` for zero.
+/// The fewest events that fill a bar: a quiet agent's lone events show as
+/// short bars, not as full ones.
+const FULL_BAR: u16 = 3;
+
+/// The bar of each count, scaled to the highest one (and to at least
+/// [`FULL_BAR`] events); `None` for zero.
 pub(crate) fn bars(counts: &[u16]) -> Vec<Option<char>> {
-    let max = counts.iter().copied().max().unwrap_or(0).max(1);
+    let max = counts.iter().copied().max().unwrap_or(0).max(FULL_BAR);
     counts
         .iter()
         .map(|&count| {
@@ -101,12 +107,14 @@ mod tests {
         log.record(agent(), at(0));
         log.record(agent(), at(1));
         log.record(agent(), at(31));
+        // Buckets of fifteen seconds: 0 and 1 share one, 31 is two later.
         let counts = log.counts(agent(), at(35));
         assert_eq!(counts[BUCKETS - 1], 1);
-        assert_eq!(counts[BUCKETS - 2], 2);
+        assert_eq!(counts[BUCKETS - 2], 0);
+        assert_eq!(counts[BUCKETS - 3], 2);
         assert_eq!(counts.iter().sum::<u16>(), 3);
         // Later, the same activity slides to the left, then out.
-        assert_eq!(log.counts(agent(), at(95))[BUCKETS - 3], 1);
+        assert_eq!(log.counts(agent(), at(95))[BUCKETS - 5], 1);
         assert_eq!(log.counts(agent(), at(600)), [0; BUCKETS]);
     }
 
@@ -126,5 +134,10 @@ mod tests {
         let bars = bars(&[0, 1, 2, 4]);
         assert_eq!(bars, [None, Some('▂'), Some('▄'), Some('█')]);
         assert_eq!(super::bars(&[0, 0]), [None, None]);
+        // A quiet agent: one event is a third of a bar, three fill it.
+        assert_eq!(
+            super::bars(&[1, 0, 1, 2, 3]),
+            [Some('▃'), None, Some('▃'), Some('▆'), Some('█')]
+        );
     }
 }

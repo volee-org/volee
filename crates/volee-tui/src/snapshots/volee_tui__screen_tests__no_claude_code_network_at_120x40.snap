@@ -2,7 +2,7 @@
 source: crates/volee-tui/src/screen_tests.rs
 expression: "draw(&empty_machine(tab, 120, 40, false))"
 ---
-" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline                           ! 0 need you · ▸ 0 working · 0 agents "
+" volee   1 Tree   2 Network   3 Repos   4 Timeline                                ! 0 need you · ▸ 0 working · 0 agents "
 "╭ Agents ────────────────────────╮╭ Network · cards ───────────────────────────────────────────────────────────────────╮"
 "│ No agents yet                  ││                                                                                    │"
 "│                                ││                                                                                    │"

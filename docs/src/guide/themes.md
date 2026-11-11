@@ -166,6 +166,15 @@ edge = "#3b4261"
 | `checks.failing` | Checks that failed. |
 | `checks.pending` | Checks that still run. |
 | `sparkline` | Activity sparklines on cards. |
+| `agent.1` | The first of the nine colors that tell agents apart: each worker and each session started on its own keeps one, on its card's border, its name and its activity. |
+| `agent.2` | The second color that tells agents apart. |
+| `agent.3` | The third color that tells agents apart. |
+| `agent.4` | The fourth color that tells agents apart. |
+| `agent.5` | The fifth color that tells agents apart. |
+| `agent.6` | The sixth color that tells agents apart. |
+| `agent.7` | The seventh color that tells agents apart. |
+| `agent.8` | The eighth color that tells agents apart. |
+| `agent.9` | The ninth color that tells agents apart. |
 | `hint.key` | Keys in the hint bar and in the help. |
 | `hint.text` | Descriptions in the hint bar and in the help. |
 | `notice` | Short notices at the bottom of the screen. |

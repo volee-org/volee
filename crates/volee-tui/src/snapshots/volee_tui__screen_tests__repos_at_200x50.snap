@@ -2,7 +2,7 @@
 source: crates/volee-tui/src/screen_tests.rs
 expression: "view_at('3', 200, 50)"
 ---
-" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline                                                                       ? 2 · ✉ 5 · ! 2 need you · ▸ 6 working · 12 agents  demo · simulated data "
+" volee   1 Tree   2 Network   3 Repos   4 Timeline                                                                            ? 2 · ✉ 5 · ! 2 need you · ▸ 6 working · 12 agents  demo · simulated data "
 "╭ Agents ──────────────────────────────╮╭ Repos · full · 8 repositories ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮"
 "│▌v ! invoice-tools              1 min ││ billing › feat/invoices from main  /home/dev/code/billing/.claude/worktrees/feat-invoices                                                            1 agent │"
 "│    needs you · mcp-server › feat/in… ││     s ! invoice-schema · worker · ◆ Invoicing                                                                                            verdict ! needs you │"

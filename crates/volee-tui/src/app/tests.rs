@@ -1587,7 +1587,9 @@ fn s_focuses_a_subtree_until_the_selection_leaves_it() {
     assert!(model.subtree.contains(&id(LATENCY_AUDIT)));
     press(&mut model, "'t");
     assert_eq!(model.subtree, []);
-    assert_eq!(model.scene.nodes.len(), 10);
+    // The tower's tree: its two missions and their five workers; the
+    // sessions started on their own are not in it.
+    assert_eq!(model.scene.nodes.len(), 8);
 }
 
 #[test]
@@ -1672,11 +1674,23 @@ fn the_selection_does_not_move_the_panels() {
     let mut model = model(120, 40);
     let layout = model.layout;
     let scene = model.scene.clone();
-    for keys in ["j", "j", "'t", "'p", "G"] {
+    // Within the tower's tree, the tree stays as it is.
+    assert_eq!(model.show, Show::Tree(id(TOWER)));
+    for keys in ["j", "j", "'t", "'p"] {
         press(&mut model, keys);
         assert_eq!(model.layout, layout);
         assert_eq!(model.scene, scene);
     }
+    // A session started on its own shows with the others like it; the
+    // panels stay where they are.
+    press(&mut model, "'i");
+    assert_eq!(model.layout, layout);
+    assert_eq!(model.show, Show::Loners);
+    let loners: Vec<AgentId> = model.scene.nodes.iter().map(|node| node.agent).collect();
+    assert_eq!(loners.len(), 2, "infra and broken-links");
+    assert!(loners.contains(&id(INFRA)));
+    press(&mut model, "'t");
+    assert_eq!(model.scene, scene, "back to the tower's tree");
 }
 
 #[test]

@@ -59,14 +59,14 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
 ## Layout
 
 ```text
-  volee  1 Hierarchy  2 Network  3 Repos  4 Timeline      ! 2 need you · ▸ 6 working · 12 agents
-╭ Agents ──────────────╮╭ Hierarchy · compact ─────────────────────────────────────────────────╮
+  volee  1 Tree  2 Network  3 Repos  4 Timeline           ! 2 need you · ▸ 6 working · 12 agents
+╭ Agents ──────────────╮╭ Tree · tower · compact ──────────────────────────────────────────────╮
 │▌v ! invoice-tools    ││              ╭─ tower ──────── ⠹ ─╮                                   │
-│    needs you · mcp-… ││              ╰─────────┬──────────╯                                   │
-│ s ! invoice-schema   ││          ┌─────────────┴──────────────┐                               │
-│    needs you · bill… ││ ╭─ invoicing ────────╮      ╭─ latency-audit ────╮                   │
-│ x ▸ explore-traces   ││ ╰┬───────────────────╯      ╰┬───────────────────╯                   │
-│    …                 ││  ├─┤ ! invoice-schema        ├─┤ ▸ trace-gateway                     │
+│    needs you · mcp-… ││              │  WORKING  24 min   │                                   │
+│ s ! invoice-schema   ││              ╰─────────┬──────────╯                                   │
+│    needs you · bill… ││          ┌─────────────┴──────────────┐                               │
+│ x ▸ explore-traces   ││ ╭─ invoicing ────────╮      ╭─ latency-audit ────╮                   │
+│    …                 ││ │  IDLE  14 min      │      │  IDLE  12 min      │                   │
 ╰──────────────────────╯╰───────────────────────────────────────────────────────────────────────╯
 ╭ Detail ──────────────╮╭ Preview · invoice-tools ──────────────────────────────────────────────╮
 │ invoice-tools        ││ ⏺ Before I go on, one question:                                       │
@@ -85,8 +85,8 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   failed, working, launching, done, idle, stopped and lost. Each row shows
   the agent's jump letter, its state, its name, how long it has been in that
   state, and where it works (`repo › branch`, or its mission).
-- **View.** What the tab shows: the [hierarchy](#the-hierarchy) of who
-  launched whom, the [network](#the-network) of who talks to whom, the
+- **View.** What the tab shows: the [tree](#the-tree) of who launched
+  whom, the [network](#the-network) of who talks to whom, the
   [repositories](#the-repositories) with their worktrees and what agents
   delivered, or the [timeline](#the-timeline) of what happened when. The
   selected agent is the same in every view and in the list.
@@ -162,19 +162,65 @@ spinner turns on the cards of working agents, as an extra, unless
 | `■` | stopped | Its process stopped; the conversation can be resumed. |
 | `∅` | lost | volee cannot find it any more. Never treated as done. |
 
-## The hierarchy
+## The tree
 
-The hierarchy shows who launched whom. Lead agents sit at the top, then the
-coordinators of their missions, then the workers. Sessions volee did not
-launch come last, on their own. Subagents hang under their parent's card as
-one-line satellites. The path from the selected card up to its root is
+The tree shows who launched whom, for the selected agent: its lead at the
+top, then the coordinators of the lead's missions, then their workers side
+by side, and the subagents hanging under their parent's card as one-line
+satellites. Its title names the agent at the top. Select an agent of
+another tree, in the list or with its jump letter, and the view shows that
+tree. The sessions that nobody launched and that launched nobody, such as
+the Claude Code sessions you start yourself, show side by side, in rows, as
+`Tree · on their own`. The path from the selected card up to its root is
 highlighted.
 
-A full card shows, from top to bottom: the name, the role and a spinner on
-its border; the state, for how long, and a sparkline of the last minutes of
-activity; the repository and branch (the mission, for a coordinator); what
-the agent does or waits for; and its delivery (`3 commits · PR #42 ✓`), its
-mission's progress for a coordinator, or its scope for a lead.
+```text
+                     ╭─ tower ───────────────── opus ⠹ ─╮
+                     │ ⠹ Read missions/invoicing/plan.… │
+                     │ 2 missions · 9 agents            │
+                     │ platform › main                  │
+                     │  WORKING  24 min                 │
+                     ╰─────────────────┬────────────────╯
+            ┌──────────────────────────┴───────────────────────┐
+╭─ invoicing ─┴────────────╮                    ╭─ latency-audit ┴─────────╮
+│ ◆ Invoicing · change     │                    │ ◆ Latency audit · analy… │
+│ Waiting for 3 workers    │                    │ Waiting for 2 workers    │
+│ ■■■ 1/3 delivered        │                    │ □□ 0/2 delivered         │
+│ ! 2 need you             │                    │ sonnet                   │
+│  IDLE  14 min            │                    │  IDLE  12 min            │
+╰─────────────┬────────────╯                    ╰─────────────┬────────────╯
+  ┌───────────┴─ ···                                ┌─────────┴─ ···
+╭─ invoice-schema ─────╮                     ╭─ trace-gateway ── ⠹ ─╮
+│ billing › feat/invo… │                     │ gateway › audit/p95… │
+│ sonnet               │                     │ sonnet · ◆ 2         │
+│ ▃▃▁▁▃▃▁▃▁▃▃▃▁▁▁▁▁▁▁▁ │                     │ ▁▃▁▁▁▃▁▃▁▁▃▁▁▁▃▃▁▁▃▁ │
+│ ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ? │                     │ ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ? │
+│ ! Bash: bun run db:… │                     │ ⠹ Read src/middlewa… │
+│ +214 −12   2 commits │                     │ no changes           │
+│  NEEDS YOU  2 min    │                     │  WORKING  11 min     │
+╰──────────────────────╯                     ╰─┬────────────────────╯
+                                               ├─ ▸ explore-handlers
+                                               └─ ▸ explore-traces
+```
+
+Each worker and each session started on its own has a color of its own
+(its card's border, its name and its activity), kept from one run to the
+next; leads and coordinators wear the color of their role. A card that
+calls for you takes the color of its state.
+
+- A **worker's** card, or a session's, shows where it works
+  (`repo › branch`), its model and its subagents at work (`◆ 2`), its
+  activity over the last five minutes (one column per fifteen seconds,
+  dimmed once it stopped), the context its conversation uses (`ctx ?` when
+  its harness does not say), what it does or waits for, the lines it
+  changed (`+214 −12`) and how its work is delivered (`2 commits`,
+  `PR #42 ✓`), and its state as a badge with how long it has lasted.
+- A **coordinator's** card shows its mission, what it waits for, its
+  workers' progress (one square each: delivered, waiting for you, or still
+  at work), how many need you, and its state.
+- A **lead's** card shows its model on its border, what it does, the
+  missions and agents it launched that still run, where it runs, and its
+  state.
 
 When a mission has more workers than the width allows, they are stacked in
 a column under their coordinator, so the tree stays readable instead of
@@ -182,16 +228,16 @@ scrolling.
 
 ### Zoom
 
-The hierarchy has three levels of detail: full **cards**, **compact** cards
-with only the state, and **dots** with a glyph and a name. volee picks the
-most detailed level that fits the panel; `+` and `_` move to more or less
-detail and keep it, `0` lets volee choose again. When the tree is larger
-than the panel, it scrolls to keep the selection in view, arrows on the
-border tell where it goes on, and the mouse wheel scrolls it (with Shift,
-sideways).
+The tree has three levels of detail: full **cards**, **compact** cards
+with only the state's badge, and **dots** with a glyph and a name. volee
+picks the most detailed level that fits the panel; `+` and `_` move to
+more or less detail and keep it, `0` lets volee choose again. When the tree
+is larger than the panel, it scrolls to keep the selection in view, arrows
+on the border tell where it goes on, and the mouse wheel scrolls it (with
+Shift, sideways).
 
-`Enter` shows only the selected agent and its descendants, with more room
-for each card; `Esc` goes back to the whole hierarchy.
+`s` shows only the selected agent and its descendants, with more room for
+each card; `Esc` goes back to its whole tree.
 
 ## The network
 
@@ -781,7 +827,7 @@ popups and the hints.
 | `:` | the command palette: type part of a command's name and press enter | `commands` |
 | `tab` | focus the next panel | `next-pane` |
 | `shift-tab` | focus the previous panel | `previous-pane` |
-| `1` | show the hierarchy | `show-hierarchy` |
+| `1` | show the tree of who launched whom | `show-hierarchy` |
 | `2` | show the network | `show-network` |
 | `3` | show repositories and worktrees | `show-repos` |
 | `4` | show the timeline | `show-timeline` |
@@ -803,7 +849,7 @@ popups and the hints.
 | `G`, `end` | last agent | `last` |
 | `ctrl-d`, `pgdn` | half a page of agents down | `half-page-down` |
 | `ctrl-u`, `pgup` | half a page of agents up | `half-page-up` |
-| `s` | show the agent's subtree in the hierarchy | `focus-subtree` |
+| `s` | show the agent's subtree in the tree | `focus-subtree` |
 | `+`, `=` | more detail in the view beside the list | `zoom-in` |
 | `_` | less detail in the view beside the list | `zoom-out` |
 | `0` | the view's detail chosen from the size again | `zoom-auto` |

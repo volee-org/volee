@@ -354,10 +354,53 @@ pub(crate) fn layout(forest: &Forest, spacing: Spacing, stacking: &Stacking) -> 
     }
 }
 
+/// Places the roots of a forest of lone nodes in rows, left to right, a new
+/// row when the next one would go past `max_width`: the agents that launched
+/// nobody, side by side. Each row is as tall as its tallest node, and rows
+/// are one row apart. Children, if any, are not placed.
+pub(crate) fn grid(forest: &Forest, spacing: Spacing, max_width: u16) -> Layout {
+    let mut nodes = vec![Placement::default(); forest.nodes.len()];
+    let (mut x, mut y, mut row_height, mut width) = (0_u16, 0_u16, 0_u16, 0_u16);
+    for root in &forest.roots {
+        let node = &forest.nodes[*root];
+        let start = if x == 0 { 0 } else { x + spacing.gap };
+        let (left, top) = if x > 0 && start.saturating_add(node.width) > max_width {
+            y = y.saturating_add(row_height + 1);
+            row_height = 0;
+            (0, y)
+        } else {
+            (start, y)
+        };
+        nodes[*root] = Placement {
+            x: left,
+            y: top,
+            width: node.width,
+            height: node.height,
+            anchor: node.anchor,
+        };
+        x = left.saturating_add(node.width);
+        width = width.max(x);
+        row_height = row_height.max(node.height);
+    }
+    Layout {
+        nodes,
+        width,
+        height: if forest.roots.is_empty() {
+            0
+        } else {
+            y.saturating_add(row_height)
+        },
+        stacking: Stacking::default(),
+    }
+}
+
 /// Places a forest within `max_width` if it can: groups are stacked one at
-/// a time, each time the one that leaves the narrowest forest, until it fits
-/// or nothing is left to stack. The result may still be wider than
-/// `max_width`; the view then scrolls.
+/// a time until it fits or nothing is left to stack. Each step takes, among
+/// the groups whose stacking makes the forest narrower, one that makes it
+/// fit if any, the one that keeps it the shortest: stacking the narrowest
+/// way first could make the forest too tall for its area when another way
+/// fitted both. The result may still be wider than `max_width`; the view
+/// then scrolls.
 pub(crate) fn fit(forest: &Forest, spacing: Spacing, max_width: u16) -> Layout {
     let mut best = layout(forest, spacing, &Stacking::default());
     while best.width > max_width {
@@ -390,10 +433,17 @@ pub(crate) fn fit(forest: &Forest, spacing: Spacing, max_width: u16) -> Layout {
         let next = candidates
             .iter()
             .map(|stacking| layout(forest, spacing, stacking))
-            .min_by_key(|candidate| (candidate.width, candidate.height));
+            .filter(|candidate| candidate.width < best.width)
+            .min_by_key(|candidate| {
+                (
+                    candidate.width > max_width,
+                    candidate.height,
+                    candidate.width,
+                )
+            });
         match next {
-            Some(candidate) if candidate.width <= best.width => best = candidate,
-            _ => break,
+            Some(candidate) => best = candidate,
+            None => break,
         }
     }
     best
@@ -586,6 +636,33 @@ mod tests {
         let n = &layout.nodes;
         assert_eq!(n[0].center(), n[1].center().midpoint(n[2].center()));
         assert_eq!(n[1].center(), n[1].x);
+    }
+
+    #[test]
+    fn lone_nodes_fill_rows_and_wrap() {
+        let forest = Forest {
+            nodes: vec![
+                node(24, 9, &[]),
+                node(24, 9, &[]),
+                node(24, 11, &[]),
+                node(36, 6, &[]),
+            ],
+            roots: vec![0, 1, 2, 3],
+        };
+        // Three cards of 24 with two gaps of 2 are 76 wide: the fourth wraps.
+        let layout = grid(&forest, SPACING, 80);
+        assert_no_overlap(&layout);
+        let n = &layout.nodes;
+        assert_eq!((n[0].x, n[1].x, n[2].x), (0, 26, 52));
+        assert_eq!((n[0].y, n[1].y, n[2].y), (0, 0, 0));
+        // Below the tallest card of the first row, one row apart.
+        assert_eq!((n[3].x, n[3].y), (0, 12));
+        assert_eq!((layout.width, layout.height), (76, 18));
+        // A width smaller than a card still places it, one per row.
+        let narrow = grid(&forest, SPACING, 10);
+        assert_no_overlap(&narrow);
+        assert_eq!(narrow.nodes[1].y, 10);
+        assert_eq!(grid(&Forest::default(), SPACING, 80).height, 0);
     }
 
     #[test]

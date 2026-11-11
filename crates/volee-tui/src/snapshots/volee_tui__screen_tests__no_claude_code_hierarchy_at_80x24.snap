@@ -2,7 +2,7 @@
 source: crates/volee-tui/src/screen_tests.rs
 expression: "draw(&empty_machine('1', 80, 24, false))"
 ---
-" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline                 !0 ▸0 0 "
+" volee   1 Tree   2 Network   3 Repos   4 Timeline                      !0 ▸0 0 "
 "╭ Agents · tree ───────────────────╮╭ Detail ──────────────────────────────────╮"
 "│ volee cannot use Claude Code     ││ Select an agent                          │"
 "│ here: run `volee daemon status`  ││                                          │"

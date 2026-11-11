@@ -2,7 +2,7 @@
 source: crates/volee-tui/src/screen_tests.rs
 expression: "waiting_for_a_move(80, 24)"
 ---
-" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline          ?2 ✉5 !2 ▸6 12 "
+" volee   1 Tree   2 Network   3 Repos   4 Timeline               ?2 ✉5 !2 ▸6 12 "
 "╭ Agents · tree ───────────────────╮╭ Detail ──────────────────────────────────╮"
 "│ t ▸ tower                 24 min ││ broken-links · independent               │"
 "│ n ├─ · invoicing          14 min ││ ▸ working · for 18 min                   │"

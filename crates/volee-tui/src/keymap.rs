@@ -1170,7 +1170,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &[":"], A::Commands, "commands", Some("commands"), "the command palette: type part of a command's name and press enter"),
         bind(C::Global, &["tab"], A::NextPane, "next panel", Some("panel"), "focus the next panel"),
         bind(C::Global, &["shift-tab"], A::PreviousPane, "previous panel", Some("panel"), "focus the previous panel"),
-        bind(C::Global, &["1"], A::ShowHierarchy, "hierarchy", Some("views"), "show the hierarchy"),
+        bind(C::Global, &["1"], A::ShowHierarchy, "tree", Some("views"), "show the tree of who launched whom"),
         bind(C::Global, &["2"], A::ShowNetwork, "network", Some("views"), "show the network"),
         bind(C::Global, &["3"], A::ShowRepos, "repositories", Some("views"), "show repositories and worktrees"),
         bind(C::Global, &["4"], A::ShowTimeline, "timeline", Some("views"), "show the timeline"),
@@ -1188,7 +1188,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Agents, &["G", "end"], A::Last, "last", Some("first/last"), "last agent"),
         bind(C::Agents, &["ctrl-d", "pgdn"], A::HalfPageDown, "half page down", None, "half a page of agents down"),
         bind(C::Agents, &["ctrl-u", "pgup"], A::HalfPageUp, "half page up", None, "half a page of agents up"),
-        bind(C::Agents, &["s"], A::FocusSubtree, "subtree", Some("subtree"), "show the agent's subtree in the hierarchy"),
+        bind(C::Agents, &["s"], A::FocusSubtree, "subtree", Some("subtree"), "show the agent's subtree in the tree"),
         // The list has the keyboard at first: the zoom keys reach the view
         // beside it from there too.
         bind(C::Agents, &["+", "="], A::ZoomIn, "zoom in", None, "more detail in the view beside the list"),

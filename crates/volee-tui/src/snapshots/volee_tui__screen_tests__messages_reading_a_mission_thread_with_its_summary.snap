@@ -2,8 +2,8 @@
 source: crates/volee-tui/src/screen_tests.rs
 expression: draw(&model)
 ---
-" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline              ? 2 · ✉ 5 · ! 2 need you · ▸ 6 working · 12 agents "
-"╭ Agents ────────────────────────╮╭ Hierarchy · compact ───────────────────────────────────────────────────────────────╮"
+" volee   1 Tree   2 Network   3 Repos   4 Timeline                   ? 2 · ✉ 5 · ! 2 need you · ▸ 6 working · 12 agents "
+"╭ Agents ────────────────────────╮╭ Tree · tower · compact ────────────────────────────────────────────────────────────╮"
 "│▌╭ Messages · 2 questions for you · 5 unread ───────────────────────────────────────────────────────────────────────╮ │"
 "│ │ ? invoice-tools asks you              1 min │ Inbox                                                              │ │"
 "│ │   Should create_invoice accept a draft fla… │ Summary (demo, 6 messages): 6 messages in Inbox. The latest, a     │ │"

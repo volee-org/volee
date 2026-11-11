@@ -7,6 +7,7 @@ use ratatui::text::Span;
 
 use crate::app::{Model, Overlay, Pane, Tab};
 use crate::theme::StyleRole;
+use crate::views::hierarchy::Show;
 use crate::views::{hierarchy, network, repos, timeline};
 use crate::widgets::{
     composer, detail, diff, handover, help, hints, inbox, keys, launch, palette, panel, rail,
@@ -26,6 +27,20 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
     if let Some(view) = layout.view {
         let focused = model.focus == Pane::View && model.overlay.is_none();
         let mut title = vec![Span::raw(model.tab.title())];
+        if model.tab == Tab::Hierarchy && model.subtree.is_empty() {
+            // Whose tree it is, as the rail names it.
+            let whose = match model.show {
+                Show::Tree(root) => Some(model.name_of(root)),
+                Show::Loners => Some("on their own".to_owned()),
+                Show::Everything => None,
+            };
+            if let Some(whose) = whose {
+                title.push(Span::styled(
+                    format!(" · {whose}"),
+                    theme.style(StyleRole::Text),
+                ));
+            }
+        }
         if model.tab == Tab::Hierarchy {
             for root in &model.subtree {
                 let name = model

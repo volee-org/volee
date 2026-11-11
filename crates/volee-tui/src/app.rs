@@ -36,7 +36,7 @@ use crate::source::{
 use crate::text;
 use crate::theme::Theme;
 use crate::tools::{Tool, ToolMenu};
-use crate::views::hierarchy::{self, Direction, Scene, SceneKey, ZoomChoice};
+use crate::views::hierarchy::{self, Direction, Scene, SceneKey, Show, ZoomChoice};
 use crate::views::network::{self, NetworkState};
 use crate::views::repos::ReposState;
 use crate::views::timeline::TimelineState;
@@ -62,7 +62,7 @@ impl Tab {
     /// The tab's name.
     pub(crate) const fn title(self) -> &'static str {
         match self {
-            Self::Hierarchy => "Hierarchy",
+            Self::Hierarchy => "Tree",
             Self::Network => "Network",
             Self::Repos => "Repos",
             Self::Timeline => "Timeline",
@@ -682,6 +682,9 @@ pub(crate) struct Model {
     pub(crate) rail_offset: usize,
     /// The hierarchy, placed.
     pub(crate) scene: Scene,
+    /// What the tree view shows: the selected agent's tree, or the agents
+    /// on their own.
+    pub(crate) show: Show,
     /// What the scene was built from.
     scene_key: Option<SceneKey>,
     /// The top left of the hierarchy's visible window, in scene cells.
@@ -755,6 +758,7 @@ impl Model {
             rail_order: RailOrder::default(),
             rail_offset: 0,
             scene: Scene::default(),
+            show: Show::default(),
             scene_key: None,
             scene_offset: (0, 0),
             reveal_selection: true,
@@ -1022,20 +1026,21 @@ impl Model {
                 self.selected = None;
             }
         }
+        self.show = Show::of(&self.registry, self.subtree.last().copied(), self.selected);
         if let Some(view) = self.layout.view
             && self.tab == Tab::Hierarchy
         {
             let inner = inner(view);
             let key = hierarchy::scene_key(
                 &self.registry,
-                self.subtree.last().copied(),
+                self.show,
                 self.zoom,
                 (inner.width, inner.height),
             );
             if self.scene_key.as_ref() != Some(&key) {
                 self.scene = Scene::build(
                     &self.registry,
-                    self.subtree.last().copied(),
+                    self.show,
                     self.zoom,
                     (inner.width, inner.height),
                 );

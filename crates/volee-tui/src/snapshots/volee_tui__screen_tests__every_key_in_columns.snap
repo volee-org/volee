@@ -2,7 +2,7 @@
 source: crates/volee-tui/src/screen_tests.rs
 expression: draw(&model)
 ---
-" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline              ? 2 · ✉ 5 · ! 2 need you · ▸ 6 working · 12 agents "
+" volee   1 Tree   2 Network   3 Repos   4 Timeline                   ? 2 · ✉ 5 · ! 2 need you · ▸ 6 working · 12 agents "
 "╭ ╭ All keys · [tui.keys] in config.toml changes them · esc closes ──────────────────────────────────────────────────╮─╮"
 "│▌│ Everywhere                        Agents list                       Hierarchy                                    │ │"
 "│ │ '               jump to…          h, ←            parent            h, ←            left                         │ │"
@@ -26,7 +26,7 @@ expression: draw(&model)
 "│ │ :               commands          gg, home        first             +, =            zoom in                      │ │"
 "│ │ tab             next panel        G, end          last              _               zoom out                     │ │"
 "│ │ shift-tab       previous panel    +, =            zoom in           0               auto zoom                    │ │"
-"│ │ 1               hierarchy         _               zoom out                                                       │ │"
+"│ │ 1               tree              _               zoom out                                                       │ │"
 "╰─│ 2               network           0               auto zoom         Timeline                                     │─╯"
 "╭ │ 3               repositories                                        j, ↓            next lane                    │─╮"
 "│ │ 4               timeline          Detail and preview                k, ↑            previous lane                │ │"

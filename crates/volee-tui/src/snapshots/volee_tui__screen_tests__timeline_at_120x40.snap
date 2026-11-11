@@ -2,7 +2,7 @@
 source: crates/volee-tui/src/screen_tests.rs
 expression: "view_at('4', 120, 40)"
 ---
-" volee   1 Hierarchy   2 Network   3 Repos   4 Timeline              ? 2 · ✉ 5 · ! 2 need you · ▸ 6 working · 12 agents "
+" volee   1 Tree   2 Network   3 Repos   4 Timeline                   ? 2 · ✉ 5 · ! 2 need you · ▸ 6 working · 12 agents "
 "╭ Agents ────────────────────────╮╭ Timeline · 31 min · 30 s per column ───────────────────────────────────────────────╮"
 "│▌v ! invoice-tools        1 min ││                                     -20 min             -10 min                 now│"
 "│ s ! invoice-schema       2 min ││ t ▸ tower                       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━│"
