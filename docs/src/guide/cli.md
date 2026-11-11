@@ -155,7 +155,7 @@ Where an agent runs decides what these commands can do:
 | In a volee host: launched or adopted by volee | the exact screen | takes it over | ends it, like a closed terminal |
 | As a Claude Code background session: launched by volee 0.7, or by hand with `claude --bg` | a replay of `claude logs` | opens it with `claude attach` | stops it if volee launched it |
 | Interactive, in a tuios or tmux pane | the pane's screen | brings the pane forward ([panes](interface.md#agents-in-tuios-panes)); in the interface, `enter` opens a tuios pane inside volee | refused |
-| Interactive, in another terminal (Claude Code or OpenCode) | refused: only that terminal shows it | refused, with what makes it reachable | refused |
+| Interactive, in another terminal (Claude Code or OpenCode) | refused: only that terminal shows it | refused, with what makes it reachable; in the interface, `enter` on a Claude Code session waits for it to leave that terminal, then opens it ([opening a session](interface.md#opening-a-session-volee-did-not-start)) | refused |
 
 The list is what runs now ([ADR 0027](../adr/0027-open-without-owning.md)).
 A session volee did not start is one row for as long as its harness lists
