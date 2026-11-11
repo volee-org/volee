@@ -997,3 +997,76 @@ fn replaying_the_same_events_gives_the_same_registry() {
         Some("Edit src/lib.rs")
     );
 }
+
+#[test]
+fn an_agent_has_worked_once_it_was_seen_working_using_a_tool_or_asking() {
+    let state = |state: AgentState| EventKind::StateChanged {
+        agent: agent_id(1),
+        state,
+        detail: None,
+    };
+    let after = |events: Vec<EventKind>| {
+        let mut registry = Registry::new();
+        register(&mut registry, agent_id(1), Role::Worker, None);
+        for kind in events {
+            registry.apply(&Event::new(at(5), kind)).unwrap();
+        }
+        registry.agent(agent_id(1)).unwrap().worked
+    };
+    assert!(!after(vec![]), "launching");
+    assert!(
+        !after(vec![state(AgentState::Idle)]),
+        "resting at its prompt"
+    );
+    assert!(!after(vec![state(AgentState::Stopped)]));
+    assert!(after(vec![state(AgentState::Working)]));
+    assert!(after(vec![
+        state(AgentState::Working),
+        state(AgentState::Idle)
+    ]));
+    assert!(after(vec![state(AgentState::NeedsInput {
+        request: InputRequest::Question
+    })]));
+    assert!(after(vec![EventKind::ActivityRecorded {
+        agent: agent_id(1),
+        summary: "Edit src/lib.rs".into(),
+    }]));
+}
+
+#[test]
+fn the_name_of_an_agent_outlives_it() {
+    let mut registry = Registry::new();
+    register(&mut registry, agent_id(1), Role::Worker, None);
+    let name = registry.agent(agent_id(1)).unwrap().name.clone();
+    assert_eq!(registry.name_of(agent_id(1)), Some(name.as_str()));
+    assert_eq!(registry.name_of(agent_id(9)), None);
+    // Renamed, then gone from the list: the threads it wrote in still name
+    // it, by its last name.
+    registry
+        .apply(&Event::new(
+            at(5),
+            EventKind::AgentRenamed {
+                agent: agent_id(1),
+                name: "billing-invoices".into(),
+            },
+        ))
+        .unwrap();
+    registry
+        .apply(&Event::new(
+            at(6),
+            EventKind::AgentForgotten { agent: agent_id(1) },
+        ))
+        .unwrap();
+    assert!(registry.agent(agent_id(1)).is_none());
+    assert_eq!(registry.name_of(agent_id(1)), Some("billing-invoices"));
+    // An expired agent keeps its name too.
+    register(&mut registry, agent_id(2), Role::Independent, None);
+    let name = registry.agent(agent_id(2)).unwrap().name.clone();
+    registry
+        .apply(&Event::new(
+            at(7),
+            EventKind::AgentExpired { agent: agent_id(2) },
+        ))
+        .unwrap();
+    assert_eq!(registry.name_of(agent_id(2)), Some(name.as_str()));
+}

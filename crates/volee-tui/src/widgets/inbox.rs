@@ -45,8 +45,8 @@ fn name(registry: &Registry, party: Party) -> String {
         Party::Human => "you".to_owned(),
         Party::System => "volee".to_owned(),
         Party::Agent(agent) => registry
-            .agent(agent)
-            .map_or_else(|| agent.short(), |agent| agent.name.clone()),
+            .name_of(agent)
+            .map_or_else(|| agent.short(), str::to_owned),
     }
 }
 
@@ -63,8 +63,8 @@ fn title(registry: &Registry, thread: ThreadId) -> String {
     match record.participants.as_slice() {
         [Party::Human, Party::Agent(agent)] | [Party::Agent(agent), Party::Human] => {
             let name = registry
-                .agent(*agent)
-                .map_or_else(|| agent.short(), |agent| agent.name.clone());
+                .name_of(*agent)
+                .map_or_else(|| agent.short(), str::to_owned);
             format!("You and {name}")
         }
         _ => record.title.clone(),
@@ -448,5 +448,42 @@ mod tests {
         assert_eq!(title(&registry, thread(1)), "You and api");
         assert_eq!(title(&registry, thread(2)), "Inbox");
         assert_eq!(title(&registry, thread(3)), "volee");
+    }
+
+    #[test]
+    fn an_agent_that_left_keeps_its_name_in_its_threads() {
+        let api = AgentId::from_ulid(ulid::Ulid::from_parts(1, 1));
+        let at = |kind| Event::new(Timestamp::from_millis(1), kind);
+        let registry = Registry::from_events(&[
+            at(EventKind::AgentRegistered {
+                agent: api,
+                name: "api".into(),
+                role: Role::Worker,
+                harness: HarnessKind::ClaudeCode,
+                launched_by: LaunchedBy::Human,
+                parent: None,
+                mission: None,
+                workspace: Workspace::at("/work/api"),
+                location: Location::Background,
+            }),
+            opened(
+                1,
+                "the human, api (worker)",
+                vec![Party::Human, Party::Agent(api)],
+            ),
+            // Its mission closed: volee tidied it, and it left the list.
+            at(EventKind::AgentForgotten { agent: api }),
+        ])
+        .unwrap();
+        assert!(registry.agent(api).is_none());
+        // What it wrote is still signed with its name, not its identifier.
+        assert_eq!(name(&registry, Party::Agent(api)), "api");
+        assert_eq!(
+            title(&registry, ThreadId::from_ulid(ulid::Ulid::from_parts(2, 1))),
+            "You and api"
+        );
+        // An agent volee never knew has only its identifier.
+        let stranger = AgentId::from_ulid(ulid::Ulid::from_parts(1, 2));
+        assert_eq!(name(&registry, Party::Agent(stranger)), stranger.short());
     }
 }

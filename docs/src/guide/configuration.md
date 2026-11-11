@@ -70,6 +70,7 @@ and `.`.
 | `base` | no | The branch work starts from. The repository's default branch when unset. |
 | `model` | no | Model for this repository's agents. |
 | `setup` | no | Commands that prepare each new worktree before its agent starts, such as `["bun install"]`. See below. |
+| `merge` | no | How volee merges this repository's pull requests once you approved a mission: `"merge"` (a merge commit), `"squash"` or `"rebase"`. When unset, the first of the three the repository allows on GitHub. A repository without a remote is always merged with a merge commit. |
 
 ### Setup commands
 

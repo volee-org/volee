@@ -740,8 +740,8 @@ const fn became(state: StateCategory) -> &'static str {
 fn describe(registry: &Registry, mark: &Mark) -> String {
     let name = |party: Party| match party {
         Party::Agent(agent) => registry
-            .agent(agent)
-            .map_or_else(|| agent.short(), |agent| agent.name.clone()),
+            .name_of(agent)
+            .map_or_else(|| agent.short(), str::to_owned),
         Party::Human => "you".to_owned(),
         Party::System => "volee".to_owned(),
     };

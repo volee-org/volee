@@ -1,16 +1,22 @@
-//! `missions.create`, `missions.abort` and `missions.close` (ADR 0007).
+//! `missions.create`, `missions.abort`, `missions.request_approval` and
+//! `missions.close` (ADR 0007, ADR 0032).
 //!
 //! The supervisor runs after each commit (see `crate::missions`); these
-//! handlers only change a mission's lifecycle on request.
+//! handlers only change a mission's lifecycle on request. What follows the
+//! person's approval (the merges, the close, the tidying) is in
+//! `crate::missions`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use volee_core::message::{Message, MessageKind, Party, Receipt, Thread};
-use volee_core::mission::{Mission, MissionStatus, Verdict};
+use volee_core::mission::{Mission, MissionKind, MissionStatus, Verdict};
 use volee_core::role::Role;
 use volee_core::{Event, EventKind, MessageId, MissionId, Registry, ThreadId};
-use volee_proto::methods::{AbortParams, CloseParams, CreateMissionParams, CreatedMission, Empty};
+use volee_proto::methods::{
+    AbortParams, ApprovalAsked, ApprovalParams, CloseParams, CreateMissionParams, CreatedMission,
+    Empty,
+};
 
 use super::require_agent;
 use crate::error::DaemonError;
@@ -219,56 +225,186 @@ pub(super) async fn abort(shared: &Arc<Shared>, params: AbortParams) -> Result<E
     Ok(Empty {})
 }
 
-pub(super) async fn close(shared: &Arc<Shared>, params: CloseParams) -> Result<Empty, DaemonError> {
+/// The longest line of a report presented to the person, in characters.
+const REPORT_LINE: usize = 300;
+
+/// Whether the coordinator of `record` may present its report now: every
+/// worker delivered, and no report waits for the human's answer or was
+/// approved.
+fn presentable(registry: &Registry, record: &Mission) -> Result<(), DaemonError> {
+    match record.status {
+        MissionStatus::Reporting => Ok(()),
+        MissionStatus::AwaitingApproval => Err(DaemonError::Refused(
+            "the human has not answered your report yet: end your turn, volee wakes you with \
+             their answer"
+                .into(),
+        )),
+        MissionStatus::Approved => Err(DaemonError::Refused(
+            "the human already approved: volee merges and closes the mission, you have \
+             nothing more to do"
+                .into(),
+        )),
+        _ => Err(DaemonError::Refused(format!(
+            "mission \"{}\" is not ready to be approved: {}. Ask them to finish, or tell your \
+             lead and the human what is left: a report presented for approval says the work \
+             is ready.",
+            record.title,
+            undelivered(registry, record)
+        ))),
+    }
+}
+
+/// `missions.request_approval`: the coordinator presents its report, as a
+/// question to the person that offers the approving answer and "no". The
+/// mission waits for their answer; nothing is merged or closed before.
+pub(super) async fn request_approval(
+    shared: &Arc<Shared>,
+    params: ApprovalParams,
+) -> Result<ApprovalAsked, DaemonError> {
+    let done = report_line(&params.done);
+    let proof = report_line(&params.proof);
+    let left = report_line(&params.left);
+    if done.is_empty() || proof.is_empty() {
+        return Err(DaemonError::InvalidParams(
+            "a report says what is done and gives the proof (pull requests, branches, tests)"
+                .into(),
+        ));
+    }
+    let left = if left.is_empty() {
+        "nothing".to_owned()
+    } else {
+        left
+    };
     let mut state = shared.state.lock().await;
     let record = open_mission(&state, params.mission)?;
     let registry = state.registry();
-    let report = match params.report {
-        Some(report) => Some(report_in_thread(registry, record, report)?),
-        None => latest_report(registry, record),
+    if record.coordinator != Some(params.by) {
+        return Err(DaemonError::Refused(format!(
+            "only the coordinator of mission \"{}\" presents its report",
+            record.title
+        )));
+    }
+    presentable(registry, record)?;
+    let act = match record.kind {
+        MissionKind::Change => "merge",
+        MissionKind::Analysis => "close",
     };
-    if let Some(agent) = params.by {
-        if record.coordinator != Some(agent) {
+    let body = format!(
+        "Mission \"{}\" is ready to {act}.\nDone: {done}\nProof: {proof}\nLeft: {left}",
+        record.title
+    );
+    // The person decides; the lead that asked for the mission reads the
+    // same report, as news.
+    let mut to = vec![Party::Human];
+    if let Some(lead) = record
+        .requested_by
+        .filter(|lead| registry.agent(*lead).is_some())
+    {
+        to.push(Party::Agent(lead));
+    }
+    let question = Message {
+        id: state.new_message_id(),
+        thread: record.thread,
+        from: Party::Agent(params.by),
+        kind: MessageKind::Question,
+        body,
+        refs: vec![],
+        in_reply_to: None,
+        options: record.kind.approval_options(),
+        at: state.now(),
+        receipts: to
+            .into_iter()
+            .map(|to| Receipt {
+                to,
+                delivered_at: None,
+                read_at: None,
+            })
+            .collect(),
+    };
+    let asked = ApprovalAsked {
+        question: question.id,
+    };
+    let now = state.now();
+    state.commit(vec![
+        Event::new(now, EventKind::MessagePosted { message: question }),
+        Event::new(
+            now,
+            EventKind::MissionUpdated {
+                mission: params.mission,
+                status: MissionStatus::AwaitingApproval,
+                coordinator: None,
+                report: Some(asked.question),
+            },
+        ),
+    ])?;
+    Ok(asked)
+}
+
+/// One line of a report: a single line without control characters, cut to
+/// a length the person reads at a glance.
+fn report_line(text: &str) -> String {
+    let line = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect::<String>();
+    if line.chars().count() <= REPORT_LINE {
+        line
+    } else {
+        let cut: String = line.chars().take(REPORT_LINE - 1).collect();
+        format!("{cut}\u{2026}")
+    }
+}
+
+/// `missions.close`: the person closes a mission themselves, without its
+/// coordinator. A mission whose workers all delivered closes; any other
+/// needs `force`. An agent never closes a mission: a mission ends on the
+/// person's approval of its report, which volee carries out (see
+/// [`crate::missions::carry_out`]), or by the person's own hand, here.
+/// Closing then tidies the mission's workers and stops its coordinator (see
+/// [`crate::missions::wind_down`]).
+pub(super) async fn close(shared: &Arc<Shared>, params: CloseParams) -> Result<Empty, DaemonError> {
+    {
+        let mut state = shared.state.lock().await;
+        let record = open_mission(&state, params.mission)?;
+        if params.by.is_some() {
             return Err(DaemonError::Refused(format!(
-                "only the coordinator of mission \"{}\" can close it",
+                "an agent does not close a mission: \"{}\" closes once the human approved \
+                 the report its coordinator presents with `request_approval`, or by the \
+                 human's own hand",
                 record.title
             )));
         }
-        if params.force {
-            return Err(DaemonError::Refused(
-                "only the human can force a mission closed".into(),
-            ));
-        }
-        if report.is_none() {
-            return Err(DaemonError::Refused(
-                "send the final report to the human with the `report` tool first: what changed, \
-                 links to every pull request or report, and what the human must review"
-                    .into(),
-            ));
-        }
-    }
-    if !params.force && record.status != MissionStatus::Reporting {
-        let advice = if params.by.is_some() {
-            " Ask them to finish, or tell the human why they cannot."
-        } else {
-            ""
+        let registry = state.registry();
+        let report = match params.report {
+            Some(report) => Some(report_in_thread(registry, record, report)?),
+            None => record.report.or_else(|| latest_report(registry, record)),
         };
-        return Err(DaemonError::Refused(format!(
-            "mission \"{}\" cannot close yet: {}.{advice}",
-            record.title,
-            undelivered(registry, record)
-        )));
+        if !params.force && !record.status.is_ready() {
+            return Err(DaemonError::Refused(format!(
+                "mission \"{}\" cannot close yet: {}.",
+                record.title,
+                undelivered(registry, record)
+            )));
+        }
+        let now = state.now();
+        state.commit(vec![Event::new(
+            now,
+            EventKind::MissionUpdated {
+                mission: params.mission,
+                status: MissionStatus::Closed,
+                coordinator: None,
+                report,
+            },
+        )])?;
     }
-    let now = state.now();
-    state.commit(vec![Event::new(
-        now,
-        EventKind::MissionUpdated {
-            mission: params.mission,
-            status: MissionStatus::Closed,
-            coordinator: None,
-            report,
-        },
-    )])?;
+    tokio::spawn(crate::missions::wind_down(
+        Arc::clone(shared),
+        params.mission,
+        false,
+    ));
     Ok(Empty {})
 }
 

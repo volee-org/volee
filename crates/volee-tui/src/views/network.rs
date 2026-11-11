@@ -1078,10 +1078,7 @@ fn about(model: &Model, graph: &Graph, index: usize) -> Vec<Span<'static>> {
 /// A node's name for people: the agent's name, `you` or `volee`.
 fn node_name(model: &Model, node: NodeId) -> String {
     match node {
-        NodeId::Agent(agent) => model
-            .registry
-            .agent(agent)
-            .map_or_else(|| agent.short(), |agent| agent.name.clone()),
+        NodeId::Agent(agent) => model.name_of(agent),
         NodeId::Human => "you".to_owned(),
         NodeId::System => "volee".to_owned(),
     }

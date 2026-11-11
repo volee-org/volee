@@ -89,6 +89,12 @@ pub struct Agent {
     pub detail: Option<String>,
     /// The last activity seen.
     pub last_activity: Option<Activity>,
+    /// Whether it has worked since volee knows it: seen working, using a
+    /// tool or asking for input. An agent that just started rests at its
+    /// prompt for a moment before it takes its first task: it has not
+    /// stopped, it has not begun.
+    #[serde(default)]
+    pub worked: bool,
     /// The model in use, when known.
     pub model: Option<String>,
     /// What can be proven about its work.

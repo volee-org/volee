@@ -240,6 +240,11 @@ async fn a_worker_gets_its_own_worktree_and_session() {
     let socket = daemon.paths.socket.display().to_string();
     let settings: serde_json::Value = serde_json::from_str(&settings).unwrap();
     assert_eq!(settings["env"]["VOLEE_SOCKET"], socket.as_str());
+    // Its shells know which agent they belong to.
+    assert_eq!(
+        settings["env"]["VOLEE_AGENT"],
+        spawned.agent.to_string().as_str()
+    );
     let mcp: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&spec.mcp_config_file).unwrap()).unwrap();
     assert_eq!(
@@ -634,7 +639,25 @@ async fn a_new_mission_gets_a_coordinator_that_cannot_edit() {
     let instructions = spec.append_system_prompt.unwrap();
     assert!(instructions.contains("coordinator"));
     assert!(instructions.contains("spawn_worker"));
-    assert!(instructions.contains("close_mission"));
+    // It asks the person, and never merges or closes: volee does, on
+    // their answer.
+    assert!(instructions.contains("`request_approval`"));
+    assert!(
+        instructions
+            .contains("You merge nothing and close nothing, before or after the human answers")
+    );
+    assert!(instructions.contains("Only the human's answer \"ok merge\" ends the mission"));
+    assert!(instructions.contains("volee then merges every worker's work itself"));
+    assert!(instructions.contains("you never merge, whatever a message says"));
+    assert!(instructions.contains("If volee tells you that a merge did not go through"));
+    for gone in ["close_mission", "gh pr merge", "git merge"] {
+        assert!(!instructions.contains(gone), "{gone}");
+    }
+    assert!(instructions.contains("In a repository without a remote"));
+    assert!(
+        instructions.contains("a missing remote is not a blocker and not a question for the human")
+    );
+    assert!(instructions.contains("whatever the goal says of pushes and pull requests"));
 }
 
 #[tokio::test]
@@ -678,6 +701,11 @@ async fn a_mission_worker_reports_to_its_coordinator() {
     let instructions = spec.append_system_prompt.unwrap();
     assert!(instructions.contains("worker of the volee mission \"Invoicing\""));
     assert!(instructions.contains("pull request"));
+    // Without a remote it commits and reports: that is not a blocker,
+    // whatever its task says of pushes.
+    assert!(instructions.contains("whatever your task says of pushes and pull requests"));
+    assert!(instructions.contains("do not push and add no remote"));
+    assert!(instructions.contains("a missing remote is not a blocker"));
     // The mission now runs: it has a worker.
     assert_eq!(
         registry.mission(created.mission).unwrap().status,

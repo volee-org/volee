@@ -58,6 +58,49 @@ pub trait Forge: Send + Sync {
         repo: &Path,
         head: &BranchHead<'_>,
     ) -> Result<Option<PullRequest>, GitError>;
+
+    /// Merges a pull request into its base branch, with `method`, or with
+    /// the first method the repository allows when none is given, and
+    /// returns the method used. A draft is marked ready for review first.
+    ///
+    /// This is what a person does on the forge once they agreed to the
+    /// work: it is called only on their word. The forge's own rules still
+    /// apply (required checks and reviews, a branch that is behind): a pull
+    /// request it refuses to merge is an error that says why. The head
+    /// branch is never deleted.
+    fn merge(
+        &self,
+        repo: &Path,
+        pull_request: &PullRequest,
+        method: Option<MergeMethod>,
+    ) -> Result<MergeMethod, GitError>;
+}
+
+/// How a pull request is merged into its base branch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MergeMethod {
+    /// A merge commit: the branch's commits stay in the history.
+    Merge,
+    /// One commit that holds the whole change.
+    Squash,
+    /// The branch's commits, replayed on the base branch.
+    Rebase,
+}
+
+impl MergeMethod {
+    /// The methods, in the order volee tries them when none is asked for:
+    /// a merge commit keeps what the agent committed.
+    pub const ALL: [Self; 3] = [Self::Merge, Self::Squash, Self::Rebase];
+
+    /// The word for it, as configuration files and `gh` flags spell it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Merge => "merge",
+            Self::Squash => "squash",
+            Self::Rebase => "rebase",
+        }
+    }
 }
 
 /// What is known about a forge client: see [`Forge::status`].
@@ -89,6 +132,26 @@ pub struct GhCli {
 }
 
 impl GhCli {
+    /// The first merge method the repository of `pull_request` allows, in
+    /// the order of [`MergeMethod::ALL`].
+    fn first_allowed_method(
+        &self,
+        repo: &Path,
+        pull_request: &PullRequest,
+    ) -> Result<MergeMethod, GitError> {
+        // The repository the pull request belongs to, from its address: the
+        // remotes of a fork's checkout name two.
+        let mut view = self
+            .runner
+            .request(repo, self.timeout)
+            .args(["repo", "view"]);
+        if let Some(repository) = repository_of(&pull_request.url) {
+            view = view.arg(repository);
+        }
+        view.args(["--json", ALLOWED_FIELDS])
+            .parse(parse_allowed_method)
+    }
+
     /// How long a command may run before it is stopped, unless set with
     /// [`GhCli::timeout`].
     pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -204,6 +267,84 @@ impl Forge for GhCli {
             .arg(CANDIDATES.to_string())
             .parse(|output| parse_pull_requests(output, head))
     }
+
+    fn merge(
+        &self,
+        repo: &Path,
+        pull_request: &PullRequest,
+        method: Option<MergeMethod>,
+    ) -> Result<MergeMethod, GitError> {
+        let method = match method {
+            Some(method) => method,
+            None => self.first_allowed_method(repo, pull_request)?,
+        };
+        if pull_request.state == PrState::Draft {
+            self.runner
+                .request(repo, self.timeout)
+                .args(["pr", "ready"])
+                .arg(&pull_request.url)
+                .run()?
+                .success()?;
+        }
+        self.runner
+            .request(repo, self.timeout)
+            .args(["pr", "merge"])
+            .arg(&pull_request.url)
+            .arg(format!("--{}", method.name()))
+            .run()?
+            .success()?;
+        Ok(method)
+    }
+}
+
+/// The repository of a pull request, as `gh` names one (`HOST/OWNER/REPO`),
+/// from the pull request's address (`https://HOST/OWNER/REPO/pull/7`).
+fn repository_of(url: &str) -> Option<String> {
+    let path = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let mut parts = path.split('/');
+    let (host, owner, name) = (parts.next()?, parts.next()?, parts.next()?);
+    let plain = |part: &str| {
+        !part.is_empty()
+            && !part.starts_with('-')
+            && part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':'))
+    };
+    (parts.next() == Some("pull") && plain(host) && plain(owner) && plain(name))
+        .then(|| format!("{host}/{owner}/{name}"))
+}
+
+/// The fields `gh repo view --json` is asked for, to know how the
+/// repository lets pull requests be merged.
+const ALLOWED_FIELDS: &str = "mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed";
+
+/// The merge methods of a repository, as `gh repo view --json` prints them.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhMergeMethods {
+    #[serde(default)]
+    merge_commit_allowed: bool,
+    #[serde(default)]
+    squash_merge_allowed: bool,
+    #[serde(default)]
+    rebase_merge_allowed: bool,
+}
+
+/// The first merge method a repository allows, in the order of
+/// [`MergeMethod::ALL`].
+fn parse_allowed_method(output: &[u8]) -> Result<MergeMethod, ParseError> {
+    let allowed: GhMergeMethods = serde_json::from_slice(output)
+        .map_err(|error| ParseError::new(format!("not the JSON of a repository: {error}")))?;
+    MergeMethod::ALL
+        .into_iter()
+        .find(|method| match method {
+            MergeMethod::Merge => allowed.merge_commit_allowed,
+            MergeMethod::Squash => allowed.squash_merge_allowed,
+            MergeMethod::Rebase => allowed.rebase_merge_allowed,
+        })
+        .ok_or_else(|| ParseError::new("the repository allows no merge method"))
 }
 
 /// A pull request as `gh pr list --json` prints it.
@@ -365,6 +506,30 @@ fn gh_version(output: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pull_request_address_names_its_repository() {
+        assert_eq!(
+            repository_of("https://github.com/volee-org/volee/pull/7").as_deref(),
+            Some("github.com/volee-org/volee")
+        );
+        assert_eq!(
+            repository_of("https://git.example.com:8443/team/tool.rs/pull/12").as_deref(),
+            Some("git.example.com:8443/team/tool.rs")
+        );
+        // Anything else is left to `gh`, which reads the checkout's remotes.
+        for other in [
+            "",
+            "github.com/volee-org/volee/pull/7",
+            "https://github.com/volee-org/volee",
+            "https://github.com/volee-org/volee/issues/7",
+            "https://github.com/--web/volee/pull/7",
+            "https://github.com/volee org/volee/pull/7",
+            "https://github.com//volee/pull/7",
+        ] {
+            assert_eq!(repository_of(other), None, "{other}");
+        }
+    }
 
     fn check_run(status: &str, conclusion: Option<&str>) -> String {
         let conclusion = conclusion.map_or_else(|| "null".to_owned(), |c| format!("\"{c}\""));

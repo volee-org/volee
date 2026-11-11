@@ -110,9 +110,11 @@ pub(crate) fn party_name(registry: &Registry, party: Party) -> String {
     match party {
         Party::Human => "the human".to_owned(),
         Party::System => "volee".to_owned(),
-        Party::Agent(id) => registry.agent(id).map_or_else(
-            || id.to_string(),
-            |agent| format!("{} ({}, {})", agent.name, agent.role, agent.id),
-        ),
+        Party::Agent(id) => match (registry.agent(id), registry.name_of(id)) {
+            (Some(agent), _) => format!("{} ({}, {})", agent.name, agent.role, agent.id),
+            // It left the list: its name still says who wrote.
+            (None, Some(name)) => format!("{name} (gone, {id})"),
+            (None, None) => id.to_string(),
+        },
     }
 }

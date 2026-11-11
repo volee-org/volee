@@ -233,6 +233,23 @@ pub struct Repo {
     /// order with `sh -c` in the worktree (ADR 0017), such as `bun install`.
     #[serde(default)]
     pub setup: Vec<String>,
+    /// How volee merges this repository's pull requests once you approved a
+    /// mission (ADR 0032); the first method the repository allows when
+    /// unset.
+    #[serde(default)]
+    pub merge: Option<MergeMethod>,
+}
+
+/// How a pull request is merged into its base branch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MergeMethod {
+    /// A merge commit: the branch's commits stay in the history.
+    Merge,
+    /// One commit that holds the whole change.
+    Squash,
+    /// The branch's commits, replayed on the base branch.
+    Rebase,
 }
 
 /// Interface settings.
@@ -644,6 +661,27 @@ mod tests {
                 .contains("repos.shop.setup holds an empty command"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn a_repository_says_how_its_pull_requests_are_merged() {
+        let method = |written: &str| {
+            parse(&format!(
+                "[repos.shop]\npath = \"/srv/shop\"\nmerge = \"{written}\"\n"
+            ))
+            .map(|config| config.repos["shop"].merge)
+        };
+        assert_eq!(method("merge").unwrap(), Some(MergeMethod::Merge));
+        assert_eq!(method("squash").unwrap(), Some(MergeMethod::Squash));
+        assert_eq!(method("rebase").unwrap(), Some(MergeMethod::Rebase));
+        // Unset: the forge is asked what the repository allows.
+        let unset = parse("[repos.shop]\npath = \"/srv/shop\"\n").unwrap();
+        assert_eq!(unset.repos["shop"].merge, None);
+        // Anything else is a mistake said at once, not a default.
+        for wrong in ["fast-forward", "Squash", ""] {
+            let error = method(wrong).unwrap_err();
+            assert!(error.to_string().contains("merge"), "{wrong}: {error}");
+        }
     }
 
     #[test]

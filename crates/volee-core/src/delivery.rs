@@ -41,6 +41,10 @@ pub enum PushState {
         /// Commits not pushed yet.
         commits: u32,
     },
+    /// The repository has no remote: there is nowhere to push and no pull
+    /// request to open. Work is ready once it is committed, and lands when
+    /// its branch is merged into its base branch.
+    NoRemote,
 }
 
 /// The state of a pull request.
@@ -159,6 +163,12 @@ impl Delivery {
             .filter(|pr| pr.head.is_some() && pr.head == self.tip)
     }
 
+    /// Whether the agent's repository has no remote: nothing can be pushed
+    /// and no pull request opened.
+    pub fn no_remote(&self) -> bool {
+        self.push == PushState::NoRemote
+    }
+
     /// Whether the work has landed: merged, merged through a pull request
     /// whose head is the branch's tip, or reported.
     pub fn is_delivered(&self) -> bool {
@@ -180,6 +190,7 @@ impl Delivery {
             PushState::NoUpstream => "not pushed".to_owned(),
             PushState::UpToDate => "pushed".to_owned(),
             PushState::Ahead { commits } => format!("{commits} to push"),
+            PushState::NoRemote => "no remote".to_owned(),
         });
         if let Some(pr) = &self.pull_request {
             let state = match pr.state {
@@ -581,6 +592,7 @@ mod tests {
             state_since: Timestamp::from_millis(1_000),
             detail: None,
             last_activity: None,
+            worked: true,
             model: None,
             delivery: Delivery {
                 merged_into_base: true,

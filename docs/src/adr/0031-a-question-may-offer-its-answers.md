@@ -68,8 +68,9 @@ A question to the person may carry the answers it offers.
   before. A volee older than this decision ignores the field: it shows the
   question as a free one.
 - Anyone who can run `volee msg answer` as the person can answer for them,
-  an agent with a shell included. volee does not defend against that here;
-  what an answer authorizes is the business of whatever asked it.
+  an agent with a shell included. What an answer authorizes is the business
+  of whatever asked it; [ADR 0032](0032-a-mission-is-merged-only-after-the-person-approved.md)
+  marks the shells of the agents volee launches, where the command refuses.
 
 ## Alternatives considered
 

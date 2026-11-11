@@ -7,7 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use volee_core::delivery::{ChecksState, PrState, PullRequest};
-use volee_git::{BranchHead, Forge, ForgeStatus, GhCli, RepoSlug};
+use volee_git::{BranchHead, Forge, ForgeStatus, GhCli, GitError, MergeMethod, RepoSlug};
 
 use crate::fixture::Sandbox;
 
@@ -188,5 +188,128 @@ fn the_status_says_whether_gh_can_be_used() {
     assert!(
         missing.detail.as_deref().unwrap().contains("not installed"),
         "{missing:?}"
+    );
+}
+
+/// A pull request of `volee-org/volee`, as volee read it.
+fn read(state: PrState) -> PullRequest {
+    PullRequest {
+        number: 7,
+        url: "https://github.com/volee-org/volee/pull/7".into(),
+        state,
+        checks: ChecksState::Passing,
+        head: Some(TIP.into()),
+    }
+}
+
+/// A fake `gh` for merges: logs its arguments, answers `repo view` with
+/// `allowed`, and exits with `merge_code` on `pr merge`.
+fn merging_gh(sandbox: &Sandbox, allowed: &str, merge_code: u8) -> (PathBuf, PathBuf) {
+    let log = sandbox.path("gh.log");
+    let allowed_file = sandbox.path("allowed.json");
+    fs::write(&allowed_file, allowed).expect("write the answer of the fake gh");
+    let script = format!(
+        "#!/bin/sh\n\
+         echo \"$*\" >> '{log}'\n\
+         case \"$1 $2\" in\n\
+           'repo view') cat '{allowed}' ;;\n\
+           'pr merge') if [ {merge_code} -ne 0 ]; then echo 'Pull request is not mergeable: \
+         the base branch policy prohibits the merge.' >&2; exit {merge_code}; fi ;;\n\
+         esac\n",
+        log = log.display(),
+        allowed = allowed_file.display(),
+    );
+    (sandbox.script("bin/gh", &script), log)
+}
+
+const EVERY_METHOD: &str =
+    r#"{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":true}"#;
+
+#[test]
+fn a_pull_request_is_merged_with_the_method_asked_for_and_its_branch_is_kept() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let (gh, log) = merging_gh(&sandbox, EVERY_METHOD, 0);
+    let used = GhCli::with_program(&gh)
+        .merge(&repo, &read(PrState::Open), Some(MergeMethod::Squash))
+        .unwrap();
+    assert_eq!(used, MergeMethod::Squash);
+    // One command: no question about the repository, the branch is not
+    // deleted, nothing is forced past the forge's rules.
+    assert_eq!(
+        fs::read_to_string(&log).unwrap().trim(),
+        "pr merge https://github.com/volee-org/volee/pull/7 --squash"
+    );
+}
+
+#[test]
+fn without_a_method_the_first_one_the_repository_allows_is_used() {
+    let merge_with = |allowed: &str| {
+        let sandbox = Sandbox::new();
+        let repo = sandbox.repo("volee");
+        let (gh, log) = merging_gh(&sandbox, allowed, 0);
+        let used = GhCli::with_program(&gh).merge(&repo, &read(PrState::Open), None);
+        (used, fs::read_to_string(&log).unwrap())
+    };
+    // A merge commit keeps the agent's commits: it comes first.
+    let (used, calls) = merge_with(EVERY_METHOD);
+    assert_eq!(used.unwrap(), MergeMethod::Merge);
+    assert_eq!(
+        calls.lines().collect::<Vec<_>>(),
+        [
+            "repo view github.com/volee-org/volee --json \
+             mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed",
+            "pr merge https://github.com/volee-org/volee/pull/7 --merge",
+        ]
+    );
+    let (used, calls) = merge_with(
+        r#"{"mergeCommitAllowed":false,"squashMergeAllowed":true,"rebaseMergeAllowed":true}"#,
+    );
+    assert_eq!(used.unwrap(), MergeMethod::Squash);
+    assert!(calls.ends_with("--squash\n"), "{calls}");
+    let (used, _) = merge_with(
+        r#"{"mergeCommitAllowed":false,"squashMergeAllowed":false,"rebaseMergeAllowed":true}"#,
+    );
+    assert_eq!(used.unwrap(), MergeMethod::Rebase);
+    // A repository that allows none: nothing is attempted.
+    let (used, calls) = merge_with("{}");
+    assert!(used.is_err());
+    assert!(!calls.contains("pr merge"), "{calls}");
+}
+
+#[test]
+fn a_draft_is_marked_ready_before_it_is_merged() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let (gh, log) = merging_gh(&sandbox, EVERY_METHOD, 0);
+    GhCli::with_program(&gh)
+        .merge(&repo, &read(PrState::Draft), Some(MergeMethod::Merge))
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(&log)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        [
+            "pr ready https://github.com/volee-org/volee/pull/7",
+            "pr merge https://github.com/volee-org/volee/pull/7 --merge",
+        ]
+    );
+}
+
+#[test]
+fn a_pull_request_the_forge_refuses_to_merge_says_why() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let (gh, _) = merging_gh(&sandbox, EVERY_METHOD, 1);
+    let error = GhCli::with_program(&gh)
+        .merge(&repo, &read(PrState::Open), Some(MergeMethod::Merge))
+        .unwrap_err();
+    assert!(matches!(error, GitError::Failed { .. }), "{error:?}");
+    assert!(
+        error
+            .to_string()
+            .contains("the base branch policy prohibits the merge"),
+        "{error}"
     );
 }

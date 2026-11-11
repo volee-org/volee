@@ -815,6 +815,7 @@ pub(crate) fn evidence_spans(delivery: &Delivery, theme: &Theme) -> Vec<Span<'st
     if delivery.commits > 0 || delivery.pull_request.is_some() {
         parts.push(vec![match delivery.push {
             PushState::NoUpstream => Span::styled("not pushed", dim),
+            PushState::NoRemote => Span::styled("no remote", dim),
             PushState::UpToDate => Span::styled("pushed", plain),
             PushState::Ahead { commits } => Span::styled(
                 format!("{commits} to push"),

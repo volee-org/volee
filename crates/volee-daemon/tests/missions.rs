@@ -27,9 +27,9 @@ use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_harness::Harness;
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    AbortMission, AbortParams, AgentParams, CloseMission, CloseParams, CreateMission,
-    CreateMissionParams, EventsSince, Forget, HookIngest, HookParams, SendMessage, SendParams,
-    SinceParams, Stop,
+    AbortMission, AbortParams, AgentParams, ApprovalParams, CloseMission, CloseParams,
+    CreateMission, CreateMissionParams, EventsSince, Forget, HookIngest, HookParams,
+    RequestApproval, SendMessage, SendParams, SinceParams, Stop,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
@@ -675,68 +675,386 @@ fn close_by(by: u128, force: bool) -> CloseParams {
     }
 }
 
-async fn coordinator_reports(client: &Client, body: &str) -> volee_core::MessageId {
+/// A merged pull request at the branch's tip, as the forge says it.
+fn merged(n: u128) -> Event {
+    let mut event = shipped(n);
+    if let EventKind::DeliveryUpdated { delivery, .. } = &mut event.kind {
+        delivery.commits = 0;
+        if let Some(pr) = &mut delivery.pull_request {
+            pr.state = PrState::Merged;
+        }
+    }
+    event
+}
+
+/// The coordinator presents its report.
+fn present(by: u128) -> ApprovalParams {
+    ApprovalParams {
+        mission: mission_id(),
+        by: agent(by),
+        done: "Invoices in billing and api.".into(),
+        proof: "billing#11 and api#12, tests green.".into(),
+        left: String::new(),
+    }
+}
+
+/// The person answers a question in their own name.
+async fn answers(client: &Client, question: volee_core::MessageId, words: &str) {
     client
         .call::<SendMessage>(SendParams {
-            from: Party::Agent(agent(COORDINATOR)),
-            to: vec![Party::Human],
-            kind: MessageKind::Report,
-            body: body.into(),
+            from: Party::Human,
+            to: vec![Party::Agent(agent(COORDINATOR))],
+            kind: MessageKind::Answer,
+            body: words.into(),
             refs: vec![],
-            in_reply_to: None,
+            in_reply_to: Some(question),
             options: Vec::new(),
             thread: None,
         })
         .await
-        .unwrap()
-        .message
+        .unwrap();
+}
+
+async fn status(client: &Client) -> MissionStatus {
+    registry(client).await.mission(mission_id()).unwrap().status
+}
+
+async fn refusal<M: volee_proto::methods::Method>(client: &Client, params: M::Params) -> String {
+    let Err(error) = client.call::<M>(params).await else {
+        panic!("the daemon accepted what it must refuse");
+    };
+    let error = rpc_error(error);
+    assert_eq!(error.code, rpc::REFUSED, "{}", error.message);
+    error.message
+}
+
+/// Waits until the registry satisfies `ready`, for at most ten seconds:
+/// what follows the person's approval runs after the request that carried
+/// their answer returned.
+async fn until(client: &Client, ready: impl Fn(&Registry) -> bool) -> Registry {
+    for _ in 0..500 {
+        let registry = registry(client).await;
+        if ready(&registry) {
+            return registry;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("the registry never reached the expected state");
 }
 
 #[tokio::test]
-async fn the_coordinator_closes_with_its_latest_report() {
+async fn the_report_is_presented_as_a_question_that_offers_ok_merge_and_no() {
     let mut events = mission_with_workers();
     events.push(shipped(API));
     let daemon = start(events);
     let client = connect(&daemon).await;
+
+    // Before every worker delivered there is nothing to approve.
+    let early = refusal::<RequestApproval>(&client, present(COORDINATOR)).await;
+    assert!(early.contains("not ready to be approved"), "{early}");
+    assert!(early.contains("billing, api"), "{early}");
+
     reporting(&client).await;
+    let not_mine = refusal::<RequestApproval>(&client, present(BILLING)).await;
+    assert!(not_mine.contains("only the coordinator"), "{not_mine}");
 
-    let refused = rpc_error(
-        client
-            .call::<CloseMission>(close_by(COORDINATOR, false))
-            .await
-            .unwrap_err(),
-    );
-    assert_eq!(refused.code, rpc::REFUSED);
-    assert!(refused.message.contains("report"), "{}", refused.message);
-
-    coordinator_reports(&client, "First draft.").await;
-    let last = coordinator_reports(&client, "Invoices are in billing#11 and api#12.").await;
-    client
-        .call::<CloseMission>(close_by(COORDINATOR, false))
+    let asked = client
+        .call::<RequestApproval>(present(COORDINATOR))
         .await
         .unwrap();
     let registry = registry(&client).await;
     let mission = registry.mission(mission_id()).unwrap();
-    assert_eq!(mission.status, MissionStatus::Closed);
-    assert_eq!(mission.report, Some(last));
+    assert_eq!(mission.status, MissionStatus::AwaitingApproval);
+    assert_eq!(mission.report, Some(asked.question));
+    let question = registry.message(asked.question).unwrap();
+    assert_eq!(question.kind, MessageKind::Question);
+    assert_eq!(question.from, Party::Agent(agent(COORDINATOR)));
+    assert_eq!(question.thread, thread_id());
+    assert_eq!(question.options, ["ok merge", "no"]);
+    assert_eq!(question.recipients().collect::<Vec<_>>(), [Party::Human]);
+    assert_eq!(
+        question.body,
+        "Mission \"Invoicing\" is ready to merge.\nDone: Invoices in billing and api.\nProof: \
+         billing#11 and api#12, tests green.\nLeft: nothing"
+    );
+    // It waits on top of the person's messages.
+    assert_eq!(registry.unanswered_questions(), [question]);
+
+    // Asking twice before the person answered: refused.
+    let twice = refusal::<RequestApproval>(&client, present(COORDINATOR)).await;
+    assert!(
+        twice.contains("has not answered your report yet"),
+        "{twice}"
+    );
+    assert_eq!(status(&client).await, MissionStatus::AwaitingApproval);
 }
 
 #[tokio::test]
-async fn only_the_coordinator_closes_and_never_by_force() {
+async fn a_report_says_what_is_done_and_gives_the_proof_on_single_lines() {
     let mut events = mission_with_workers();
     events.push(shipped(API));
     let daemon = start(events);
     let client = connect(&daemon).await;
     reporting(&client).await;
-    coordinator_reports(&client, "Done.").await;
 
-    for params in [close_by(BILLING, false), close_by(COORDINATOR, true)] {
-        let error = rpc_error(client.call::<CloseMission>(params).await.unwrap_err());
-        assert_eq!(error.code, rpc::REFUSED, "{}", error.message);
+    let mut empty = present(COORDINATOR);
+    empty.proof = "  ".into();
+    let error = rpc_error(client.call::<RequestApproval>(empty).await.unwrap_err());
+    assert_eq!(error.code, rpc::INVALID_PARAMS, "{}", error.message);
+
+    let mut long = present(COORDINATOR);
+    long.done = "Invoices\nin billing\n\nand\u{7} api.".into();
+    long.left = "x".repeat(400);
+    let asked = client.call::<RequestApproval>(long).await.unwrap();
+    let registry = registry(&client).await;
+    let body = &registry.message(asked.question).unwrap().body;
+    let lines: Vec<&str> = body.lines().collect();
+    assert_eq!(lines.len(), 4, "{body}");
+    assert_eq!(lines[1], "Done: Invoices in billing and api.");
+    assert_eq!(lines[3].chars().count(), "Left: ".len() + 300, "{body}");
+    assert!(lines[3].ends_with('\u{2026}'), "{body}");
+}
+
+#[tokio::test]
+async fn an_agent_never_closes_a_mission() {
+    let mut events = mission_with_workers();
+    events.extend([merged(BILLING), merged(API)]);
+    let daemon = start(events);
+    let client = connect(&daemon).await;
+    reporting(&client).await;
+    // Neither its coordinator nor a worker, by force or not: even with
+    // every pull request merged, a mission ends on the person's word.
+    for params in [
+        close_by(COORDINATOR, false),
+        close_by(COORDINATOR, true),
+        close_by(BILLING, false),
+    ] {
+        let refused = refusal::<CloseMission>(&client, params).await;
+        assert!(
+            refused.contains("an agent does not close a mission")
+                && refused.contains("`request_approval`"),
+            "{refused}"
+        );
     }
+    assert_eq!(status(&client).await, MissionStatus::Reporting);
+    // Nor while the person reads its report.
+    client
+        .call::<RequestApproval>(present(COORDINATOR))
+        .await
+        .unwrap();
+    let refused = refusal::<CloseMission>(&client, close_by(COORDINATOR, false)).await;
+    assert!(
+        refused.contains("an agent does not close a mission"),
+        "{refused}"
+    );
+    assert_eq!(status(&client).await, MissionStatus::AwaitingApproval);
+}
+
+#[tokio::test]
+async fn no_keeps_the_mission_open_and_the_coordinator_is_told() {
+    let mut events = mission_with_workers();
+    events.push(shipped(API));
+    let daemon = start(events);
+    let client = connect(&daemon).await;
+    reporting(&client).await;
+    let asked = client
+        .call::<RequestApproval>(present(COORDINATOR))
+        .await
+        .unwrap();
+    answers(&client, asked.question, "no").await;
+
     let registry = registry(&client).await;
     assert_eq!(
         registry.mission(mission_id()).unwrap().status,
         MissionStatus::Reporting
     );
+    let told = texts(&registry, Party::Agent(agent(COORDINATOR)));
+    assert!(
+        told.iter()
+            .any(|text| text.contains("did not approve") && text.contains("Nothing is merged")),
+        "{told:?}"
+    );
+
+    // A second report is a new question; an answer to the first one, late,
+    // approves nothing.
+    let again = client
+        .call::<RequestApproval>(present(COORDINATOR))
+        .await
+        .unwrap();
+    assert_ne!(again.question, asked.question);
+    answers(&client, asked.question, "ok merge").await;
+    assert_eq!(status(&client).await, MissionStatus::AwaitingApproval);
+    // Nothing was attempted: nobody hears of a merge.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let late = crate::registry(&client).await;
+    assert_eq!(
+        late.mission(mission_id()).unwrap().status,
+        MissionStatus::AwaitingApproval
+    );
+    assert!(
+        !texts(&late, Party::Human)
+            .iter()
+            .any(|text| text.contains("could not merge")),
+        "{:?}",
+        texts(&late, Party::Human)
+    );
+}
+
+#[tokio::test]
+async fn an_approval_volee_cannot_carry_out_opens_the_mission_again_and_says_why() {
+    // Two open pull requests, and a daemon that has no forge client to
+    // merge them with.
+    let mut events = mission_with_workers();
+    events.push(shipped(API));
+    let daemon = start(events);
+    let client = connect(&daemon).await;
+    reporting(&client).await;
+    let asked = client
+        .call::<RequestApproval>(present(COORDINATOR))
+        .await
+        .unwrap();
+    // Their spelling of the approval does not matter.
+    answers(&client, asked.question, "OK merge").await;
+
+    let failed = |registry: &Registry| {
+        registry
+            .thread_messages(thread_id())
+            .into_iter()
+            .filter(|message| message.body.contains("could not merge"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let reopened = until(&client, |registry| !failed(registry).is_empty()).await;
+    // The coordinator was told that the person approved, and that the
+    // merge is not its own to make.
+    let told = texts(&reopened, Party::Agent(agent(COORDINATOR)));
+    assert!(
+        told.iter().any(|text| text.contains("The human approved")
+            && text.contains("volee merges every worker's work itself")
+            && text.contains("merge nothing")),
+        "{told:?}"
+    );
+    // Why, worker by worker, to the person and to the coordinator; once.
+    let [alert] = &failed(&reopened)[..] else {
+        panic!("one alert: {:?}", failed(&reopened));
+    };
+    assert_eq!(alert.kind, MessageKind::Alert);
+    assert_eq!(alert.from, Party::System);
+    assert_eq!(
+        alert.recipients().collect::<Vec<_>>(),
+        [Party::Human, Party::Agent(agent(COORDINATOR))]
+    );
+    assert!(
+        alert
+            .body
+            .starts_with("volee could not merge all the work of \"Invoicing\". "),
+        "{}",
+        alert.body
+    );
+    for why in [
+        "billing: volee has no forge client to merge https://example.com/pull/11 with",
+        "api: volee has no forge client to merge https://example.com/pull/12 with",
+        "What was merged stays merged, and nothing was forced.",
+        "presents its report again with `request_approval`",
+    ] {
+        assert!(alert.body.contains(why), "{why}: {}", alert.body);
+    }
+    // The mission is open again, and waits for a new report: the answer
+    // that was given approved a merge that did not happen.
+    assert_eq!(
+        reopened.mission(mission_id()).unwrap().status,
+        MissionStatus::Reporting
+    );
+    let again = client
+        .call::<RequestApproval>(present(COORDINATOR))
+        .await
+        .unwrap();
+    assert_ne!(again.question, asked.question);
+    assert_eq!(status(&client).await, MissionStatus::AwaitingApproval);
+    assert_eq!(failed(&registry(&client).await).len(), 1, "said once");
+}
+
+#[tokio::test]
+async fn a_mission_whose_work_is_already_merged_closes_on_the_person_s_approval() {
+    // The person merged both pull requests on the forge themselves, then
+    // answered the report.
+    let mut events = mission_with_workers();
+    events.extend([merged(BILLING), merged(API)]);
+    let daemon = start(events);
+    let client = connect(&daemon).await;
+    reporting(&client).await;
+    let asked = client
+        .call::<RequestApproval>(present(COORDINATOR))
+        .await
+        .unwrap();
+    // Until they answer, nothing ends.
+    assert_eq!(status(&client).await, MissionStatus::AwaitingApproval);
+    answers(&client, asked.question, "ok merge").await;
+    let closed = until(&client, |registry| {
+        registry.mission(mission_id()).unwrap().status == MissionStatus::Closed
+    })
+    .await;
+    let mission = closed.mission(mission_id()).unwrap();
+    assert_eq!(
+        mission.report,
+        Some(asked.question),
+        "the report the person approved"
+    );
+    assert!(
+        !texts(&closed, Party::Human)
+            .iter()
+            .any(|text| text.contains("could not merge")),
+        "{:?}",
+        texts(&closed, Party::Human)
+    );
+    // Presenting again is refused: the mission is over.
+    refusal::<RequestApproval>(&client, present(COORDINATOR)).await;
+}
+
+#[tokio::test]
+async fn the_person_closes_a_mission_whose_report_waits_and_is_told_what_was_kept() {
+    let mut events = mission_with_workers();
+    events.push(shipped(API));
+    let daemon = start(events);
+    let client = connect(&daemon).await;
+    reporting(&client).await;
+    client
+        .call::<RequestApproval>(present(COORDINATOR))
+        .await
+        .unwrap();
+    // No answer, no force: closing is the person's own decision.
+    client
+        .call::<CloseMission>(CloseParams {
+            mission: mission_id(),
+            report: None,
+            force: false,
+            by: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(status(&client).await, MissionStatus::Closed);
+
+    // The wind-down says what it kept: here nothing can be tidied (no
+    // worktree of volee's, no evidence read from git) or stopped (no
+    // harness), and each is kept with its reason.
+    let done = until(&client, |registry| {
+        texts(registry, Party::Human)
+            .iter()
+            .any(|text| text.starts_with("Mission \"Invoicing\" is closed."))
+    })
+    .await;
+    let said = texts(&done, Party::Human)
+        .into_iter()
+        .find(|text| text.starts_with("Mission \"Invoicing\" is closed."))
+        .unwrap();
+    assert!(said.contains("Kept: billing: "), "{said}");
+    assert!(said.contains("api: "), "{said}");
+    assert!(
+        said.contains("coordinator: it still runs; stop it with `volee stop coordinator`"),
+        "{said}"
+    );
+    assert!(!said.contains("Tidied"), "{said}");
+    for n in [COORDINATOR, BILLING, API] {
+        assert!(done.agent(agent(n)).is_some(), "agent {n} is kept");
+    }
 }

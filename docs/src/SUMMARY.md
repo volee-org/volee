@@ -58,6 +58,7 @@
   - [0029. volee run makes any program an agent](adr/0029-volee-run.md)
   - [0030. A multiplexer may say which panes run an agent](adr/0030-a-multiplexer-may-say-which-panes-run-an-agent.md)
   - [0031. A question may offer its answers](adr/0031-a-question-may-offer-its-answers.md)
+  - [0032. A mission is merged only after approval](adr/0032-a-mission-is-merged-only-after-the-person-approved.md)
   - [Template](adr/template.md)
 
 # Project

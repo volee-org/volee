@@ -427,11 +427,99 @@ fn a_repository_without_commits_reports_its_staged_files() {
                 insertions: 1,
                 deletions: 0,
             },
+            push: PushState::NoRemote,
             ..Delivery::default()
         }
     );
     assert!(report.on_branch);
     assert_eq!(report.base, None);
+}
+
+#[test]
+fn a_repository_without_a_remote_says_so_and_proves_a_local_merge() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("local");
+    let worktree = sandbox.path("wt/local-feat");
+    sandbox
+        .cli()
+        .add_worktree(&repo, &worktree, "feat", "main")
+        .expect("create the agent's worktree");
+    let check = |unmerged_tip: Option<&str>| {
+        let query = DeliveryQuery {
+            branch: "feat",
+            base: "main",
+            unmerged_tip,
+        };
+        sandbox.cli().delivery(&worktree, &query).unwrap()
+    };
+    let tip = sandbox.commit(&worktree, "a.rs", "a\n", "Add a.rs");
+    let first = check(None);
+    assert!(first.delivery.no_remote());
+    assert_eq!(first.delivery.commits, 1);
+    assert_eq!(first.delivery.push, PushState::NoRemote);
+    assert_eq!(first.base.as_deref(), Some("main"));
+    assert_eq!(first.upstream, None);
+    assert!(!first.delivery.is_delivered());
+    assert_eq!(first.delivery.summary(), "1 commit \u{b7} no remote");
+
+    // The person's go-ahead, then a plain merge in the main checkout: the
+    // branch's commits are part of the base branch.
+    sandbox.git(
+        &repo,
+        &[
+            "merge",
+            "--quiet",
+            "--no-ff",
+            "--message",
+            "Merge feat",
+            "feat",
+        ],
+    );
+    let second = check(first.delivery.unmerged_tip.as_deref());
+    assert!(second.delivery.no_remote());
+    assert_eq!(second.delivery.commits, 0);
+    assert!(second.delivery.merged_into_base);
+    assert!(second.delivery.is_delivered());
+    assert_eq!(second.delivery.unmerged_tip.as_deref(), Some(tip.as_str()));
+    assert_eq!(second.delivery.summary(), "no remote \u{b7} merged");
+}
+
+#[test]
+fn a_squash_in_a_repository_without_a_remote_is_not_a_merge_volee_can_prove() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("local");
+    let worktree = sandbox.path("wt/local-feat");
+    sandbox
+        .cli()
+        .add_worktree(&repo, &worktree, "feat", "main")
+        .expect("create the agent's worktree");
+    sandbox.commit(&worktree, "a.rs", "a\n", "Add a.rs");
+    let query = |unmerged_tip| DeliveryQuery {
+        branch: "feat",
+        base: "main",
+        unmerged_tip,
+    };
+    let first = sandbox.cli().delivery(&worktree, &query(None)).unwrap();
+    sandbox.git(&repo, &["merge", "--quiet", "--squash", "feat"]);
+    sandbox.git(&repo, &["commit", "--quiet", "--message", "Squash feat"]);
+    let second = sandbox
+        .cli()
+        .delivery(&worktree, &query(first.delivery.unmerged_tip.as_deref()))
+        .unwrap();
+    // The branch's own commit is not part of the base branch.
+    assert_eq!(second.delivery.commits, 1);
+    assert!(!second.delivery.merged_into_base);
+    assert!(!second.delivery.is_delivered());
+}
+
+#[test]
+fn a_clone_has_a_remote() {
+    let agent = Agent::new();
+    agent.commit("a.rs", "a\n");
+    let delivery = agent.report(None).delivery;
+    assert!(!delivery.no_remote());
+    assert_eq!(delivery.push, PushState::NoUpstream);
+    assert_eq!(delivery.summary(), "1 commit \u{b7} not pushed");
 }
 
 #[test]

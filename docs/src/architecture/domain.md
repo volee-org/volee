@@ -59,7 +59,7 @@ group.
 | `activity-recorded` | The last thing the agent did, in one line. |
 | `workspace-updated`, `location-changed`, `model-changed` | Better knowledge of where and how the agent runs. |
 | `delivery-updated` | New delivery evidence from git or the forge. |
-| `agent-forgotten` | The agent is removed; its sessions are ignored from then on. |
+| `agent-forgotten` | The agent is removed; its sessions are ignored from then on. Its name stays known (`Registry::name_of`), so that the threads it wrote in still name it. |
 | `agent-renamed` | The harness renamed the session of an agent volee only watches: the agent takes that name (ADR 0027). |
 | `session-released` | A session no longer belongs to the agent, and is not ignored: listed again, it becomes an agent of its own (ADR 0027). |
 | `agent-expired` | An agent volee only watched is gone with its session and is removed. Its sessions are not ignored: listed again, they come back (ADR 0027). |
@@ -121,6 +121,7 @@ returns nothing.
 | Worker state | Verdict |
 | --- | --- |
 | launching, working | none yet |
+| idle, before it ever worked | none yet: a session that just started rests at its prompt for a moment before its task is submitted (`Agent::worked`) |
 | needs input | `needs-human` |
 | failed | `failed` (the human is told too) |
 | lost | `lost` (the human is told too) |
@@ -129,7 +130,9 @@ returns nothing.
 Delivery evidence depends on the mission kind:
 
 - **change**: commits, all pushed, an open or merged pull request, and a clean
-  tree; a merged branch or pull request always counts;
+  tree; a merged branch or pull request always counts. In a repository
+  without a remote (`PushState::NoRemote`) there is nowhere to push and no
+  pull request to open: commits and a clean tree are enough;
 - **analysis**: a `report` message from the worker.
 
 A pull request counts only when its head commit is the branch's tip
@@ -146,14 +149,33 @@ daemon without a git source) is judged as it is.
 
 Every new or changed verdict is recorded as `worker-assessed` and told to the
 coordinator. When every worker delivered, the mission moves to `reporting`
-and the coordinator and the human are asked for the final report, once. A
+and the coordinator is asked, once, to present its report to the human. A
 delivered worker that works again (to answer its coordinator, say) keeps its
 delivery until a new verdict says otherwise; a new verdict that is not
 `delivered` moves the mission back to `running`.
 
+The end of a mission is the human's decision
+([ADR 0032](../adr/0032-a-mission-is-merged-only-after-the-person-approved.md)):
+
+| Status | Meaning | What moves it on |
+| --- | --- | --- |
+| `reporting` | Every worker delivered; the coordinator checks the work. | The coordinator presents its report (`missions.request_approval`). |
+| `awaiting-approval` | The report is a question to the human, recorded as the mission's `report`. Nothing is merged or closed. | The human's answer to that question. |
+| `approved` | The human chose the approving answer (`MissionKind::approval`): the daemon merges the work of every worker. | The daemon: `closed` once every merge is seen in the evidence, else back to `reporting`, with the reason. |
+
+`supervise` reads the human's answer with `Registry::answer_to` and
+`Message::chosen`: only the approving option, chosen exactly, approves;
+anything else moves the mission back to `reporting` and tells the
+coordinator. Only the answer to the report presented last counts, and only
+while the mission is `awaiting-approval`. If a worker's verdict stops being
+`delivered` while a report waits or after it was approved, the mission goes
+back to `running` and the human and the coordinator are told that the report
+no longer stands.
+
 In the daemon (`volee-daemon`, module `missions`), supervision follows every
 commit: the daemon finds the missions the new events concern (an agent of
-the mission changed state or delivery, posted a message, or registered),
+the mission changed state or delivery, posted a message, or registered, or
+the human answered the report its coordinator presented),
 first records a newly registered coordinator on its mission, then runs
 `supervise` and commits the decision in one batch. The supervisor's own
 events never trigger another round. It also runs over every open mission

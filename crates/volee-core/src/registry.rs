@@ -82,6 +82,9 @@ pub enum RouteError {
 #[derive(Clone, Debug, Default)]
 pub struct Registry {
     agents: BTreeMap<AgentId, Agent>,
+    /// The last name of every agent ever registered, the ones that left
+    /// included: the threads they wrote in still name them.
+    names: HashMap<AgentId, String>,
     by_session: HashMap<SessionKey, AgentId>,
     ignored_sessions: HashSet<SessionKey>,
     threads: BTreeMap<ThreadId, Thread>,
@@ -125,6 +128,7 @@ impl Registry {
                 if self.agents.contains_key(agent) {
                     return Err(ApplyError::DuplicateAgent(*agent));
                 }
+                self.names.insert(*agent, name.clone());
                 self.agents.insert(
                     *agent,
                     Agent {
@@ -142,6 +146,7 @@ impl Registry {
                         state_since: at,
                         detail: None,
                         last_activity: None,
+                        worked: false,
                         model: None,
                         delivery: crate::delivery::Delivery::default(),
                         hold: None,
@@ -184,6 +189,9 @@ impl Registry {
                     record.state = state.clone();
                     record.state_since = at;
                 }
+                if matches!(state, AgentState::Working | AgentState::NeedsInput { .. }) {
+                    record.worked = true;
+                }
                 record.detail.clone_from(detail);
                 record.updated_at = at;
             }
@@ -193,6 +201,7 @@ impl Registry {
                     at,
                     summary: summary.clone(),
                 });
+                record.worked = true;
                 record.updated_at = at;
             }
             EventKind::WorkspaceUpdated { agent, workspace } => {
@@ -229,6 +238,7 @@ impl Registry {
                 let record = self.agent_mut(*agent)?;
                 record.name.clone_from(name);
                 record.updated_at = at;
+                self.names.insert(*agent, name.clone());
             }
             EventKind::SessionReleased { agent, session } => {
                 let record = self.agent_mut(*agent)?;
@@ -382,6 +392,13 @@ impl Registry {
     /// An agent by identifier.
     pub fn agent(&self, id: AgentId) -> Option<&Agent> {
         self.agents.get(&id)
+    }
+
+    /// The name of an agent, whether it is still listed or left the list
+    /// (forgotten, tidied or expired): what it wrote stays in its threads,
+    /// and reads better under its name than under an identifier.
+    pub fn name_of(&self, id: AgentId) -> Option<&str> {
+        self.names.get(&id).map(String::as_str)
     }
 
     /// Why `id` cannot be forgotten now, in words for the person: an agent

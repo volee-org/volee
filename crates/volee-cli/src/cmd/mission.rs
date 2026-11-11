@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 
 use anyhow::{Context, Result, bail};
 use volee_core::message::{MessageKind, Party};
-use volee_core::mission::{Mission, MissionKind, MissionStatus};
+use volee_core::mission::{Mission, MissionKind};
 use volee_core::role::Role;
 use volee_core::time::{Elapsed, Timestamp};
 use volee_core::{MissionId, Registry};
@@ -173,8 +173,10 @@ pub(crate) async fn abort(input: &str, reason: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// Closes a mission, with its coordinator's latest report.
+/// Closes a mission, with the report its coordinator presented. volee then
+/// tidies its workers and stops its coordinator.
 pub(crate) async fn close(input: &str, force: bool) -> Result<()> {
+    resolve::as_the_person("closes a mission from the command line")?;
     let client = connect_or_start().await?;
     let registry = resolve::registry(&client).await?;
     let id = resolve::mission(&registry, input)?;
@@ -188,15 +190,19 @@ pub(crate) async fn close(input: &str, force: bool) -> Result<()> {
         .await;
     match closed {
         Ok(_) => {
-            println!("Closed mission {}.", id.short());
+            println!(
+                "Closed mission {}. volee tidies its workers whose work landed and stops its \
+                 coordinator; it tells you in your messages what it kept, and why.",
+                id.short()
+            );
             Ok(())
         }
         // Not every worker delivered: say how to close it anyway.
         Err(ClientError::Rpc(error))
             if error.code == rpc::REFUSED
-                && registry.mission(id).is_some_and(|m| {
-                    !m.status.is_over() && m.status != MissionStatus::Reporting
-                }) =>
+                && registry
+                    .mission(id)
+                    .is_some_and(|m| !m.status.is_over() && !m.status.is_ready()) =>
         {
             bail!(
                 "{} To close it anyway: `volee mission close {} --force`.",
@@ -297,10 +303,9 @@ fn party(registry: &Registry, party: Party) -> String {
     match party {
         Party::Human => "you".to_owned(),
         Party::System => "volee".to_owned(),
-        Party::Agent(id) => registry.agent(id).map_or_else(
-            || id.short(),
-            |agent| text::one_line(&agent.name).into_owned(),
-        ),
+        Party::Agent(id) => registry
+            .name_of(id)
+            .map_or_else(|| id.short(), |name| text::one_line(name).into_owned()),
     }
 }
 

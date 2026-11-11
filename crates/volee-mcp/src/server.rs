@@ -13,8 +13,8 @@ use volee_core::role::Role;
 use volee_core::{AgentId, AgentState, Registry};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    ActivityParams, CloseMission, CloseParams, Join, JoinParams, MarkRead, MarkReadParams,
-    RecordActivity, SendMessage, SendParams, Spawn, SpawnParams,
+    ActivityParams, ApprovalParams, Join, JoinParams, MarkRead, MarkReadParams, RecordActivity,
+    RequestApproval, SendMessage, SendParams, Spawn, SpawnParams,
 };
 use volee_proto::replica::{Replica, ReplicaError};
 
@@ -26,8 +26,9 @@ with the human who supervises them. Use list_agents to see who works on what, se
 write to an agent or to the human (by id, by name, or \"human\"), read_messages to read what was \
 sent to you, and report when your task is done, blocked or failed. When only the human can \
 decide, ask_human puts the question on top of their messages with the answers they choose from. \
-A mission's coordinator calls close_mission once every worker delivered and its final report is \
-sent. Messages sent to you also arrive on their own at the end of your turn.";
+A mission's coordinator presents its report to the human with request_approval once every \
+worker delivered: on their approval volee merges the work and closes the mission itself, no \
+agent merges. Messages sent to you also arrive on their own at the end of your turn.";
 
 /// The same for an agent of another harness that joined (ADR 0014): no
 /// hooks hand it messages, so it must read them.
@@ -226,6 +227,18 @@ pub struct SpawnArgs {
     pub base: Option<String>,
 }
 
+/// Parameters of `request_approval`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ApprovalArgs {
+    /// What is done, in one line.
+    pub done: String,
+    /// The proof, in one line: pull requests, branches, test results.
+    pub proof: String,
+    /// What is left, in one line; leave it out when nothing is.
+    #[serde(default)]
+    pub left: String,
+}
+
 /// Parameters of `report`.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReportArgs {
@@ -290,6 +303,30 @@ impl VoleeMcp {
         // The tool's answer matters more than the activity line: a daemon
         // that cannot record it fails the next call on its own.
         let _ = self.inner.client.call::<RecordActivity>(params).await;
+    }
+
+    /// The mission this agent coordinates, or the refusal to give a model
+    /// that coordinates none; `act` says what only a coordinator does.
+    async fn coordinated(
+        &self,
+        act: &str,
+    ) -> Result<Result<volee_core::MissionId, CallToolResult>, ErrorData> {
+        let registry = self.inner.replica.read().await;
+        let Some(me) = registry.agent(self.inner.me) else {
+            return Err(ErrorData::internal_error(
+                "this agent was forgotten by volee",
+                None,
+            ));
+        };
+        let Some(mission) = me.mission.and_then(|id| registry.mission(id)) else {
+            return Ok(Err(refuse("you are not part of a mission")));
+        };
+        if mission.coordinator != Some(me.id) {
+            return Ok(Err(refuse(&format!(
+                "only the mission's coordinator {act}; if your task is over, use the report tool"
+            ))));
+        }
+        Ok(Ok(mission.id))
     }
 
     async fn send(&self, params: SendParams) -> Result<CallToolResult, ErrorData> {
@@ -626,47 +663,43 @@ impl VoleeMcp {
         }
     }
 
-    /// Closes the mission this agent coordinates.
+    /// Presents the mission's report to the human and asks for approval.
     #[tool(
-        description = "Close the mission you coordinate. Call it once volee told you every worker \
-                       delivered and after you sent the final report to the human with the report \
-                       tool. volee refuses while a worker has not delivered, and says which."
+        description = "For a mission's coordinator, once volee told you every worker delivered \
+                       and you checked their work: present your report to the human (what is \
+                       done, the proof, what is left; one line each) and ask for their approval. \
+                       volee puts it on top of their messages with the answers to choose from. \
+                       You never merge and never close: on their approval volee merges the work \
+                       itself and closes the mission. End your turn, volee wakes you with their \
+                       answer."
     )]
-    pub async fn close_mission(&self) -> Result<CallToolResult, ErrorData> {
-        self.note("asked to close its mission").await;
-        let mission = {
-            let registry = self.inner.replica.read().await;
-            let Some(me) = registry.agent(self.inner.me) else {
-                return Err(ErrorData::internal_error(
-                    "this agent was forgotten by volee",
-                    None,
-                ));
-            };
-            let Some(mission) = me.mission.and_then(|id| registry.mission(id)) else {
-                return Ok(refuse("you are not part of a mission"));
-            };
-            if mission.coordinator != Some(me.id) {
-                return Ok(refuse(
-                    "only the mission's coordinator closes it; if your task is over, use the \
-                     report tool",
-                ));
-            }
-            mission.id
+    pub async fn request_approval(
+        &self,
+        Parameters(args): Parameters<ApprovalArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.note("presented its mission's report").await;
+        let mission = match self.coordinated("presents its report").await? {
+            Ok(mission) => mission,
+            Err(refusal) => return Ok(refusal),
         };
-        let closed = self
+        let asked = self
             .inner
             .client
-            .call::<CloseMission>(CloseParams {
+            .call::<RequestApproval>(ApprovalParams {
                 mission,
-                report: None,
-                force: false,
-                by: Some(self.inner.me),
+                by: self.inner.me,
+                done: args.done,
+                proof: args.proof,
+                left: args.left,
             })
             .await;
-        match closed {
-            Ok(_) => Ok(text(
-                "The mission is closed and the human has your report. You can stop now.",
-            )),
+        match asked {
+            Ok(asked) => Ok(text(&format!(
+                "Your report is before the human (message {}). Merge nothing: on their \
+                 approval volee merges and closes the mission itself. End your turn, volee \
+                 wakes you with their answer.",
+                asked.question
+            ))),
             Err(ClientError::Rpc(error)) => Ok(refuse(&error.message)),
             Err(error) => Err(ErrorData::internal_error(error.to_string(), None)),
         }

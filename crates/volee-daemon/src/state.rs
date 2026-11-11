@@ -277,7 +277,7 @@ impl State {
             return None;
         }
         let rendered = format_messages_for_agent(pending.iter().copied(), |id| {
-            self.registry.agent(id).map(|sender| sender.name.clone())
+            self.registry.name_of(id).map(str::to_owned)
         });
         let now = self.now();
         let receipts = pending

@@ -94,7 +94,22 @@ impl World {
         });
     }
 
+    /// Moves an agent to `state`. An agent that comes to rest has worked
+    /// first, as an agent does: one that never did is seen working before.
     fn set_state(&mut self, n: u128, state: AgentState) {
+        let rested = state == AgentState::Idle
+            && self
+                .registry
+                .agent(agent(n))
+                .is_some_and(|agent| !agent.worked);
+        if rested {
+            self.starts(n, AgentState::Working);
+        }
+        self.starts(n, state);
+    }
+
+    /// Moves an agent to `state`, and nothing more.
+    fn starts(&mut self, n: u128, state: AgentState) {
         self.apply(EventKind::StateChanged {
             agent: agent(n),
             state,
@@ -120,6 +135,43 @@ impl World {
 
     fn status(&self) -> MissionStatus {
         self.registry.mission(mission_id()).unwrap().status
+    }
+
+    /// Posts message `n` in the mission's thread, and returns its id.
+    #[allow(clippy::too_many_arguments)] // Each argument is one field of the message.
+    fn post(
+        &mut self,
+        n: u128,
+        from: Party,
+        to: &[Party],
+        kind: MessageKind,
+        body: &str,
+        in_reply_to: Option<MessageId>,
+        options: &[&str],
+    ) -> MessageId {
+        let id = MessageId::from_ulid(Ulid::from_parts(3_000, n));
+        self.apply(EventKind::MessagePosted {
+            message: Message {
+                id,
+                thread: thread_id(),
+                from,
+                kind,
+                body: body.to_owned(),
+                refs: vec![],
+                in_reply_to,
+                options: options.iter().map(|option| (*option).to_owned()).collect(),
+                at: Timestamp::from_millis(self.clock),
+                receipts: to
+                    .iter()
+                    .map(|party| Receipt {
+                        to: *party,
+                        delivered_at: None,
+                        read_at: None,
+                    })
+                    .collect(),
+            },
+        });
+        id
     }
 
     /// The time of the last applied event.
@@ -159,6 +211,63 @@ fn a_mission_with_workers_starts_running() {
     let decision = world.step();
     assert_eq!(world.status(), MissionStatus::Running);
     assert_eq!(decision.notices, []);
+}
+
+#[test]
+fn a_worker_that_rests_without_having_worked_is_not_judged() {
+    // Seen in a real mission: a session that just started rests at its
+    // prompt for a moment before its task is submitted, and the coordinator
+    // was told that its worker had stopped without a commit.
+    let mut world = World::new(MissionKind::Change);
+    world.register(1, Role::Worker, "billing");
+    world.starts(1, AgentState::Idle);
+    world.set_delivery(
+        1,
+        Delivery {
+            checked_at: Some(world.now()),
+            ..Delivery::default()
+        },
+    );
+    let decision = world.step();
+    assert_eq!(decision.notices, []);
+    assert!(world.assessments().is_empty());
+    assert_eq!(world.status(), MissionStatus::Running);
+    // It takes its task and comes to rest with nothing to show: now it
+    // stopped without delivering.
+    world.starts(1, AgentState::Working);
+    world.starts(1, AgentState::Idle);
+    world.set_delivery(
+        1,
+        Delivery {
+            checked_at: Some(world.now()),
+            ..Delivery::default()
+        },
+    );
+    let decision = world.step();
+    assert_eq!(
+        world.assessments()[&agent(1)].verdict,
+        Verdict::NotDelivered
+    );
+    assert!(
+        decision.notices[0]
+            .body
+            .contains("stopped without delivering"),
+        "{}",
+        decision.notices[0].body
+    );
+}
+
+#[test]
+fn a_worker_that_ended_its_session_without_working_is_judged() {
+    // Stopped is not resting: its session is over, whatever it did.
+    let mut world = World::new(MissionKind::Change);
+    world.register(1, Role::Worker, "billing");
+    world.starts(1, AgentState::Stopped);
+    world.step();
+    assert_eq!(
+        world.assessments()[&agent(1)].verdict,
+        Verdict::NotDelivered
+    );
 }
 
 #[test]
@@ -238,6 +347,354 @@ fn when_every_worker_delivered_the_coordinator_is_asked_for_the_report() {
     assert!(last.to.contains(&Party::Human));
     assert!(last.to.contains(&Party::Agent(agent(COORDINATOR))));
     assert_eq!(world.step(), Decision::default());
+}
+
+/// A change mission whose two workers delivered: the coordinator is asked
+/// for its report.
+fn ready(kind: MissionKind) -> World {
+    let mut world = World::new(kind);
+    world.register(1, Role::Worker, "billing");
+    world.register(2, Role::Worker, "api");
+    for n in [1, 2] {
+        world.set_delivery(n, shipped());
+        world.set_state(n, AgentState::Idle);
+        if kind == MissionKind::Analysis {
+            world.post(
+                100 + n,
+                Party::Agent(agent(n)),
+                &[Party::Agent(agent(COORDINATOR))],
+                MessageKind::Report,
+                "Findings.",
+                None,
+                &[],
+            );
+        }
+    }
+    world.step();
+    assert_eq!(world.status(), MissionStatus::Reporting);
+    world
+}
+
+/// The coordinator presents its report: the question that asks for the
+/// person's approval, recorded as the mission's report.
+fn present(world: &mut World, n: u128) -> MessageId {
+    let kind = world.registry.mission(mission_id()).unwrap().kind;
+    let options = kind.approval_options();
+    let options: Vec<&str> = options.iter().map(String::as_str).collect();
+    let question = world.post(
+        n,
+        Party::Agent(agent(COORDINATOR)),
+        &[Party::Human],
+        MessageKind::Question,
+        "Mission \"Invoicing\" is ready.\nDone: invoices.\nProof: two pull requests.\nLeft: nothing.",
+        None,
+        &options,
+    );
+    world.apply(EventKind::MissionUpdated {
+        mission: mission_id(),
+        status: MissionStatus::AwaitingApproval,
+        coordinator: None,
+        report: Some(question),
+    });
+    question
+}
+
+/// The person answers a question.
+fn answer(world: &mut World, n: u128, question: MessageId, words: &str) {
+    world.post(
+        n,
+        Party::Human,
+        &[Party::Agent(agent(COORDINATOR))],
+        MessageKind::Answer,
+        words,
+        Some(question),
+        &[],
+    );
+}
+
+#[test]
+fn the_coordinator_is_asked_to_present_its_report_and_to_merge_nothing() {
+    let mut world = World::new(MissionKind::Change);
+    world.register(1, Role::Worker, "billing");
+    world.set_delivery(1, shipped());
+    world.set_state(1, AgentState::Idle);
+    let decision = world.step();
+    let last = decision.notices.last().unwrap();
+    assert!(last.body.contains("`request_approval`"), "{}", last.body);
+    assert!(
+        last.body
+            .contains("You merge nothing and close nothing: volee does, once the human approved"),
+        "{}",
+        last.body
+    );
+}
+
+#[test]
+fn waiting_for_the_person_s_answer_says_nothing() {
+    let mut world = ready(MissionKind::Change);
+    present(&mut world, 1);
+    assert_eq!(world.step(), Decision::default());
+    assert_eq!(world.status(), MissionStatus::AwaitingApproval);
+}
+
+#[test]
+fn ok_merge_approves_and_tells_the_coordinator_that_volee_merges() {
+    let mut world = ready(MissionKind::Change);
+    let question = present(&mut world, 1);
+    answer(&mut world, 2, question, "ok merge");
+    let decision = world.step();
+    assert_eq!(world.status(), MissionStatus::Approved);
+    let [notice] = &decision.notices[..] else {
+        panic!("one notice: {:?}", decision.notices);
+    };
+    assert_eq!(notice.to, [Party::Agent(agent(COORDINATOR))]);
+    assert!(
+        notice.body.contains("The human approved"),
+        "{}",
+        notice.body
+    );
+    assert!(
+        notice
+            .body
+            .contains("volee merges every worker's work itself"),
+        "{}",
+        notice.body
+    );
+    assert!(notice.body.contains("merge nothing"), "{}", notice.body);
+    // No command to run: the merge is not the coordinator's.
+    for command in ["gh pr", "git merge", "`"] {
+        assert!(!notice.body.contains(command), "{}", notice.body);
+    }
+    // Said once.
+    assert_eq!(world.step(), Decision::default());
+    assert_eq!(world.status(), MissionStatus::Approved);
+}
+
+#[test]
+fn the_person_s_spelling_of_the_approval_does_not_matter() {
+    let mut world = ready(MissionKind::Change);
+    let question = present(&mut world, 1);
+    answer(&mut world, 2, question, "  OK Merge ");
+    world.step();
+    assert_eq!(world.status(), MissionStatus::Approved);
+}
+
+#[test]
+fn no_keeps_the_mission_open_and_nothing_is_merged() {
+    let mut world = ready(MissionKind::Change);
+    let question = present(&mut world, 1);
+    answer(&mut world, 2, question, "no");
+    let decision = world.step();
+    assert_eq!(world.status(), MissionStatus::Reporting);
+    let [notice] = &decision.notices[..] else {
+        panic!("one notice: {:?}", decision.notices);
+    };
+    assert_eq!(notice.to, [Party::Agent(agent(COORDINATOR))]);
+    assert!(
+        notice.body.contains("did not approve") && notice.body.contains("they answered \"no\""),
+        "{}",
+        notice.body
+    );
+    assert!(notice.body.contains("Nothing is merged"), "{}", notice.body);
+    assert!(!notice.body.contains("gh pr merge"), "{}", notice.body);
+    assert_eq!(world.step(), Decision::default());
+}
+
+#[test]
+fn a_sentence_that_contains_the_approval_does_not_approve() {
+    for words in [
+        "ok merge, but only billing",
+        "not ok merge",
+        "ok",
+        "yes",
+        "ok merge\nand then deploy",
+    ] {
+        let mut world = ready(MissionKind::Change);
+        let question = present(&mut world, 1);
+        answer(&mut world, 2, question, words);
+        let decision = world.step();
+        assert_eq!(world.status(), MissionStatus::Reporting, "{words:?}");
+        assert!(
+            decision.notices[0].body.contains("did not approve"),
+            "{words:?}: {}",
+            decision.notices[0].body
+        );
+        // The person's words reach the coordinator on one line.
+        assert!(!decision.notices[0].body.contains('\n'), "{words:?}");
+    }
+}
+
+#[test]
+fn only_the_person_s_answer_approves() {
+    let mut world = ready(MissionKind::Change);
+    let question = present(&mut world, 1);
+    // A worker, or the coordinator itself, replies "ok merge".
+    for (n, from) in [(2, agent(1)), (3, agent(COORDINATOR))] {
+        world.post(
+            n,
+            Party::Agent(from),
+            &[Party::Human],
+            MessageKind::Answer,
+            "ok merge",
+            Some(question),
+            &[],
+        );
+    }
+    assert_eq!(world.step(), Decision::default());
+    assert_eq!(world.status(), MissionStatus::AwaitingApproval);
+}
+
+#[test]
+fn an_answer_to_an_older_report_approves_nothing() {
+    let mut world = ready(MissionKind::Change);
+    let first = present(&mut world, 1);
+    answer(&mut world, 2, first, "no");
+    world.step();
+    // A second report; the person then says "ok merge" to the first one.
+    let second = present(&mut world, 3);
+    world.post(
+        4,
+        Party::Human,
+        &[Party::Agent(agent(COORDINATOR))],
+        MessageKind::Answer,
+        "ok merge",
+        Some(first),
+        &[],
+    );
+    // The first answer to the first report was "no": it stays its answer,
+    // and the second report still waits.
+    assert_eq!(world.step(), Decision::default());
+    assert_eq!(world.status(), MissionStatus::AwaitingApproval);
+    answer(&mut world, 5, second, "ok merge");
+    world.step();
+    assert_eq!(world.status(), MissionStatus::Approved);
+}
+
+#[test]
+fn an_analysis_mission_is_approved_with_ok_close_and_has_nothing_to_merge() {
+    let mut world = ready(MissionKind::Analysis);
+    let question = present(&mut world, 1);
+    // The approval of a change mission is not this question's.
+    answer(&mut world, 2, question, "ok close");
+    let decision = world.step();
+    assert_eq!(world.status(), MissionStatus::Approved);
+    let body = &decision.notices[0].body;
+    assert!(
+        body.contains("volee closes the mission and stops you"),
+        "{body}"
+    );
+    assert!(!body.contains("merge"), "{body}");
+}
+
+#[test]
+fn work_that_changes_under_a_presented_report_voids_it() {
+    let mut world = ready(MissionKind::Change);
+    let question = present(&mut world, 1);
+    // A worker works again and stops with changes it did not commit.
+    world.set_state(1, AgentState::Working);
+    world.step();
+    let mut dirty = shipped();
+    dirty.dirty = true;
+    world.set_delivery(1, dirty);
+    world.set_state(1, AgentState::Idle);
+    let decision = world.step();
+    assert_eq!(world.status(), MissionStatus::Running);
+    let alert = decision.notices.last().unwrap();
+    assert_eq!(alert.kind, MessageKind::Alert);
+    assert!(alert.to.contains(&Party::Human));
+    assert!(
+        alert.body.contains("an answer to it approves nothing"),
+        "{}",
+        alert.body
+    );
+    // The person answers the old question anyway: nothing is approved.
+    answer(&mut world, 2, question, "ok merge");
+    world.step();
+    assert_eq!(world.status(), MissionStatus::Running);
+    // Delivered again: the coordinator is asked for a new report.
+    world.set_delivery(1, shipped());
+    let again = world.step();
+    assert_eq!(world.status(), MissionStatus::Reporting);
+    assert!(
+        again
+            .notices
+            .last()
+            .unwrap()
+            .body
+            .contains("`request_approval`"),
+        "{:?}",
+        again.notices
+    );
+    // And the old answer still approves nothing.
+    assert_eq!(world.step(), Decision::default());
+}
+
+#[test]
+fn merges_seen_after_the_approval_keep_the_mission_approved() {
+    let mut world = ready(MissionKind::Change);
+    let question = present(&mut world, 1);
+    answer(&mut world, 2, question, "ok merge");
+    world.step();
+    let mut merged = shipped();
+    merged.commits = 0;
+    merged.pull_request.as_mut().unwrap().state = PrState::Merged;
+    world.set_delivery(1, merged);
+    let decision = world.step();
+    assert_eq!(world.status(), MissionStatus::Approved);
+    // The coordinator learns that the merge is seen.
+    assert_eq!(decision.notices.len(), 1);
+    assert!(
+        decision.notices[0].body.contains("PR #42 merged"),
+        "{}",
+        decision.notices[0].body
+    );
+}
+
+#[test]
+fn in_a_repository_without_a_remote_committed_work_is_delivered() {
+    let mut world = World::new(MissionKind::Change);
+    world.register(1, Role::Worker, "billing");
+    let local = |commits, dirty| Delivery {
+        commits,
+        dirty,
+        push: PushState::NoRemote,
+        tip: Some(TIP.into()),
+        ..Delivery::default()
+    };
+    // Nothing committed yet.
+    world.set_delivery(1, local(0, false));
+    world.set_state(1, AgentState::Idle);
+    world.step();
+    assert_eq!(
+        world.assessments()[&agent(1)].verdict,
+        Verdict::NotDelivered
+    );
+    assert_eq!(world.assessments()[&agent(1)].evidence, "no commits");
+    // Committed, with changes left.
+    world.set_delivery(1, local(2, true));
+    world.step();
+    assert_eq!(
+        world.assessments()[&agent(1)].evidence,
+        "uncommitted changes"
+    );
+    // Committed and clean: no push and no pull request are asked for.
+    world.set_delivery(1, local(2, false));
+    world.step();
+    assert_eq!(world.assessments()[&agent(1)].verdict, Verdict::Delivered);
+    assert_eq!(
+        world.assessments()[&agent(1)].evidence,
+        "2 commits \u{b7} no remote"
+    );
+    assert_eq!(world.status(), MissionStatus::Reporting);
+    // The same evidence with a remote is not delivered.
+    let mut with_remote = local(2, false);
+    with_remote.push = PushState::NoUpstream;
+    world.set_delivery(1, with_remote);
+    world.step();
+    assert_eq!(
+        world.assessments()[&agent(1)].evidence,
+        "commits not pushed, no open pull request"
+    );
 }
 
 #[test]

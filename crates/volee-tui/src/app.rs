@@ -890,8 +890,8 @@ impl Model {
 
     pub(crate) fn name_of(&self, agent: AgentId) -> String {
         self.registry
-            .agent(agent)
-            .map_or_else(|| agent.short(), |agent| agent.name.clone())
+            .name_of(agent)
+            .map_or_else(|| agent.short(), str::to_owned)
     }
 
     /// Selects an agent, remembering the previous one.
