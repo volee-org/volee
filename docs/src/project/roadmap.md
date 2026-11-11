@@ -117,6 +117,7 @@ keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
 | Your approval before a merge | A mission's coordinator presents its report as a question. On "ok merge" volee merges the work itself (the pull request on GitHub, or a merge commit in a repository without a remote), closes the mission and tidies it in one gesture; a merge that cannot go through changes nothing and says why. No agent merges ([ADR 0032](../adr/0032-a-mission-is-merged-only-after-the-person-approved.md)) | Done |
 | A lead | `volee lead` starts the agent you talk to: it launches agents and missions for you, never codes, does not wait in a loop, and tells you in three lines what came back; duplicates are refused with whom to write to ([ADR 0033](../adr/0033-a-lead-makes-others-work.md)) | Done |
 | Release | v0.14.0 | Done: v0.14.0 |
+| Writing to a lead | A lead does what you write to it through volee (`volee msg send`, or `m` in the interface), the same as what you type in its terminal: a message volee hands an agent as from the human is the human's own word. Found by a mission run on a real daemon after 0.14.0 was installed | Done: v0.14.1 |
 
 ## Next
 
