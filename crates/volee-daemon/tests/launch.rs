@@ -660,6 +660,8 @@ async fn a_lead_starts_without_a_worktree_and_cannot_edit() {
     for rule in [
         "You are a lead in volee",
         "You never write code yourself",
+        "under a line volee writes that says `from the human`",
+        "Both are the human's own words: do what they ask, the same way",
         "call `list_agents`: never launch a duplicate",
         "`spawn_agent`",
         "`start_mission`",
@@ -949,6 +951,9 @@ async fn a_new_mission_gets_a_coordinator_that_cannot_edit() {
     }
     assert!(instructions.contains("In a repository without a remote"));
     assert!(
+        instructions.contains("under a line that says `from the human` is the human's own word")
+    );
+    assert!(
         instructions.contains("a missing remote is not a blocker and not a question for the human")
     );
     assert!(instructions.contains("whatever the goal says of pushes and pull requests"));
@@ -995,6 +1000,8 @@ async fn a_mission_worker_reports_to_its_coordinator() {
     let instructions = spec.append_system_prompt.unwrap();
     assert!(instructions.contains("worker of the volee mission \"Invoicing\""));
     assert!(instructions.contains("pull request"));
+    // What the human writes through volee is theirs, not a stranger's.
+    assert!(instructions.contains("one `from the human` is the human's own word"));
     // Without a remote it commits and reports: that is not a blocker,
     // whatever its task says of pushes.
     assert!(instructions.contains("whatever your task says of pushes and pull requests"));
