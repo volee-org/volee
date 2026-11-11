@@ -109,10 +109,19 @@ keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
 | Agents tuios recognizes | An agent of a harness volee has no listing for (Codex CLI, Gemini CLI, Aider...) is found through tuios when it runs in one of its panes ([ADR 0030](../adr/0030-a-multiplexer-may-say-which-panes-run-an-agent.md)). Checked with stand-in programs carrying the harnesses' names: the real ones were not available | Done |
 | Release | v0.13.0 | Done: v0.13.0 |
 
+## 0.14: missions as a lead runs them
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| A question with its answers | An agent asks the person a question that offers its answers; the messages window numbers them, a number then `y` answers, and `volee msg answer` does it from a shell ([ADR 0031](../adr/0031-a-question-may-offer-its-answers.md)) | Done |
+| Your approval before a merge | A mission's coordinator presents its report as a question. On "ok merge" volee merges the work itself (the pull request on GitHub, or a merge commit in a repository without a remote), closes the mission and tidies it in one gesture; a merge that cannot go through changes nothing and says why. No agent merges ([ADR 0032](../adr/0032-a-mission-is-merged-only-after-the-person-approved.md)) | Done |
+| A lead | `volee lead` starts the agent you talk to: it launches agents and missions for you, never codes, does not wait in a loop, and tells you in three lines what came back; duplicates are refused with whom to write to ([ADR 0033](../adr/0033-a-lead-makes-others-work.md)) | Done |
+| Release | v0.14.0 | Done: v0.14.0 |
+
 ## Next
 
-- Missions as a lead agent runs them, with the rules that make a lead a
-  good one, and a coordinator that asks before it merges.
+Nothing is scheduled: the plan that ran from 0.11 to 0.14 is complete. What
+comes next is chosen among the items below.
 
 ## Later
 
