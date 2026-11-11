@@ -120,7 +120,7 @@ style_roles! {
     RoleWorker => "role.worker",
     /// A helper started by another agent inside its session.
     RoleSubagent => "role.subagent",
-    /// A session volee did not launch.
+    /// A session volee did not launch, or a program run with `volee run`.
     RoleIndependent => "role.independent",
     /// Lines between cards, and who launched whom in the network view.
     Edge => "edge",

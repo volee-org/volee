@@ -36,10 +36,34 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `hooks.ingest` | `agent`, `event`, `payload` | `stdout`: what the hook prints, if anything |
 | `hooks.wait` | `agent`, `timeout_ms` | `text`: messages that wake the agent, or `null` |
 | `agents.spawn` | `repo`, `branch`, `task`, `role`, optional `base`, `parent`, `mission`, `model`, `name`, `harness` (`claude-code` by default, or `opencode`) | `agent`, `worktree` |
+| `agents.run` | `host`: the id of a volee host the client started, in the daemon's hosts directory; optional `name` | `agent`, `name`; the program of the host is now an agent |
 | `threads.summarize` | `thread` | `summary`, `messages`, `model`; refused unless `[messages] summaries` is on |
 | `missions.create` | `title`, `kind` (`change` or `analysis`), `goal`, `repos`, optional `requested_by` | `mission`, `thread`, `coordinator` |
 | `missions.abort` | `mission`, optional `reason` | none |
 | `missions.close` | `mission`, optional `report`, `force`, `by` | none |
+
+### Running a program
+
+`agents.run` makes the program of a volee host an agent
+([ADR 0029](../adr/0029-volee-run.md)). The client starts the host itself
+(`volee host run`, detached, under the daemon's hosts directory), so that
+the program gets the client's environment and directory, then gives the
+daemon the host's id. The daemon reads the host's record and registers an
+agent in that host, launched by the human, with the role `independent`, the
+name asked for (else the host's own name, else the name of the program's
+directory) and, as its harness, the name of the program. It refuses an id
+that names no file of its hosts directory (`-32602`), a host it does not
+find (`-32001`), and a program that already ended or a host that already
+is an agent (`-32002`); the client then ends the program it started.
+
+The agent has no session, so nothing that needs one applies to it: its
+states come from its screen, no message is handed to it and nothing resumes
+it. `agents.preview`, `agents.open`, `agents.attach` and `agents.stop` act
+on its host, as for any agent in a host; once its program ended,
+`agents.open` and `agents.attach` are refused with words that say nothing
+resumes it, and the agent leaves the registry a minute later. A session or
+a process that a harness lists inside the host, the program itself or a
+process below it, is not registered a second time.
 
 ### Tidying
 
@@ -72,7 +96,8 @@ the agent, then starts the session in a new volee host
 the repository's main checkout with `--worktree`
 ([ADR 0013](../adr/0013-worktrees-live-in-their-repository.md)). With
 `harness: "opencode"`, it starts `opencode --session <id> --prompt <task>`
-in the worktree instead; any other harness is refused (`-32602`).
+in the worktree instead, for a lead or a worker; any other role there, and
+any other harness, is refused (`-32602`).
 A failed start marks the agent `failed` and keeps the worktree; the same
 request sent again reuses that worktree while nothing was done in it, and
 forgets the failed agent

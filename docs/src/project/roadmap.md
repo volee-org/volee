@@ -107,7 +107,11 @@ In this order, one release per step:
 - Other harnesses: finding their agents wherever they run, a door on each,
   and `volee run -- <command>` to start any program in a host. Done so
   far: an OpenCode agent started by hand in a tuios or tmux pane is placed
-  in its pane, and opens there like any agent in a pane.
+  in its pane, and opens there like any agent in a pane; `volee run --
+  <command>` runs any program as an agent of the list, in a host, from the
+  terminal it is typed in ([ADR 0029](../adr/0029-volee-run.md)). Still to
+  do: finding, through tuios, the agents of harnesses volee has no listing
+  for.
 - Missions as a lead agent runs them, with the rules that make a lead a
   good one.
 
@@ -117,9 +121,9 @@ In this order, one release per step:
   have one ([ADR 0015](../adr/0015-tuios-location-adapter.md)).
 - Profiles for Codex CLI, Gemini CLI, Grok Build and others, each measured on
   the real program ([ADR 0022](../adr/0022-harness-profiles.md)). Until
-  then, `volee host spawn` runs any of them in a host, and agents of any
-  MCP-capable harness can [join](../guide/other-harnesses.md) through
-  `volee mcp --join`.
+  then, `volee run` runs any of them as an agent, with a state read on its
+  screen, and agents of any MCP-capable harness can
+  [join](../guide/other-harnesses.md) through `volee mcp --join`.
 - Finding agents of harnesses other than OpenCode in the process table.
 - Leads that start missions and workers themselves.
 - Messaging sessions started outside volee.

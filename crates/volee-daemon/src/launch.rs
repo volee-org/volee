@@ -218,6 +218,17 @@ fn opencode_started(
 /// from its screen, and messages reach it when volee resumes it.
 async fn spawn_opencode(shared: &Arc<Shared>, params: SpawnParams) -> Result<Spawned, DaemonError> {
     use volee_harness::opencode;
+    // An independent agent of a harness without hooks, launched by the
+    // human and still without a session, is what a program started with
+    // `volee run` is (`Agent::generic`, ADR 0029): a launch has a place in
+    // the work.
+    if !matches!(params.role, Role::Lead | Role::Worker) {
+        return Err(DaemonError::InvalidParams(format!(
+            "agents.spawn launches OpenCode leads and workers, not a {} agent: `volee run -- \
+             opencode` runs it on its own",
+            params.role.label()
+        )));
+    }
     let git = git(shared)?;
     let task = params.task.trim().to_owned();
     if task.is_empty() {
@@ -339,10 +350,14 @@ pub(crate) async fn run(shared: &Arc<Shared>, params: RunParams) -> Result<Ran, 
         .cwd
         .file_name()
         .map(|name| name.to_string_lossy().into_owned());
-    let name = params
-        .name
-        .or(record.name)
-        .filter(|name| !name.trim().is_empty())
+    // The name asked for, else the host's own, else its directory's: a
+    // name of spaces is no name.
+    let named = |name: Option<String>| {
+        name.map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+    };
+    let name = named(params.name)
+        .or_else(|| named(record.name))
         .or(folder)
         .unwrap_or_else(|| program.clone());
     let mut state = shared.state.lock().await;

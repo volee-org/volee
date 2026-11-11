@@ -32,7 +32,7 @@ use volee_host::{HostConfig, HostDir, HostRecord, Size};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     AgentParams, Attach, EventsSince, Open, OpenParams, Preview, Ran, Run, RunParams, SendMessage,
-    SendParams, SinceParams, Stop,
+    SendParams, SinceParams, Spawn, SpawnParams, Stop,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
@@ -296,9 +296,12 @@ async fn its_name_is_the_one_asked_for_then_its_host_s_then_its_directory_s() {
     daemon.host("n1", "alpha", &["sh", "-c", WAITS], Some("from-the-host"));
     daemon.host("n2", "beta", &["sh", "-c", WAITS], Some("from-the-host"));
     daemon.host("n3", "gamma", &["sh", "-c", WAITS], None);
-    assert_eq!(daemon.run("n1", Some("mine")).await.unwrap().name, "mine");
-    assert_eq!(daemon.run("n2", None).await.unwrap().name, "from-the-host");
-    // A name of spaces is no name.
+    assert_eq!(daemon.run("n1", Some(" mine ")).await.unwrap().name, "mine");
+    // A name of spaces is no name: the host's own, then its directory's.
+    assert_eq!(
+        daemon.run("n2", Some("  ")).await.unwrap().name,
+        "from-the-host"
+    );
     assert_eq!(daemon.run("n3", Some("  ")).await.unwrap().name, "gamma");
 }
 
@@ -505,11 +508,37 @@ async fn a_message_does_not_resume_it_even_when_its_program_is_one_volee_can_lau
     assert_eq!(daemon.hosts.list().unwrap().len(), 1);
 }
 
-/// The id of an agent that is not in the registry is unknown to `agents.run`
-/// only through its host: a host id that is an agent's id elsewhere changes
-/// nothing.
+/// What tells a program started with `volee run` is that the human started
+/// it, on its own, on a harness other than Claude Code. No launch may make
+/// such an agent: it would be taken for one while its session is unknown.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_host_named_like_an_agent_id_is_a_host_like_another() {
+async fn no_launch_makes_an_agent_that_looks_like_a_run() {
+    let daemon = start();
+    let client = daemon.client().await;
+    let launch = |role| SpawnParams {
+        repo: daemon.folder("billing").display().to_string(),
+        branch: "feat/x".into(),
+        base: None,
+        task: "Do it.".into(),
+        role,
+        parent: None,
+        mission: None,
+        model: None,
+        name: None,
+        harness: Some("opencode".into()),
+    };
+    for role in [Role::Independent, Role::Coordinator, Role::Subagent] {
+        let (code, message) = refused(client.call::<Spawn>(launch(role)).await);
+        assert_eq!(code, rpc::INVALID_PARAMS, "{role}: {message}");
+        assert!(message.contains("leads and workers"), "{message}");
+    }
+    assert_eq!(daemon.registry().await.agents().count(), 0);
+}
+
+/// `volee run` gives its hosts ids made like agent ids: they name files in
+/// the hosts directory like any other.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_ids_the_command_gives_its_hosts_are_accepted() {
     let daemon = start();
     let id = AgentId::from_ulid(ulid::Ulid::from_parts(1_000, 1)).to_string();
     daemon.host(&id, "billing", &["sh", "-c", WAITS], None);

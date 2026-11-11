@@ -31,7 +31,7 @@ agent has one current session and keeps the lineage of the previous ones.
 | **Coordinator** | The agent of a mission | Splits the goal, writes tasks for workers, answers their questions, writes the final report |
 | **Worker** | An agent working in one repository, in its own worktree | Codes, tests, opens a pull request, or writes an analysis |
 | **Subagent** | A helper an agent starts by itself (for example a search) | Short tasks inside its parent's session |
-| **Independent** | A session volee did not launch | Anything you started by hand; volee shows it, with a coarser state |
+| **Independent** | A session volee did not launch, or a program you run under volee with `volee run` | Anything you started by hand; volee shows it, with a coarser state |
 
 ## Mission
 

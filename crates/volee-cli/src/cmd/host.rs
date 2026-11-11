@@ -44,7 +44,12 @@ pub(crate) fn spawn(dir: &HostDir, spawn: Spawn) -> anyhow::Result<()> {
 }
 
 /// Starts a host in the background, detached from this terminal, waits
-/// until it answers, and returns its id.
+/// until it runs its program, and returns its id.
+///
+/// A host binds its socket first, then starts its program, then writes its
+/// record. Only the record says that the program runs: a caller that went
+/// on once the socket answered would find no record yet, or a host that
+/// stops a moment later because its program could not start.
 pub(crate) fn start(dir: &HostDir, spawn: Spawn) -> anyhow::Result<String> {
     dir.ensure()
         .with_context(|| format!("cannot create {}", dir.path().display()))?;
@@ -89,7 +94,15 @@ pub(crate) fn start(dir: &HostDir, spawn: Spawn) -> anyhow::Result<String> {
         .spawn()
         .context("cannot start the host")?;
     let deadline = Instant::now() + Duration::from_secs(5);
-    while std::os::unix::net::UnixStream::connect(&socket).is_err() {
+    let record = dir.record(&id);
+    // The record of this very host: an earlier host of the same id may have
+    // left one.
+    let host = child.id();
+    let started = || {
+        volee_host::HostRecord::read(&record).is_ok_and(|record| record.host_pid == host)
+            && std::os::unix::net::UnixStream::connect(&socket).is_ok()
+    };
+    while !started() {
         if let Some(status) = child.try_wait()? {
             let log = dir.log(&id);
             // A program that cannot start is the usual reason, and the host
@@ -109,7 +122,7 @@ pub(crate) fn start(dir: &HostDir, spawn: Spawn) -> anyhow::Result<String> {
         }
         if Instant::now() > deadline {
             bail!(
-                "the host did not answer within 5 seconds; see {}",
+                "the host did not start its program within 5 seconds; see {}",
                 dir.log(&id).display()
             );
         }

@@ -231,6 +231,34 @@ includes a launch the daemon could not finish because it stopped, and one
 whose session Claude Code never listed within two minutes: volee marks those
 failed at its next look for sessions.
 
+## Running any program as an agent
+
+```sh
+volee run -- codex                      # any command line, after --
+volee run --name invoices -- gemini     # with a name of your choice
+```
+
+`volee run [--name <name>] -- <command>` starts the command in a volee
+host, in the current directory and with this terminal's environment, makes
+it an agent of the list, and puts this terminal on it: you use the program
+as if you had typed the command alone. `ctrl-q` (the leave key) gives the
+terminal back, and the program keeps running under volee: `volee ls` and
+the interface list it, `volee attach <name>` and `enter` open it,
+`volee logs <name>` prints its screen and `volee stop <name>` ends it. The
+agent is named after the directory unless `--name` says otherwise. Without
+a terminal on standard input and output, the command starts the program
+and prints how to open it. A command that cannot start (a program that is
+not found) is no agent, and the reason is printed.
+
+Such an agent is a program volee holds the terminal of, and nothing more:
+its state is read on its screen (working while the screen changes, idle
+after a few seconds without a change), nothing hands it a message, and
+nothing resumes it once it ended, whether by itself, by `volee stop` or
+with a reboot. Its row then shows the end for a minute and leaves the
+list. See [Agents of other harnesses](other-harnesses.md#any-program-volee-run)
+for when to use it, and [ADR 0029](../adr/0029-volee-run.md) for the
+decision.
+
 ## After a reboot
 
 A reboot, a logout or a crash of a host ends the agent's program, but its
@@ -404,7 +432,9 @@ it answers, and prints its id; closing the terminal does not end it.
 `--name` the name its clients show, and `--linger` how many seconds the last
 screen stays after the program ends (600). A host started this way has no
 harness profile: volee does not resume it after a reboot, and it is not an
-agent in `volee ls`. `volee host ls` shows each host as `running`, `exited`
+agent in `volee ls`; to have a program in the list,
+[`volee run`](#running-any-program-as-an-agent) starts it in a host and
+makes it an agent. `volee host ls` shows each host as `running`, `exited`
 with its code, `killed` with its signal, or `interrupted` when its host is
 gone without recording an end.
 
