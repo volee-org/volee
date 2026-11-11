@@ -45,8 +45,8 @@ fn name(registry: &Registry, party: Party) -> String {
         Party::Human => "you".to_owned(),
         Party::System => "volee".to_owned(),
         Party::Agent(agent) => registry
-            .agent(agent)
-            .map_or_else(|| agent.short(), |agent| agent.name.clone()),
+            .name_of(agent)
+            .map_or_else(|| agent.short(), str::to_owned),
     }
 }
 
@@ -63,8 +63,8 @@ fn title(registry: &Registry, thread: ThreadId) -> String {
     match record.participants.as_slice() {
         [Party::Human, Party::Agent(agent)] | [Party::Agent(agent), Party::Human] => {
             let name = registry
-                .agent(*agent)
-                .map_or_else(|| agent.short(), |agent| agent.name.clone());
+                .name_of(*agent)
+                .map_or_else(|| agent.short(), str::to_owned);
             format!("You and {name}")
         }
         _ => record.title.clone(),

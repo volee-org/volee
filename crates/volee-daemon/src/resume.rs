@@ -735,7 +735,7 @@ async fn resume_opencode(
         };
         let pending = registry.pending_for(agent);
         let rendered = format_messages_for_agent(pending.iter().copied(), |id| {
-            registry.agent(id).map(|sender| sender.name.clone())
+            registry.name_of(id).map(str::to_owned)
         });
         let shown: Vec<MessageId> = pending
             .iter()
@@ -801,7 +801,7 @@ fn plan(
     let (root, worktree) = launch::resume_place(&main, agent.workspace.worktree.as_deref());
     let pending = registry.pending_for(agent.id);
     let rendered = format_messages_for_agent(pending.iter().copied(), |id| {
-        registry.agent(id).map(|sender| sender.name.clone())
+        registry.name_of(id).map(str::to_owned)
     });
     let shown = pending
         .iter()

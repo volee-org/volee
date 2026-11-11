@@ -94,7 +94,22 @@ impl World {
         });
     }
 
+    /// Moves an agent to `state`. An agent that comes to rest has worked
+    /// first, as an agent does: one that never did is seen working before.
     fn set_state(&mut self, n: u128, state: AgentState) {
+        let rested = state == AgentState::Idle
+            && self
+                .registry
+                .agent(agent(n))
+                .is_some_and(|agent| !agent.worked);
+        if rested {
+            self.starts(n, AgentState::Working);
+        }
+        self.starts(n, state);
+    }
+
+    /// Moves an agent to `state`, and nothing more.
+    fn starts(&mut self, n: u128, state: AgentState) {
         self.apply(EventKind::StateChanged {
             agent: agent(n),
             state,
@@ -196,6 +211,63 @@ fn a_mission_with_workers_starts_running() {
     let decision = world.step();
     assert_eq!(world.status(), MissionStatus::Running);
     assert_eq!(decision.notices, []);
+}
+
+#[test]
+fn a_worker_that_rests_without_having_worked_is_not_judged() {
+    // Seen in a real mission: a session that just started rests at its
+    // prompt for a moment before its task is submitted, and the coordinator
+    // was told that its worker had stopped without a commit.
+    let mut world = World::new(MissionKind::Change);
+    world.register(1, Role::Worker, "billing");
+    world.starts(1, AgentState::Idle);
+    world.set_delivery(
+        1,
+        Delivery {
+            checked_at: Some(world.now()),
+            ..Delivery::default()
+        },
+    );
+    let decision = world.step();
+    assert_eq!(decision.notices, []);
+    assert!(world.assessments().is_empty());
+    assert_eq!(world.status(), MissionStatus::Running);
+    // It takes its task and comes to rest with nothing to show: now it
+    // stopped without delivering.
+    world.starts(1, AgentState::Working);
+    world.starts(1, AgentState::Idle);
+    world.set_delivery(
+        1,
+        Delivery {
+            checked_at: Some(world.now()),
+            ..Delivery::default()
+        },
+    );
+    let decision = world.step();
+    assert_eq!(
+        world.assessments()[&agent(1)].verdict,
+        Verdict::NotDelivered
+    );
+    assert!(
+        decision.notices[0]
+            .body
+            .contains("stopped without delivering"),
+        "{}",
+        decision.notices[0].body
+    );
+}
+
+#[test]
+fn a_worker_that_ended_its_session_without_working_is_judged() {
+    // Stopped is not resting: its session is over, whatever it did.
+    let mut world = World::new(MissionKind::Change);
+    world.register(1, Role::Worker, "billing");
+    world.starts(1, AgentState::Stopped);
+    world.step();
+    assert_eq!(
+        world.assessments()[&agent(1)].verdict,
+        Verdict::NotDelivered
+    );
 }
 
 #[test]

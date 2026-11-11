@@ -59,7 +59,7 @@ group.
 | `activity-recorded` | The last thing the agent did, in one line. |
 | `workspace-updated`, `location-changed`, `model-changed` | Better knowledge of where and how the agent runs. |
 | `delivery-updated` | New delivery evidence from git or the forge. |
-| `agent-forgotten` | The agent is removed; its sessions are ignored from then on. |
+| `agent-forgotten` | The agent is removed; its sessions are ignored from then on. Its name stays known (`Registry::name_of`), so that the threads it wrote in still name it. |
 | `agent-renamed` | The harness renamed the session of an agent volee only watches: the agent takes that name (ADR 0027). |
 | `session-released` | A session no longer belongs to the agent, and is not ignored: listed again, it becomes an agent of its own (ADR 0027). |
 | `agent-expired` | An agent volee only watched is gone with its session and is removed. Its sessions are not ignored: listed again, they come back (ADR 0027). |
@@ -121,6 +121,7 @@ returns nothing.
 | Worker state | Verdict |
 | --- | --- |
 | launching, working | none yet |
+| idle, before it ever worked | none yet: a session that just started rests at its prompt for a moment before its task is submitted (`Agent::worked`) |
 | needs input | `needs-human` |
 | failed | `failed` (the human is told too) |
 | lost | `lost` (the human is told too) |

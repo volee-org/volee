@@ -67,10 +67,9 @@ fn waiting(registry: &Registry, now: Timestamp) -> String {
     let mut out = String::new();
     for question in questions {
         let asker = match question.from {
-            Party::Agent(agent) => registry.agent(agent).map_or_else(
-                || agent.short(),
-                |agent| text::one_line(&agent.name).into_owned(),
-            ),
+            Party::Agent(agent) => registry
+                .name_of(agent)
+                .map_or_else(|| agent.short(), |name| text::one_line(name).into_owned()),
             other => other.to_string(),
         };
         let id = question.id.short();

@@ -592,6 +592,7 @@ mod tests {
             state_since: Timestamp::from_millis(1_000),
             detail: None,
             last_activity: None,
+            worked: true,
             model: None,
             delivery: Delivery {
                 merged_into_base: true,

@@ -59,9 +59,9 @@ struct Running {
     _dir: tempfile::TempDir,
 }
 
-/// A lead (agent 20) asked for the change mission "Invoicing" in `alpha`;
-/// its coordinator (agent 10) rests between two turns.
-fn mission(repo: &Path) -> Vec<Event> {
+/// A lead (agent 20) asked for the mission "Invoicing" in `alpha`; its
+/// coordinator (agent 10) rests between two turns.
+fn mission(repo: &Path, kind: MissionKind) -> Vec<Event> {
     let at = |kind| Event::new(Timestamp::from_millis(1), kind);
     let member = |n: u128, name: &str, role: Role, of: Option<MissionId>| {
         at(EventKind::AgentRegistered {
@@ -99,7 +99,7 @@ fn mission(repo: &Path) -> Vec<Event> {
             mission: Mission {
                 id: mission_id(),
                 title: "Invoicing".into(),
-                kind: MissionKind::Change,
+                kind,
                 goal: "Add invoices".into(),
                 repos: vec!["alpha".into()],
                 requested_by: Some(agent(LEAD)),
@@ -122,9 +122,16 @@ fn mission(repo: &Path) -> Vec<Event> {
     ]
 }
 
-/// A daemon with a repository named `alpha` that has no remote, git
-/// evidence read every few milliseconds, and a fake harness listed as often.
+/// A daemon with a change mission in a repository named `alpha` that has
+/// no remote.
 fn start() -> Running {
+    start_kind(MissionKind::Change)
+}
+
+/// The same, for a mission of `kind`. Git evidence is read when an agent
+/// stops and when a request asks for it; the fake harness is listed every
+/// few milliseconds.
+fn start_kind(kind: MissionKind) -> Running {
     let dir = tempfile::tempdir().unwrap();
     // Canonical, so that paths compare equal to what git reports.
     let root = dir.path().canonicalize().unwrap();
@@ -146,7 +153,7 @@ fn start() -> Running {
         .env("GIT_CONFIG_NOSYSTEM", "1");
     let config = Config {
         paths,
-        log: Box::new(MemoryLog::with(mission(&repo))),
+        log: Box::new(MemoryLog::with(mission(&repo, kind))),
         clock: Arc::new(ManualClock::at(10_000)),
         harnesses: vec![],
         spool: None,
@@ -279,6 +286,37 @@ async fn refused(client: &Client, params: CloseParams) -> String {
     }
 }
 
+/// A hook of agent `n`, as Claude Code sends it.
+async fn hook(client: &Client, n: u128, event: &str) {
+    client
+        .call::<HookIngest>(HookParams {
+            agent: agent(n),
+            event: event.into(),
+            payload: serde_json::json!({ "reason": "other" }),
+            pid: None,
+        })
+        .await
+        .unwrap();
+}
+
+/// The worker tells its coordinator and the person that it is done, as the
+/// `report` tool does.
+async fn reports(client: &Client, worker: AgentId) {
+    client
+        .call::<SendMessage>(SendParams {
+            from: Party::Agent(worker),
+            to: vec![Party::Human, Party::Agent(agent(COORDINATOR))],
+            kind: MessageKind::Report,
+            body: "**Done.** Invoices are on feat/invoices.".into(),
+            refs: vec![],
+            in_reply_to: None,
+            options: Vec::new(),
+            thread: None,
+        })
+        .await
+        .unwrap();
+}
+
 fn branch_exists(repo: &Path, branch: &str) -> bool {
     std::process::Command::new("git")
         .args(["rev-parse", "--verify", "--quiet", branch])
@@ -350,8 +388,10 @@ async fn a_mission_without_a_remote_is_merged_after_ok_merge_then_closed_and_tid
     );
     assert!(worktree.is_dir(), "nothing was tidied");
 
-    // The coordinator merges, in the main checkout, then closes at once:
-    // the daemon reads the merge from git before it answers.
+    // The coordinator merges, in the main checkout, then closes at once,
+    // in the middle of its turn: the daemon reads the merge from git before
+    // it answers.
+    hook(&client, COORDINATOR, "user-prompt-submit").await;
     git(
         &daemon.repo,
         &[
@@ -376,19 +416,24 @@ async fn a_mission_without_a_remote_is_merged_after_ok_merge_then_closed_and_tid
         "the merge was read before the mission closed"
     );
 
-    // The coordinator's turn ends, then its session: the wind-down tidies
-    // the worker and forgets the coordinator.
-    for event in ["stop", "session-end"] {
-        client
-            .call::<HookIngest>(HookParams {
-                agent: agent(COORDINATOR),
-                event: event.into(),
-                payload: serde_json::json!({ "reason": "other" }),
-                pid: None,
-            })
-            .await
-            .unwrap();
-    }
+    // The turn in which it closed is its own: while it lasts, the
+    // coordinator is not stopped and the last word is not said.
+    until(&client, |r| r.agent(worker).is_none()).await;
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    let during = registry(&client).await;
+    assert_eq!(
+        during.agent(agent(COORDINATOR)).map(|agent| &agent.state),
+        Some(&AgentState::Working)
+    );
+    assert!(
+        !told(&during, Party::Human)
+            .iter()
+            .any(|text| text.starts_with("Mission \"Invoicing\" is closed.")),
+        "said before the coordinator's turn ended"
+    );
+    // Its turn ends, then its session: it is forgotten.
+    hook(&client, COORDINATOR, "stop").await;
+    hook(&client, COORDINATOR, "session-end").await;
     let done = until(&client, |r| {
         told(r, Party::Human)
             .iter()
@@ -448,6 +493,9 @@ async fn a_worker_whose_work_did_not_land_is_kept_when_the_person_closes_its_mis
             .is_some_and(|mission| mission.status == MissionStatus::Reporting)
     })
     .await;
+    // It said that it is done: in a change mission, that proves nothing
+    // about where its commits are.
+    reports(&client, worker).await;
     // The person closes the mission themselves, without a merge: the
     // worker's work has not landed.
     client
@@ -477,4 +525,240 @@ async fn a_worker_whose_work_did_not_land_is_kept_when_the_person_closes_its_mis
     assert!(worktree.is_dir(), "its worktree is kept");
     assert!(done.agent(worker).is_some(), "and so is its row");
     assert!(branch_exists(&daemon.repo, "refs/heads/feat/invoices"));
+}
+
+#[tokio::test]
+async fn the_person_who_merged_and_closes_themselves_gets_the_same_tidying() {
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let (worker, worktree) = delivered_worker(&daemon, &client).await;
+    until(&client, |r| {
+        r.mission(mission_id())
+            .is_some_and(|mission| mission.status == MissionStatus::Reporting)
+    })
+    .await;
+    // No report presented, no coordinator involved: the person merges the
+    // branch and closes the mission. Nothing has read the merge yet.
+    git(
+        &daemon.repo,
+        &[
+            "merge",
+            "--quiet",
+            "--no-ff",
+            "-m",
+            "Merge feat/invoices",
+            "feat/invoices",
+        ],
+    );
+    assert!(
+        !registry(&client)
+            .await
+            .agent(worker)
+            .unwrap()
+            .delivery
+            .merged_into_base
+    );
+    client
+        .call::<CloseMission>(CloseParams {
+            mission: mission_id(),
+            report: None,
+            force: false,
+            by: None,
+        })
+        .await
+        .unwrap();
+    // The coordinator rested: it is stopped at once, without a turn to wait
+    // for; here its session ends when the test says so.
+    hook(&client, COORDINATOR, "session-end").await;
+    let done = until(&client, |r| {
+        told(r, Party::Human)
+            .iter()
+            .any(|text| text.starts_with("Mission \"Invoicing\" is closed."))
+    })
+    .await;
+    assert!(done.agent(worker).is_none(), "the worker left the list");
+    assert!(!worktree.exists(), "its worktree is gone");
+    assert!(branch_exists(&daemon.repo, "refs/heads/feat/invoices"));
+    assert!(
+        told(&done, Party::Human)
+            .iter()
+            .any(|text| text.contains("Tidied: billing (worktrees removed, branches kept).")),
+        "{:?}",
+        told(&done, Party::Human)
+    );
+}
+
+#[tokio::test]
+async fn an_analysis_mission_is_approved_with_ok_close_and_tidied_on_its_reports() {
+    let daemon = start_kind(MissionKind::Analysis);
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    // The worker looks, changes nothing, and reports.
+    let spawned = client
+        .call::<Spawn>(SpawnParams {
+            repo: "alpha".into(),
+            branch: "audit/invoices".into(),
+            base: None,
+            task: "Find where invoices are rounded.".into(),
+            role: Role::Worker,
+            parent: Some(agent(COORDINATOR)),
+            mission: Some(mission_id()),
+            model: None,
+            name: Some("audit".into()),
+            harness: None,
+        })
+        .await
+        .unwrap();
+    let worktree = PathBuf::from(&spawned.worktree);
+    reports(&client, spawned.agent).await;
+    daemon.harness.set(vec![ListedSession {
+        alive: true,
+        background: true,
+        handle: Some("abcd1234".into()),
+        ..ListedSession::new(
+            SessionKey::claude("abcd1234-5b60-4cdc-8cf3-000000000001"),
+            &worktree,
+            AgentState::Done,
+        )
+    }]);
+    until(&client, |r| {
+        r.mission(mission_id())
+            .is_some_and(|mission| mission.status == MissionStatus::Reporting)
+    })
+    .await;
+
+    let asked = client.call::<RequestApproval>(present()).await.unwrap();
+    let waiting = registry(&client).await;
+    let question = waiting.message(asked.question).unwrap();
+    assert_eq!(question.options, ["ok close", "no"]);
+    assert!(
+        question
+            .body
+            .starts_with("Mission \"Invoicing\" is ready to close."),
+        "{}",
+        question.body
+    );
+    // The approval of a change mission is not this mission's.
+    answers(&client, asked.question, "ok merge").await;
+    assert_eq!(
+        registry(&client)
+            .await
+            .mission(mission_id())
+            .unwrap()
+            .status,
+        MissionStatus::Reporting
+    );
+    let again = client.call::<RequestApproval>(present()).await.unwrap();
+    answers(&client, again.question, "ok close").await;
+    // Nothing to merge: the coordinator closes.
+    client.call::<CloseMission>(close()).await.unwrap();
+    hook(&client, COORDINATOR, "session-end").await;
+    let done = until(&client, |r| {
+        told(r, Party::Human)
+            .iter()
+            .any(|text| text.starts_with("Mission \"Invoicing\" is closed."))
+    })
+    .await;
+    // Its report is what an analysis worker delivers: its worktree goes.
+    assert!(
+        done.agent(spawned.agent).is_none(),
+        "the worker left the list"
+    );
+    assert!(!worktree.exists(), "its worktree is gone");
+    assert!(branch_exists(&daemon.repo, "refs/heads/audit/invoices"));
+    assert!(
+        told(&done, Party::Human)
+            .iter()
+            .any(|text| text.contains("Tidied: audit (worktrees removed, branches kept).")),
+        "{:?}",
+        told(&done, Party::Human)
+    );
+}
+
+#[tokio::test]
+async fn a_worker_that_just_started_is_not_judged_before_it_took_its_task() {
+    let daemon = start();
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let spawned = client
+        .call::<Spawn>(SpawnParams {
+            repo: "alpha".into(),
+            branch: "feat/invoices".into(),
+            base: None,
+            task: "Add invoices to the billing module.".into(),
+            role: Role::Worker,
+            parent: Some(agent(COORDINATOR)),
+            mission: Some(mission_id()),
+            model: None,
+            name: Some("billing".into()),
+            harness: None,
+        })
+        .await
+        .unwrap();
+    let worker = spawned.agent;
+    let worktree = PathBuf::from(&spawned.worktree);
+    let listed = |state: AgentState| {
+        daemon.harness.set(vec![ListedSession {
+            alive: true,
+            background: true,
+            handle: Some("abcd1234".into()),
+            ..ListedSession::new(
+                SessionKey::claude("abcd1234-5b60-4cdc-8cf3-000000000001"),
+                &worktree,
+                state,
+            )
+        }]);
+    };
+    // Its session starts: it rests at its prompt for a moment, before its
+    // task is submitted. The evidence of that moment is read.
+    listed(AgentState::Idle);
+    let started = until(&client, |r| {
+        r.agent(worker).is_some_and(|agent| {
+            agent.state == AgentState::Idle
+                && agent
+                    .delivery
+                    .checked_at
+                    .is_some_and(|checked| checked >= agent.state_since)
+        })
+    })
+    .await;
+    // Nothing is said of it: it has not worked yet.
+    assert!(
+        started
+            .mission(mission_id())
+            .unwrap()
+            .assessments
+            .is_empty(),
+        "{:?}",
+        started.mission(mission_id()).unwrap().assessments
+    );
+    assert_eq!(
+        told(&started, Party::Agent(agent(COORDINATOR))),
+        Vec::<String>::new()
+    );
+
+    // It takes its task, works, and ends its turn without a commit: now it
+    // did stop without delivering, and the coordinator hears it.
+    listed(AgentState::Working);
+    until(&client, |r| {
+        r.agent(worker)
+            .is_some_and(|agent| agent.state == AgentState::Working)
+    })
+    .await;
+    listed(AgentState::Idle);
+    let stopped = until(&client, |r| {
+        r.mission(mission_id())
+            .is_some_and(|mission| mission.assessments.contains_key(&worker))
+    })
+    .await;
+    assert_eq!(
+        stopped.mission(mission_id()).unwrap().assessments[&worker].verdict,
+        Verdict::NotDelivered
+    );
+    let heard = told(&stopped, Party::Agent(agent(COORDINATOR)));
+    assert!(
+        heard
+            .iter()
+            .any(|text| text.contains("stopped without delivering: no commits")),
+        "{heard:?}"
+    );
+    assert!(worktree.is_dir());
 }

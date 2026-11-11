@@ -305,10 +305,9 @@ fn party(registry: &Registry, party: Party) -> String {
     match party {
         Party::Human => "you".to_owned(),
         Party::System => "volee".to_owned(),
-        Party::Agent(id) => registry.agent(id).map_or_else(
-            || id.short(),
-            |agent| text::one_line(&agent.name).into_owned(),
-        ),
+        Party::Agent(id) => registry
+            .name_of(id)
+            .map_or_else(|| id.short(), |name| text::one_line(name).into_owned()),
     }
 }
 

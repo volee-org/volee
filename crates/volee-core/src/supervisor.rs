@@ -261,7 +261,8 @@ fn one_line(words: &str) -> String {
 }
 
 /// The verdict on a worker and its evidence, or `None` while it is still
-/// working.
+/// working, or has not begun: a worker that just started rests at its
+/// prompt for a moment before its task is submitted, with nothing to show.
 ///
 /// A change worker that stopped is judged on its delivery evidence, and only
 /// on evidence checked after it stopped: evidence checked before (while it
@@ -274,6 +275,11 @@ pub fn verdict_for(
     kind: MissionKind,
     worker: &Agent,
 ) -> Option<(Verdict, String)> {
+    // A worker that rests without ever having worked has not stopped: it
+    // just started, and its task is not submitted yet.
+    if worker.state == AgentState::Idle && !worker.worked {
+        return None;
+    }
     let finished = matches!(
         worker.state,
         AgentState::Idle | AgentState::Done | AgentState::Stopped
