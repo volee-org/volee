@@ -168,7 +168,7 @@ mod tests {
 
     use super::*;
     use crate::app::{Msg, update};
-    use crate::demo::INFRA;
+    use crate::demo::{INFRA, INVOICING};
     use crate::test_support::{id, model, start};
 
     fn row_of(buffer: &Buffer, area: Rect, name_start: &str) -> String {
@@ -203,5 +203,30 @@ mod tests {
         // A name that leaves room keeps its time in state.
         let tower = row_of(&buffer, area, "tower");
         assert!(tower.contains("min"), "{tower}");
+    }
+
+    #[test]
+    fn a_coordinators_name_shows_whole_under_its_lead() {
+        // The smallest terminal with the right column, as the mission journey
+        // runs it: a coordinator's name is "coordinator-" and its mission's.
+        let mut model = model(160, 45);
+        let name = "coordinator-journey-433295";
+        let renamed = Event::new(
+            start(),
+            EventKind::AgentRenamed {
+                agent: id(INVOICING),
+                name: name.to_owned(),
+            },
+        );
+        update(&mut model, Msg::Events(vec![renamed]));
+        let area = model.layout.rail;
+        let mut buffer = Buffer::empty(area);
+        render(&model, area, &mut buffer);
+        let row = row_of(&buffer, area, "coordinator-journey");
+        assert!(
+            row.contains('└') || row.contains('├'),
+            "under its lead: {row}"
+        );
+        assert!(row.contains(name), "{row}");
     }
 }
