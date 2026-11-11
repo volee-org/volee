@@ -147,6 +147,7 @@ pub(crate) fn notice_message(state: &State, mission: MissionId, notice: Notice) 
         body: notice.body,
         refs: Vec::new(),
         in_reply_to: None,
+        options: Vec::new(),
         at: state.now(),
         receipts: notice
             .to

@@ -121,6 +121,7 @@ async fn exchange(client: &Client) -> volee_core::ThreadId {
                 body: body.into(),
                 refs: vec![],
                 in_reply_to: None,
+                options: Vec::new(),
                 thread,
             })
             .await

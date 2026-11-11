@@ -280,6 +280,29 @@ fn render_prompt(model: &Model, prompt: Prompt, area: Rect, buf: &mut Buffer) {
             spans.extend(join(answers, usize::from(area.width)));
             spans
         }
+        Prompt::Answer { question, option } => {
+            let asked = model.registry.message(question);
+            let answer = asked
+                .and_then(|message| message.options.get(option))
+                .map(String::as_str)
+                .unwrap_or_default();
+            let to = asked.map_or_else(String::new, |message| match message.from {
+                volee_core::message::Party::Agent(agent) => model.name_of(agent),
+                other => other.to_string(),
+            });
+            let mut spans = vec![
+                Span::styled(
+                    format!("Answer \"{answer}\" to {to}?"),
+                    theme.style(StyleRole::Input),
+                ),
+                Span::raw(SEPARATOR),
+            ];
+            let answers = groups(model, &[Context::Confirm])
+                .into_iter()
+                .map(|(_, group)| group);
+            spans.extend(join(answers, usize::from(area.width)));
+            spans
+        }
     };
     put_spans(buf, area.x, area.y, &spans, area.width);
 }

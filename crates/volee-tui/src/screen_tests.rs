@@ -555,6 +555,44 @@ fn messages_at_every_size() {
 }
 
 #[test]
+fn messages_with_a_question_that_offers_answers() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    crate::test_support::offer(&mut model, &["ok merge", "no"]);
+    // The third pinned question: its answers, numbered, under its text.
+    type_text(&demo, &mut model, "Ijj");
+    let offered = draw(&model);
+    assert!(offered.contains("1 ok merge"), "{offered}");
+    assert!(offered.contains("2 no"), "{offered}");
+    assert!(
+        offered.contains("press its number to answer, or reply in your own words"),
+        "{offered}"
+    );
+    // 1: the bottom line asks before sending.
+    type_text(&demo, &mut model, "1");
+    let asking = draw(&model);
+    assert!(
+        asking.contains("Answer \"ok merge\" to invoice-tools?"),
+        "{asking}"
+    );
+    assert_snapshot!(asking);
+
+    // In a small terminal the answers still show whole, and what to press
+    // wraps instead of being cut.
+    let (mut model, demo) = demo_model(80, 24, Theme::default());
+    crate::test_support::offer(&mut model, &["ok merge", "no"]);
+    type_text(&demo, &mut model, "Ijj");
+    let small = draw(&model);
+    for part in [
+        "1 ok merge",
+        "2 no",
+        "press its number to answer, or reply in",
+        "your own words",
+    ] {
+        assert!(small.contains(part), "{part}: {small}");
+    }
+}
+
+#[test]
 fn messages_reading_a_mission_thread_with_its_summary() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     // The row after the pinned question: the Invoicing mission's thread,

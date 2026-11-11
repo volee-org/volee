@@ -10,10 +10,10 @@ use volee_core::message::{MessageKind, Party};
 use volee_core::time::Timestamp;
 use volee_core::{AgentId, MessageId, Registry, ThreadId};
 
-use crate::app::{Draft, Effect, Model, Overlay};
+use crate::app::{Draft, Effect, Model, Overlay, Prompt};
 use crate::editor::TextField;
 use crate::keymap::Action;
-use crate::source::{SourceError, Summary};
+use crate::source::{Outgoing, SourceError, Summary};
 
 /// One row of the list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,6 +186,71 @@ pub(crate) fn reply(registry: &Registry, row: Row) -> Option<Reply> {
         thread,
         question,
     })
+}
+
+/// The question a row waits on, when it offers answers to choose from and
+/// the person has not answered it: the row's own question, or the one a
+/// reply from its thread would answer.
+pub(crate) fn offered(registry: &Registry, row: Row) -> Option<&volee_core::message::Message> {
+    let question = match row {
+        Row::Question(id) => Some(id),
+        Row::Thread(_) => reply(registry, row)?.question,
+    }?;
+    registry
+        .message(question)
+        .filter(|message| !message.options.is_empty() && registry.answer_to(question).is_none())
+}
+
+/// A digit typed in the messages window: asks, on the bottom line, whether
+/// to send the answer of that number to the selected question. Returns
+/// whether the digit was one of its answers.
+pub(crate) fn pick(model: &mut Model, digit: u32) -> bool {
+    let rows = rows(&model.registry);
+    let Some(Overlay::Inbox(view)) = &model.overlay else {
+        return false;
+    };
+    let Some(question) = view
+        .current(&rows)
+        .and_then(|row| offered(&model.registry, row))
+    else {
+        return false;
+    };
+    let Some(option) = usize::try_from(digit)
+        .ok()
+        .and_then(|digit| digit.checked_sub(1))
+        .filter(|option| *option < question.options.len())
+    else {
+        return false;
+    };
+    model.prompt = Some(Prompt::Answer {
+        question: question.id,
+        option,
+    });
+    true
+}
+
+/// Sends the answer picked for a question, in the question's thread. The
+/// answer is the option's own words, so that whoever asked can tell it from
+/// a sentence that merely contains them.
+pub(crate) fn answer(
+    model: &mut Model,
+    question: MessageId,
+    option: usize,
+    effects: &mut Vec<Effect>,
+) {
+    let Some(message) = model.registry.message(question) else {
+        return;
+    };
+    let (Party::Agent(to), Some(body)) = (message.from, message.options.get(option)) else {
+        return;
+    };
+    effects.push(Effect::Send(Outgoing {
+        to,
+        kind: MessageKind::Answer,
+        body: body.clone(),
+        in_reply_to: Some(question),
+        thread: Some(message.thread),
+    }));
 }
 
 impl InboxView {
@@ -429,10 +494,11 @@ mod tests {
         use ratatui::crossterm::event::KeyCode;
 
         use super::*;
+        use crate::app::Prompt;
         use crate::app::{Msg, update};
         use crate::keymap::Context;
         use crate::source::Outgoing;
-        use crate::test_support::{id, key, model, press};
+        use crate::test_support::{id, key, model, offer, press};
 
         fn view(model: &Model) -> &InboxView {
             match &model.overlay {
@@ -507,6 +573,102 @@ mod tests {
             press(&mut model, "r");
             key(&mut model, KeyCode::Esc);
             assert!(matches!(model.overlay, Some(Overlay::Inbox(_))));
+        }
+
+        #[test]
+        fn a_digit_picks_an_answer_the_question_offers_and_y_sends_it() {
+            let mut model = model(120, 40);
+            let tools = id(INVOICE_TOOLS);
+            let question = offer(&mut model, &["ok merge", "no"]);
+            let thread = model.registry.message(question).unwrap().thread;
+            press(&mut model, "Ijj");
+            assert_eq!(view(&model).selected, Some(Row::Question(question)));
+            // A digit beyond its answers is not one of them.
+            assert_eq!(press(&mut model, "3"), []);
+            assert_eq!(press(&mut model, "0"), []);
+            assert_eq!(model.prompt, None);
+            // 1 asks before anything is sent.
+            assert_eq!(press(&mut model, "1"), []);
+            assert_eq!(
+                model.prompt,
+                Some(Prompt::Answer {
+                    question,
+                    option: 0
+                })
+            );
+            assert_eq!(model.contexts(), [Context::Confirm]);
+            // No: nothing was sent, and the messages are still there.
+            assert_eq!(press(&mut model, "n"), []);
+            assert_eq!(model.prompt, None);
+            assert!(matches!(model.overlay, Some(Overlay::Inbox(_))));
+            // 2, then yes: the answer is the option's own words, in reply
+            // to the question, in its thread.
+            press(&mut model, "2");
+            assert_eq!(
+                press(&mut model, "y"),
+                [Effect::Send(Outgoing {
+                    to: tools,
+                    kind: MessageKind::Answer,
+                    body: "no".into(),
+                    in_reply_to: Some(question),
+                    thread: Some(thread),
+                })]
+            );
+            assert_eq!(model.prompt, None);
+            assert!(matches!(model.overlay, Some(Overlay::Inbox(_))));
+            // The person can still answer in their own words.
+            press(&mut model, "r");
+            assert_eq!(model.overlay, Some(Overlay::Composer));
+            assert_eq!(model.draft.as_ref().unwrap().question, Some(question));
+        }
+
+        #[test]
+        fn a_digit_does_nothing_on_a_question_without_answers_or_once_answered() {
+            let mut model = model(120, 40);
+            // The demo's questions offer nothing.
+            press(&mut model, "I");
+            assert_eq!(press(&mut model, "1"), []);
+            assert_eq!(model.prompt, None);
+            key(&mut model, KeyCode::Esc);
+
+            let question = offer(&mut model, &["ok merge", "no"]);
+            let asked = model.registry.message(question).unwrap().clone();
+            assert_eq!(
+                offered(&model.registry, Row::Question(question)).map(|message| message.id),
+                Some(question)
+            );
+            // The thread's row answers it too: its latest question.
+            let rows = rows(&model.registry);
+            let row = *rows
+                .iter()
+                .find(|row| matches!(row, Row::Thread(thread) if *thread == asked.thread))
+                .unwrap();
+            assert_eq!(
+                offered(&model.registry, row).map(|message| message.id),
+                Some(question)
+            );
+            // Once the person answered, the digits pick nothing.
+            let answer = volee_core::message::Message {
+                id: MessageId::from_ulid(ulid::Ulid::from_parts(u64::MAX >> 16, 2)),
+                from: Party::Human,
+                kind: MessageKind::Answer,
+                body: "ok merge".into(),
+                in_reply_to: Some(question),
+                options: Vec::new(),
+                ..asked
+            };
+            let now = model.now;
+            update(
+                &mut model,
+                Msg::Events(vec![volee_core::Event::new(
+                    now,
+                    volee_core::event::EventKind::MessagePosted { message: answer },
+                )]),
+            );
+            assert_eq!(offered(&model.registry, row), None);
+            press(&mut model, "I");
+            assert_eq!(press(&mut model, "1"), []);
+            assert_eq!(model.prompt, None);
         }
 
         #[test]

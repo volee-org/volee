@@ -633,6 +633,11 @@ pub struct SendParams {
     /// The message it answers.
     #[serde(default)]
     pub in_reply_to: Option<MessageId>,
+    /// The answers a question to the person offers (see
+    /// [`Message::options`](volee_core::message::Message::options)). The
+    /// daemon refuses them on anything else.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
     /// The thread; chosen by the daemon when absent (the mission thread, or
     /// the direct thread between the two parties).
     #[serde(default)]

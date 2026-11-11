@@ -11,6 +11,7 @@
 //! | `list_agents` | Every agent on the machine and whether the caller may write to it. |
 //! | `send_message` | Write to agents or to the human, by id or by name. |
 //! | `read_messages` | Read messages addressed to the caller. |
+//! | `ask_human` | Ask the human a question with the answers to choose from. |
 //! | `report` | Tell whoever launched the caller that its task is done, blocked or failed. |
 //!
 //! The server keeps a replica of the daemon's registry, fed by an event
@@ -25,6 +26,6 @@ pub use server::{McpError, VoleeMcp};
 /// The argument types of the tools, for callers that invoke tools directly.
 pub mod tools {
     pub use crate::server::{
-        KindArg, ListArgs, OutcomeArg, ReadArgs, RefArg, ReportArgs, SendArgs, SpawnArgs,
+        AskArgs, KindArg, ListArgs, OutcomeArg, ReadArgs, RefArg, ReportArgs, SendArgs, SpawnArgs,
     };
 }

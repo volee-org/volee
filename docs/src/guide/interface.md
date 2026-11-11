@@ -427,6 +427,23 @@ elsewhere it writes to the last agent that spoke there (or the mission's
 coordinator). Sending or closing the composer comes back to the messages.
 volee's alerts take no reply.
 
+A question may offer the answers to choose from. They show under its text,
+numbered:
+
+```text
+coordinator-invoicing → you · question · 2 min ago
+Both pull requests are green and reviewed. Merge them?
+  1 ok merge
+  2 no
+  press its number to answer, or reply in your own words
+```
+
+Press the number of an answer: the bottom line asks
+`Answer "ok merge" to coordinator-invoicing?`, and `y` sends it, `n` or
+`Esc` takes it back. The agent reads exactly the answer it offered. `r`
+still opens the composer, for an answer in your own words, which the agent
+must not take for one of its options.
+
 `s` asks for a summary of the thread, written by a model. Summaries are
 off unless you turn them on (`summaries = true` under `[messages]` in the
 [configuration](configuration.md)); until then, the window says so.

@@ -31,7 +31,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `agents.stop` | `agent` | none |
 | `agents.adopt` | `agent` | none; the agent's conversation continues in a volee host |
 | `agents.tidy` | `agent`, optional `dry_run` | `outcome`: `removed` or `would-remove` (`worktree`, `branch`), or `kept` (`reasons`) |
-| `messages.send` | `from`, `to`, `kind`, `body`, optional `refs`, `in_reply_to`, `thread` | `message`, `thread` |
+| `messages.send` | `from`, `to`, `kind`, `body`, optional `refs`, `in_reply_to`, `thread`, `options` (the answers a question to the human offers: two to six short lines) | `message`, `thread` |
 | `messages.read` | `message`, `by` | none |
 | `hooks.ingest` | `agent`, `event`, `payload` | `stdout`: what the hook prints, if anything |
 | `hooks.wait` | `agent`, `timeout_ms` | `text`: messages that wake the agent, or `null` |

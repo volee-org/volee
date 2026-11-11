@@ -462,6 +462,7 @@ fn post(
                     body: format!("message {n}"),
                     refs: vec![],
                     in_reply_to,
+                    options: Vec::new(),
                     at: at(10),
                     receipts: to
                         .iter()
@@ -540,6 +541,60 @@ fn a_question_is_answered_by_a_reply_from_the_human() {
 }
 
 #[test]
+fn the_answer_to_a_question_is_the_person_s_first_reply_to_it() {
+    let mut registry = Registry::new();
+    register(&mut registry, agent_id(1), Role::Worker, None);
+    register(&mut registry, agent_id(2), Role::Worker, None);
+    let worker = Party::Agent(agent_id(1));
+    let other = Party::Agent(agent_id(2));
+    let thread = open_thread(&mut registry, 1, None, vec![Party::Human, worker, other]);
+    let question = post(
+        &mut registry,
+        1,
+        thread,
+        worker,
+        &[Party::Human, other],
+        MessageKind::Question,
+        None,
+    );
+    assert_eq!(registry.answer_to(question), None);
+    // Another agent's reply is not the person's answer.
+    post(
+        &mut registry,
+        2,
+        thread,
+        other,
+        &[worker],
+        MessageKind::Answer,
+        Some(question),
+    );
+    assert_eq!(registry.answer_to(question), None);
+    assert_eq!(registry.unanswered_questions().len(), 1);
+    let first = post(
+        &mut registry,
+        3,
+        thread,
+        Party::Human,
+        &[worker],
+        MessageKind::Answer,
+        Some(question),
+    );
+    post(
+        &mut registry,
+        4,
+        thread,
+        Party::Human,
+        &[worker],
+        MessageKind::Note,
+        Some(question),
+    );
+    assert_eq!(
+        registry.answer_to(question).map(|answer| answer.id),
+        Some(first)
+    );
+}
+
+#[test]
 fn a_message_needs_an_existing_thread() {
     let mut registry = Registry::new();
     let missing = ThreadId::from_ulid(Ulid::from_parts(9, 9));
@@ -554,6 +609,7 @@ fn a_message_needs_an_existing_thread() {
                 body: String::new(),
                 refs: vec![],
                 in_reply_to: None,
+                options: Vec::new(),
                 at: at(1),
                 receipts: vec![],
             },

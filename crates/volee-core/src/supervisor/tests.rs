@@ -347,6 +347,7 @@ fn an_analysis_worker_delivers_with_a_report() {
             body: "Three high severity advisories.".into(),
             refs: vec![],
             in_reply_to: None,
+            options: Vec::new(),
             at: Timestamp::from_millis(99),
             receipts: vec![Receipt {
                 to: Party::Agent(agent(COORDINATOR)),

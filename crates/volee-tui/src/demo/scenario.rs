@@ -519,6 +519,7 @@ impl Script {
                     body: body.to_owned(),
                     refs: Vec::new(),
                     in_reply_to,
+                    options: Vec::new(),
                     at,
                     receipts: to
                         .iter()

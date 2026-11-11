@@ -5,7 +5,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use volee_config::Config;
-use volee_core::{AgentId, Event, MissionId, Registry};
+use volee_core::message::{Message, Party};
+use volee_core::{AgentId, Event, MessageId, MissionId, Registry};
 use volee_proto::client::Client;
 use volee_proto::methods::{EventsSince, SinceParams};
 
@@ -92,6 +93,57 @@ pub(crate) fn mission(registry: &Registry, input: &str) -> Result<MissionId> {
             several
                 .iter()
                 .map(|(id, title)| format!("\"{}\" ({})", text::one_line(title), id.short()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+/// The question waiting for the person that `input` names: its identifier,
+/// its short identifier, or the agent that asked it, when that agent asked
+/// only one.
+pub(crate) fn question(registry: &Registry, input: &str) -> Result<MessageId> {
+    let input = input.trim();
+    let waiting = registry.unanswered_questions();
+    if let Ok(id) = input.parse::<MessageId>() {
+        if waiting.iter().any(|question| question.id == id) {
+            return Ok(id);
+        }
+        if registry.message(id).is_some() {
+            bail!("message {id} is not a question waiting for you; see `volee msg questions`");
+        }
+        bail!("volee knows no message {id}; see `volee msg questions`");
+    }
+    let by_id: Vec<&Message> = waiting
+        .iter()
+        .copied()
+        .filter(|question| ends_with(&question.id.to_string(), MessageId::PREFIX, input))
+        .collect();
+    let candidates = if by_id.is_empty() {
+        agent(registry, input).map_or_else(
+            |_| Vec::new(),
+            |asker| {
+                waiting
+                    .iter()
+                    .copied()
+                    .filter(|question| question.from == Party::Agent(asker))
+                    .collect()
+            },
+        )
+    } else {
+        by_id
+    };
+    match candidates.as_slice() {
+        [question] => Ok(question.id),
+        [] => bail!(
+            "no question waiting for you has the id `{input}` or comes from an agent of that \
+             name; see `volee msg questions`"
+        ),
+        several => bail!(
+            "`{input}` could be {}; use the id",
+            several
+                .iter()
+                .map(|question| question.id.short())
                 .collect::<Vec<_>>()
                 .join(", ")
         ),

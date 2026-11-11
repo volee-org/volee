@@ -24,7 +24,7 @@ use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, MissionId, Registry, ThreadId};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_mcp::VoleeMcp;
-use volee_mcp::tools::{ListArgs, OutcomeArg, ReportArgs, SpawnArgs};
+use volee_mcp::tools::{AskArgs, ListArgs, OutcomeArg, ReportArgs, SpawnArgs};
 use volee_proto::client::Client;
 use volee_proto::methods::{
     EventsSince, HookIngest, HookParams, JoinParams, SendMessage, SendParams, SinceParams,
@@ -235,6 +235,7 @@ async fn read_messages_returns_unread_messages_once() {
             body: "Rebase on main before opening the PR.".into(),
             refs: vec![],
             in_reply_to: None,
+            options: Vec::new(),
             thread: None,
         })
         .await
@@ -344,6 +345,7 @@ async fn an_agent_of_another_harness_joins_asks_the_human_and_reads_the_answer()
             body: "eu-west-3.".into(),
             refs: vec![],
             in_reply_to: Some(question),
+            options: Vec::new(),
             thread: None,
         })
         .await
@@ -371,6 +373,115 @@ async fn an_agent_of_another_harness_joins_asks_the_human_and_reads_the_answer()
 }
 
 #[tokio::test]
+async fn ask_human_puts_a_question_with_its_answers_before_the_person() {
+    let fixture = start();
+    let server = server_for(&fixture, agent(2)).await;
+    let ask = |options: &[&str]| AskArgs {
+        question: "Both pull requests are green. Merge them?".into(),
+        options: options.iter().map(|option| (*option).to_owned()).collect(),
+    };
+    let asked = server
+        .ask_human(Parameters(ask(&["ok merge", "no"])))
+        .await
+        .unwrap();
+    assert!(!failed(&asked), "{}", body(&asked));
+    let snapshot = registry(&fixture).await;
+    let [question] = snapshot.unanswered_questions()[..] else {
+        panic!("one question waits for the person");
+    };
+    assert_eq!(question.from, Party::Agent(agent(2)));
+    assert_eq!(question.kind, MessageKind::Question);
+    assert_eq!(question.options, ["ok merge", "no"]);
+    assert_eq!(question.recipients().collect::<Vec<_>>(), [Party::Human]);
+    // The tool names the message the answer will refer to, and says not to
+    // wait in a loop.
+    assert!(
+        body(&asked).contains(&question.id.to_string()),
+        "{}",
+        body(&asked)
+    );
+    assert!(body(&asked).contains("end your turn"), "{}", body(&asked));
+
+    // The person picks an answer; the agent reads it, in reply to its
+    // question.
+    let human = Client::connect(&fixture.socket).await.unwrap();
+    let question = question.id;
+    human
+        .call::<SendMessage>(SendParams {
+            from: Party::Human,
+            to: vec![Party::Agent(agent(2))],
+            kind: MessageKind::Answer,
+            body: "ok merge".into(),
+            refs: vec![],
+            in_reply_to: Some(question),
+            options: Vec::new(),
+            thread: None,
+        })
+        .await
+        .unwrap();
+    settle().await;
+    let answer = server
+        .read_messages(Parameters(
+            serde_json::from_value(serde_json::json!({})).unwrap(),
+        ))
+        .await
+        .unwrap();
+    assert!(body(&answer).contains("ok merge"), "{}", body(&answer));
+    assert!(
+        body(&answer).contains(&question.to_string()),
+        "the answer names the question: {}",
+        body(&answer)
+    );
+
+    // A question sent to the person and to an agent: the agent reads the
+    // answers the person chooses from.
+    human
+        .call::<SendMessage>(SendParams {
+            from: Party::Agent(agent(2)),
+            to: vec![Party::Human, Party::Agent(agent(1))],
+            kind: MessageKind::Question,
+            body: "Deploy tonight?".into(),
+            refs: vec![],
+            in_reply_to: None,
+            options: vec!["yes".into(), "no".into()],
+            thread: None,
+        })
+        .await
+        .unwrap();
+    settle().await;
+    let lead = server_for(&fixture, agent(1)).await;
+    let copy = lead
+        .read_messages(Parameters(
+            serde_json::from_value(serde_json::json!({})).unwrap(),
+        ))
+        .await
+        .unwrap();
+    let copy: serde_json::Value = serde_json::from_str(&body(&copy)).unwrap();
+    assert_eq!(
+        copy[0]["options"],
+        serde_json::json!(["yes", "no"]),
+        "{copy}"
+    );
+    assert!(
+        body(&answer).contains("ok merge") && !body(&answer).contains("options"),
+        "a message without answers to choose from has no such field"
+    );
+
+    // A choice of one is no choice: the refusal is the model's to read.
+    let refused = server
+        .ask_human(Parameters(ask(&["ok merge"])))
+        .await
+        .unwrap();
+    assert!(failed(&refused));
+    assert!(
+        body(&refused).contains("between 2 and 6 answers"),
+        "{}",
+        body(&refused)
+    );
+    assert_eq!(registry(&fixture).await.unanswered_questions().len(), 1);
+}
+
+#[tokio::test]
 async fn a_real_mcp_client_sees_every_tool() {
     let fixture = start();
     let server = server_for(&fixture, agent(2)).await;
@@ -391,6 +502,7 @@ async fn a_real_mcp_client_sees_every_tool() {
     assert_eq!(
         names,
         [
+            "ask_human",
             "close_mission",
             "list_agents",
             "read_messages",

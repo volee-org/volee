@@ -132,6 +132,7 @@ pub(crate) fn one_of_each_kind() -> Vec<Event> {
                     line: Some(3),
                 }],
                 in_reply_to: None,
+                options: Vec::new(),
                 at: at(10),
                 receipts: vec![Receipt {
                     to: Party::Agent(agent),

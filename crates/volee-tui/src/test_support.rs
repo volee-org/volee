@@ -72,6 +72,37 @@ pub(crate) fn press(model: &mut Model, keys: &str) -> Vec<Effect> {
         .collect()
 }
 
+/// One more question to the person, from the agent that asked the demo's
+/// first one and in the same thread, offering `options`. It is the latest
+/// question: the last of the pinned rows.
+pub(crate) fn offer(model: &mut Model, options: &[&str]) -> volee_core::MessageId {
+    let first = model
+        .registry
+        .unanswered_questions()
+        .first()
+        .map(|question| (*question).clone());
+    let Some(first) = first else {
+        panic!("the demo starts with questions for the person");
+    };
+    let id = volee_core::MessageId::from_ulid(ulid::Ulid::from_parts(u64::MAX >> 16, 1));
+    let now = model.now;
+    let question = volee_core::message::Message {
+        id,
+        body: "Both pull requests are green. Merge them?".into(),
+        options: options.iter().map(|option| (*option).to_owned()).collect(),
+        at: now,
+        ..first
+    };
+    update(
+        model,
+        Msg::Events(vec![volee_core::Event::new(
+            now,
+            volee_core::event::EventKind::MessagePosted { message: question },
+        )]),
+    );
+    id
+}
+
 /// The demo with its first member in a volee host `h1`, selected, and the
 /// interface knowing where hosts live.
 pub(crate) fn hosted_model(width: u16, height: u16) -> (Model, AgentId) {

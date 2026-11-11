@@ -83,6 +83,9 @@ pub(crate) struct MessageView {
     pub(crate) refs: Vec<Reference>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) in_reply_to: Option<String>,
+    /// The answers a question to the human offers.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) options: Vec<String>,
     pub(crate) at_ms: i64,
 }
 
@@ -96,6 +99,7 @@ impl MessageView {
             body: message.body.clone(),
             refs: message.refs.clone(),
             in_reply_to: message.in_reply_to.map(|id| id.to_string()),
+            options: message.options.clone(),
             at_ms: message.at.as_millis(),
         }
     }

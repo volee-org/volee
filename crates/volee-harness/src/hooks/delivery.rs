@@ -243,6 +243,7 @@ mod tests {
             body: body.into(),
             refs: vec![],
             in_reply_to: None,
+            options: Vec::new(),
             at: Timestamp::from_millis(0),
             receipts: vec![Receipt {
                 to: Party::Human,

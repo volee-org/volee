@@ -146,6 +146,7 @@ async fn alert_human(
         body,
         refs: vec![],
         in_reply_to: None,
+        options: Vec::new(),
         at: now,
         receipts: vec![Receipt {
             to: Party::Human,
@@ -192,6 +193,7 @@ pub(super) async fn abort(shared: &Arc<Shared>, params: AbortParams) -> Result<E
         body,
         refs: vec![],
         in_reply_to: None,
+        options: Vec::new(),
         at: now,
         receipts: to
             .into_iter()

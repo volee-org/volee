@@ -170,6 +170,13 @@ pub(crate) enum Prompt {
     /// Move this agent into a volee host, which stops its session and
     /// resumes it there, then open it? Opening it needs no adoption.
     AdoptAndTakeOver(AgentId),
+    /// Send this answer, one of those the question offers?
+    Answer {
+        /// The question.
+        question: MessageId,
+        /// The answer picked, an index into the question's options.
+        option: usize,
+    },
 }
 
 /// The kinds of message the person can send, in the composer's order.
@@ -780,7 +787,10 @@ impl Model {
 
     /// The key contexts that apply now, the most specific first.
     pub(crate) fn contexts(&self) -> Vec<Context> {
-        if matches!(self.prompt, Some(Prompt::Quit | Prompt::Forget(_))) {
+        if matches!(
+            self.prompt,
+            Some(Prompt::Quit | Prompt::Forget(_) | Prompt::Answer { .. })
+        ) {
             return vec![Context::Confirm];
         }
         match self.overlay {
@@ -1707,6 +1717,21 @@ fn on_prompt(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) -> boo
             }
             true
         }
+        Some(Prompt::Answer { question, option }) => {
+            match model.keymap.action(&[Context::Confirm], key) {
+                Some(Action::Confirm) => {
+                    model.prompt = None;
+                    crate::inbox::answer(model, question, option, effects);
+                }
+                Some(Action::Back) => model.prompt = None,
+                Some(Action::Quit) => {
+                    model.prompt = None;
+                    request_quit(model, effects);
+                }
+                _ => {}
+            }
+            true
+        }
         None => false,
     }
 }
@@ -1752,6 +1777,16 @@ fn on_key(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) {
             // Any other key closes the popup and does what it does.
             _ => model.overlay = None,
         }
+    }
+    // In the messages, a digit picks one of the answers the selected
+    // question offers: like the letter of a jump, it is what the screen
+    // shows, not a binding.
+    if matches!(model.overlay, Some(Overlay::Inbox(_)))
+        && model.pending_keys.is_empty()
+        && let Some(digit) = key.typed_char().and_then(|c| c.to_digit(10))
+        && crate::inbox::pick(model, digit)
+    {
+        return;
     }
     let contexts = model.contexts();
     let pending = std::mem::take(&mut model.pending_keys);

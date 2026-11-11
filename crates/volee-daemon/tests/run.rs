@@ -483,6 +483,7 @@ async fn a_message_does_not_resume_it_even_when_its_program_is_one_volee_can_lau
             body: "are you there?".into(),
             refs: Vec::new(),
             in_reply_to: None,
+            options: Vec::new(),
             thread: None,
         })
         .await

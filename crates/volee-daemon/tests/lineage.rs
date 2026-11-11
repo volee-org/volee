@@ -292,6 +292,7 @@ async fn only_the_agent_s_conversation_takes_its_messages() {
             body: "keep going".into(),
             refs: vec![],
             in_reply_to: None,
+            options: Vec::new(),
             thread: None,
         })
         .await
