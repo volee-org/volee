@@ -143,6 +143,13 @@ impl Delivery {
         self.checked_at.is_some_and(|checked| checked < at)
     }
 
+    /// Whether this evidence was read at `at` or later, typically since the
+    /// agent's current state began: it then shows what the agent did before
+    /// that moment. Evidence never read shows nothing yet.
+    pub fn is_read_since(&self, at: Timestamp) -> bool {
+        self.checked_at.is_some_and(|checked| checked >= at)
+    }
+
     /// The same evidence without the time it was checked, to tell whether a
     /// new check found anything new.
     #[must_use]
@@ -559,6 +566,21 @@ mod tests {
         assert!(!checked.is_stale_at(Timestamp::from_millis(1_000)));
         assert!(!Delivery::default().is_stale_at(Timestamp::from_millis(1_001)));
         assert_eq!(checked.without_check_time(), Delivery::default());
+    }
+
+    #[test]
+    fn evidence_read_since_a_moment_shows_what_came_before() {
+        let checked = Delivery {
+            checked_at: Some(Timestamp::from_millis(1_000)),
+            ..Delivery::default()
+        };
+        assert!(checked.is_read_since(Timestamp::from_millis(1_000)));
+        assert!(checked.is_read_since(Timestamp::from_millis(999)));
+        assert!(!checked.is_read_since(Timestamp::from_millis(1_001)));
+        assert!(
+            !Delivery::default().is_read_since(Timestamp::from_millis(0)),
+            "evidence never read shows nothing yet"
+        );
     }
 
     /// An agent volee launched in its own worktree, done, whose branch was

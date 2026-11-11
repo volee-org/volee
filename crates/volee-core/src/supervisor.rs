@@ -281,7 +281,12 @@ pub fn verdict_for(
         worker.state,
         AgentState::Idle | AgentState::Done | AgentState::Stopped
     );
-    if finished && kind == MissionKind::Change && worker.delivery.is_stale_at(worker.state_since) {
+    // A change is judged on evidence read since the worker stopped: evidence
+    // read before may miss its last commits, and evidence never read is
+    // empty (a worker that stops before its branch was ever read would be
+    // said to have no commits). The daemon reads it whenever an agent stops.
+    if finished && kind == MissionKind::Change && !worker.delivery.is_read_since(worker.state_since)
+    {
         return None;
     }
     match &worker.state {

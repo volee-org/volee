@@ -153,12 +153,16 @@ A pull request counts only when its head commit is the branch's tip
 name, or one read before the branch moved on, proves nothing about the work
 as it is.
 
-A change worker is judged only on fresh evidence: evidence checked before it
-stopped (`checked_at` earlier than its `state_since`) may miss its last
-commits, push or pull request, so the verdict waits for the daemon's next
-check, which the stop itself triggers. The coordinator therefore never hears
-"not delivered" just before "delivered". Evidence that was never checked (a
-daemon without a git source) is judged as it is.
+A change worker is judged only on evidence read since it stopped
+(`checked_at` at or after its `state_since`): evidence read before may miss
+its last commits, push or pull request, and evidence never read is empty, so
+the verdict waits for the daemon's next check, which the stop itself
+triggers (and the daemon's start, for a mission's worker never read). The
+coordinator therefore never hears "not delivered" just before "delivered".
+Judging evidence never read once told a coordinator that a worker which
+committed, reported and stopped within a few seconds had "no commits": its
+branch had not been read yet. A daemon without a git source reads no
+evidence: it judges what its clients send, with the time it was read.
 
 Every new or changed verdict is recorded as `worker-assessed` and told to the
 coordinator. When every worker delivered, the mission moves to `reporting`
