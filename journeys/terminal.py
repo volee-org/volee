@@ -14,7 +14,6 @@ here asks one for anything, and nothing shows on the person's screen.
 
     python3 journeys/terminal.py --volee target/release/volee --sandbox ~/code/sandbox
 """
-import os
 import time
 
 from journey import Journey, Terminal, arguments
@@ -27,33 +26,16 @@ def main():
     args = arguments(__doc__)
     j = Journey("terminal", args)
     name = "journey-terminal-" + j.stamp
-    moved = None
     try:
         if not j.check("the daemon starts", j.start_daemon()):
             return
         known = {session.get("sessionId") for session in j.claude_sessions()}
-        terminal = j.terminal(["claude", "--model", j.model, "--name", name])
-        j.by_hand.append(name)
-        j.background.append(name)
-
-        def typed_there():
-            """The session in the terminal, as Claude Code lists it."""
-            session = j.claude_session(name)
-            return session if session and session.get("kind") == "interactive" else None
-
-        def at_rest():
-            session = typed_there()
-            return session if session and session.get("status") == "idle" else None
-        first = j.wait(at_rest, 90, 1)
-        if not j.check("a session typed in a plain terminal rests at its prompt", first,
+        terminal, first = j.claude_in_a_terminal(
+            name, "Remember the number 7341. For this message only, reply with the word READY.")
+        if not j.check("a session typed in a plain terminal ran its first turn there", first,
                        terminal.wrote(count=200)):
             return
         session_id, pid = first["sessionId"], first["pid"]
-        start = len(terminal.written)
-        terminal.type("Remember the number 7341. For this message only, reply with the word READY.")
-        turn = j.wait(lambda: "⏺" in terminal.wrote(start, 4000) and at_rest(), 120, 1)
-        if not j.check("it ran a first turn there", turn, terminal.wrote(start, 200)):
-            return
 
         # ---- the list ---------------------------------------------------------
         row = j.wait(lambda: j.agent(name), SETTLE + 30, 1)
@@ -87,41 +69,31 @@ def main():
         j.check("and says nothing of a failure", bool(said) and "Cannot open" not in said)
         j.keys("Escape", 1.0)
         j.check("Escape gives the wait up", j.wait(lambda: waits not in j.screen(), 5))
-        still = typed_there() or {}
+        still = j.claude_session(name) or {}
         j.check("and nothing happened to the session",
-                still.get("sessionId") == session_id and still.get("pid") == pid,
+                still.get("sessionId") == session_id and still.get("pid") == pid
+                and still.get("kind") == "interactive",
                 "{} pid {}".format(still.get("sessionId"), still.get("pid")))
         j.keys("Enter", 1.5)
         j.check("Enter waits again", j.sees(waits, timeout=10))
 
         # ---- the left arrow, pressed in the session's own terminal -----------------
+        pressed = time.time()
         terminal.press(Terminal.LEFT)
-
-        def in_background():
-            return next((session for session in j.claude_sessions()
-                         if session.get("kind") == "background"
-                         and session.get("sessionId") not in known
-                         and os.path.realpath(session.get("cwd") or "/")
-                         == os.path.realpath(j.sandbox)), None)
-        moved = j.wait(in_background, 30, 0.5)
+        moved = j.moved_to_background(known)
         if not j.check("the left arrow there has Claude Code move the conversation to the "
                        "background", moved, terminal.wrote(count=200)):
             return
         title = moved.get("name") or moved["id"]
-
-        def there():
-            """The conversation in the background, as Claude Code lists it now."""
-            return next((session for session in j.claude_sessions()
-                         if session.get("sessionId") == moved["sessionId"]), {})
-        # Claude Code lists it there about a second before it has a process.
-        process = j.wait(lambda: there().get("pid"), 20, 0.5)
         j.check("under another session id, in another process",
-                moved["sessionId"] != session_id and process and process != pid,
-                "{} pid {} / {} pid {}".format(moved["sessionId"], process, session_id, pid))
+                moved["sessionId"] != session_id and moved["pid"] != pid,
+                "{} pid {} / {} pid {}".format(moved["sessionId"], moved["pid"],
+                                               session_id, pid))
 
         # ---- volee opens it by itself, on the same row -----------------------------
         opened = j.check("volee opens it by itself, in edit mode, on the conversation",
-                         j.sees("your keys go to " + title, "7341", timeout=40))
+                         j.sees("your keys go to " + title, "7341", timeout=40),
+                         "{:.0f} s after the key".format(time.time() - pressed))
         j.show("the conversation opened once it left its terminal")
         if not opened:
             # Nothing is typed into a screen that is not the conversation's.
@@ -142,10 +114,11 @@ def main():
                 "it answered: " + j.last_answer())
         j.check("it is the conversation that was in the terminal: it remembers the number",
                 j.sees("7342", timeout=30, every=1), "it answered: " + j.last_answer())
-        now = there()
+        now = next((session for session in j.claude_sessions()
+                    if session.get("sessionId") == moved["sessionId"]), {})
         j.check("opening it stopped and copied nothing: the same session in the same process",
-                now.get("pid") == process and now.get("kind") == "background",
-                "pid {} / {}".format(now.get("pid"), process))
+                now.get("pid") == moved["pid"] and now.get("kind") == "background",
+                "pid {} / {}".format(now.get("pid"), moved["pid"]))
         copies = [session.get("kind") for session in j.claude_sessions()
                   if session.get("sessionId") in (session_id, moved["sessionId"])
                   or (session.get("name") or "").startswith(name)]
@@ -171,11 +144,6 @@ def main():
         j.check("no row without a session Claude Code lists", not orphans, str(orphans))
         j.keys("q", 1.0)
     finally:
-        # By its id: Claude Code may have given the conversation another name.
-        if moved:
-            j.claude("stop", moved["id"])
-            time.sleep(2)
-            j.claude("rm", moved["id"])
         j.finish()
 
 

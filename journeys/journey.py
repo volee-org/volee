@@ -278,6 +278,8 @@ class Journey:
         self.by_hand = []
         # The terminals the journey holds itself.
         self.terminals = []
+        # Background sessions of the journey known by their id only.
+        self.by_id = []
         # The client that gives the interface's window its size, if any.
         self.viewer = None
 
@@ -444,6 +446,47 @@ class Journey:
         terminal = Terminal(command, self.sandbox, self.clean, cols, rows)
         self.terminals.append(terminal)
         return terminal
+
+    def claude_in_a_terminal(self, name, prompt):
+        """Types `claude` in a terminal the journey holds (`terminal()`), under
+        `name`, and has it run a first turn on `prompt`. Returns the terminal, and
+        what Claude Code lists for the session once it rests after that turn: None
+        when it never did."""
+        terminal = self.terminal(["claude", "--model", self.model, "--name", name])
+        self.by_hand.append(name)
+        self.background.append(name)
+
+        def at_rest():
+            session = self.claude_session(name)
+            resting = (session and session.get("kind") == "interactive"
+                       and session.get("status") == "idle")
+            return session if resting else None
+        if not self.wait(at_rest, 90, 1):
+            return terminal, None
+        start = len(terminal.written)
+        terminal.type(prompt)
+        # The mark of an answer in what the session wrote, then its prompt again.
+        return terminal, self.wait(lambda: "⏺" in terminal.wrote(start, 4000) and at_rest(),
+                                   120, 1)
+
+    def moved_to_background(self, known, timeout=30):
+        """The session Claude Code lists in the background, in the sandbox, that is
+        not one of `known` (session ids read earlier): the conversation of a session
+        typed in a terminal, once the left arrow was pressed there (ADR 0034). Claude
+        Code lists it about a second before it has a process; it is returned once it
+        has one, and `cleanup()` removes it, by its id: Claude Code may have given it
+        another name."""
+        def arrived():
+            return next((session for session in self.claude_sessions()
+                         if session.get("kind") == "background"
+                         and session.get("sessionId") not in known
+                         and session.get("pid")
+                         and os.path.realpath(session.get("cwd") or "/")
+                         == os.path.realpath(self.sandbox)), None)
+        session = self.wait(arrived, timeout, 0.5)
+        if session:
+            self.by_id.append(session["id"])
+        return session
 
     def views(self):
         """The views the journey's daemon holds open now (ADR 0027)."""
@@ -660,6 +703,12 @@ class Journey:
                     if session.get("pid"):
                         self.claude("stop", session["id"])
                     self.claude("rm", session["id"])
+        listed = {session.get("id"): session for session in self.claude_sessions()}
+        for handle in self.by_id:
+            if handle in listed:
+                if listed[handle].get("pid"):
+                    self.claude("stop", handle)
+                self.claude("rm", handle)
         if self.isolated:
             # A session that ends runs its last hooks. Let them reach the daemon:
             # with none left to hear it, a hook leaves a spool file behind, in a

@@ -759,6 +759,20 @@ fn only_a_live_claude_code_session_in_a_terminal_waits_for_its_move() {
     );
     assert_eq!(model.prompt, None);
 
+    // An agent volee launched is not followed by the listing: its hooks say
+    // where its conversation goes.
+    let mut model = self::model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    in_its_own_terminal(&mut model, schema);
+    assert!(!model.registry.agent(schema).unwrap().watched());
+    assert_eq!(
+        key(&mut model, KeyCode::Enter),
+        [Effect::Open {
+            agent: schema,
+            size: PANEL
+        }]
+    );
+
     // Once the source is gone, nothing would say that it moved.
     let mut model = self::model(120, 40);
     in_its_own_terminal(&mut model, links);
