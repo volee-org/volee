@@ -11,6 +11,7 @@ use volee_core::time::Elapsed;
 
 use super::{panel, panel_with, put_spans, state_glyph, truncated};
 use crate::app::{Model, Pane};
+use crate::keymap::{Action, Context};
 use crate::live::{Live, Phase};
 use crate::preview::Fit;
 use crate::text;
@@ -183,6 +184,65 @@ fn facts(model: &Model, agent: &Agent) -> Vec<(&'static str, String)> {
 pub(crate) fn render_preview(model: &Model, area: Rect, buf: &mut Buffer) {
     let focused = model.focus == Pane::Detail && model.overlay.is_none();
     draw_screen(model, area, buf, "Preview", focused, Fit::Crop);
+    if model.layout.mode == crate::layout::Mode::Wide {
+        action_bar(model, area, buf);
+    }
+}
+
+/// On the preview's top border, after its title: the selected agent's state
+/// as a badge with how long it has lasted and what it does, and at the
+/// right the keys of what can be done with it, as keys.
+fn action_bar(model: &Model, area: Rect, buf: &mut Buffer) {
+    let Some(agent) = model.selected_agent() else {
+        return;
+    };
+    let theme = &model.theme;
+    let context = super::card::CardContext::new(model);
+    let dim = theme.style(StyleRole::TextDim);
+    let cap = theme.style(StyleRole::HintKey);
+    let mut actions: Vec<Span<'static>> = Vec::new();
+    for (action, word) in [
+        (Action::TakeOver, "open"),
+        (Action::Message, "message"),
+        (Action::Diff, "diff"),
+        (Action::FullScreen, "full screen"),
+    ] {
+        let Some(key) = model.keymap.first_key(Context::Global, action) else {
+            continue;
+        };
+        actions.push(Span::styled(format!(" {} ", key.short()), cap));
+        actions.push(Span::styled(format!(" {word}  "), dim));
+    }
+    let width = |spans: &[Span<'_>]| -> u16 {
+        spans
+            .iter()
+            .map(|span| u16::try_from(text::width(&span.content)).unwrap_or(0))
+            .sum()
+    };
+    let actions_width = width(&actions);
+    // The title the panel drew ends at its first border cell after it.
+    let title_end = (area.x + 1..area.right())
+        .rev()
+        .find(|x| buf[(*x, area.y)].symbol() != "─" && buf[(*x, area.y)].symbol() != "╮")
+        .map_or(area.x + 2, |x| x + 2);
+    let right = area.right().saturating_sub(2);
+    let actions_x = right.saturating_sub(actions_width);
+    let mut state = super::card::badge_spans(agent, &context);
+    if let Some(doing) = agent
+        .last_activity
+        .as_ref()
+        .map(|activity| activity.summary.clone())
+        .or_else(|| agent.detail.clone())
+    {
+        state.push(Span::styled(format!(" · {doing} "), dim));
+    }
+    let room = actions_x.saturating_sub(title_end + 2);
+    if room > 8 {
+        put_spans(buf, title_end, area.y, &truncated(&state, room), room);
+    }
+    if actions_x > title_end + 2 {
+        put_spans(buf, actions_x, area.y, &actions, actions_width);
+    }
 }
 
 /// Draws the selected agent's screen over the whole interface but its hint

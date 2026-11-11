@@ -10,8 +10,8 @@ use crate::theme::StyleRole;
 use crate::views::hierarchy::Show;
 use crate::views::{hierarchy, network, repos, timeline};
 use crate::widgets::{
-    composer, detail, diff, handover, help, hints, inbox, keys, launch, palette, panel, rail,
-    theme_picker, tiles, tools, top_bar,
+    composer, detail, diff, for_you, handover, help, hints, inbox, journal, keys, launch, palette,
+    panel, rail, theme_picker, tiles, tools, top_bar,
 };
 
 /// Draws the whole screen from the model.
@@ -26,48 +26,7 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
     rail::render(model, layout.rail, buf);
     if let Some(view) = layout.view {
         let focused = model.focus == Pane::View && model.overlay.is_none();
-        let mut title = vec![Span::raw(model.tab.title())];
-        if model.tab == Tab::Hierarchy && model.subtree.is_empty() {
-            // Whose tree it is, as the rail names it.
-            let whose = match model.show {
-                Show::Tree(root) => Some(model.name_of(root)),
-                Show::Loners => Some("on their own".to_owned()),
-                Show::Everything => None,
-            };
-            if let Some(whose) = whose {
-                title.push(Span::styled(
-                    format!(" · {whose}"),
-                    theme.style(StyleRole::Text),
-                ));
-            }
-        }
-        if model.tab == Tab::Hierarchy {
-            for root in &model.subtree {
-                let name = model
-                    .registry
-                    .agent(*root)
-                    .map_or_else(|| root.short(), |agent| agent.name.clone());
-                title.push(Span::styled(
-                    format!(" › {name}"),
-                    theme.style(StyleRole::Text),
-                ));
-            }
-            let zoom = if model.scene.automatic {
-                model.scene.zoom.label().to_owned()
-            } else {
-                format!("{} (fixed)", model.scene.zoom.label())
-            };
-            title.push(Span::styled(
-                format!(" · {zoom}"),
-                theme.style(StyleRole::TextDim),
-            ));
-        }
-        match model.tab {
-            Tab::Hierarchy => {}
-            Tab::Network => title.extend(network::title(model)),
-            Tab::Repos => title.extend(repos::title(model)),
-            Tab::Timeline => title.extend(timeline::title(model)),
-        }
+        let title = view_title(model);
         let inner = panel(buf, view, title, focused, theme);
         match model.tab {
             Tab::Hierarchy => {
@@ -82,6 +41,12 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
     detail::render(model, layout.detail, buf);
     if let Some(preview) = layout.preview {
         detail::render_preview(model, preview, buf);
+    }
+    if let Some(area) = layout.for_you {
+        for_you::render(model, area, buf);
+    }
+    if let Some(area) = layout.journal {
+        journal::render(model, area, buf);
     }
     hints::render(model, layout.hints, buf);
     let mut cursor = None;
@@ -122,6 +87,55 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
     if let Some(cursor) = cursor {
         frame.set_cursor_position(cursor);
     }
+}
+
+/// The title of the view's panel: the view's name, whose tree it is and at
+/// what zoom for the tree, what the other views add.
+fn view_title(model: &Model) -> Vec<Span<'static>> {
+    let theme = &model.theme;
+    let mut title = vec![Span::raw(model.tab.title())];
+    if model.tab == Tab::Hierarchy && model.subtree.is_empty() {
+        // Whose tree it is, as the rail names it.
+        let whose = match model.show {
+            Show::Tree(root) => Some(model.name_of(root)),
+            Show::Loners => Some("on their own".to_owned()),
+            Show::Everything => None,
+        };
+        if let Some(whose) = whose {
+            title.push(Span::styled(
+                format!(" · {whose}"),
+                theme.style(StyleRole::Text),
+            ));
+        }
+    }
+    if model.tab == Tab::Hierarchy {
+        for root in &model.subtree {
+            let name = model
+                .registry
+                .agent(*root)
+                .map_or_else(|| root.short(), |agent| agent.name.clone());
+            title.push(Span::styled(
+                format!(" › {name}"),
+                theme.style(StyleRole::Text),
+            ));
+        }
+        let zoom = if model.scene.automatic {
+            model.scene.zoom.label().to_owned()
+        } else {
+            format!("{} (fixed)", model.scene.zoom.label())
+        };
+        title.push(Span::styled(
+            format!(" · {zoom}"),
+            theme.style(StyleRole::TextDim),
+        ));
+    }
+    match model.tab {
+        Tab::Hierarchy => {}
+        Tab::Network => title.extend(network::title(model)),
+        Tab::Repos => title.extend(repos::title(model)),
+        Tab::Timeline => title.extend(timeline::title(model)),
+    }
+    title
 }
 
 /// Arrows on the view's border where the hierarchy goes on out of sight.

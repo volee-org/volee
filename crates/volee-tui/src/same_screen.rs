@@ -39,8 +39,9 @@ use crate::theme::{StyleRole, Theme};
 use crate::view::view;
 
 /// The agent's terminal: smaller than the full-screen view of the
-/// interface below, which then draws it cell for cell, and larger than the
-/// preview and a tile, which crop it.
+/// interface below, which then draws it cell for cell; taller than the
+/// preview, which runs across the whole width and crops its rows; wider
+/// and taller than a tile, which crops both.
 const AGENT: Size = Size {
     cols: 160,
     rows: 40,
@@ -506,10 +507,13 @@ fn assert_the_same(found: &Compared, views: &[Seen]) {
             .join("\n")
     );
     // The views differ in size, so that the comparison is not of three
-    // copies of one drawing: the preview and the tile crop.
+    // copies of one drawing: the preview crops the screen's rows, the tile
+    // its rows and its columns.
     assert!(
-        views[0].area.width < AGENT.cols && views[2].area.width < AGENT.cols,
-        "the preview {:?} and the tile {:?} must be narrower than the screen",
+        views[0].area.height < AGENT.rows
+            && views[2].area.width < AGENT.cols
+            && views[2].area.height < AGENT.rows,
+        "the preview {:?} must be shorter than the screen, and the tile {:?} smaller",
         views[0].area,
         views[2].area
     );
@@ -520,13 +524,9 @@ fn assert_the_same(found: &Compared, views: &[Seen]) {
         found.cells
     );
     assert!(found.shared > 600, "{}", found.shared);
-    // The edge of each view that crops fell in the middle of a wide
+    // The edge of the view that crops columns fell in the middle of a wide
     // character, which the comparison then leaves out for that view.
-    assert!(
-        found.cut[0] > 0 && found.cut[2] > 0,
-        "wide characters cut: {:?}",
-        found.cut
-    );
+    assert!(found.cut[2] > 0, "wide characters cut: {:?}", found.cut);
 }
 
 #[test]
@@ -537,12 +537,31 @@ fn a_held_screen_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wa
     // The gap of blank rows is in every view that reaches it, as it is on
     // the screen: the tile shows a row that only a gap separates from the
     // row above the gap.
-    let gap = frame
-        .rows
-        .iter()
-        .position(|row| row.iter().all(StyledCell::shows_nothing))
-        .expect("the screen has a blank row");
-    assert!(views[2].rows.contains(&gap) || views[0].rows.contains(&gap));
+    // The last row of the longest run of blank rows between rows that show
+    // something: the gap, not the lone blank row under the banner, nor the
+    // rows under the last one written.
+    let blank = |index: usize| frame.rows[index].iter().all(StyledCell::shows_nothing);
+    let end = (0..frame.rows.len())
+        .rposition(|index| !blank(index))
+        .unwrap_or(0);
+    let mut longest = (0, 0);
+    let mut run = 0;
+    for index in 0..end {
+        run = if blank(index) { run + 1 } else { 0 };
+        if run > longest.0 {
+            longest = (run, index);
+        }
+    }
+    assert!(longest.0 >= 3, "the screen has a gap of blank rows");
+    let gap = longest.1;
+    assert!(
+        views[2].rows.contains(&gap) || views[0].rows.contains(&gap),
+        "row {gap} is the gap; the preview {:?} shows rows {:?}, the tile {:?} rows {:?}",
+        views[0].area,
+        views[0].rows,
+        views[2].area,
+        views[2].rows
+    );
 }
 
 #[test]

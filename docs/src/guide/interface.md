@@ -59,44 +59,68 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
 ## Layout
 
 ```text
-  volee  1 Tree  2 Network  3 Repos  4 Timeline           ! 2 need you · ▸ 6 working · 12 agents
-╭ Agents ──────────────╮╭ Tree · tower · compact ──────────────────────────────────────────────╮
-│▌v ! invoice-tools    ││              ╭─ tower ──────── ⠹ ─╮                                   │
-│    needs you · mcp-… ││              │  WORKING  24 min   │                                   │
-│ s ! invoice-schema   ││              ╰─────────┬──────────╯                                   │
-│    needs you · bill… ││          ┌─────────────┴──────────────┐                               │
-│ x ▸ explore-traces   ││ ╭─ invoicing ────────╮      ╭─ latency-audit ────╮                   │
-│    …                 ││ │  IDLE  14 min      │      │  IDLE  12 min      │                   │
-╰──────────────────────╯╰───────────────────────────────────────────────────────────────────────╯
-╭ Detail ──────────────╮╭ Preview · invoice-tools ──────────────────────────────────────────────╮
-│ invoice-tools        ││ ⏺ Before I go on, one question:                                       │
-│ ! needs you · 1 min  ││   Should create_invoice accept a draft flag?                          │
-╰──────────────────────╯╰───────────────────────────────────────────────────────────────────────╯
- h/j/k/l move   gg/G first/last   s subtree   ' jump   / filter   n/N match   1-4 views
- m message   d diff   enter open   z full screen   I messages   ␣ more   ? help
+ volee  1 Tree  2 Network  3 Repos  4 Timeline   ? 2 · ! 2 need you · ▸ 6 working · lead 1 · coordinators 2 · workers 5 · PR 1
+╭ Agents ─────────────────╮╭ Tree · tower · cards ──────────────────────────────────────╮╭ For you · 3 ─────────────╮
+│ LEADS                   ││                 ╭─ tower ──────────── opus ⠹ ─╮            ││ ? invoice-tools          │
+│ t ▸ tower        24 min ││                 │  WORKING  24 min            │            ││   Should create_invoice …│
+│ n ├ · invoicing  14 min ││                 ╰──────────────┬──────────────╯            ││ ! invoice-schema         │
+│ s │ ├ ! invoice-…  2 min││      ┌─────────────────────────┴─────────────────┐         ││   Bash: bun run db:migra…│
+│▌v │ ├ ! invoice-…  1 min││ ╭─ invoicing ────────╮               ╭─ latency-audit ────╮  │╰──────────────────────────╯
+│ TERMINALS               ││ │ ◆ Invoicing · chan…│               │ ◆ Latency audit …  │  │╭ Journal ─────────────────╮
+│ i · infra        25 min ││ ╰────────────────────╯               ╰────────────────────╯  ││  2 min invoice-schema ! …│
+╰─────────────────────────╯│   (the workers' cards, side by side)                       ││  1 min invoice-tools ? y…│
+╭ Detail ─────────────────╮│                                                            ││  40 s trace-gateway → e… │
+│ invoice-tools · worker  ││                                                            ││                          │
+│ ! needs you · for 1 min ││                                                            ││                          │
+╰─────────────────────────╯╰────────────────────────────────────────────────────────────╯╰──────────────────────────╯
+╭ Preview · invoice-tools ─ NEEDS YOU  1 min · Bash bun test … ──── enter  open   m  message   d  diff   z  full screen ─╮
+│ ⏺ Before I go on, one question:                                                                                       │
+│   Should create_invoice accept a draft flag?                                                                          │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  TREE    h/j/k/l  move    gg/G  first/last    s  subtree    '  jump    /  filter    n/N  match    1-4  views
+  m  message    d  diff    enter  open    z  full screen    I  messages    ␣  more    q  quit                    ?  help
 ```
 
 - **Top bar.** The views, numbered (press the number to switch; `5` opens
   the [wall of screens](#the-wall-of-screens) over the whole terminal), and
   counters: questions waiting for your answer (`?`) and unread messages
-  (`✉`) when there are any, then how many agents need you, how many work,
-  how many there are.
-- **Agents.** Every agent, the most urgent first: those that need you, then
-  failed, working, launching, done, idle, stopped and lost. Each row shows
-  the agent's jump letter, its state, its name, how long it has been in that
-  state, and where it works (`repo › branch`, or its mission).
+  (`✉`) when there are any, how many agents need you and how many work,
+  then the agents by role (leads, coordinators, workers, subagents, the
+  sessions on their own) and the pull requests open. A narrow terminal
+  keeps the first counters only.
+- **Agents.** Every agent, one row each, its tree under its root, the roots
+  grouped by kind: **LEADS**, **MISSIONS** (missions you started without a
+  lead), **TERMINALS** (sessions in a terminal, a multiplexer pane or a
+  volee host) and **BACKGROUND** (Claude Code background sessions), the
+  most urgent first in each group. Each row shows the agent's jump letter,
+  its place in its tree, its state, its name in its color, and how long it
+  has been in that state when the name leaves room for it. volee opens on
+  the agent that needs you most.
 - **View.** What the tab shows: the [tree](#the-tree) of who launched
   whom, the [network](#the-network) of who talks to whom, the
   [repositories](#the-repositories) with their worktrees and what agents
   delivered, or the [timeline](#the-timeline) of what happened when. The
   selected agent is the same in every view and in the list.
-- **Detail.** Facts about the selected agent: role, state and since when,
-  its mission and the mission supervisor's verdict on its work, repository
-  and branch, worktree, where it runs (`volee host`, `background`, a pane
-  such as `tuios · work`, or `a terminal`) and with which model, whether it
-  is held (you stopped it, or its mission is over: volee will not resume it
-  on its own), delivery evidence, last activity and session.
-- **Preview.** The selected agent's terminal screen, kept up to date. For
+- **Detail.** Under the list, facts about the selected agent: role, state
+  and since when, its mission and the mission supervisor's verdict on its
+  work, repository and branch, worktree, where it runs (`volee host`,
+  `background`, a pane such as `tuios · work`, or `a terminal`) and with
+  which model, whether it is held (you stopped it, or its mission is over:
+  volee will not resume it on its own), delivery evidence, last activity
+  and session.
+- **For you.** From 160 columns, at the right: what waits for you, the
+  questions agents asked you that nobody answered, oldest first, then the
+  agents that wait for you (a permission, a dialog), each with what it
+  asks. A click selects the agent; `I` opens the
+  [messages](#messages) to answer.
+- **Journal.** Under it, what happened lately, newest at the bottom, with
+  how long ago: who launched whom (`→`), who wrote to whom (`✉`, `?` for a
+  question), who needs you, who finished or failed, who left the list.
+- **Preview.** Across the bottom, the selected agent: on the panel's
+  border, its state as a badge, for how long and what it does, and at the
+  right the keys of what you can do with it (open it, write to it, its
+  changes, its screen full size). Inside, its terminal screen, kept up to
+  date. For
   an agent volee does not host, volee reads it again every two seconds
   while the agent works and every five seconds while it rests: a screen
   changes at rest too, when you type in its pane or when the last lines of
@@ -130,20 +154,25 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   for (`⋯ 12 blank rows ⋯`). `z` shows every row of the screen, and
   [opening](#edit-mode-typing-into-an-agent) the session (`enter`) shows
   it live.
-- **Hints.** The keys that apply to the panel that has the keyboard, on two
-  rows from 20 rows up: the top one says how to move around (moves, first
-  and last, the filter and its matches, panels and views), the bottom one
-  what to do (message, diff, open, the leader, commands, quit),
-  with `? help` at the right. Smaller terminals and the windows keep one
+- **Hints.** The keys that apply to the panel that has the keyboard, drawn
+  as keys, on two rows from 20 rows up: the top one starts with the view
+  on screen (`TREE`) and says how to move around (moves, first and last,
+  the filter and its matches, panels and views), the bottom one what to do
+  (message, diff, open, the leader, commands, quit), with `? help` at the
+  right. Smaller terminals and the windows keep one
   row. They come from the same table as the help (`?`), so they are always
   right.
 
 Panel sizes depend only on the size of the terminal and on the view: moving
-around never makes anything jump. Below 100 columns or 28 rows, the view
-makes room. On the hierarchy tab, the agents panel shows the hierarchy as an
-indented tree, next to the detail and the preview; the network, the
-repositories and the timeline take the right side of the screen, next to
-the agents and the detail. The smallest supported terminal is 80x24.
+around never makes anything jump. Under 160 columns, the For you column and
+the journal make room for the view. Below 100 columns or 28 rows, the view
+makes room too: on the tree tab, the agents panel, already a tree, sits
+next to the detail and the preview; the network, the repositories and the
+timeline take the right side of the screen, next to the agents and the
+detail. The smallest supported terminal is 80x24.
+
+volee shows your terminal's own background under its text; see
+[Themes](themes.md#the-background) to have the theme's instead.
 
 ## States
 

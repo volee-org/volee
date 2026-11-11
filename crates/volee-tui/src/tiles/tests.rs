@@ -129,6 +129,7 @@ fn the_wall_holds_the_agents_that_run_nine_to_a_page() {
     let mut model = model(160, 48);
     let all = running(&model);
     assert!(all.len() > PAGE, "the demo fills more than a page");
+    press(&mut model, "gg");
     let selected = model.selected.unwrap();
     assert_eq!(all[0], selected, "the list starts on its first agent");
 
@@ -159,7 +160,7 @@ fn the_wall_holds_the_agents_that_run_nine_to_a_page() {
 fn moving_on_the_wall_moves_in_the_list() {
     let mut model = model(160, 48);
     let all = running(&model);
-    press(&mut model, "5");
+    press(&mut model, "gg5");
     press(&mut model, "l");
     assert_eq!(model.selected, Some(all[1]));
     // Nine tiles are three rows of three.
@@ -315,7 +316,7 @@ fn what_is_opened_from_the_wall_comes_back_to_the_wall() {
 fn an_agent_that_runs_elsewhere_opens_through_its_door_and_comes_back() {
     let mut model = model(160, 48);
     let all = running(&model);
-    press(&mut model, "5l");
+    press(&mut model, "gg5l");
     let agent = all[1];
     let effects = press(&mut model, "i");
     assert!(
@@ -359,7 +360,7 @@ fn an_agent_that_runs_elsewhere_opens_through_its_door_and_comes_back() {
 fn screens_read_through_the_source_are_read_again_often_at_work_and_less_often_at_rest() {
     let mut model = model(160, 48);
     let all = running(&model);
-    press(&mut model, "5");
+    press(&mut model, "gg5");
     let busy = |model: &Model, agent: AgentId| model.registry.agent(agent).unwrap().state.is_busy();
     let working: Vec<AgentId> = all[1..PAGE]
         .iter()
@@ -464,7 +465,7 @@ fn a_screen_the_source_cannot_read_is_not_asked_for_again_until_things_change() 
 fn the_wall_follows_the_agents_that_stop_and_start() {
     let mut model = model(160, 48);
     let all = running(&model);
-    press(&mut model, "5l");
+    press(&mut model, "gg5l");
     assert_eq!(model.selected, Some(all[1]));
     // The selected agent stops: its tile leaves, the next one takes its
     // place and the selection.
@@ -576,7 +577,7 @@ fn a_page_holds_what_the_terminal_shows_at_a_readable_size() {
     // around the selected one.
     let mut model = model(160, 48);
     let all = running(&model);
-    press(&mut model, "5llllll");
+    press(&mut model, "gg5llllll");
     assert_eq!(model.selected, Some(all[6]));
     assert_eq!(shown(&model).len(), 9);
     update(

@@ -51,7 +51,7 @@ sparkline = "cyan"
 "agent.7" = "light-green"
 "agent.8" = "light-magenta"
 "agent.9" = "light-red"
-"hint.key" = { fg = "blue", modifiers = ["bold"] }
+"hint.key" = { modifiers = ["reversed", "bold"] }
 "hint.text" = "dark-gray"
 notice = { modifiers = ["reversed"] }
 "notice.error" = { fg = "black", bg = "red", modifiers = ["bold"] }

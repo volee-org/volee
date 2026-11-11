@@ -1,9 +1,10 @@
 //! The top bar: the volee badge, the numbered tabs and the counters:
 //! questions waiting for the person (`?`) and unread messages (`✉`) when
-//! there are any, then the agents.
+//! there are any, the agents that need you and those at work, then the
+//! agents by role and the pull requests open.
 //!
 //! ```text
-//!  volee   1 Hierarchy  2 Network  3 Repos  4 Timeline   ? 1 · ✉ 2 · ! 2 need you · ▸ 6 working · 12 agents
+//!  volee   1 Tree  2 Network  3 Repos  4 Timeline   ? 1 · ✉ 2 · ! 2 need you · ▸ 6 working · lead 1 · coordinators 2 · workers 5 · subagents 2 · on their own 2 · PR 1
 //! ```
 
 use ratatui::buffer::Buffer;
@@ -94,12 +95,48 @@ fn counter_spans(model: &Model) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         ),
         Span::styled(" · ", dim),
         Span::styled(format!("▸ {working} working"), counter),
-        Span::styled(" · ", dim),
-        Span::styled(
+    ]);
+    // The agents by role, as the tree shows them, then the pull requests
+    // open: what a glance at the cockpit tells.
+    let roles = by_role(&model.registry);
+    let prs = model
+        .registry
+        .agents()
+        .filter(|agent| {
+            agent.delivery.pull_request.as_ref().is_some_and(|pr| {
+                matches!(
+                    pr.state,
+                    volee_core::delivery::PrState::Open | volee_core::delivery::PrState::Draft
+                )
+            })
+        })
+        .count();
+    for (count, one, many) in [
+        (roles[0], "lead", "leads"),
+        (roles[1], "coordinator", "coordinators"),
+        (roles[2], "worker", "workers"),
+        (roles[3], "subagent", "subagents"),
+        (roles[4], "on its own", "on their own"),
+        (prs, "PR", "PR"),
+    ] {
+        if count > 0 {
+            full.push(Span::styled(" · ", dim));
+            let word = if count == 1 { one } else { many };
+            let text = if word == "PR" {
+                format!("PR {count}")
+            } else {
+                format!("{word} {count}")
+            };
+            full.push(Span::styled(text, counter));
+        }
+    }
+    if roles.iter().all(|count| *count == 0) {
+        full.push(Span::styled(" · ", dim));
+        full.push(Span::styled(
             format!("{all} {}", if all == 1 { "agent" } else { "agents" }),
             counter,
-        ),
-    ]);
+        ));
+    }
     short.extend([
         Span::styled(format!("!{needs}"), needs_style),
         Span::styled(" ", dim),
@@ -108,6 +145,23 @@ fn counter_spans(model: &Model) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         Span::styled(format!("{all}"), counter),
     ]);
     (full, short)
+}
+
+/// How many agents have each role: leads, coordinators, workers, subagents
+/// and agents on their own.
+fn by_role(registry: &volee_core::Registry) -> [usize; 5] {
+    let mut counts = [0; 5];
+    for agent in registry.agents() {
+        let index = match agent.role {
+            volee_core::role::Role::Lead => 0,
+            volee_core::role::Role::Coordinator => 1,
+            volee_core::role::Role::Worker => 2,
+            volee_core::role::Role::Subagent => 3,
+            volee_core::role::Role::Independent => 4,
+        };
+        counts[index] += 1;
+    }
+    counts
 }
 
 /// Draws the bar.
