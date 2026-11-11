@@ -64,7 +64,8 @@ macro_rules! style_roles {
 }
 
 style_roles! {
-    /// The background and default text color of the whole screen.
+    /// The default text color of the whole screen, and its background with
+    /// `background = "theme"` (by default, the terminal's own shows).
     Background => "background",
     /// Regular text.
     Text => "text",
@@ -437,6 +438,18 @@ impl Theme {
         self
     }
 
+    /// The same theme over the terminal's own background: the screen keeps
+    /// whatever the terminal shows under its text (its color, its
+    /// transparency), and the theme colors the text, the borders and what
+    /// fills a cell on purpose (a selection, a badge, a notice).
+    #[must_use]
+    pub fn with_terminal_background(mut self) -> Self {
+        if let Some(style) = self.styles.get_mut(StyleRole::Background as usize) {
+            style.bg = Some(Color::Reset);
+        }
+        self
+    }
+
     /// The theme's name.
     pub fn name(&self) -> &str {
         &self.name
@@ -766,6 +779,24 @@ mod tests {
             mocha.style(StyleRole::RoleWorker)
         );
         assert_eq!(theme.style(StyleRole::Text), mocha.style(StyleRole::Text));
+    }
+
+    #[test]
+    fn the_terminals_background_shows_under_any_theme() {
+        for name in Theme::builtin_names() {
+            let theme = Theme::builtin(name).unwrap();
+            let over = theme.clone().with_terminal_background();
+            let background = over.style(StyleRole::Background);
+            assert_eq!(background.bg, Some(Color::Reset), "{name}");
+            // The text keeps the theme's color, and so does every other role:
+            // what fills a cell on purpose (a selection, a notice) stays.
+            assert_eq!(background.fg, theme.style(StyleRole::Background).fg);
+            for role in StyleRole::ALL {
+                if *role != StyleRole::Background {
+                    assert_eq!(over.style(*role), theme.style(*role), "{name}: {role}");
+                }
+            }
+        }
     }
 
     #[test]

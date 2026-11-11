@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use volee_config::{Config, KeySetting};
+use volee_config::{Background, Config, KeySetting};
 use volee_tui::keymap::KeyOverride;
 use volee_tui::{ColorDepth, DaemonSource, Keymap, Options, Theme, ThemeError, ThemeSaver};
 
@@ -79,16 +79,28 @@ pub(crate) fn options(theme: Option<&str>) -> Result<Options> {
         .or_else(|| background::guess_theme())
         .unwrap_or(Theme::DEFAULT);
     let depth = ColorDepth::detect();
-    let theme = Theme::load(name, Some(&themes_dir))
-        .map_err(|error| unknown_theme(error, &themes_dir))?
-        .with_color_depth(depth);
+    // The terminal's own background, unless the configuration asks for the
+    // theme's: the same for the theme in use and for every one the picker
+    // shows, so that its preview is what the theme will look like.
+    let terminal_background = config.tui.background == Background::Terminal;
+    let prepare = |theme: Theme| {
+        let theme = theme.with_color_depth(depth);
+        if terminal_background {
+            theme.with_terminal_background()
+        } else {
+            theme
+        }
+    };
+    let theme = prepare(
+        Theme::load(name, Some(&themes_dir)).map_err(|error| unknown_theme(error, &themes_dir))?,
+    );
     // Every theme for the picker; one that does not load is left out.
     let themes = Theme::available_names(Some(&themes_dir))
         .into_iter()
         .filter_map(|name| {
             Theme::load(&name, Some(&themes_dir))
                 .ok()
-                .map(|theme| (name, theme.with_color_depth(depth)))
+                .map(|theme| (name, prepare(theme)))
         })
         .collect();
     let keymap = Keymap::with_overrides(key_overrides(&config.tui.keys))

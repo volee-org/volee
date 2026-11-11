@@ -187,6 +187,7 @@ and new agents start from `origin/<base>` as that fetch left it.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `theme` | light or dark, matching the terminal | A built-in theme or a file in `~/.config/volee/themes/`; see [Themes](themes.md). Without it, volee uses `catppuccin-latte` on a light terminal and `catppuccin-mocha` otherwise. The theme picker (`Space t`) writes it for you, and `volee --theme <name>` overrides it for one run. |
+| `background` | `"terminal"` | Whose background shows under volee's text: `"terminal"`, your terminal's own (its color and its transparency), or `"theme"`, the theme's color. The theme colors the text, the borders and what fills a cell on purpose (a selection, a badge, a notice) either way; see [Themes](themes.md#the-background). |
 | `reduced_motion` | `false` | Stop animations: a new message lights up its line on the [network](interface.md#the-network) instead of travelling along it, and spinners stop. |
 | `keys` | none | Key overrides; see below. |
 | `tools` | found on the machine | Programs `o` opens an agent's worktree with; see below. |

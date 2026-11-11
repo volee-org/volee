@@ -267,6 +267,21 @@ pub struct Tui {
     /// No travelling animations: message pulses become short highlights
     /// and spinners stop.
     pub reduced_motion: bool,
+    /// Whose background the interface shows: the terminal's own (the
+    /// default) or the theme's.
+    pub background: Background,
+}
+
+/// Whose background the interface shows under its text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Background {
+    /// The terminal's own, transparency included: the theme colors the
+    /// text, the borders and the badges only.
+    #[default]
+    Terminal,
+    /// The theme's own background color.
+    Theme,
 }
 
 /// The keys of one action: one key or sequence (`"ctrl-a"`, `"g g"`,
@@ -635,6 +650,16 @@ mod tests {
         assert!(!Config::default().tui.reduced_motion);
         let config = parse("[tui]\nreduced_motion = true\n").unwrap();
         assert!(config.tui.reduced_motion);
+    }
+
+    #[test]
+    fn the_interface_shows_the_terminals_background_unless_told_otherwise() {
+        assert_eq!(Config::default().tui.background, Background::Terminal);
+        let theme = parse("[tui]\nbackground = \"theme\"\n").unwrap();
+        assert_eq!(theme.tui.background, Background::Theme);
+        let terminal = parse("[tui]\nbackground = \"terminal\"\n").unwrap();
+        assert_eq!(terminal.tui.background, Background::Terminal);
+        assert!(parse("[tui]\nbackground = \"black\"\n").is_err());
     }
 
     #[test]
