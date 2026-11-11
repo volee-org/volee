@@ -127,8 +127,9 @@ volee forget <agent>        # stop listing an agent that no longer runs
 an agent in a volee host, that is the exact screen the host holds; for a
 session in a tuios or tmux pane, the pane's screen, row for row. For a
 Claude Code background session, volee replays what `claude logs` recorded
-and keeps the last frame, which can miss what was drawn long ago and never
-redrawn.
+and prints the screen that leaves, every row of it, blank rows included; in
+a session that has run for hours it can miss what was drawn long ago and
+never redrawn.
 `volee diff` compares the agent's worktree, committed or not, with the merge
 base of its base branch, and lists the files it created; a very long diff is
 cut, and the rest is in the worktree.

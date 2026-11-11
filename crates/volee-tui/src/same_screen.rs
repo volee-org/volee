@@ -15,7 +15,9 @@
 //! whose views show it row for row; for a session in a multiplexer's pane,
 //! whose views show what the multiplexer captured of it, row for row too;
 //! and for a session volee reads the replay of, whose views all show that
-//! replay, a run of blank rows counted as one.
+//! replay: its rows as they are full size, and in the views that crop a
+//! run of blank rows as one line, volee's own, which says how many rows it
+//! stands for.
 
 use std::fmt::Write as _;
 
@@ -172,24 +174,33 @@ fn cropped_rows(frame: &Frame, height: usize) -> Vec<usize> {
     (first..=last).collect()
 }
 
-/// The rows of the reference a view of a replay shows in `height` rows: as
-/// for a held screen, but a run of rows that show nothing counts as one (a
-/// replay leaves blank what it never redrew).
+/// Among the rows a view shows, what stands for a line that is volee's
+/// own: a folded run of blank rows. No row of a screen has this index.
+const FOLD: usize = usize::MAX;
+
+/// The rows of the reference a view that crops shows of a replay in
+/// `height` rows: as for a screen itself, but a run of three rows or more
+/// that show nothing is one line, which is volee's ([`FOLD`]).
 fn replayed_rows(frame: &Frame, height: usize) -> Vec<usize> {
     let empty = |row: &Vec<StyledCell>| row.iter().all(StyledCell::shows_nothing);
     let last = frame.rows.iter().rposition(|row| !empty(row)).unwrap_or(0);
-    let mut rows: Vec<usize> = Vec::new();
-    for index in 0..=last {
-        let repeated = empty(&frame.rows[index])
-            && rows
-                .last()
-                .is_some_and(|before| empty(&frame.rows[*before]));
-        if !repeated {
-            rows.push(index);
+    let mut lines: Vec<usize> = Vec::new();
+    let mut index = 0;
+    while index <= last {
+        let run = frame.rows[index..=last]
+            .iter()
+            .take_while(|row| empty(row))
+            .count();
+        if run >= 3 {
+            lines.push(FOLD);
+            index += run;
+        } else {
+            lines.push(index);
+            index += 1;
         }
     }
-    let first = rows.len().saturating_sub(height);
-    rows[first..].to_vec()
+    let first = lines.len().saturating_sub(height);
+    lines[first..].to_vec()
 }
 
 /// One view: its name, its buffer, where the screen is drawn in it, and
@@ -302,8 +313,9 @@ fn views_of_a_held_screen() -> (Frame, Vec<Seen>) {
 }
 
 /// The three views of a session volee does not host: each shows what the
-/// source read, `reading`, and of the screen the rows `shown` tells for
-/// its height.
+/// source read, `reading`. Of the screen, the views that crop show the rows
+/// `shown` tells for their height, and the full-screen view its last rows
+/// as they are.
 fn views_of_a_reading(
     reading: &Reading,
     shown: fn(&Frame, usize) -> Vec<usize>,
@@ -347,7 +359,7 @@ fn views_of_a_reading(
         name: "the full-screen view",
         buffer: draw(&model),
         area,
-        rows: shown(&frame, usize::from(area.height)),
+        rows: cropped_rows(&frame, usize::from(area.height)),
     };
 
     key(&mut model, KeyCode::Esc);
@@ -375,7 +387,9 @@ fn longest_gap(frame: &Frame, view: &Seen) -> usize {
     let mut longest = 0;
     let mut run = 0;
     for row in &view.rows {
-        if frame.rows[*row].iter().all(StyledCell::shows_nothing) {
+        if *row == FOLD {
+            run = 0;
+        } else if frame.rows[*row].iter().all(StyledCell::shows_nothing) {
             run += 1;
             longest = longest.max(run);
         } else {
@@ -554,8 +568,25 @@ fn a_replay_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wall() 
     let (frame, views) = views_of_a_reading(&Reading::replay(text), replayed_rows);
     let found = compare(&frame, &views);
     assert_the_same(&found, &views);
-    // A run of blank rows counts as one in every view.
-    for view in &views {
-        assert_eq!(longest_gap(&frame, view), 1, "{}", view.name);
+    // Full size, the five blank rows of the gap are shown as they are.
+    assert_eq!(longest_gap(&frame, &views[1]), 5, "{}", views[1].name);
+    // In the views that crop, the gap is one line, which says how many rows
+    // it stands for: nothing of the screen is left out without a word.
+    for view in [&views[0], &views[2]] {
+        let line = view
+            .rows
+            .iter()
+            .position(|row| *row == FOLD)
+            .unwrap_or_else(|| panic!("{} does not reach the gap", view.name));
+        let y = view.area.y + u16::try_from(line).unwrap();
+        let said: String = (view.area.x..view.area.right())
+            .map(|x| view.buffer[(x, y)].symbol())
+            .collect();
+        assert!(
+            said.starts_with("\u{22ef} 5 blank rows \u{22ef}"),
+            "{}: {said:?}",
+            view.name
+        );
+        assert!(longest_gap(&frame, view) < 3, "{}", view.name);
     }
 }

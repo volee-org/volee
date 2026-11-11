@@ -179,7 +179,7 @@ What the proof establishes depends on where a screen comes from:
 | A volee host | the host's screen, row for row | yes, and live |
 | A view open on the session | the view's screen, row for row | yes, while the view is open |
 | A multiplexer pane | what the multiplexer captured, row for row (0.12.1 read it as a replay: a run of blank rows showed as one) | yes, as of the last reading |
-| A Claude Code background session, not open | the replay of `claude logs`, a run of blank rows shown as one | its cells, as far as measured; the blank rows between its conversation and its prompt are left out |
+| A Claude Code background session, not open | the replay of `claude logs`: every row of it full size and in `volee logs`; in the preview and on the wall, a run of three blank rows or more as one row that says how many it stands for (until 0.12.3: as one blank row, in every view, without a word) | its cells and its rows, as far as measured; what a view that crops folds, it says |
 
 The plan's words were "an exact preview everywhere", with the size
 guessing and the blank-row repair gone. In 0.12.1 the last two rows did
@@ -205,7 +205,7 @@ holds forty-five. A capture needs no size: each of its rows is placed
 with a cursor move, so it draws the same cells in any terminal large
 enough.
 
-The last row is still open.
+The last row stayed open until 0.12.3.
 
 For a background session, this decision first said that an exact screen
 needs a client on the session. That was written before it was measured,
@@ -228,18 +228,51 @@ session draw again, so a replay cannot be compared with the screen of a
 session nobody looks at more closely than that.
 
 So the replay is the screen, to that extent, with no client. What volee
-changes is its own: it counts a run of blank rows as one, and it tells the
-size from what the replay writes. A background session draws its
-conversation at the top of its terminal and its prompt at the bottom:
-shown as it is, the last rows of a fresh session are blank rows and the
-prompt, and a small view shows nothing of what the agent said. Counting
-the blank rows as one keeps the end of the conversation in view, and is
-not the screen. Which of the two the preview and the wall should do for a
-background session is open.
+changed was its own: it counted a run of blank rows as one, in every view
+and without a word, and it tells the size from what the replay writes. A
+background session draws its conversation at the top of its terminal and
+its prompt at the bottom: shown as it is, the last rows of its screen can
+be blank rows and the prompt, and a small view then shows nothing of what
+the agent said. Counting the blank rows as one keeps the end of the
+conversation in view, and is not the screen.
 
-Not measured: a session whose terminal has another size than 200 by 50,
-and a session that ran for hours, where earlier versions showed gaps in
-what had been drawn long before.
+Two real background sessions, read the same day through `claude logs`,
+give the measure of it. One, an hour old and at rest, never has two blank
+rows in a row: counting a run as one changes nothing. The other, hours old
+and at work, holds twelve blank rows between the last line of its
+conversation and its footer: shown as it is, a preview of twelve rows
+would hold blank rows and the footer, and nothing of what the agent is
+doing. Both terminals are some 210 columns wide, not 200: a session keeps
+the width of its last client, so the size cannot be assumed either.
+
+### The fold, said
+
+Since 0.12.3:
+
+- A replay keeps its rows as they are. The full-screen view and
+  `volee logs` show every one of them.
+- The views that crop, the preview and a tile of the wall, show a run of
+  three blank rows or more as one row, in volee's own dim style, which says
+  how many rows it stands for: `⋯ 12 blank rows ⋯`. One or two blank rows
+  are how an interface spaces what it writes, and stay as they are.
+- A screen itself (a volee host, a view, a multiplexer's capture) never
+  folds: its views show it row for row.
+
+What a view shows of a replay is then the screen's own cells, and what it
+leaves out, it says. The size of the replay's terminal is still told from
+what the replay writes: `claude logs` does not say it, and the two
+sessions above show that it varies.
+
+This was decided on 2026-11-11 while the project's owner was away, on a
+question put to him and not answered yet. It is the smallest change that
+hides nothing, and it is his to overturn: showing a replay's rows as they
+are in every view means removing the fold, and a live, exact preview of a
+session that is not open needs a client on it, which resizes it
+([ADR 0027](0027-open-without-owning.md)).
+
+Not measured: the replay of a session that has run for hours against its
+screen through a client, which would resize a session someone works in.
+Earlier versions showed gaps there in what had been drawn long before.
 
 ### A screen at rest
 

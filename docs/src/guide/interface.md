@@ -123,12 +123,13 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   `claude logs`, which keeps only the session's recent output: in a session
   that has run for hours, parts of the screen drawn long ago and never
   redrawn since, such as a list that has not changed, can show gaps. A
-  recent session shows whole, with one difference: a background session
-  draws its conversation at the top of its terminal and its prompt at the
-  bottom, and the preview, the full-screen view and the wall show the blank
-  rows between the two as one row, so that the end of the conversation
-  stays in view. [Opening](#edit-mode-typing-into-an-agent) the session
-  (`enter`) shows its screen as it is.
+  recent session shows whole. A background session draws its conversation
+  at the top of its terminal and its prompt at the bottom: so that the end
+  of the conversation stays in view, the preview and the wall show a run
+  of three blank rows or more as one dim row that says how many it stands
+  for (`⋯ 12 blank rows ⋯`). `z` shows every row of the screen, and
+  [opening](#edit-mode-typing-into-an-agent) the session (`enter`) shows
+  it live.
 - **Hints.** The keys that apply to the panel that has the keyboard, on two
   rows from 20 rows up: the top one says how to move around (moves, first
   and last, the filter and its matches, panels and views), the bottom one
