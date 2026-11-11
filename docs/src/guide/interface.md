@@ -118,8 +118,12 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   `claude logs`, which keeps only the session's recent output: in a session
   that has run for hours, parts of the screen drawn long ago and never
   redrawn since, such as a list that has not changed, can show gaps. A
-  recent session shows whole, and [opening](#edit-mode-typing-into-an-agent)
-  it (`enter`) shows its exact screen.
+  recent session shows whole, with one difference: a background session
+  draws its conversation at the top of its terminal and its prompt at the
+  bottom, and the preview, the full-screen view and the wall show the blank
+  rows between the two as one row, so that the end of the conversation
+  stays in view. [Opening](#edit-mode-typing-into-an-agent) the session
+  (`enter`) shows its screen as it is.
 - **Hints.** The keys that apply to the panel that has the keyboard, on two
   rows from 20 rows up: the top one says how to move around (moves, first
   and last, the filter and its matches, panels and views), the bottom one

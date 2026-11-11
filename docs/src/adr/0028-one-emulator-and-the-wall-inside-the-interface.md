@@ -123,8 +123,8 @@ machine, whatever they run, from a shell, without the daemon.
 - A tile of an agent volee does not host is up to five seconds late, and a
   page of such tiles costs a read per tile every five seconds while those
   agents work (`claude logs` for a background session, `capture-pane` for a
-  pane). An exact, live tile would need a client on the session, which
-  resizes it ([ADR 0027](0027-open-without-owning.md)).
+  pane). A live tile would need a client on the session, which resizes it
+  ([ADR 0027](0027-open-without-owning.md)).
 - A tile shows the bottom of a screen: with a status line of several rows
   under the prompt, a tile of fourteen rows shows a few rows of the
   conversation. Which rows of a screen matter is a harness's business, and
@@ -176,17 +176,48 @@ What the proof establishes depends on where a screen comes from:
 | A volee host | the host's screen, row for row | yes, and live |
 | A view open on the session | the view's screen, row for row | yes, while the view is open |
 | A multiplexer pane | what the multiplexer captured, read as a replay | its cells, yes; a run of blank rows shows as one |
-| A Claude Code background session, not open | the replay of `claude logs` | not always: a long session shows gaps, and its size is told by what the replay writes |
+| A Claude Code background session, not open | the replay of `claude logs`, a run of blank rows shown as one | its cells, as far as measured; the blank rows between its conversation and its prompt are left out |
 
 The plan's words were "an exact preview everywhere", with the size
 guessing and the blank-row repair gone. The last two rows do not meet
-them. A pane's capture is exact and is still read with a replay's repairs:
-the daemon does not yet say which kind of reading it returns. An exact
-screen of a background session needs a client on it (`claude attach`): the
-session takes the client's size, a client costs about 139 MB, and
-attaching to a finished session starts it again. This decision keeps
-"looking changes nothing", so that source stays a replay until someone
-decides that looking may do that.
+them, and for both the reason is in volee, not in what it reads.
+
+A pane's capture is exact and is still read with a replay's repairs: the
+daemon does not yet say which kind of reading it returns.
+
+For a background session, this decision first said that an exact screen
+needs a client on the session. That was written before it was measured,
+and it is wrong. Measured on 2026-11-11 with Claude Code 2.1.322, on two
+throwaway background sessions, each read three ways in a terminal of 200
+by 50, the size Claude Code gives a background session: its real screen
+through a client (`claude attach` in a volee host), the raw replay of
+`claude logs` in a volee host, and volee's preview.
+
+| Session | Raw replay against the real screen | What volee's preview leaves out |
+| --- | --- | --- |
+| Fresh: one short turn | the same on 50 rows of 50 once a client has attached; on 49 of 50 read before any client | 32 blank rows between the conversation and the prompt |
+| One turn that wrote 400 lines | the same on 50 of 50 after a client; on 49 of 50 before | nothing: the screen holds no run of blank rows |
+
+The row that differs before a client attaches is one that attaching
+changes: in one session a hint that the session then shows, in the other a
+row that held something past its hundredth column and then held nothing.
+The only way to see a session's screen is a client, and a client makes the
+session draw again, so a replay cannot be compared with the screen of a
+session nobody looks at more closely than that.
+
+So the replay is the screen, to that extent, with no client. What volee
+changes is its own: it counts a run of blank rows as one, and it tells the
+size from what the replay writes. A background session draws its
+conversation at the top of its terminal and its prompt at the bottom:
+shown as it is, the last rows of a fresh session are blank rows and the
+prompt, and a small view shows nothing of what the agent said. Counting
+the blank rows as one keeps the end of the conversation in view, and is
+not the screen. Which of the two the preview and the wall should do for a
+background session is open.
+
+Not measured: a session whose terminal has another size than 200 by 50,
+and a session that ran for hours, where earlier versions showed gaps in
+what had been drawn long before.
 
 ## Alternatives considered
 
