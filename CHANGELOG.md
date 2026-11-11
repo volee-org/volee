@@ -21,6 +21,7 @@ see [RELEASING.md](RELEASING.md).
 - **mcp**: Tell an agent which row of the agent list is itself ([#163](https://github.com/volee-org/volee/pull/163))
 - **tui**: Keep a coordinator's whole name in the list next to the right column ([#166](https://github.com/volee-org/volee/pull/166))
 - **core**: Judge a mission's worker only on evidence read since it stopped ([#168](https://github.com/volee-org/volee/pull/168))
+- **tui**: Send what is typed in edit mode before the agent's host answers, instead of dropping it ([#169](https://github.com/volee-org/volee/pull/169))
 
 ### Documentation
 
