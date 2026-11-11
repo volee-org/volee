@@ -779,11 +779,14 @@ fn reported(registry: &volee_core::Registry, agent: &Agent) -> bool {
 
 /// What an agent needs when the refresher starts, or after it lagged: live
 /// agents need everything, and an agent the supervisor waits for (evidence
-/// older than its state) needs its evidence.
+/// older than its state, or a mission's worker whose evidence was never
+/// read) needs its evidence.
 fn wanted_at_start(agent: &Agent) -> Option<Wanted> {
     if agent.state.is_live() {
         Some(Wanted::WORKSPACE)
-    } else if agent.delivery.is_stale_at(agent.state_since) {
+    } else if agent.delivery.is_stale_at(agent.state_since)
+        || (agent.mission.is_some() && agent.delivery.checked_at.is_none())
+    {
         Some(Wanted::FINISHED)
     } else {
         None
@@ -1037,6 +1040,44 @@ mod tests {
             &checked(3_000),
             state_since
         ));
+    }
+
+    #[test]
+    fn a_stopped_mission_worker_never_read_is_read_when_the_daemon_starts() {
+        // The supervisor judges a change only on evidence read since the
+        // worker stopped: one never read must get its read, or the mission
+        // waits for ever.
+        let mut registry = volee_core::Registry::new();
+        registry
+            .apply(&Event::new(
+                Timestamp::from_millis(1),
+                EventKind::AgentRegistered {
+                    agent: agent_id(),
+                    name: "billing".into(),
+                    role: Role::Worker,
+                    harness: HarnessKind::ClaudeCode,
+                    launched_by: LaunchedBy::Human,
+                    parent: None,
+                    mission: None,
+                    workspace: Workspace::at("/work"),
+                    location: Location::Background,
+                },
+            ))
+            .unwrap();
+        let mut worker = registry.agent(agent_id()).unwrap().clone();
+        worker.state = AgentState::Stopped;
+        worker.state_since = Timestamp::from_millis(2_000);
+        worker.mission = Some(volee_core::ids::MissionId::from_ulid(
+            ulid::Ulid::from_parts(1_000, 2),
+        ));
+        assert_eq!(wanted_at_start(&worker), Some(Wanted::FINISHED));
+        // Read since it stopped: nothing to do.
+        worker.delivery.checked_at = Some(Timestamp::from_millis(2_000));
+        assert_eq!(wanted_at_start(&worker), None);
+        // Outside a mission, nobody waits for it: as before.
+        worker.delivery.checked_at = None;
+        worker.mission = None;
+        assert_eq!(wanted_at_start(&worker), None);
     }
 
     #[test]

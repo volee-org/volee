@@ -123,6 +123,21 @@ fn shipped(n: u128) -> Event {
                 head: Some(format!("c0ffee{n}")),
             }),
             tip: Some(format!("c0ffee{n}")),
+            // Read when the worker stops, as the daemon reads it: these
+            // daemons have no git source, and their clock stays at 10 000 ms.
+            checked_at: Some(Timestamp::from_millis(10_000)),
+            ..Delivery::default()
+        },
+    })
+}
+
+/// A branch without commits, read when its worker stops: what the daemon
+/// finds for a worker that did nothing.
+fn nothing_shipped(n: u128) -> Event {
+    at(EventKind::DeliveryUpdated {
+        agent: agent(n),
+        delivery: Delivery {
+            checked_at: Some(Timestamp::from_millis(10_000)),
             ..Delivery::default()
         },
     })
@@ -331,7 +346,9 @@ async fn the_coordinator_is_linked_and_the_mission_runs_once_workers_exist() {
 
 #[tokio::test]
 async fn the_coordinator_hears_about_each_worker_and_is_asked_for_a_report() {
-    let daemon = start(mission_with_workers());
+    let mut events = mission_with_workers();
+    events.push(nothing_shipped(API));
+    let daemon = start(events);
     let client = connect(&daemon).await;
 
     stops(&client, BILLING).await;

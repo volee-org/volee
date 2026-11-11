@@ -600,6 +600,9 @@ fn mission_whose_pull_request_is(state: PrState) -> Fixture {
                     head: Some("c0ffee".into()),
                 }),
                 tip: Some("c0ffee".into()),
+                // Read when the worker stops, as the daemon reads it: this
+                // daemon has no git source, and its clock stays at 5 000 ms.
+                checked_at: Some(Timestamp::from_millis(5_000)),
                 ..Delivery::default()
             },
         }),
