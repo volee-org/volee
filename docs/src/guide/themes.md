@@ -66,6 +66,26 @@ volee uses 24-bit colors when the terminal announces them in `COLORTERM`
 one of the 256-color palette. The `terminal` theme uses only the 16 colors
 your terminal lets you configure.
 
+## The background
+
+volee shows your terminal's own background under its text, whatever the
+theme: its color, and its transparency or blur when your terminal has
+some. The theme colors the text, the borders and what fills a cell on
+purpose, such as the selected row, a state badge or a notice.
+
+To have the theme's own background color instead (the `background` role
+of the theme):
+
+```toml
+[tui]
+background = "theme"
+```
+
+The theme picker shows each theme over the background you chose. A theme
+made for a light background reads badly on a dark terminal, and the other
+way round: when nothing is set, volee picks the flavor that matches your
+terminal ([above](#when-nothing-is-set)).
+
 ## Write a theme
 
 A theme is a TOML file with an optional parent, a palette of named colors,
@@ -106,7 +126,7 @@ edge = "#3b4261"
 <!-- roles:start -->
 | Role | Used for |
 | --- | --- |
-| `background` | The background and default text color of the whole screen. |
+| `background` | The default text color of the whole screen, and its background with `background = "theme"` (by default, the terminal's own shows). |
 | `text` | Regular text. |
 | `text.dim` | Secondary text: labels, separators, elapsed times, paths. |
 | `title` | Panel titles. |
