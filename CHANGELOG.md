@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 It is generated from the commit history with [git-cliff](https://git-cliff.org):
 see [RELEASING.md](RELEASING.md).
 
+## [0.12.0] - 2026-11-11
+
+### Added
+
+- With VOLEE_LOG the interface logs to a file, and says what becomes of each key in edit mode ([#131](https://github.com/volee-org/volee/pull/131))
+- The wall shows every agent that runs, the preview is live, and the mouse reaches an opened agent ([#129](https://github.com/volee-org/volee/pull/129))
+
 ## [0.11.0] - 2026-11-10
 
 ### Added
@@ -221,6 +228,7 @@ see [RELEASING.md](RELEASING.md).
 - Mark the interface, messaging and views milestones done ([#52](https://github.com/volee-org/volee/pull/52))
 - Start the daemon in the first step of the guide, and say what tidy removes ([#56](https://github.com/volee-org/volee/pull/56))
 
+[0.12.0]: https://github.com/volee-org/volee/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/volee-org/volee/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/volee-org/volee/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/volee-org/volee/compare/v0.9.0...v0.9.1
