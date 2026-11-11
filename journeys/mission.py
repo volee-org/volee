@@ -27,7 +27,7 @@ import json
 import os
 import time
 
-from journey import Journey, answered_with, arguments
+from journey import Journey, arguments
 
 # How long real agents get for each leg of the trip (seconds).
 PLANNING = 300
@@ -147,6 +147,15 @@ def closing(text, title):
     if start < 0:
         return ""
     return text[start:end + len("branches kept).")] if end >= 0 else text[start:]
+
+
+def spoke_since(j, name, since_ms):
+    """Whether the agent called `name` took a turn after `since_ms` (milliseconds since
+    the epoch) and rests again. What it says is its own, in the language it answers in:
+    the journey shows its screen and does not look for words in it."""
+    agent = j.agent(name) or {}
+    return ((agent.get("state") or {}).get("state") in ("idle", "done")
+            and (agent.get("state_since") or 0) > since_ms)
 
 
 def missions(j):
@@ -401,12 +410,12 @@ def main():
         j.keys("Escape", 0.5)
 
         # ---- the lead heard it, and tells the person -------------------------------
+        ended = next(m for m in missions(j) if m["id"] == mission["id"]).get("ended_at") or 0
+        told = j.wait(lambda: spoke_since(j, lead, ended), 120, 2)
         if j.select(lead):
             j.keys("z", 1.5)
-            told = j.wait(lambda: any(answered_with(j.screen(), word)
-                                      for word in ("closed", "merged", "tidied")), 120, 2)
-            j.check("the lead tells the person that the mission is over", told,
-                    "it said: " + j.last_answer())
+            j.check("the lead takes a turn once the mission is closed, to tell the person",
+                    told, "it said: " + j.last_answer())
             j.show("the lead, at the end")
             j.keys("Escape", 0.5)
         j.check("the lead is still there, for the next request",
@@ -444,10 +453,10 @@ def main():
                     repos[0].git("log", "--oneline", merged + ".." + solo))
             j.check("nobody merges it: the main branch has not moved",
                     repos[0].head() == merged)
-            j.check("the lead tells the person what came back",
-                    j.wait(lambda: answered_with(j.screen(), solo)
-                           and ((j.agent(lead) or {}).get("state") or {}).get("state")
-                           in ("idle", "done"), 180, 2),
+            # The agent reports to its lead once its work is committed.
+            committed = int(repos[0].git("log", "-1", "--format=%ct", solo) or 0) * 1000
+            j.check("the lead takes a turn once the agent reported, to tell the person",
+                    j.wait(lambda: spoke_since(j, lead, committed), 180, 2),
                     "it said: " + j.last_answer())
             j.show("the lead, after one agent's work")
             j.keys("ctrl+q", 1.5)
