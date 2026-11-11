@@ -70,12 +70,15 @@ while its process still runs, it did not end: a session that ends takes
 its process with it. The daemon reads the process table (one `ps`) to tell
 the two apart. Such a session is continued by the background session of
 the same directory that nobody owns, that did not start before it, and
-that runs or started less than five seconds ago: a conversation that
-arrives in the background is listed about a second before it has a
-process. When several are there, it is the one that carries its name; when
-that leaves a doubt (two sessions left that directory, or two arrived
-under other names), none is taken and the rows are what they were before
-this decision. The agent releases the old session and takes the new one:
+that runs or arrives. A conversation that arrives in the background is
+listed before it has a process, in a state that says it works or waits,
+where a session that finished is done, stopped or failed; it counts as
+arriving for a minute after it started, since the second it took was
+measured on short conversations. When several are there, it is the one
+that carries its name; when that leaves a doubt (two sessions left that
+directory, or two arrived under other names), none is taken and the rows
+are what they were before this decision. The agent releases the old
+session and takes the new one:
 the same row, with the name and the place Claude Code now gives the
 conversation. Agents volee launched learn it from their hooks, as before
 ([ADR 0026](0026-edit-mode-types-into-an-agent-inside-volee.md)).

@@ -93,15 +93,20 @@ pub const SETTLE_MS: u64 = 10_000;
 
 /// How long a background session that started beside a live session in a
 /// terminal, in the same directory, waits before it becomes an agent of its
-/// own, in milliseconds; and how long a background session without a process
-/// counts as starting, not as finished. It may be that session's
-/// conversation on its way to the background ([`moved_to_background`]).
-/// Measured with Claude Code, three times: the listing taken at the key
-/// press shows the session in the terminal and the new one in the
-/// background, which has no process yet; for about a second (0.7 s to 1.4 s)
-/// listings show the new one alone, still without a process; then it has
+/// own, in milliseconds. It may be that session's conversation on its way to
+/// the background ([`moved_to_background`]). Measured with Claude Code,
+/// three times: the listing taken at the key press shows the session in the
+/// terminal and the new one in the background, which has no process yet;
+/// for about a second (0.7 s to 1.4 s) listings show the new one alone,
+/// still without a process, in a state that says it waits; then it has
 /// one. A listing taken in between must not make a second agent of it.
 pub const MOVE_SETTLE_MS: u64 = 5_000;
+
+/// How long after it started a background session without a process may
+/// still be a conversation that arrives, in milliseconds: longer than the
+/// longest wait between two listings, since the arrival was measured on
+/// short conversations and a long one may take longer to get its process.
+pub const ARRIVAL_MS: u64 = 60_000;
 
 /// Returns the events that bring `registry` in line with `listing`.
 ///
@@ -297,13 +302,14 @@ pub fn continued<'a>(
 /// that ran in a terminal, as the session of an agent volee watches
 /// ([`Agent::watched`]), is continued by the background session of the same
 /// directory that nobody owns, that did not start before it, and that runs
-/// or just started (a conversation that arrives in the background is listed
-/// about a second before it has a process, [`MOVE_SETTLE_MS`]): the one
-/// that carries its name when several are there, the only one otherwise,
-/// and none when that leaves a doubt (two sessions left that directory, or
-/// two arrived under other names). The agent releases the old session and
-/// takes the new one, so that its row stays; [`reconcile`] then gives it the
-/// name and the place of that session.
+/// or arrives: a conversation that arrives in the background is listed
+/// before it has a process, in a state that says it works or waits, where a
+/// finished session is done, stopped or failed ([`ARRIVAL_MS`]). It is the
+/// one that carries its name when several are there, the only one
+/// otherwise, and none when that leaves a doubt (two sessions left that
+/// directory, or two arrived under other names). The agent releases the old
+/// session and takes the new one, so that its row stays; [`reconcile`] then
+/// gives it the name and the place of that session.
 ///
 /// Apply the returned events before calling [`reconcile`].
 pub fn moved_to_background<'a>(
@@ -334,7 +340,7 @@ pub fn moved_to_background<'a>(
             .iter()
             .filter(|session| {
                 session.background
-                    && (session.alive || just_started(session, now))
+                    && (session.alive || arrives(session, now))
                     && session.cwd == before.cwd
                     && !started_before(session, before)
                     && !taken.contains(&&session.key)
@@ -377,12 +383,14 @@ pub fn moved_to_background<'a>(
     events
 }
 
-/// Whether `session` started less than [`MOVE_SETTLE_MS`] ago: without a
-/// process, it is one that starts, not one that finished.
-fn just_started(session: &ListedSession, now: Timestamp) -> bool {
-    session
-        .started_at
-        .is_some_and(|started| started.millis_until(now) < MOVE_SETTLE_MS)
+/// Whether `session`, which has no process, is a conversation that arrives
+/// in the background and not one that finished: its harness says that it
+/// works or waits, and it started less than [`ARRIVAL_MS`] ago.
+fn arrives(session: &ListedSession, now: Timestamp) -> bool {
+    session.state.is_live()
+        && session
+            .started_at
+            .is_some_and(|started| started.millis_until(now) < ARRIVAL_MS)
 }
 
 /// Whether `session` started before `other` did, as far as the harness
@@ -1372,8 +1380,8 @@ mod tests {
 
     #[test]
     fn a_finished_background_session_is_no_conversation_on_its_way() {
-        // No process either, but it started long ago: a session that ended
-        // and that Claude Code still lists.
+        // No process either, but Claude Code says that it stopped: a
+        // session that ended and that it still lists.
         let mut registry = Registry::new();
         let before = listing(vec![process("first", 100, 1_000)]);
         sync(&mut registry, &before, 60_000);
@@ -1387,6 +1395,22 @@ mod tests {
         assert_eq!(
             moved_to_background(&registry, &before.sessions, &after, at),
             none
+        );
+        // Nor is one said to wait, without a process, a minute after it
+        // started: whatever it was, it is not arriving.
+        let arrival = i64::try_from(ARRIVAL_MS).unwrap();
+        let stale = listing(vec![arriving("stale", "a task", 2_000)]);
+        let late = Timestamp::from_millis(2_000 + arrival);
+        assert_eq!(
+            moved_to_background(&registry, &before.sessions, &stale, late),
+            none
+        );
+        // A long conversation may take that long to get its process: just
+        // before, it still is.
+        let soon = Timestamp::from_millis(2_000 + arrival - 1);
+        assert_eq!(
+            moved_to_background(&registry, &before.sessions, &stale, soon).len(),
+            2
         );
         // Beside the session in the terminal, it is a row of its own at once.
         let both = listing(vec![process("first", 100, 1_000), finished]);
@@ -1493,8 +1517,7 @@ mod tests {
             "{events:?}"
         );
         // A session of another directory, one that started before the
-        // session left behind, one that ended (no process, and it did not
-        // just start), one in a terminal: no.
+        // session left behind, one that ended, one in a terminal: no.
         for other in [
             ListedSession {
                 cwd: "/work/beta".into(),
@@ -1503,7 +1526,8 @@ mod tests {
             in_background("second", "a task", 500),
             ListedSession {
                 alive: false,
-                ..in_background("second", "a task", 50_000)
+                state: AgentState::Stopped,
+                ..in_background("second", "a task", 61_000)
             },
             process("second", 101, 61_000),
         ] {
