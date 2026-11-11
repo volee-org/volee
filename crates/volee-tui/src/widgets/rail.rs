@@ -146,7 +146,8 @@ fn draw_entry(
         put_spans(buf, area.x + 1, area.y, &line, width);
         buf.set_string(area.right() - elapsed_width - 1, area.y, &elapsed, dim);
     } else {
-        let room = area.width.saturating_sub(2);
+        // The name to the edge: it matters more than the margin.
+        let room = area.width.saturating_sub(1);
         put_spans(buf, area.x + 1, area.y, &truncated(&line, room), room);
     }
 }
@@ -158,4 +159,49 @@ fn compact_guides(guides: &str) -> String {
         .replace("└─ ", "└ ")
         .replace("│  ", "│ ")
         .replace("   ", "  ")
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::buffer::Buffer;
+    use volee_core::event::{Event, EventKind};
+
+    use super::*;
+    use crate::app::{Msg, update};
+    use crate::demo::INFRA;
+    use crate::test_support::{id, model, start};
+
+    fn row_of(buffer: &Buffer, area: Rect, name_start: &str) -> String {
+        (area.y..area.bottom())
+            .map(|y| {
+                (area.x..area.right())
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .find(|row| row.contains(name_start))
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_long_name_shows_whole_when_the_time_gives_way() {
+        // A list as narrow as next to the right column, 160 columns wide.
+        let mut model = model(160, 45);
+        let name = "journey-terminal-430872";
+        let renamed = Event::new(
+            start(),
+            EventKind::AgentRenamed {
+                agent: id(INFRA),
+                name: name.to_owned(),
+            },
+        );
+        update(&mut model, Msg::Events(vec![renamed]));
+        let area = model.layout.rail;
+        let mut buffer = Buffer::empty(area);
+        render(&model, area, &mut buffer);
+        let row = row_of(&buffer, area, "journey-terminal");
+        assert!(row.contains(name), "{row}");
+        // A name that leaves room keeps its time in state.
+        let tower = row_of(&buffer, area, "tower");
+        assert!(tower.contains("min"), "{tower}");
+    }
 }

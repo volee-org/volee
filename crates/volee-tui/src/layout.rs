@@ -74,7 +74,7 @@ const RIGHT_COLUMN_MIN: u16 = 160;
 /// The width of the agents' column and of the right column, when both show:
 /// at 190 columns, the tree keeps 130, the room of five workers' cards side
 /// by side.
-const SIDE_COLUMN: (u16, u16) = (30, 28);
+const SIDE_COLUMN: (u16, u16) = (32, 26);
 
 impl ScreenLayout {
     /// The layout of a terminal of the given size. On small screens, the
@@ -252,8 +252,8 @@ mod tests {
         let view = layout.view.unwrap();
         // 130 columns inside the border: five cards of 24 and their gaps.
         assert_eq!(view.width, 132);
-        assert_eq!(layout.for_you, Some(Rect::new(162, 1, 28, 16)));
-        assert_eq!(layout.journal, Some(Rect::new(162, 17, 28, 17)));
+        assert_eq!(layout.for_you, Some(Rect::new(164, 1, 26, 16)));
+        assert_eq!(layout.journal, Some(Rect::new(164, 17, 26, 17)));
         assert_eq!(layout.preview, Some(Rect::new(0, 34, 190, 14)));
         assert_eq!(view.height, 33);
     }
