@@ -87,7 +87,7 @@ the agents of the list that run (the filter applies), wherever they run:
 | Where the agent runs | Its tile |
 | --- | --- |
 | A volee host | followed live, on a connection that only watches |
-| Anywhere else | the screen the daemon reads, as for the preview: again every five seconds while the agent works, and once when its state changes |
+| Anywhere else | the screen the daemon reads, as for the preview: again every five seconds while the agent works, every fifteen seconds while it rests, and at once when its state changes |
 
 - A tile shows the bottom of the screen, cut on the right, under the
   agent's name and state. It never takes an agent's input and never
@@ -120,11 +120,11 @@ machine, whatever they run, from a shell, without the daemon.
   says how far that goes, and where a screen is only a replay.
 - The wall is useful on a machine where volee hosts nothing: it shows the
   sessions that run in the background and in multiplexer panes.
-- A tile of an agent volee does not host is up to five seconds late, and a
-  page of such tiles costs a read per tile every five seconds while those
-  agents work (`claude logs` for a background session, `capture-pane` for a
-  pane). A live tile would need a client on the session, which resizes it
-  ([ADR 0027](0027-open-without-owning.md)).
+- A tile of an agent volee does not host is up to five seconds late while
+  its agent works and up to fifteen while it rests, and a page of such
+  tiles costs a read per tile at that pace (`claude logs` for a background
+  session, `capture-pane` for a pane). A live tile would need a client on
+  the session, which resizes it ([ADR 0027](0027-open-without-owning.md)).
 - A tile shows the bottom of a screen: with a status line of several rows
   under the prompt, a tile of fourteen rows shows a few rows of the
   conversation. Which rows of a screen matter is a harness's business, and
@@ -218,6 +218,24 @@ background session is open.
 Not measured: a session whose terminal has another size than 200 by 50,
 and a session that ran for hours, where earlier versions showed gaps in
 what had been drawn long before.
+
+### A screen at rest
+
+Comparing a pane's own screen with volee's views by keyboard found what a
+comparison of cells at one moment cannot: a screen read through the daemon
+was read again only while its agent worked (the preview), or while it
+worked and once when its state changed (a tile). At rest it went stale.
+After a command typed in a pane, the preview still showed the screen of
+the session's start, until the selection moved.
+
+An agent at rest still has a screen that changes: a person types in its
+pane, the last lines of a turn land after the reading its end asked for,
+a turn runs that is too short for volee to see as work. Since 0.12.2 the
+preview reads the screen of a selected agent at rest again every five
+seconds, and a tile every fifteen: a page of tiles costs a read per tile,
+and one read of a background session takes Claude Code about 0.6 second
+(0.17 second of processor time, measured on an idle session). An agent
+that ended keeps the screen it left, which nothing reads again.
 
 ## Alternatives considered
 

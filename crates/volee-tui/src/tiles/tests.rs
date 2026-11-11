@@ -356,7 +356,7 @@ fn an_agent_that_runs_elsewhere_opens_through_its_door_and_comes_back() {
 }
 
 #[test]
-fn screens_read_through_the_source_are_read_again_while_their_agent_works() {
+fn screens_read_through_the_source_are_read_again_often_at_work_and_less_often_at_rest() {
     let mut model = model(160, 48);
     let all = running(&model);
     press(&mut model, "5");
@@ -394,10 +394,17 @@ fn screens_read_through_the_source_are_read_again_while_their_agent_works() {
     for agent in &working {
         screen(&mut model, *agent, "\x1b[2J\x1b[Hread again");
     }
-    assert_eq!(others(&tick(&mut model, 15)), []);
+    assert_eq!(others(&tick(&mut model, 14)), []);
+    // An agent at rest is read again too, fifteen seconds after its last
+    // reading: its screen still changes, when the last lines of a turn
+    // land late or a person types in its pane.
+    assert_eq!(others(&tick(&mut model, 15)), resting);
     assert_eq!(others(&tick(&mut model, 16)), working);
+    for agent in &resting {
+        screen(&mut model, *agent, "\x1b[2J\x1b[Hread at rest");
+    }
 
-    // The end of a turn is read: a change of state asks again.
+    // A change of state asks again at once, without waiting for the pace.
     let rested = resting[0];
     let effects = state(&mut model, rested, AgentState::Working);
     assert!(loads(&effects).contains(&rested));
