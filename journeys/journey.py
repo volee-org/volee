@@ -12,6 +12,7 @@ import fcntl
 import json
 import os
 import pty
+import re
 import shutil
 import signal
 import socket
@@ -116,6 +117,16 @@ def in_order(view, reference, width):
             return False, compared, "the view lacks the row {!r}".format(wanted[:70])
         compared += len(wanted)
     return compared > 0, compared, "" if compared else "no row to compare"
+
+
+def answered_with(text, word):
+    """Whether, on a screen given as text, the agent wrote `word` in a line of its
+    own, which it marks with ⏺: an answer, not the prompt that asked for it. Whatever
+    the case: asked for a word in uppercase, a small model now and then writes it in
+    lowercase, which is the model's business and not volee's."""
+    wanted = re.compile(r"(?<![0-9A-Za-z])" + re.escape(word) + r"(?![0-9A-Za-z])",
+                        re.IGNORECASE)
+    return any("⏺" in line and wanted.search(line) for line in text.splitlines())
 
 
 def resolve(program):
@@ -490,6 +501,11 @@ class Journey:
         is not what a check expected."""
         lines = [line for line in self.screen().splitlines() if "⏺" in line]
         return lines[-1].split("⏺", 1)[1].strip(" │┃") if lines else "nothing"
+
+    def said(self, word, timeout=90, every=1):
+        """Whether the agent on the interface's screen answers with `word` within
+        `timeout`, in a line of its own and whatever the case (`answered_with`)."""
+        return bool(self.wait(lambda: answered_with(self.screen(), word), timeout, every))
 
     def sees(self, *needles, timeout=15, every=0.5):
         """Whether every needle shows on the interface's screen within `timeout`."""

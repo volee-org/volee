@@ -9,7 +9,7 @@ leave key comes back.
     python3 journeys/old_host.py --volee target/release/volee \\
         --old-volee ~/bin/volee-0.9.1 --sandbox ~/code/sandbox
 """
-from journey import Journey, arguments, resolve
+from journey import Journey, answered_with, arguments, resolve
 
 
 def more(parser):
@@ -36,7 +36,7 @@ def main():
         launched = j.launch(name, "Reply only READY, then wait for my next message.", binary=old)
         j.check("the older volee launches an agent", launched.returncode == 0,
                 (launched.stdout + launched.stderr).strip()[:160])
-        ready = j.wait(lambda: "READY" in j.run([old, "logs", name]).stdout, 120, 2)
+        ready = j.wait(lambda: answered_with(j.run([old, "logs", name]).stdout, "ready"), 120, 2)
         if not j.check("the agent answered READY", ready):
             return
         j.open_interface()
@@ -44,11 +44,12 @@ def main():
         if not j.select(name):
             return
         j.keys("i", 2.0)
-        j.check("edit mode opens on the older host", j.sees(" EDIT ", "READY", timeout=10))
+        j.check("edit mode opens on the older host",
+                j.sees(" EDIT ", timeout=10) and j.said("ready", timeout=10))
         j.type("Reply with the word fruit in uppercase, nothing else")
         j.keys("Enter")
-        j.check("typed text reaches the agent through the older host",
-                j.sees("FRUIT", timeout=90, every=1))
+        j.check("typed text reaches the agent through the older host", j.said("fruit"),
+                "it answered: " + j.last_answer())
         j.keys("ctrl+z", 0.5)
         j.check("Ctrl+Z is kept back, with a word why",
                 j.sees("Ctrl+Z is not sent", timeout=5, every=0.3))
@@ -57,7 +58,7 @@ def main():
         j.wait(lambda: False, 4)
         j.type("Reply with the word sky in uppercase, nothing else")
         j.keys("Enter")
-        j.check("the agent still answers", j.sees("SKY", timeout=90, every=1))
+        j.check("the agent still answers", j.said("sky"), "it answered: " + j.last_answer())
         j.keys("ctrl+q", 1.0)
         j.check("the leave key comes back", j.sees("Screen · " + name + " · live", timeout=10))
         j.keys("z", 0.5)

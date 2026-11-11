@@ -8,7 +8,7 @@ unique names and touches no other agent.
 
     python3 journeys/installed.py --sandbox ~/code/sandbox [--expect 0.11.0]
 """
-from journey import Journey, arguments
+from journey import Journey, answered_with, arguments
 
 
 def more(parser):
@@ -20,7 +20,7 @@ def launched_agent(j, name):
     launched = j.launch(name, "Reply only READY, then wait for my next message.")
     j.check("the person's daemon launches a throwaway agent", launched.returncode == 0,
             (launched.stdout + launched.stderr).strip()[:160])
-    ready = j.wait(lambda: "READY" in j.volee_run("logs", name).stdout, 120, 2)
+    ready = j.wait(lambda: answered_with(j.volee_run("logs", name).stdout, "ready"), 120, 2)
     if not j.check("the agent answered READY", ready):
         return
     agent = j.agent(name)
@@ -29,17 +29,20 @@ def launched_agent(j, name):
     if not j.select(name):
         return
     j.keys("z", 2.0)
-    j.check("z shows its screen live", j.sees("Screen · " + name + " · live", "READY"))
+    j.check("z shows its screen live",
+            j.sees("Screen · " + name + " · live") and j.said("ready", timeout=15))
     j.keys("Enter", 2.0)
     j.check("Enter opens it in edit mode", j.sees("your keys go to " + name, timeout=10))
     j.type("Reply with the word fruit in uppercase, nothing else")
     j.keys("Enter")
-    j.check("typed text reaches the agent and it answers", j.sees("FRUIT", timeout=90, every=1))
+    j.check("typed text reaches the agent and it answers", j.said("fruit"),
+            "it answered: " + j.last_answer())
     j.show("edit mode on the installed volee")
     j.keys("ctrl+z", 2.0)
     j.type("Reply with the word sky in uppercase, nothing else")
     j.keys("Enter")
-    j.check("after Ctrl+Z the agent still answers", j.sees("SKY", timeout=90, every=1))
+    j.check("after Ctrl+Z the agent still answers", j.said("sky"),
+            "it answered: " + j.last_answer())
     j.keys("ctrl+q", 1.0)
     j.check("the leave key comes back, the screen stays",
             j.sees("Screen · " + name + " · live", timeout=10))

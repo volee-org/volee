@@ -16,7 +16,7 @@ import struct
 import termios
 import time
 
-from journey import Journey, arguments
+from journey import Journey, answered_with, arguments
 
 
 def by_keyboard(j, name):
@@ -28,7 +28,8 @@ def by_keyboard(j, name):
         return
 
     j.keys("z")
-    j.check("z shows the agent's screen live", j.sees("Screen · " + name + " · live", "READY"))
+    j.check("z shows the agent's screen live",
+            j.sees("Screen · " + name + " · live") and j.said("ready", timeout=15))
     j.check("the full-screen view offers to open the agent", "enter open" in j.screen())
 
     j.keys("i")
@@ -38,7 +39,8 @@ def by_keyboard(j, name):
 
     j.type("Reply with the word fruit in uppercase, nothing else")
     j.keys("Enter")
-    j.check("typed text reaches the agent and it answers", j.sees("FRUIT", timeout=90, every=1))
+    j.check("typed text reaches the agent and it answers", j.said("fruit"),
+            "it answered: " + j.last_answer())
 
     # With Claude Code's vim mode, Esc leaves its insert mode: `i` goes back to it.
     vim = "-- INSERT --" in j.screen()
@@ -51,12 +53,14 @@ def by_keyboard(j, name):
     j.keys("ctrl+z", 2.0)
     j.type("Reply with the word sky in uppercase, nothing else")
     j.keys("Enter")
-    j.check("after Ctrl+Z the agent still answers", j.sees("SKY", timeout=90, every=1))
+    j.check("after Ctrl+Z the agent still answers", j.said("sky"),
+            "it answered: " + j.last_answer())
 
     j.paste("Reply with the word sea in uppercase,\nnothing else")
     j.show("after a two-line paste")
     j.keys("Enter")
-    j.check("a paste reaches the agent in one piece", j.sees("SEA", timeout=90, every=1))
+    j.check("a paste reaches the agent in one piece", j.said("sea"),
+            "it answered: " + j.last_answer())
 
     j.keys("ctrl+q", 1.0)
     back = j.wait(lambda: "Screen · " + name + " · live" in j.screen()
@@ -132,7 +136,7 @@ def main():
         launched = j.launch(name, "Reply only READY, then wait for my next message.")
         j.check("an agent is launched in a volee host", launched.returncode == 0,
                 (launched.stdout + launched.stderr).strip()[:160])
-        ready = j.wait(lambda: "READY" in j.volee_run("logs", name).stdout, 120, 2)
+        ready = j.wait(lambda: answered_with(j.volee_run("logs", name).stdout, "ready"), 120, 2)
         if j.check("the agent answered READY", ready):
             by_keyboard(j, name)
             resized(j, name)
