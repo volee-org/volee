@@ -199,6 +199,20 @@ class Journey:
             time.sleep(every)
         return None
 
+    def still(self, read, quiet=4, timeout=90):
+        """Polls `read` until it has returned the same thing for `quiet` seconds: a
+        screen at rest, once an agent has finished writing on it. Returns what it
+        read, or None when it never came to rest within `timeout` seconds."""
+        last, since, end = read(), time.time(), time.time() + timeout
+        while time.time() < end:
+            time.sleep(1)
+            now = read()
+            if now != last:
+                last, since = now, time.time()
+            elif time.time() - since >= quiet:
+                return last
+        return None
+
     def volee_run(self, *args):
         return self.run([self.volee, *args])
 

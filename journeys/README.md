@@ -79,6 +79,14 @@ agent's.
 - Never tell the agent, in one message, how to answer the next ones: "reply
   only OK" in a first message once made a small model answer OK to the
   question that followed.
+- A screen is not still because its agent rests: for some twenty seconds
+  after a turn, Claude Code shows a hint on its last row, then takes it
+  away. And a view of a screen volee does not hold reads it every few
+  seconds. To compare a view with a screen, wait for the screen to be still
+  (`still()`), give the view the time of a few readings to show it, and
+  count the comparison only when the screen has not changed since. A view
+  read once, right after the screen, was compared with a screen it had read
+  two seconds earlier, and failed one run in several.
 - To change an agent's screen without asking the model for anything, type
   in its pane and leave the text in the input box. What a model writes
   changes from run to run, and so does how long it takes.
