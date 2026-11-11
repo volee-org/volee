@@ -190,6 +190,8 @@ pub trait Git: Send + Sync {
     ///   An upstream that is a local branch does not count.
     ///   [`PushState::NoUpstream`] when no such remote-tracking branch
     ///   exists.
+    /// - `no_remote`: the repository has no remote at all, so there is
+    ///   nowhere to push and no pull request to open.
     /// - `unmerged_tip` and `merged_into_base`: proving a merge needs memory
     ///   (see [`Delivery`]). Pass the `unmerged_tip` of the agent's previous
     ///   evidence in `query`. When the branch has commits of its own, the

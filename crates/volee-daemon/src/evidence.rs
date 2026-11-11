@@ -27,9 +27,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use tokio::sync::{Semaphore, broadcast};
+use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use volee_core::delivery::{Delivery, PullRequest};
+use volee_core::message::{MessageKind, Party};
+use volee_core::mission::MissionKind;
 use volee_core::role::LaunchedBy;
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
@@ -112,9 +114,76 @@ impl std::fmt::Debug for EvidenceSources {
     }
 }
 
+/// A request to read an agent's delivery evidence again now, answered once
+/// it was read.
+#[derive(Debug)]
+pub(crate) struct Check {
+    agent: AgentId,
+    done: oneshot::Sender<()>,
+}
+
+/// How the rest of the daemon asks the refresher for a check now. Empty
+/// until a refresher runs: without git there is nothing to read.
+#[derive(Debug, Default)]
+pub(crate) struct Checks(Mutex<Option<mpsc::UnboundedSender<Check>>>);
+
+impl Checks {
+    fn sender(&self) -> MutexGuard<'_, Option<mpsc::UnboundedSender<Check>>> {
+        // An optional sender stays consistent whatever a panic interrupted.
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Opens the requests for a refresher that starts.
+    fn open(&self) -> mpsc::UnboundedReceiver<Check> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        *self.sender() = Some(sender);
+        receiver
+    }
+}
+
+/// Reads the delivery evidence of `agents` again, from git and the forge,
+/// and returns once it is recorded for each of them, or after `timeout`.
+///
+/// The refresher reads the evidence of an agent when it stops, and again at
+/// each interval while it is live. A decision that rests on what just
+/// happened elsewhere (a merge, made by another agent, of the branch of a
+/// worker that stopped long ago) asks for a check first. Without git,
+/// nothing is read: the evidence is what the events say.
+pub(crate) async fn check_now(shared: &Shared, agents: &[AgentId], timeout: Duration) {
+    let Some(sender) = shared.checks.sender().clone() else {
+        return;
+    };
+    let mut waiting = Vec::new();
+    for agent in agents {
+        let (done, wait) = oneshot::channel();
+        if sender
+            .send(Check {
+                agent: *agent,
+                done,
+            })
+            .is_ok()
+        {
+            waiting.push(wait);
+        }
+    }
+    let read = async {
+        for wait in waiting {
+            // A dropped request only means the refresher stopped.
+            let _ = wait.await;
+        }
+    };
+    if tokio::time::timeout(timeout, read).await.is_err() {
+        tracing::warn!(
+            ?agents,
+            "the delivery evidence was not read again in time"
+        );
+    }
+}
+
 /// Starts the refresher; `None` without git.
 pub(crate) fn spawn(shared: &Arc<Shared>, sources: EvidenceSources) -> Option<JoinHandle<()>> {
     let git = sources.git?;
+    let checks = shared.checks.open();
     let refresher = Arc::new(Refresher {
         shared: Arc::clone(shared),
         git,
@@ -132,7 +201,7 @@ pub(crate) fn spawn(shared: &Arc<Shared>, sources: EvidenceSources) -> Option<Jo
         }),
     });
     tokio::spawn(Arc::clone(&refresher).check_forge());
-    Some(tokio::spawn(refresher.run()))
+    Some(tokio::spawn(refresher.run(checks)))
 }
 
 /// What an agent needs refreshed. Triggers for an agent that is being
@@ -194,6 +263,8 @@ struct Book {
     looked_up: HashMap<(PathBuf, String), Instant>,
     /// Whether the forge can be used.
     forge_usable: bool,
+    /// Who waits for an agent's queued work to be done.
+    waiters: HashMap<AgentId, Vec<oneshot::Sender<()>>>,
 }
 
 struct Refresher {
@@ -209,7 +280,7 @@ struct Refresher {
 }
 
 impl Refresher {
-    async fn run(self: Arc<Self>) {
+    async fn run(self: Arc<Self>, mut checks: mpsc::UnboundedReceiver<Check>) {
         // Subscribe and look at every agent under one lock, so no event
         // falls in between.
         let mut events = {
@@ -239,8 +310,37 @@ impl Refresher {
                     }
                     Err(broadcast::error::RecvError::Closed) => return,
                 },
+                Some(check) = checks.recv() => self.check(check),
                 _ = ticks.tick() => self.rescan(wanted_on_tick).await,
             }
+        }
+    }
+
+    /// Queues everything the supervisor judges for the agent of `check`,
+    /// and remembers who waits for it. Both under one lock: a job that ends
+    /// meanwhile either sees the queued work and does it, or ended before
+    /// the request and answers nobody.
+    fn check(self: &Arc<Self>, check: Check) {
+        let start = {
+            let mut book = self.book();
+            book.waiters.entry(check.agent).or_default().push(check.done);
+            book.queue
+                .entry(check.agent)
+                .or_default()
+                .merge(Wanted::FINISHED);
+            book.running.insert(check.agent)
+        };
+        if start {
+            tokio::spawn(Arc::clone(self).drain(check.agent));
+        }
+    }
+
+    /// The agent's job ends: whoever waited for its work is answered.
+    fn finished(book: &mut Book, agent: AgentId) {
+        book.running.remove(&agent);
+        for waiter in book.waiters.remove(&agent).unwrap_or_default() {
+            // Nobody waits any more: nothing to say.
+            let _ = waiter.send(());
         }
     }
 
@@ -298,14 +398,14 @@ impl Refresher {
             let wanted = {
                 let mut book = self.book();
                 let Some(wanted) = book.queue.remove(&agent) else {
-                    book.running.remove(&agent);
+                    Self::finished(&mut book, agent);
                     return;
                 };
                 wanted
             };
             // The semaphore is never closed.
             let Ok(_permit) = self.jobs.acquire().await else {
-                self.book().running.remove(&agent);
+                Self::finished(&mut self.book(), agent);
                 return;
             };
             if wanted.workspace {
@@ -502,7 +602,8 @@ impl Refresher {
         }
         let fresh = Delivery {
             pull_request: looked_up.unwrap_or_else(|| current.delivery.pull_request.clone()),
-            report_delivered: current.delivery.report_delivered,
+            report_delivered: current.delivery.report_delivered
+                || reported(state.registry(), current),
             checked_at: Some(checked_at),
             ..report.delivery
         };
@@ -660,6 +761,20 @@ fn wanted_after<'a>(
         }
         _ => None,
     }
+}
+
+/// Whether `agent` delivered what an analysis mission asks of it: a report.
+/// Only there: a report says what was found, and in a change mission it
+/// proves nothing about the code.
+fn reported(registry: &volee_core::Registry, agent: &Agent) -> bool {
+    agent
+        .mission
+        .and_then(|mission| registry.mission(mission))
+        .is_some_and(|mission| mission.kind == MissionKind::Analysis)
+        && registry
+            .messages_from(Party::Agent(agent.id))
+            .iter()
+            .any(|message| message.kind == MessageKind::Report)
 }
 
 /// What an agent needs when the refresher starts, or after it lagged: live

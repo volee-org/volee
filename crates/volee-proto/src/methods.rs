@@ -763,26 +763,62 @@ method!(
     Empty
 );
 
+/// Parameters of [`RequestApproval`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalParams {
+    /// The mission.
+    pub mission: MissionId,
+    /// The agent presenting the report: the mission's coordinator.
+    pub by: AgentId,
+    /// What is done, in one line.
+    pub done: String,
+    /// The proof: pull requests, branches, test results, in one line.
+    pub proof: String,
+    /// What is left, in one line; "nothing" when nothing is.
+    pub left: String,
+}
+
+/// The result of [`RequestApproval`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalAsked {
+    /// The question put to the person: the report, with the answers that
+    /// approve it or keep the mission open.
+    pub question: MessageId,
+}
+
+method!(
+    /// Presents a mission's report to the person and asks for their
+    /// approval, once every worker delivered (ADR 0032). Nothing is merged
+    /// or closed until they answer.
+    RequestApproval,
+    "missions.request_approval",
+    ApprovalParams,
+    ApprovalAsked
+);
+
 /// Parameters of [`CloseMission`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CloseParams {
     /// The mission.
     pub mission: MissionId,
     /// The final report, a message in the mission's thread. Without it, the
-    /// coordinator's latest report in that thread is used.
+    /// report the coordinator presented is kept, else its latest report in
+    /// that thread.
     #[serde(default)]
     pub report: Option<MessageId>,
     /// Close even if some workers have not delivered. Only the human can.
     #[serde(default)]
     pub force: bool,
     /// The agent closing the mission, when an agent does. It must be the
-    /// mission's coordinator and must have sent its report.
+    /// mission's coordinator, the person must have approved its report, and
+    /// the work of a change mission must be merged.
     #[serde(default)]
     pub by: Option<AgentId>,
 }
 
 method!(
-    /// Closes a mission whose workers all delivered (ADR 0007).
+    /// Closes a mission whose workers all delivered (ADR 0007), then tidies
+    /// its workers and stops its coordinator (ADR 0032).
     CloseMission,
     "missions.close",
     CloseParams,

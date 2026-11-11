@@ -519,6 +519,15 @@ impl GitCli {
             }
             _ => false,
         };
+        // A repository without any remote: nowhere to push, no forge.
+        let no_remote = self
+            .git(worktree)
+            .arg("remote")
+            .run()?
+            .success()?
+            .text()?
+            .trim()
+            .is_empty();
         Ok(DeliveryReport {
             delivery: Delivery {
                 commits,
@@ -528,6 +537,7 @@ impl GitCli {
                 merged_into_base,
                 tip,
                 unmerged_tip,
+                no_remote,
                 ..Delivery::default()
             },
             head: Head {

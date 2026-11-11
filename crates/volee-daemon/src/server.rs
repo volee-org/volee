@@ -113,6 +113,8 @@ pub(crate) struct Shared {
     pub(crate) presence: crate::join::Presence,
     /// The terminals open on sessions that run elsewhere (ADR 0027).
     pub(crate) views: crate::views::Views,
+    /// Requests to read an agent's delivery evidence again now.
+    pub(crate) checks: crate::evidence::Checks,
     /// What the evidence refresher learned about the forge, once it checked.
     forge: std::sync::Mutex<Option<ForgeStatus>>,
     /// The agents being launched now, from just before their registration
@@ -264,6 +266,7 @@ impl Daemon {
             panes: crate::panes::Panes::new(config.multiplexers),
             presence: crate::join::Presence::default(),
             views: crate::views::Views::default(),
+            checks: crate::evidence::Checks::default(),
             forge: std::sync::Mutex::new(None),
             launches: std::sync::Mutex::default(),
             shutdown,
