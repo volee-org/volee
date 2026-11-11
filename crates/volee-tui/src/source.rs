@@ -71,6 +71,14 @@ pub trait Source: Send + Sync + 'static {
         }
     }
 
+    /// Has the source look again, now, at the sessions that run; what it
+    /// finds changed comes back as events. The interface asks while it waits
+    /// for a change it told the person to make (ADR 0034). A source with
+    /// nothing to look at does nothing.
+    fn relist(&self) -> impl Future<Output = ()> + Send {
+        async {}
+    }
+
     /// Marks a message to the person as read. The change comes back as an
     /// event.
     fn mark_read(&self, message: MessageId)

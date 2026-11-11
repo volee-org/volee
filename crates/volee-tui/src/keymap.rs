@@ -962,6 +962,23 @@ impl Keymap {
         }
     }
 
+    /// How a sentence names the key of `action` in `context`: `preferred`
+    /// when it is one of its keys or when the action has none, else the
+    /// first of them. A binding lists its shortest key first (`n` before
+    /// `esc`), which a hint shows; a sentence wants the one people expect.
+    pub(crate) fn key_of(&self, context: Context, action: Action, preferred: &str) -> String {
+        let keys: Vec<String> = self
+            .bindings
+            .iter()
+            .filter(|binding| binding.context == context && binding.action == action)
+            .flat_map(|binding| binding.keys.iter().map(KeySeq::short))
+            .collect();
+        match keys.first() {
+            Some(first) if !keys.iter().any(|key| key == preferred) => first.clone(),
+            _ => preferred.to_owned(),
+        }
+    }
+
     /// The keys that continue `pending`, one per key, the most specific
     /// context first, for the which-key popup.
     pub(crate) fn continuations(&self, contexts: &[Context], pending: &[KeyCombo]) -> Vec<Next> {

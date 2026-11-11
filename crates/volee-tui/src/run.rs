@@ -264,6 +264,10 @@ fn run_request<Src: Source>(
             let result = source.open(agent, (size.cols, size.rows)).await;
             Msg::Opened { agent, result }
         }),
+        // No answer to wait for: what the source finds comes as events.
+        Effect::Relist => {
+            tokio::spawn(async move { source.relist().await });
+        }
         Effect::PrepareTakeOver(agent) => spawn(results, async move {
             let result = source.attach(agent).await;
             Msg::TakeOverReady { agent, result }

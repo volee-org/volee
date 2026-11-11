@@ -13,8 +13,8 @@ use volee_core::workspace::Location;
 use super::*;
 use crate::clock::ManualClock;
 use crate::demo::{
-    DemoSource, EXPLORE_HANDLERS, INFRA, INVOICE_PAGE, INVOICE_SCHEMA, INVOICE_TOOLS, INVOICING,
-    LATENCY_AUDIT, TOWER, TRACE_GATEWAY,
+    BROKEN_LINKS, DemoSource, EXPLORE_HANDLERS, INFRA, INVOICE_PAGE, INVOICE_SCHEMA, INVOICE_TOOLS,
+    INVOICING, LATENCY_AUDIT, TOWER, TRACE_GATEWAY,
 };
 use crate::source::{Changes, Door, Outgoing, PaneFocus, SourceError, TakeOver};
 use crate::views::hierarchy::Zoom;
@@ -161,11 +161,11 @@ fn minus_goes_back_and_forth() {
     let mut model = model(120, 40);
     press(&mut model, "'t");
     press(&mut model, "'b");
-    assert_eq!(model.selected, Some(id(crate::demo::BROKEN_LINKS)));
+    assert_eq!(model.selected, Some(id(BROKEN_LINKS)));
     press(&mut model, "-");
     assert_eq!(model.selected, Some(id(TOWER)));
     press(&mut model, "-");
-    assert_eq!(model.selected, Some(id(crate::demo::BROKEN_LINKS)));
+    assert_eq!(model.selected, Some(id(BROKEN_LINKS)));
 }
 
 #[test]
@@ -559,6 +559,231 @@ fn an_agent_with_no_door_says_what_to_do() {
     );
     assert_eq!(model.overlay, None);
     assert_eq!(model.opening, None, "the next one can open");
+}
+
+/// Puts `agent`, a Claude Code session of the demo started elsewhere, in a
+/// terminal of its own, as a session someone runs by typing `claude` in a
+/// terminal tab is, and selects it.
+fn in_its_own_terminal(model: &mut Model, agent: AgentId) {
+    update(model, Msg::Events(vec![placed(agent, Location::Terminal)]));
+    let mut effects = Vec::new();
+    model.select(agent, &mut effects);
+}
+
+fn placed(agent: AgentId, location: Location) -> Event {
+    Event::new(start(), EventKind::LocationChanged { agent, location })
+}
+
+#[test]
+fn a_session_in_its_own_terminal_is_opened_once_it_moved_to_the_background() {
+    let mut model = model(120, 40);
+    let links = id(BROKEN_LINKS);
+    in_its_own_terminal(&mut model, links);
+
+    // No terminal to ask for: the bottom line says what to do in the
+    // session's own terminal, and the source is asked to look again.
+    assert_eq!(key(&mut model, KeyCode::Enter), [Effect::Relist]);
+    assert_eq!(model.prompt, Some(Prompt::AwaitMove(links)));
+    assert_eq!(model.opening, None);
+    assert!(model.notice.is_none(), "a wait, not an error");
+
+    // While it waits, keys do nothing, and the source looks again every
+    // two seconds.
+    assert_eq!(press(&mut model, "j"), []);
+    assert_eq!(model.selected, Some(links));
+    let asked = model.now;
+    let tick = |model: &mut Model, millis: i64| {
+        update(model, Msg::Tick(asked.plus_millis(millis))).contains(&Effect::Relist)
+    };
+    assert!(!tick(&mut model, 1_900));
+    assert!(tick(&mut model, 2_000));
+    assert!(!tick(&mut model, 3_900));
+    assert!(tick(&mut model, 4_000));
+
+    // The person pressed the left arrow there: the conversation runs in the
+    // background, and volee opens it without being asked again.
+    let effects = update(
+        &mut model,
+        Msg::Events(vec![placed(links, Location::Background)]),
+    );
+    assert!(
+        effects.contains(&Effect::Open {
+            agent: links,
+            size: PANEL
+        }),
+        "{effects:?}"
+    );
+    assert_eq!(model.prompt, None);
+    assert_eq!(model.opening, Some(links));
+    assert!(!tick(&mut model, 6_000), "nothing left to wait for");
+}
+
+#[test]
+fn the_wait_for_a_session_to_move_ends_with_a_key_or_with_the_session() {
+    let links = id(BROKEN_LINKS);
+    let waiting = || {
+        let mut model = model(120, 40);
+        in_its_own_terminal(&mut model, links);
+        key(&mut model, KeyCode::Enter);
+        assert_eq!(model.prompt, Some(Prompt::AwaitMove(links)));
+        model
+    };
+
+    // Given up.
+    let mut model = waiting();
+    assert_eq!(key(&mut model, KeyCode::Esc), []);
+    assert_eq!(model.prompt, None);
+    let moved = update(
+        &mut model,
+        Msg::Events(vec![placed(links, Location::Background)]),
+    );
+    assert!(
+        !moved
+            .iter()
+            .any(|effect| matches!(effect, Effect::Open { .. })),
+        "{moved:?}"
+    );
+
+    // The session ended in its terminal.
+    let mut model = waiting();
+    let ended = Event::new(
+        start(),
+        EventKind::StateChanged {
+            agent: links,
+            state: volee_core::AgentState::Stopped,
+            detail: Some("the session ended".into()),
+        },
+    );
+    update(&mut model, Msg::Events(vec![ended]));
+    assert_eq!(model.prompt, None);
+    assert_eq!(
+        model.notice.as_ref().unwrap().text,
+        "broken-links ended in its terminal."
+    );
+
+    // The row left the list.
+    let mut model = waiting();
+    let expired = Event::new(start(), EventKind::AgentExpired { agent: links });
+    update(&mut model, Msg::Events(vec![expired]));
+    assert_eq!(model.prompt, None);
+    assert_eq!(
+        model.notice.as_ref().unwrap().text,
+        "The session you were opening is gone."
+    );
+
+    // Another agent is asked for: opened at once, and the wait is over.
+    let mut model = waiting();
+    let schema = id(INVOICE_SCHEMA);
+    let mut effects = Vec::new();
+    open_agent(&mut model, schema, &mut effects);
+    assert_eq!(
+        effects,
+        [Effect::Open {
+            agent: schema,
+            size: PANEL
+        }]
+    );
+    assert_eq!(model.prompt, None);
+
+    // Quitting does not wait either.
+    let mut model = waiting();
+    assert_eq!(ctrl(&mut model, 'c'), [Effect::Quit]);
+}
+
+#[test]
+fn only_a_live_claude_code_session_in_a_terminal_waits_for_its_move() {
+    // A session that ended there, or the session of another harness, has no
+    // left arrow to wait for: the source says what it can.
+    let links = id(BROKEN_LINKS);
+    let mut model = model(120, 40);
+    in_its_own_terminal(&mut model, links);
+    let stopped = Event::new(
+        start(),
+        EventKind::StateChanged {
+            agent: links,
+            state: volee_core::AgentState::Stopped,
+            detail: None,
+        },
+    );
+    update(&mut model, Msg::Events(vec![stopped]));
+    assert_eq!(
+        key(&mut model, KeyCode::Enter),
+        [Effect::Open {
+            agent: links,
+            size: PANEL
+        }]
+    );
+    assert_eq!(model.prompt, None);
+
+    // A session of another harness, found in a terminal: it has no such key.
+    let mut model = self::model(120, 40);
+    let other = AgentId::from_ulid(ulid::Ulid::from_parts(7, 7));
+    let harness = HarnessKind::Other("opencode".into());
+    let found = [
+        EventKind::AgentRegistered {
+            agent: other,
+            name: "opencode-in-a-tab".into(),
+            role: Role::Independent,
+            harness: harness.clone(),
+            launched_by: volee_core::role::LaunchedBy::Outside,
+            parent: None,
+            mission: None,
+            workspace: volee_core::workspace::Workspace::at("/work/alpha"),
+            location: Location::Terminal,
+        },
+        EventKind::SessionLinked {
+            agent: other,
+            session: volee_core::harness::SessionKey {
+                harness,
+                id: "ses_1".into(),
+            },
+            origin: volee_core::harness::SessionOrigin::Discovered,
+        },
+        EventKind::StateChanged {
+            agent: other,
+            state: volee_core::AgentState::Idle,
+            detail: None,
+        },
+    ];
+    let found = found.map(|kind| Event::new(start(), kind)).to_vec();
+    update(&mut model, Msg::Events(found));
+    let mut effects = Vec::new();
+    model.select(other, &mut effects);
+    assert!(model.registry.agent(other).unwrap().watched());
+    assert_eq!(
+        key(&mut model, KeyCode::Enter),
+        [Effect::Open {
+            agent: other,
+            size: PANEL
+        }]
+    );
+    assert_eq!(model.prompt, None);
+
+    // An agent volee launched is not followed by the listing: its hooks say
+    // where its conversation goes.
+    let mut model = self::model(120, 40);
+    let schema = id(INVOICE_SCHEMA);
+    in_its_own_terminal(&mut model, schema);
+    assert!(!model.registry.agent(schema).unwrap().watched());
+    assert_eq!(
+        key(&mut model, KeyCode::Enter),
+        [Effect::Open {
+            agent: schema,
+            size: PANEL
+        }]
+    );
+
+    // Once the source is gone, nothing would say that it moved.
+    let mut model = self::model(120, 40);
+    in_its_own_terminal(&mut model, links);
+    update(&mut model, Msg::SourceClosed(None));
+    assert_eq!(
+        key(&mut model, KeyCode::Enter),
+        [Effect::Open {
+            agent: links,
+            size: PANEL
+        }]
+    );
 }
 
 #[test]

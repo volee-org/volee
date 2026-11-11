@@ -66,6 +66,26 @@ impl Sessions {
         );
     }
 
+    /// The sessions the last listing of `listing`'s harness showed alive in
+    /// a terminal, with their process, and that `listing` no longer shows:
+    /// each one ended, or its conversation went on elsewhere (ADR 0034).
+    pub(crate) fn left_terminal(&self, listing: &Listing) -> Vec<ListedSession> {
+        self.listed
+            .values()
+            .filter(|session| {
+                session.key.harness == listing.harness
+                    && session.alive
+                    && !session.background
+                    && session.pid.is_some()
+                    && !listing
+                        .sessions
+                        .iter()
+                        .any(|listed| listed.key == session.key)
+            })
+            .cloned()
+            .collect()
+    }
+
     /// A session as the last listing showed it.
     pub(crate) fn listed(&self, key: &SessionKey) -> Option<&ListedSession> {
         self.listed.get(key)

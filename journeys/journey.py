@@ -155,6 +155,87 @@ def resolve(program):
     return shutil.which(program) or program
 
 
+class Terminal:
+    """A terminal the journey holds itself: a pseudo-terminal with one program in it,
+    and neither a multiplexer nor a volee host around it. It is what a tab of a
+    terminal application is to the program typed in it: only its holder shows the
+    program and presses keys in it. A thread reads what the program writes, as a
+    terminal does, and answers what a terminal is asked when a program starts."""
+
+    # The bytes a terminal sends for the left arrow.
+    LEFT = b"\x1b[D"
+
+    def __init__(self, command, cwd, env, cols=120, rows=40):
+        self.pid, self.fd = pty.fork()
+        if self.pid == 0:
+            os.chdir(cwd)
+            os.execvpe(command[0], command, env)
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+        self.written = bytearray()
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        while True:
+            try:
+                data = os.read(self.fd, 65536)
+            except OSError:
+                return
+            if not data:
+                return
+            self.written.extend(data)
+            # Where the cursor is and what the terminal is: a program that asks
+            # waits for the answers.
+            if b"\x1b[6n" in data:
+                self.press(b"\x1b[1;1R")
+            if b"\x1b[c" in data:
+                self.press(b"\x1b[?62;c")
+
+    def press(self, keys):
+        """Presses keys, given as the bytes a terminal sends for them."""
+        try:
+            os.write(self.fd, keys)
+        except OSError:
+            pass
+
+    def type(self, text, pause=1.0):
+        """Types a line, then presses Enter."""
+        self.press(text.encode())
+        time.sleep(pause)
+        self.press(b"\r")
+
+    def wrote(self, since=0, count=400):
+        """The end of what the program wrote from the byte `since` on, without its
+        escape sequences."""
+        raw = bytes(self.written[since:])[-20000:]
+        text = re.sub(rb"\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)"
+                      rb"|\x1b[()][0-9A-B]|\x1b[=>78]", b" ", raw).decode("utf-8", "replace")
+        return " ".join(text.split())[-count:]
+
+    def runs(self):
+        """Whether the program still runs."""
+        try:
+            return os.waitpid(self.pid, os.WNOHANG) == (0, 0)
+        except OSError:
+            return False
+
+    def close(self):
+        """Ends the program, as closing its terminal does."""
+        for sign in (signal.SIGHUP, signal.SIGKILL):
+            try:
+                os.kill(self.pid, sign)
+            except OSError:
+                break
+            end = time.time() + 5
+            while time.time() < end and self.runs():
+                time.sleep(0.2)
+            if not self.runs():
+                break
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+
+
 class Journey:
     """One run: its environment, its tuios window, its checks and its cleanup."""
 
@@ -192,8 +273,13 @@ class Journey:
         self.agents = []
         self.branches = []
         self.background = []
-        # Names of the sessions the journey started by hand, in a pane.
+        # Names of the sessions the journey started by hand, in a pane or in a
+        # terminal of its own.
         self.by_hand = []
+        # The terminals the journey holds itself.
+        self.terminals = []
+        # Background sessions of the journey known by their id only.
+        self.by_id = []
         # The client that gives the interface's window its size, if any.
         self.viewer = None
 
@@ -352,6 +438,55 @@ class Journey:
             session = self.claude_session(name)
             return session if session and session.get("state") in ("idle", "done") else None
         return self.wait(settled, 120, 2)
+
+    def terminal(self, command, cols=120, rows=40):
+        """Runs `command` in the sandbox, in a terminal the journey holds itself
+        (`Terminal`), with the environment of a person's shell: no multiplexer, no
+        volee host. `cleanup()` closes it."""
+        terminal = Terminal(command, self.sandbox, self.clean, cols, rows)
+        self.terminals.append(terminal)
+        return terminal
+
+    def claude_in_a_terminal(self, name, prompt):
+        """Types `claude` in a terminal the journey holds (`terminal()`), under
+        `name`, and has it run a first turn on `prompt`. Returns the terminal, and
+        what Claude Code lists for the session once it rests after that turn: None
+        when it never did."""
+        terminal = self.terminal(["claude", "--model", self.model, "--name", name])
+        self.by_hand.append(name)
+        self.background.append(name)
+
+        def at_rest():
+            session = self.claude_session(name)
+            resting = (session and session.get("kind") == "interactive"
+                       and session.get("status") == "idle")
+            return session if resting else None
+        if not self.wait(at_rest, 90, 1):
+            return terminal, None
+        start = len(terminal.written)
+        terminal.type(prompt)
+        # The mark of an answer in what the session wrote, then its prompt again.
+        return terminal, self.wait(lambda: "⏺" in terminal.wrote(start, 4000) and at_rest(),
+                                   120, 1)
+
+    def moved_to_background(self, known, timeout=30):
+        """The session Claude Code lists in the background, in the sandbox, that is
+        not one of `known` (session ids read earlier): the conversation of a session
+        typed in a terminal, once the left arrow was pressed there (ADR 0034). Claude
+        Code lists it about a second before it has a process; it is returned once it
+        has one, and `cleanup()` removes it, by its id: Claude Code may have given it
+        another name."""
+        def arrived():
+            return next((session for session in self.claude_sessions()
+                         if session.get("kind") == "background"
+                         and session.get("sessionId") not in known
+                         and session.get("pid")
+                         and os.path.realpath(session.get("cwd") or "/")
+                         == os.path.realpath(self.sandbox)), None)
+        session = self.wait(arrived, timeout, 0.5)
+        if session:
+            self.by_id.append(session["id"])
+        return session
 
     def views(self):
         """The views the journey's daemon holds open now (ADR 0027)."""
@@ -554,6 +689,8 @@ class Journey:
     def cleanup(self):
         """Stops and removes everything the journey started."""
         self.close_viewer()
+        for terminal in self.terminals:
+            terminal.close()
         for name in self.agents:
             self.volee_run("stop", name)
         if self.agents:
@@ -566,6 +703,12 @@ class Journey:
                     if session.get("pid"):
                         self.claude("stop", session["id"])
                     self.claude("rm", session["id"])
+        listed = {session.get("id"): session for session in self.claude_sessions()}
+        for handle in self.by_id:
+            if handle in listed:
+                if listed[handle].get("pid"):
+                    self.claude("stop", handle)
+                self.claude("rm", handle)
         if self.isolated:
             # A session that ends runs its last hooks. Let them reach the daemon:
             # with none left to hear it, a hook leaves a spool file behind, in a

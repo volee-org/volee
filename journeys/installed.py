@@ -3,12 +3,14 @@
 The last check before and after a release: the installed binary, the real daemon and
 its real list of agents. The journey compares that list with what Claude Code lists,
 launches one throwaway agent in the sandbox, types into it and shows it on the wall,
-starts one background session by hand and opens it by Enter, then removes both. It finds them by their
-unique names and touches no other agent.
+starts one background session by hand and opens it by Enter, types `claude` in a
+terminal of its own and opens that session once the left arrow moved it to the
+background, then removes all three. It finds them by their unique names and touches
+no other agent.
 
     python3 journeys/installed.py --sandbox ~/code/sandbox [--expect 0.11.0]
 """
-from journey import Journey, answered_with, arguments
+from journey import Journey, Terminal, answered_with, arguments
 
 
 def more(parser):
@@ -105,6 +107,65 @@ def session_by_hand(j, name):
             j.wait(lambda: j.agent(name) is None, 100, 2), str(j.agent(name))[:120])
 
 
+def session_in_a_terminal(j, name):
+    """A session typed in a terminal of its own: opened once it left it, on the
+    same row (ADR 0034). The terminal is one the journey holds."""
+    known = {session.get("sessionId") for session in j.claude_sessions()}
+    terminal, first = j.claude_in_a_terminal(
+        name, "Remember the number 5127. For this message only, reply with the word READY.")
+    if not j.check("a session typed in a plain terminal ran its first turn there", first,
+                   terminal.wrote(count=200)):
+        return
+    row = j.wait(lambda: j.agent(name), 60, 2)
+    if not j.check("your list shows it, in a terminal of its own", row
+                   and row["location"]["kind"] == "terminal", str(row and row["location"])):
+        return
+    if not j.select(name):
+        return
+    # The window has 80 columns: the end of the bottom line is cut.
+    waits = name + " runs in its own terminal"
+    j.keys("Enter", 0.5)
+
+    def answered_enter():
+        screen = j.screen()
+        return screen if waits in screen or "Cannot open" in screen else None
+    said = j.wait(answered_enter, 10, 0.3) or ""
+    j.check("Enter says what to do in that terminal, and reports no failure",
+            waits in said and "Cannot open" not in said)
+    j.show("the installed volee waits for the session to leave its terminal")
+    terminal.press(Terminal.LEFT)
+    moved = j.moved_to_background(known)
+    if not j.check("the left arrow there has Claude Code move the conversation to the "
+                   "background", moved):
+        return
+    title = moved.get("name") or moved["id"]
+    if not j.check("volee opens it by itself, on the conversation",
+                   j.sees("your keys go to " + title, "5127", timeout=40)):
+        return
+    after = j.agent(title) or {}
+    j.check("on the same row, which followed it to the background",
+            after.get("id") == row["id"] and after.get("location", {}).get("kind") == "background",
+            str((after.get("id"), row["id"], after.get("location"))))
+    asked = "Add one to the number you remembered. Reply with the result in digits only."
+    j.type(asked)
+    j.keys("Enter")
+    j.check("typed text reaches the conversation and it answers", j.answered(asked),
+            "it answered: " + j.last_answer())
+    j.check("it is the conversation that was in the terminal: it remembers the number",
+            j.sees("5128", timeout=30, every=1), "it answered: " + j.last_answer())
+    j.show("a session that left its terminal, opened on the installed volee")
+    j.keys("ctrl+q", 1.5)
+    j.check("the leave key comes back to the list and says it keeps running",
+            j.sees("Left " + title + ": it keeps running", timeout=10))
+    j.claude("stop", moved["id"])
+    j.wait(lambda: not any(session.get("id") == moved["id"] and session.get("pid")
+                           for session in j.claude_sessions()), 30, 1)
+    j.claude("rm", moved["id"])
+    j.check("removed in Claude Code, it leaves your list",
+            j.wait(lambda: not any(listed["id"] == row["id"] for listed in j.agents_listed()),
+                   100, 2))
+
+
 def main():
     args = arguments(__doc__, more)
     j = Journey("installed", args, isolated=False)
@@ -129,6 +190,7 @@ def main():
         launched_agent(j, launched)
         the_wall(j, launched)
         session_by_hand(j, "journey-installed-bg-" + j.stamp)
+        session_in_a_terminal(j, "journey-installed-tab-" + j.stamp)
         j.keys("q", 1.0)
     finally:
         j.finish()

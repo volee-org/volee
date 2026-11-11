@@ -11,9 +11,11 @@ use ratatui::crossterm::event::{
 };
 use ratatui::layout::{Position, Rect};
 use volee_core::event::{Event, EventKind};
+use volee_core::harness::HarnessKind;
 use volee_core::message::{MessageKind, Party};
 use volee_core::role::Role;
 use volee_core::time::Timestamp;
+use volee_core::workspace::Location;
 use volee_core::{Agent, AgentId, MessageId, Registry, ThreadId};
 
 use crate::activity::ActivityLog;
@@ -170,6 +172,10 @@ pub(crate) enum Prompt {
     /// Move this agent into a volee host, which stops its session and
     /// resumes it there, then open it? Opening it needs no adoption.
     AdoptAndTakeOver(AgentId),
+    /// No question: this agent runs in a terminal of its own, and it is
+    /// opened as soon as the person has pressed the left arrow there, which
+    /// has Claude Code move its conversation to the background (ADR 0034).
+    AwaitMove(AgentId),
     /// Send this answer, one of those the question offers?
     Answer {
         /// The question.
@@ -263,6 +269,12 @@ const PREVIEW_REFRESH_MILLIS: u64 = 2_000;
 /// changes: the last lines of a turn land after the last reading, a person
 /// types in its pane, a turn too short to be seen as work runs.
 const PREVIEW_REST_REFRESH_MILLIS: u64 = 5_000;
+
+/// How often the source is asked to look at the sessions again while the
+/// interface waits for a conversation to move to the background, in
+/// milliseconds: the wait ends a moment after the key, not at the source's
+/// own pace.
+const RELIST_MILLIS: u64 = 2_000;
 
 /// The preview of the selected agent.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -474,6 +486,8 @@ pub(crate) enum Effect {
         /// The panel's columns and rows.
         size: volee_host::Size,
     },
+    /// Ask the source to look at the sessions again, now (ADR 0034).
+    Relist,
     /// Ask the source how to take over an agent.
     PrepareTakeOver(AgentId),
     /// Suspend the interface and run the take over in this terminal.
@@ -639,6 +653,9 @@ pub(crate) struct Model {
     pub(crate) next_link: u64,
     /// The agent the source is opening (ADR 0027).
     pub(crate) opening: Option<AgentId>,
+    /// When the source was last asked to look at the sessions again, while
+    /// the interface waits for a conversation to move (ADR 0034).
+    pub(crate) relisted_at: Option<Timestamp>,
     /// The terminal the source opened on the agent shown live, when the
     /// agent runs in no volee host: its socket, and whether it is a view.
     pub(crate) door: Option<(AgentId, std::path::PathBuf, bool)>,
@@ -725,6 +742,7 @@ impl Model {
             wall: None,
             next_link: 0,
             opening: None,
+            relisted_at: None,
             door: None,
             last_click: None,
             hosts: None,
@@ -1381,6 +1399,7 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         }
     }
     crate::edit::settle(model, &mut effects);
+    settle_move(model, &mut effects);
     model.relayout();
     // The wall follows the list as it now is, before the preview follows
     // the selection the wall may have moved.
@@ -1628,6 +1647,17 @@ fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool
         model.notice = None;
         changed = true;
     }
+    // While the interface waits for a conversation to move to the
+    // background, the source looks at the sessions more often than it would.
+    if matches!(model.prompt, Some(Prompt::AwaitMove(_)))
+        && model.offline.is_none()
+        && model
+            .relisted_at
+            .is_none_or(|at| at.millis_until(now) >= RELIST_MILLIS)
+    {
+        model.relisted_at = Some(now);
+        effects.push(Effect::Relist);
+    }
     // The screen of an agent that runs is read again: often while it works,
     // now and then at rest. An agent that ended keeps the screen it left.
     let period = model.selected_agent().and_then(|agent| {
@@ -1692,6 +1722,18 @@ fn on_prompt(model: &mut Model, key: KeyCombo, effects: &mut Vec<Effect>) -> boo
                     model.notify(format!("Adopting {name}..."), false);
                     effects.push(Effect::Adopt { agent, name });
                 }
+                Some(Action::Back) => model.prompt = None,
+                Some(Action::Quit) => {
+                    model.prompt = None;
+                    request_quit(model, effects);
+                }
+                _ => {}
+            }
+            true
+        }
+        Some(Prompt::AwaitMove(_)) => {
+            // Nothing to answer: the wait ends by itself, or is given up.
+            match model.keymap.action(&[Context::Confirm], key) {
                 Some(Action::Back) => model.prompt = None,
                 Some(Action::Quit) => {
                     model.prompt = None;
@@ -2015,7 +2057,17 @@ pub(crate) fn open_agent(model: &mut Model, agent: AgentId, effects: &mut Vec<Ef
     if model.pending_take_over.is_some() || model.opening.is_some() {
         return;
     }
+    // Asking for an agent ends the wait for another one.
+    if matches!(model.prompt, Some(Prompt::AwaitMove(_))) {
+        model.prompt = None;
+    }
     if crate::edit::edit(model, agent, effects) {
+        return;
+    }
+    if moves_first(model, agent) {
+        model.prompt = Some(Prompt::AwaitMove(agent));
+        model.relisted_at = Some(model.now);
+        effects.push(Effect::Relist);
         return;
     }
     model.opening = Some(agent);
@@ -2023,6 +2075,43 @@ pub(crate) fn open_agent(model: &mut Model, agent: AgentId, effects: &mut Vec<Ef
         agent,
         size: crate::edit::edit_size(model),
     });
+}
+
+/// Whether `agent` must move before volee can open it: a live Claude Code
+/// session in a terminal volee cannot reach. Only that terminal shows it,
+/// until the person presses the left arrow on its empty prompt there: Claude
+/// Code then moves the conversation to the background, where any terminal
+/// opens it, volee's included (ADR 0034).
+fn moves_first(model: &Model, agent: AgentId) -> bool {
+    model.offline.is_none()
+        && model.registry.agent(agent).is_some_and(|record| {
+            record.harness == HarnessKind::ClaudeCode
+                && record.location == Location::Terminal
+                && record.watched()
+                && record.state.is_live()
+        })
+}
+
+/// After an update: the agent the person asked to open while it ran in a
+/// terminal of its own is opened as soon as it runs where volee opens it,
+/// and the wait ends with the session if the session does (ADR 0034).
+fn settle_move(model: &mut Model, effects: &mut Vec<Effect>) {
+    let Some(Prompt::AwaitMove(agent)) = model.prompt else {
+        return;
+    };
+    let Some(record) = model.registry.agent(agent) else {
+        model.prompt = None;
+        model.notify("The session you were opening is gone.", false);
+        return;
+    };
+    if record.location != Location::Terminal {
+        model.prompt = None;
+        open_agent(model, agent, effects);
+    } else if !record.state.is_live() {
+        let name = record.name.clone();
+        model.prompt = None;
+        model.notify(format!("{name} ended in its terminal."), false);
+    }
 }
 
 /// The source answered an [`Effect::Open`].
