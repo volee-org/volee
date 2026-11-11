@@ -100,21 +100,19 @@ keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
 | A pane's screen, row for row | The daemon says what it read: the screen itself (a volee host's snapshot, with the size of its terminal; a multiplexer's capture of a pane) or the replay of a session's output. The preview, the wall, the full-screen view and `volee logs` show a pane's screen row for row, blank rows included ([ADR 0028](../adr/0028-one-emulator-and-the-wall-inside-the-interface.md#the-proof-and-what-it-found)) | Done: v0.12.2 |
 | An exact preview everywhere | Met for an agent in a volee host, a view open on a session and a multiplexer pane. For a Claude Code background session that is not open, volee has its replay, which is its screen as far as measured (50 rows of 50): the full-screen view and `volee logs` show every row of it, and the views that crop show a run of blank rows as one row that says how many it stands for, where they used to hide it without a word. Decided while the project's owner was away, and his to overturn ([ADR 0028](../adr/0028-one-emulator-and-the-wall-inside-the-interface.md#the-fold-said)). The size of a replay is still told from what it writes: nothing gives it | Done |
 
+## 0.13: agents of other AIs
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| Another AI, in its pane | An OpenCode agent started by hand in a tuios or tmux pane is placed in its pane; its preview and its tile are the pane's screen, and in a tuios pane `enter` opens it inside volee | Done |
+| `volee run` | `volee run -- <command>` runs any program as an agent of the list, in a volee host, from the terminal it is typed in; the leave key gives the terminal back and the program keeps running ([ADR 0029](../adr/0029-volee-run.md)) | Done |
+| Agents tuios recognizes | An agent of a harness volee has no listing for (Codex CLI, Gemini CLI, Aider...) is found through tuios when it runs in one of its panes ([ADR 0030](../adr/0030-a-multiplexer-may-say-which-panes-run-an-agent.md)). Checked with stand-in programs carrying the harnesses' names: the real ones were not available | Done |
+| Release | v0.13.0 | Done: v0.13.0 |
+
 ## Next
 
-In this order, one release per step:
-
-- Other harnesses: finding their agents wherever they run, a door on each,
-  and `volee run -- <command>` to start any program in a host. Done so
-  far: an OpenCode agent started by hand in a tuios or tmux pane is placed
-  in its pane, and opens there like any agent in a pane; `volee run --
-  <command>` runs any program as an agent of the list, in a host, from the
-  terminal it is typed in ([ADR 0029](../adr/0029-volee-run.md)); an agent
-  of a harness volee has no listing for (Codex CLI, Gemini CLI, Aider...)
-  is found through tuios when it runs in one of its panes
-  ([ADR 0030](../adr/0030-a-multiplexer-may-say-which-panes-run-an-agent.md)).
 - Missions as a lead agent runs them, with the rules that make a lead a
-  good one.
+  good one, and a coordinator that asks before it merges.
 
 ## Later
 
@@ -127,7 +125,6 @@ In this order, one release per step:
   [join](../guide/other-harnesses.md) through `volee mcp --join`.
 - Finding agents of harnesses other than OpenCode in the process table, so
   that they show outside tuios too.
-- Leads that start missions and workers themselves.
 - Messaging sessions started outside volee.
 - A Homebrew tap and a crates.io release.
 
