@@ -18,7 +18,9 @@ pub enum Role {
     Worker,
     /// A helper started by another agent inside its own session.
     Subagent,
-    /// A session volee did not launch.
+    /// An agent with no place in the organization of the work: a session
+    /// volee did not launch, or a program a person runs under volee
+    /// (`volee run`).
     Independent,
 }
 

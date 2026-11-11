@@ -65,6 +65,20 @@ fn outlook(agent: &Agent) -> String {
              there: `volee attach {name}`, or enter in the interface."
         );
     }
+    if agent.generic() {
+        return if agent.state.is_live() {
+            format!(
+                "{name} is a program started with `volee run`, which nothing hands a message to: \
+                 to talk to it, open it and type there: `volee attach {name}`, or enter in the \
+                 interface."
+            )
+        } else {
+            format!(
+                "{name} is a program started with `volee run`, and it ended: nothing resumes it, \
+                 so nothing will read this message. Run it again to talk to it."
+            )
+        };
+    }
     if agent.state.is_live() {
         return format!("It reaches {name} at the end of its turn, or wakes it if it is idle.");
     }
@@ -192,6 +206,50 @@ mod tests {
             }],
         );
         assert!(outlook(&failed).contains("waits until it runs again"));
+    }
+
+    #[test]
+    fn a_program_started_with_volee_run_is_typed_into() {
+        let id = AgentId::from_ulid(Ulid::from_parts(1, 1));
+        let run = |state| {
+            let events = [
+                EventKind::AgentRegistered {
+                    agent: id,
+                    name: "billing".into(),
+                    role: Role::Independent,
+                    harness: HarnessKind::Other("opencode".into()),
+                    launched_by: LaunchedBy::Human,
+                    parent: None,
+                    mission: None,
+                    workspace: Workspace::default(),
+                    location: Location::Host { id: "h1".into() },
+                },
+                EventKind::StateChanged {
+                    agent: id,
+                    state,
+                    detail: None,
+                },
+            ]
+            .map(|kind| Event::new(Timestamp::from_millis(1), kind));
+            Registry::from_events(&events)
+                .unwrap()
+                .agent(id)
+                .unwrap()
+                .clone()
+        };
+        // Nothing hands it the message: no promise that it arrives.
+        for state in [AgentState::Working, AgentState::Idle] {
+            let line = outlook(&run(state));
+            assert!(line.contains("started with `volee run`"), "{line}");
+            assert!(line.contains("`volee attach billing`"), "{line}");
+            assert!(!line.contains("end of its turn"), "{line}");
+        }
+        // And once it ended nothing resumes it: no promise of that either,
+        // and no advice to open what cannot be opened.
+        let ended = outlook(&run(AgentState::Stopped));
+        assert!(ended.contains("nothing resumes it"), "{ended}");
+        assert!(ended.contains("Run it again"), "{ended}");
+        assert!(!ended.contains("volee attach"), "{ended}");
     }
 
     #[test]

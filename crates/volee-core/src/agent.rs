@@ -122,6 +122,22 @@ impl Agent {
             && self.sessions.is_empty()
     }
 
+    /// Whether this agent is a program started with `volee run`
+    /// ([ADR 0029](https://volee-org.github.io/volee/adr/0029-volee-run.html)):
+    /// volee holds its terminal and knows it by no session of a harness.
+    /// Its states come from its screen, and nothing hands it a message or
+    /// resumes it: a person types into it.
+    ///
+    /// Told by what volee recorded of it: the human started it through
+    /// volee, it has no place in the organization of the work, and no
+    /// harness volee drives gave it a session.
+    pub fn generic(&self) -> bool {
+        self.launched_by == LaunchedBy::Human
+            && self.role == Role::Independent
+            && matches!(self.harness, HarnessKind::Other(_))
+            && self.sessions.is_empty()
+    }
+
     /// Whether volee drives the agent: it launched it, or the agent runs in
     /// one of volee's hosts, as an adopted agent does
     /// ([ADR 0023](https://volee-org.github.io/volee/adr/0023-every-agent-on-the-machine.html)).
@@ -221,6 +237,84 @@ mod tests {
             !agent(LaunchedBy::Outside, Location::Unknown, None).watched(),
             "joined through the MCP server: no session"
         );
+    }
+
+    /// An agent as its registration alone makes it.
+    fn registered(
+        role: Role,
+        launched_by: LaunchedBy,
+        harness: HarnessKind,
+        location: Location,
+    ) -> Agent {
+        let id = AgentId::from_ulid(Ulid::from_parts(7, 7));
+        let mut registry = Registry::new();
+        registry
+            .apply(&Event::new(
+                Timestamp::from_millis(1),
+                EventKind::AgentRegistered {
+                    agent: id,
+                    name: "a".into(),
+                    role,
+                    harness,
+                    launched_by,
+                    parent: None,
+                    mission: None,
+                    workspace: Workspace::at("/work"),
+                    location,
+                },
+            ))
+            .unwrap();
+        registry.agent(id).unwrap().clone()
+    }
+
+    #[test]
+    fn a_program_run_under_volee_is_told_from_every_other_agent() {
+        let host = || Location::Host { id: "h".into() };
+        let opencode = || HarnessKind::Other("opencode".into());
+        let run = registered(Role::Independent, LaunchedBy::Human, opencode(), host());
+        assert!(run.generic());
+        // volee holds its terminal: it is stopped from volee, it did not
+        // join through MCP and it is more than a session volee watches.
+        assert!(run.managed() && !run.joined() && !run.watched());
+
+        // The same program launched by volee has a place in the work, even
+        // before its session is known.
+        let launching = registered(Role::Lead, LaunchedBy::Human, opencode(), host());
+        assert!(!launching.generic());
+        let worker = registered(
+            Role::Worker,
+            LaunchedBy::Agent(AgentId::from_ulid(Ulid::from_parts(1, 1))),
+            opencode(),
+            host(),
+        );
+        assert!(!worker.generic());
+        // One that joined through MCP was started outside volee.
+        let joined = registered(
+            Role::Independent,
+            LaunchedBy::Outside,
+            HarnessKind::Other("codex".into()),
+            Location::Unknown,
+        );
+        assert!(joined.joined() && !joined.generic());
+        // A Claude Code agent has hooks, a session and a way to resume.
+        let claude = registered(
+            Role::Independent,
+            LaunchedBy::Human,
+            HarnessKind::ClaudeCode,
+            host(),
+        );
+        assert!(!claude.generic());
+        // With a session of a harness volee drives, it is that harness's.
+        let mut with_session = run;
+        with_session.sessions.push(SessionLink {
+            key: SessionKey {
+                harness: opencode(),
+                id: "ses_1".into(),
+            },
+            origin: SessionOrigin::Started,
+            at: Timestamp::from_millis(2),
+        });
+        assert!(!with_session.generic());
     }
 
     #[test]

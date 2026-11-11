@@ -259,6 +259,8 @@ struct Hosted {
     socket: std::path::PathBuf,
     id: String,
     name: String,
+    /// A program started with `volee run`: nothing resumes it.
+    generic: bool,
 }
 
 /// The host `agent` runs in, if it runs in one.
@@ -270,6 +272,7 @@ async fn hosted(shared: &Arc<Shared>, agent: AgentId) -> Option<Hosted> {
         socket: crate::launch::hosts_dir(shared).join(format!("{id}.sock")),
         id,
         name: record.name.clone(),
+        generic: record.generic(),
     })
 }
 
@@ -432,11 +435,12 @@ pub(crate) async fn attach(
 ) -> Result<AttachCommand, DaemonError> {
     // An agent in a host: `volee host attach`, which the client runs in its
     // own terminal; Ctrl+Q comes back (ADR 0021).
-    if let Some(Hosted { id, name, .. }) = hosted(shared, params.agent).await {
+    if let Some(Hosted {
+        id, name, generic, ..
+    }) = hosted(shared, params.agent).await
+    {
         if !crate::launch::host_runs(shared, &id) {
-            return Err(DaemonError::Refused(format!(
-                "{name} is not running: send it a message to resume it in a new volee host"
-            )));
+            return Err(crate::launch::not_running(&name, generic));
         }
         let volee = shared.volee_bin.clone().ok_or_else(|| {
             DaemonError::Unavailable(format!("this daemon cannot take {name} over"))

@@ -528,10 +528,19 @@ pub(crate) fn closed(
     if never_opened {
         let reason = text::clause(reason).to_owned();
         if was_editing {
+            // Nothing resumes a program started with `volee run`.
+            let advice = if model
+                .registry
+                .agent(agent)
+                .is_some_and(volee_core::Agent::generic)
+            {
+                "Run it again with volee run."
+            } else {
+                "Send it a message to resume it in a new host."
+            };
             model.notify(
                 format!(
-                    "Cannot type into {name}: its volee host does not answer ({reason}). Send it \
-                     a message to resume it in a new host."
+                    "Cannot type into {name}: its volee host does not answer ({reason}). {advice}"
                 ),
                 true,
             );

@@ -120,7 +120,7 @@ fn runs(dir: &HostDir, id: &str) -> bool {
 /// inside its own screen.
 pub(crate) async fn open(shared: &Arc<Shared>, params: OpenParams) -> Result<Opened, DaemonError> {
     let agent = params.agent;
-    let (name, location, harness, cwd) = {
+    let (name, location, harness, cwd, generic) = {
         let state = shared.state.lock().await;
         let record = state
             .registry()
@@ -131,14 +131,13 @@ pub(crate) async fn open(shared: &Arc<Shared>, params: OpenParams) -> Result<Ope
             record.location.clone(),
             record.harness.clone(),
             record.workspace.cwd.clone(),
+            record.generic(),
         )
     };
     // An agent in a volee host: the host is its terminal.
     if let Some(host) = location.host() {
         if !crate::launch::host_runs(shared, host) {
-            return Err(DaemonError::Refused(format!(
-                "{name} is not running: send it a message to resume it in a new volee host"
-            )));
+            return Err(crate::launch::not_running(&name, generic));
         }
         return Ok(Opened {
             socket: Some(crate::launch::hosts_dir(shared).join(format!("{host}.sock"))),

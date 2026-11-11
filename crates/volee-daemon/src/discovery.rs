@@ -298,6 +298,15 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
     listing
         .sessions
         .retain(|session| !session.cwd.starts_with(&shared.paths.state_dir));
+    // A session whose program runs in the host of an agent started with
+    // `volee run` is that agent: the host's own record comes first
+    // (ADR 0023), and the listing does not make a second agent of it.
+    let in_hosts = crate::launch::run_programs(shared).await;
+    if !in_hosts.is_empty() {
+        listing
+            .sessions
+            .retain(|session| session.pid.is_none_or(|pid| !in_hosts.contains(&pid)));
+    }
     let hosted = crate::panes::hosted(&listing.sessions);
     let mut state = shared.state.lock().await;
     let now = state.now();
