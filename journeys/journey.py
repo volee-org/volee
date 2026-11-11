@@ -14,6 +14,7 @@ import os
 import pty
 import shutil
 import signal
+import socket
 import struct
 import subprocess
 import sys
@@ -137,12 +138,37 @@ class Journey:
         return self.run([self.volee, *args])
 
     def start_daemon(self, binary=None):
-        """Starts the journey's own daemon and waits until it answers."""
+        """Starts the journey's own daemon and waits until it answers.
+
+        No volee command runs before the daemon listens. Any command starts a daemon
+        when none answers yet, and that second daemon would be the binary under test:
+        it could take the lock first, and a journey that means to run an older daemon
+        would run the new one without knowing. So the wait only knocks on the socket,
+        which starts nothing, and the daemon that answers must be the process started
+        here."""
         os.makedirs(self.vars["VOLEE_CONFIG_DIR"], exist_ok=True)
         log = open(os.path.join(self.workdir, "daemon.log"), "w", encoding="utf-8")
         self.daemon = subprocess.Popen([binary or self.volee, "daemon", "run"], env=self.env,
                                        stdout=log, stderr=log, start_new_session=True)
-        return bool(self.wait(lambda: self.volee_run("ls").returncode == 0, 20))
+
+        def listening():
+            knock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                knock.connect(self.vars["VOLEE_SOCKET"])
+                return True
+            except OSError:
+                return False
+            finally:
+                knock.close()
+        if not self.wait(listening, 20, 0.1):
+            return False
+        return self.daemon.poll() is None and self.volee_run("ls").returncode == 0
+
+    def daemon_version(self):
+        """The version of the daemon that answers, as `volee daemon status` says it:
+        `volee daemon 0.9.1 (pid ...)`."""
+        words = self.volee_run("daemon", "status").stdout.split()
+        return words[2] if words[:2] == ["volee", "daemon"] and len(words) > 2 else ""
 
     def launch(self, name, task, binary=None):
         """Launches a throwaway agent in the sandbox, on a branch of its own."""

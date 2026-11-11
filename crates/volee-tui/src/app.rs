@@ -1283,15 +1283,7 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     let mut effects = Vec::new();
     let mut dirty = true;
     match msg {
-        Msg::Key(key) => {
-            if key.kind == KeyEventKind::Release {
-                dirty = false;
-            } else if crate::edit::editing(model) {
-                crate::edit::on_key(model, &key, &mut effects);
-            } else {
-                on_key(model, KeyCombo::from_event(&key), &mut effects);
-            }
-        }
+        Msg::Key(key) => dirty = on_key_event(model, &key, &mut effects),
         // In edit mode the mouse does nothing: the keys are the agent's.
         Msg::Mouse(mouse) => dirty = on_mouse(model, mouse, &mut effects),
         Msg::Paste(text) if crate::edit::editing(model) => {
@@ -1390,6 +1382,28 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     }
     model.dirty |= dirty;
     effects
+}
+
+/// A key: nothing for a release, the agent's in edit mode, volee's
+/// otherwise. Returns whether anything may have changed.
+fn on_key_event(model: &mut Model, key: &KeyEvent, effects: &mut Vec<Effect>) -> bool {
+    if key.kind == KeyEventKind::Release {
+        return false;
+    }
+    if crate::edit::editing(model) {
+        crate::edit::on_key(model, key, effects);
+        return true;
+    }
+    if model.overlay == Some(Overlay::Screen) {
+        // A key on an agent's screen that edit mode does not hold.
+        tracing::debug!(
+            control = key.modifiers.contains(KeyModifiers::CONTROL),
+            live = model.live.is_some(),
+            "full screen: a key for volee"
+        );
+    }
+    on_key(model, KeyCombo::from_event(key), effects);
+    true
 }
 
 /// The interface is back after a take over in the terminal.

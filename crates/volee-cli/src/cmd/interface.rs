@@ -16,6 +16,7 @@ use crate::tools;
 /// person quits. The theme, the key overrides and reduced motion come from
 /// the configuration.
 pub(crate) async fn run(theme: Option<&str>) -> Result<()> {
+    init_logging(&paths()?.log_dir());
     let mut options = options(theme)?;
     // Agents in volee hosts are shown live and typed into in edit mode.
     options.hosts = Some(paths()?.state_dir.join("hosts"));
@@ -33,6 +34,32 @@ pub(crate) async fn run(theme: Option<&str>) -> Result<()> {
         .context("cannot follow the volee daemon")?;
     volee_tui::run(source, options).await?;
     Ok(())
+}
+
+/// With `VOLEE_LOG` set (a filter, such as `volee_tui=debug`), the interface
+/// writes its diagnostics to `interface.log`, beside the daemon's log,
+/// readable only by the person. The terminal is the interface's: nothing
+/// may be printed there. Without the variable nothing is written.
+fn init_logging(log_dir: &Path) {
+    use std::os::unix::fs::OpenOptionsExt;
+    let Ok(filter) = tracing_subscriber::EnvFilter::try_from_env("VOLEE_LOG") else {
+        return;
+    };
+    let opened = std::fs::create_dir_all(log_dir).and_then(|()| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(log_dir.join("interface.log"))
+    });
+    let Ok(file) = opened else {
+        return;
+    };
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::sync::Mutex::new(file))
+        .with_ansi(false)
+        .try_init();
 }
 
 /// The interface's colors, keys, motion, repositories and tools from the
