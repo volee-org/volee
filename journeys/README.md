@@ -33,7 +33,7 @@ python3 journeys/pane.py      --volee target/release/volee --sandbox ~/code/sand
 python3 journeys/edit_mode.py --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/wall.py      --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/old_host.py  --volee target/release/volee --old-volee ~/bin/volee-0.9.1 --sandbox ~/code/sandbox
-python3 journeys/installed.py --sandbox ~/code/sandbox --expect 0.11.0
+python3 journeys/installed.py --sandbox ~/code/sandbox --expect 0.12.0
 ```
 
 Each prints one `PASS` or `FAIL` line per check, the screens it saw at the
@@ -48,7 +48,7 @@ you can look (`tuios attach volee-journey-...`).
 | `edit_mode.py` | Launches an agent, shows it full screen, types into it in edit mode, sends Esc, Ctrl+Z and a two-line paste, leaves with Ctrl+Q, then checks in a pseudo-terminal that the agent follows the panel's size. | Its own, isolated |
 | `wall.py` | Launches an agent and starts a background session by hand, in a window the size of a large terminal: the preview of the first is its live screen, `5` shows both screens side by side, each opens from the wall with Enter or `i`, takes what is typed and comes back to the wall, `z` shows one full size, and the wall opens no terminal and resizes nothing. | Its own, isolated |
 | `old_host.py` | The same typing on an agent whose host an older release started (hosts outlive upgrades). | Its own, started by the older binary |
-| `installed.py` | The installed volee with your own daemon and your own list: compares the list with what Claude Code lists, launches one throwaway agent and types into it, starts one background session by hand and opens it by Enter, then removes both. Run it after installing a release. | Yours |
+| `installed.py` | The installed volee with your own daemon and your own list: compares the list with what Claude Code lists, launches one throwaway agent, types into it and shows it on the wall, starts one background session by hand and opens it by Enter, then removes both. Run it after installing a release. | Yours |
 
 ## What a journey leaves behind
 
