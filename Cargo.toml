@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.12.3"
+version = "0.13.0"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
@@ -15,18 +15,18 @@ categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
 # Internal crates.
-volee-config = { path = "crates/volee-config", version = "0.12.3" }
-volee-core = { path = "crates/volee-core", version = "0.12.3" }
-volee-daemon = { path = "crates/volee-daemon", version = "0.12.3" }
-volee-git = { path = "crates/volee-git", version = "0.12.3" }
-volee-harness = { path = "crates/volee-harness", version = "0.12.3" }
-volee-host = { path = "crates/volee-host", version = "0.12.3" }
-volee-mcp = { path = "crates/volee-mcp", version = "0.12.3" }
-volee-mux = { path = "crates/volee-mux", version = "0.12.3" }
-volee-proto = { path = "crates/volee-proto", version = "0.12.3" }
-volee-store = { path = "crates/volee-store", version = "0.12.3" }
-volee-term = { path = "crates/volee-term", version = "0.12.3" }
-volee-tui = { path = "crates/volee-tui", version = "0.12.3" }
+volee-config = { path = "crates/volee-config", version = "0.13.0" }
+volee-core = { path = "crates/volee-core", version = "0.13.0" }
+volee-daemon = { path = "crates/volee-daemon", version = "0.13.0" }
+volee-git = { path = "crates/volee-git", version = "0.13.0" }
+volee-harness = { path = "crates/volee-harness", version = "0.13.0" }
+volee-host = { path = "crates/volee-host", version = "0.13.0" }
+volee-mcp = { path = "crates/volee-mcp", version = "0.13.0" }
+volee-mux = { path = "crates/volee-mux", version = "0.13.0" }
+volee-proto = { path = "crates/volee-proto", version = "0.13.0" }
+volee-store = { path = "crates/volee-store", version = "0.13.0" }
+volee-term = { path = "crates/volee-term", version = "0.13.0" }
+volee-tui = { path = "crates/volee-tui", version = "0.13.0" }
 
 # External crates. Keep this list sorted.
 anyhow = "1.0.104"

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 It is generated from the commit history with [git-cliff](https://git-cliff.org):
 see [RELEASING.md](RELEASING.md).
 
+## [0.13.0] - 2026-11-11
+
+### Added
+
+- **daemon**: Open an agent of another AI where it runs, in its pane ([#144](https://github.com/volee-org/volee/pull/144))
+- **cli**: Run any program as an agent with volee run ([#145](https://github.com/volee-org/volee/pull/145))
+- **daemon**: List the agents tuios recognizes in its panes (Codex CLI, Gemini CLI, Aider) ([#146](https://github.com/volee-org/volee/pull/146))
+
 ## [0.12.3] - 2026-11-11
 
 ### Fixed
@@ -251,6 +259,7 @@ see [RELEASING.md](RELEASING.md).
 - Mark the interface, messaging and views milestones done ([#52](https://github.com/volee-org/volee/pull/52))
 - Start the daemon in the first step of the guide, and say what tidy removes ([#56](https://github.com/volee-org/volee/pull/56))
 
+[0.13.0]: https://github.com/volee-org/volee/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/volee-org/volee/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/volee-org/volee/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/volee-org/volee/compare/v0.12.0...v0.12.1
