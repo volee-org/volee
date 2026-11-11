@@ -81,6 +81,25 @@ def cut(row, width):
     return "".join(cell for cell in row[:width] if cell is not None).rstrip()
 
 
+def folded(rows):
+    """A screen, given as rows of cells, as a view that crops shows it when volee
+    reads it from a replay: a run of three blank rows or more is one row, volee's
+    own, which says how many rows it stands for."""
+    out, run = [], 0
+    for row in list(rows) + [None]:
+        if row is not None and not cut(row, len(row)):
+            run += 1
+            continue
+        if run >= 3:
+            out.append(cells("\u22ef {} blank rows \u22ef".format(run)))
+        else:
+            out.extend([[] for _ in range(run)])
+        run = 0
+        if row is not None:
+            out.append(row)
+    return out
+
+
 def same_tail(view, reference, width):
     """Whether a view that crops a screen shows its last rows, each cut at `width`:
     cell for cell, as far as text tells. `view` and `reference` are rows of cells.

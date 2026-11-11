@@ -17,7 +17,7 @@ and the comparison only counts when the screen did not change while it was made.
 
     python3 journeys/wall.py --volee target/release/volee --sandbox ~/code/sandbox
 """
-from journey import Journey, answered_with, arguments, cells, in_order, same_tail
+from journey import Journey, answered_with, arguments, cells, cut, folded, in_order, same_tail
 
 SPELL = "Reply only with the word made of these letters, in uppercase: "
 
@@ -80,10 +80,13 @@ def held_screen(j, name):
 
 def replayed_screen(j, name):
     """The session volee does not host: its three views show what the daemon reads,
-    the same replay, which `volee logs` prints whole. A view reads it every few
-    seconds, and a screen still changes for a while after a turn (a hint goes away):
-    the screen is first left to come to rest, each view is given the time of a few
-    readings to show it, and the comparison counts when the screen has not changed."""
+    the same replay, which `volee logs` prints whole, every row of it. Full size the
+    rows are shown as they are; the preview and the tile, which crop, show a run of
+    blank rows as one row that says how many it stands for. A view reads the screen
+    every few seconds, and a screen still changes for a while after a turn (a hint
+    goes away): the screen is first left to come to rest, each view is given the time
+    of a few readings to show it, and the comparison counts when the screen has not
+    changed."""
     def read():
         return [cells(line) for line in j.volee_run("logs", name).stdout.splitlines()]
 
@@ -100,9 +103,10 @@ def replayed_screen(j, name):
         before = j.still(read)
         if not before:
             continue
-        preview, preview_width = view("Preview · " + name, 1, before, same_tail)
+        cropped = folded(before)
+        preview, preview_width = view("Preview · " + name, 1, cropped, same_tail)
         j.keys("5", 3.0)
-        tile, tile_width = view(name, 0, before, same_tail)
+        tile, tile_width = view(name, 0, cropped, same_tail)
         j.keys("q", 1.0)
         j.keys("z", 2.0)
         full, full_width = view("Screen · " + name, 1, before, in_order)
@@ -112,13 +116,21 @@ def replayed_screen(j, name):
     else:
         j.check("the session's screen stays still while its three views are compared", False)
         return
+    # A background session draws its conversation at the top of its terminal and
+    # its prompt at the bottom: its screen holds a run of blank rows, which is what
+    # the views that crop fold.
+    runs = [cut(row, len(row)) for row in cropped if "blank rows" in cut(row, len(row))]
+    j.check("the session's screen holds a run of blank rows", bool(runs),
+            "{} rows, {} once its runs are folded: {}".format(len(before), len(cropped),
+                                                             ", ".join(runs)))
     for what, view, view_width in (("the preview", preview, preview_width),
                                    ("its tile on the wall", tile, tile_width)):
         if view is None:
             j.check(what + " shows the session's screen", False, "no such frame on screen")
             continue
-        same, compared, difference = same_tail(view, before, view_width)
-        j.check("{} shows the same cells as what the daemon reads".format(what), same,
+        same, compared, difference = same_tail(view, cropped, view_width)
+        j.check("{} shows the same cells as what the daemon reads, a run of blank rows "
+                "as one row that says so".format(what), same,
                 difference or "{} cells compared, in {} columns".format(compared, view_width))
     if full is None:
         j.check("the full-screen view shows the session's screen", False,
@@ -127,6 +139,8 @@ def replayed_screen(j, name):
     same, compared, difference = in_order(full, before, full_width)
     j.check("the full-screen view shows the same rows, the long ones wrapped", same,
             difference or "{} cells compared, in {} columns".format(compared, full_width))
+    j.check("and folds nothing: its blank rows are the screen's",
+            not any("blank rows" in cut(row, len(row)) for row in full))
 
 
 def main():

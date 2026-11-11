@@ -201,11 +201,30 @@ struct PreviewCell {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Fit {
     /// Each row on one line, cut at the edge: the preview, a glance at as
-    /// many rows as fit.
+    /// many rows as fit. Of a replay, a run of blank rows is one line that
+    /// says how many it stands for.
     Crop,
     /// A row whose text goes past the edge goes on over several lines: the
-    /// full-screen view, for reading.
+    /// full-screen view, for reading. Every row is shown.
     Wrap,
+}
+
+/// How many blank rows in a row a view that crops folds into one line. Fewer
+/// are how an interface spaces what it writes, and stay as they are.
+const FOLD_FROM: usize = 3;
+
+/// One line of a screen as a view draws it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Line {
+    /// Cells of a row: the row, and the range of its cells.
+    Cells(usize, Range<usize>),
+    /// A run of blank rows folded into one line: how many rows.
+    Fold(usize),
+}
+
+/// What a folded run of `rows` blank rows says in its one line.
+fn fold_text(rows: usize) -> String {
+    format!("\u{22ef} {rows} blank rows \u{22ef}")
 }
 
 /// Whether a cell holds only blanks or box lines (U+2500 to U+257F), which
@@ -219,20 +238,24 @@ fn decorative(symbol: &str) -> bool {
 /// A parsed screen.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PreviewScreen {
-    /// Rows of cells, without trailing blanks: the screen's own rows, or,
-    /// read from a replay, its rows with a run of blank rows kept as one.
+    /// Rows of cells, without trailing blanks: the screen's own rows.
     rows: Vec<Vec<PreviewCell>>,
     /// The last row worth showing: the cursor's or the last with text.
     anchor: u16,
+    /// Whether a view that crops folds its runs of blank rows: for the
+    /// replay of a session's output.
+    folds: bool,
 }
 
 impl PreviewScreen {
     /// What a source read of an agent's screen, run through the emulator
-    /// (libghostty-vt, as everywhere in volee: ADR 0020). A screen itself,
-    /// such as the capture of a multiplexer's pane, is kept row for row, as
-    /// a screen volee holds is. A replay is not the session's screen: it
-    /// leaves blank what it never redrew, and gets the repair of
-    /// [`Self::read`] (ADR 0028).
+    /// (libghostty-vt, as everywhere in volee: ADR 0020). Its rows are kept
+    /// as they are, for a screen itself, such as the capture of a
+    /// multiplexer's pane, and for a replay. A replay is what volee has of
+    /// a session whose screen it does not hold, and such a session may draw
+    /// its conversation at the top of its terminal and its prompt at the
+    /// bottom: a view that crops folds its runs of blank rows, and says so
+    /// (ADR 0028).
     ///
     /// The emulator has the size of the terminal the output was drawn in
     /// when the source says it: the snapshot of a volee host redraws its
@@ -261,8 +284,8 @@ impl PreviewScreen {
     }
 
     /// Reads the emulator's cells. Each row keeps its cells down to the
-    /// last one that shows something; of a `replay`, a run of blank rows
-    /// is kept as one.
+    /// last one that shows something. A `replay` is marked as one: its rows
+    /// are the same, and a view that crops folds its runs of blank rows.
     fn read(screen: &mut Screen, depth: ColorDepth, replay: bool) -> Option<Self> {
         let frame = screen.frame().ok()?;
         let height = frame.rows.len();
@@ -297,31 +320,10 @@ impl PreviewScreen {
         }
         let (_, cursor_row) = screen.cursor_position();
         let anchor = last_text.max(usize::from(cursor_row)).min(height - 1);
-        if !replay {
-            return Some(Self {
-                rows: parsed,
-                anchor: u16::try_from(anchor).unwrap_or(u16::MAX),
-            });
-        }
-        // A replay leaves blank what it never redrew: on a tall Claude Code
-        // screen, rows of nothing between the conversation and the status
-        // line, where the frame of the prompt was drawn before the replay
-        // starts. A run of blank rows is kept as one, so that the end of the
-        // conversation stays in view.
-        let mut rows: Vec<Vec<PreviewCell>> = Vec::with_capacity(parsed.len());
-        let mut kept_anchor = 0;
-        for (index, cells) in parsed.into_iter().enumerate() {
-            let repeated_blank = cells.is_empty() && rows.last().is_some_and(Vec::is_empty);
-            if !repeated_blank {
-                rows.push(cells);
-            }
-            if index == anchor {
-                kept_anchor = rows.len().saturating_sub(1);
-            }
-        }
         Some(Self {
-            rows,
-            anchor: u16::try_from(kept_anchor).unwrap_or(u16::MAX),
+            rows: parsed,
+            anchor: u16::try_from(anchor).unwrap_or(u16::MAX),
+            folds: replay,
         })
     }
 
@@ -340,11 +342,36 @@ impl PreviewScreen {
     /// wraps. What a row ends with that is only blanks and box lines, such
     /// as the padding of a diff line or the right side of a frame, does not
     /// count: such a row stays one line, cut at the edge.
-    fn lines(&self, width: u16, fit: Fit) -> Vec<(usize, Range<usize>)> {
+    ///
+    /// With [`Fit::Crop`], a run of blank rows of a replay is one line
+    /// ([`Line::Fold`]): a session volee does not hold may draw its
+    /// conversation at the top of its terminal and its prompt at the
+    /// bottom, and the last rows of its screen would be blank rows.
+    fn lines(&self, width: u16, fit: Fit) -> Vec<Line> {
         let width = usize::from(width.max(1));
         let mut lines = Vec::new();
         let shown = usize::from(self.anchor) + 1;
+        let fold = self.folds && fit == Fit::Crop;
+        // The first row after a folded run.
+        let mut after_fold = 0;
         for (row, cells) in self.rows.iter().enumerate().take(shown) {
+            if row < after_fold {
+                continue;
+            }
+            if fold && cells.is_empty() {
+                let run = self
+                    .rows
+                    .iter()
+                    .take(shown)
+                    .skip(row)
+                    .take_while(|cells| cells.is_empty())
+                    .count();
+                if run >= FOLD_FROM {
+                    lines.push(Line::Fold(run));
+                    after_fold = row + run;
+                    continue;
+                }
+            }
             let text_end = match fit {
                 Fit::Crop => 0,
                 Fit::Wrap => cells
@@ -364,11 +391,11 @@ impl PreviewScreen {
                 if used > 0 && used + cell_width > width {
                     match after_blank {
                         Some((next, before)) if before * 2 >= width => {
-                            lines.push((row, start..next));
+                            lines.push(Line::Cells(row, start..next));
                             (start, used) = (next, used - before);
                         }
                         _ => {
-                            lines.push((row, start..position));
+                            lines.push(Line::Cells(row, start..position));
                             (start, used) = (position, 0);
                         }
                     }
@@ -379,7 +406,7 @@ impl PreviewScreen {
                     after_blank = Some((position + 1, used));
                 }
             }
-            lines.push((row, start..cells.len()));
+            lines.push(Line::Cells(row, start..cells.len()));
         }
         lines
     }
@@ -403,7 +430,22 @@ impl PreviewScreen {
             .max(1)
             .min(lines.len());
         let top = bottom.saturating_sub(usize::from(area.height));
-        for (y, (row, range)) in (area.y..area.bottom()).zip(&lines[top..bottom]) {
+        for (y, line) in (area.y..area.bottom()).zip(&lines[top..bottom]) {
+            let (row, range) = match line {
+                Line::Cells(row, range) => (row, range),
+                Line::Fold(rows) => {
+                    // The one line that is volee's own, in its own style.
+                    let style = theme.style(StyleRole::TextDim);
+                    buf.set_stringn(
+                        area.x,
+                        y,
+                        fold_text(*rows),
+                        usize::from(area.width),
+                        style,
+                    );
+                    continue;
+                }
+            };
             let Some(cells) = self
                 .rows
                 .get(*row)
@@ -442,8 +484,8 @@ impl PreviewScreen {
 /// visible last, one line per row, without colors, escape sequences or
 /// trailing blanks. `volee logs` prints it: the raw output replays every
 /// frame of the agent's interface, and carries sequences that should not
-/// reach a terminal unread. A screen itself is printed row for row; a
-/// replay of a session's output has its runs of blank rows counted as one.
+/// reach a terminal unread. Every row is printed, blank rows included, for
+/// a screen itself and for a replay.
 pub fn screen_text(reading: &Reading) -> String {
     let screen = PreviewScreen::of(reading, ColorDepth::TrueColor);
     let mut lines: Vec<String> = screen
@@ -567,21 +609,34 @@ mod tests {
     }
 
     #[test]
-    fn a_capture_keeps_its_blank_rows_and_a_replay_counts_a_run_as_one() {
+    fn a_capture_and_a_replay_keep_their_rows_and_only_a_replay_folds() {
         // Rows placed with cursor moves, as a multiplexer's capture comes.
         let output = "\x1b[1;1Hfirst\x1b[5;1Hfifth\x1b[6;1Hsixth";
         let capture = PreviewScreen::of(&Reading::screen(output, None), ColorDepth::TrueColor);
         assert_eq!(capture.text()[..6], ["first", "", "", "", "fifth", "sixth"]);
         assert_eq!(capture.anchor, 5);
+        assert_eq!(capture.line_count(40, Fit::Crop), 6);
+        // Read as a replay, the rows are the same. A view that crops folds
+        // the run; full size, every row is shown.
         let replay = PreviewScreen::of(&Reading::replay(output), ColorDepth::TrueColor);
-        assert_eq!(replay.text()[..4], ["first", "", "fifth", "sixth"]);
-        assert_eq!(replay.anchor, 3);
-        // `volee logs` prints each as it is read.
+        assert_eq!(replay.text(), capture.text());
+        assert_eq!(replay.anchor, 5);
+        assert_eq!(
+            replay.lines(40, Fit::Crop),
+            [
+                Line::Cells(0, 0..5),
+                Line::Fold(3),
+                Line::Cells(4, 0..5),
+                Line::Cells(5, 0..5),
+            ]
+        );
+        assert_eq!(replay.line_count(40, Fit::Wrap), 6);
+        // `volee logs` prints every row of both.
         assert_eq!(
             screen_text(&Reading::screen(output, None)),
             "first\n\n\n\nfifth\nsixth"
         );
-        assert_eq!(screen_text(&output.into()), "first\n\nfifth\nsixth");
+        assert_eq!(screen_text(&output.into()), "first\n\n\n\nfifth\nsixth");
     }
 
     #[test]
@@ -612,8 +667,9 @@ mod tests {
         use std::fmt::Write as _;
         let mut output = String::from("\x1b[10;5Hhere");
         let screen = PreviewScreen::parse(&output, ColorDepth::TrueColor);
-        // The nine blank rows above it are kept as one.
-        assert_eq!(screen.text()[..2], ["", "    here"]);
+        // The nine blank rows above it are the screen's own: they stay.
+        assert_eq!(screen.text()[8..10], ["", "    here"]);
+        assert_eq!(screen.anchor, 9);
         for line in 0..60 {
             write!(output, "\r\nline {line}").unwrap();
         }
@@ -645,10 +701,11 @@ mod tests {
         assert_eq!(screen_size(output), (73, 295));
         let screen = PreviewScreen::parse(output, ColorDepth::TrueColor);
         let text = screen.text();
-        // The 70 blank rows above the counter are kept as one.
-        assert_eq!(text[1], format!("{}42", " ".repeat(293)));
-        assert_eq!(text[3], "prompt");
-        assert_eq!(screen.anchor, 3);
+        // The counter is on row 71 and the prompt on row 73, as on the
+        // screen.
+        assert_eq!(text[70], format!("{}42", " ".repeat(293)));
+        assert_eq!(text[72], "prompt");
+        assert_eq!(screen.anchor, 72);
         assert_eq!(screen_size("\x1b[10;5Hhere\x1b[?25l"), (ROWS, COLUMNS));
         assert_eq!(
             screen_size("\x1b[9999;99999H\x1b["),
@@ -677,23 +734,90 @@ mod tests {
         assert_eq!(text[3], "  next");
     }
 
+    /// The text a buffer holds on one of its rows, without trailing blanks.
+    fn drawn(buf: &Buffer, y: u16) -> String {
+        (0..buf.area.width)
+            .map(|x| buf[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    }
+
     #[test]
-    fn runs_of_blank_rows_shrink_to_one() {
-        // A tall Claude Code screen as its replay leaves it: the
-        // conversation at the top, the status line at the bottom, and blank
-        // between them where the frame of the prompt was drawn earlier.
+    fn a_view_that_crops_folds_a_run_of_blank_rows_of_a_replay_and_says_so() {
+        // A background session's screen as its replay draws it: the
+        // conversation at the top of its terminal, the status line at the
+        // bottom, and blank rows between them.
         let output = "\x1b[1;1Hfirst\x1b[3;1Hsecond\x1b[40;1Hlast\x1b[73;1H18%\x1b[69;3H";
         let screen = PreviewScreen::parse(output, ColorDepth::TrueColor);
-        assert_eq!(screen.anchor, 6);
+        // Its rows are the screen's, and `volee logs` prints them all.
+        assert_eq!(screen.anchor, 72);
+        let text = screen.text();
         assert_eq!(
-            screen_text(&output.into()),
-            "first\n\nsecond\n\nlast\n\n18%"
+            [&text[0], &text[2], &text[39], &text[72]],
+            ["first", "second", "last", "18%"]
         );
-        let area = Rect::new(0, 0, 6, 3);
+        assert_eq!(screen_text(&output.into()).lines().count(), 73);
+
+        // A view that crops: one blank row stays, a run becomes one line.
+        assert_eq!(
+            screen.lines(40, Fit::Crop),
+            [
+                Line::Cells(0, 0..5),
+                Line::Cells(1, 0..0),
+                Line::Cells(2, 0..6),
+                Line::Fold(36),
+                Line::Cells(39, 0..4),
+                Line::Fold(32),
+                Line::Cells(72, 0..3),
+            ]
+        );
+        let area = Rect::new(0, 0, 24, 3);
         let mut buf = Buffer::empty(area);
         screen.render(area, &mut buf, 0, Fit::Crop, &Theme::default());
-        let row = |y: u16| -> String { (0..6).map(|x| buf[(x, y)].symbol().to_owned()).collect() };
-        assert_eq!([row(0), row(1), row(2)], ["last  ", "      ", "18%   "]);
+        assert_eq!(
+            [drawn(&buf, 0), drawn(&buf, 1), drawn(&buf, 2)],
+            ["last", "\u{22ef} 32 blank rows \u{22ef}", "18%"]
+        );
+        // The line that is volee's own is not drawn as the agent's text.
+        assert_ne!(buf[(0, 1)].style(), buf[(0, 0)].style());
+
+        // Full size, every row is shown: the 32 blank rows are there.
+        assert_eq!(screen.line_count(40, Fit::Wrap), 73);
+        let area = Rect::new(0, 0, 24, 34);
+        let mut buf = Buffer::empty(area);
+        screen.render(area, &mut buf, 0, Fit::Wrap, &Theme::default());
+        assert_eq!(drawn(&buf, 0), "last");
+        assert!((1..33).all(|y| drawn(&buf, y).is_empty()));
+        assert_eq!(drawn(&buf, 33), "18%");
+    }
+
+    #[test]
+    fn two_blank_rows_are_spacing_and_a_screen_itself_never_folds() {
+        let output = "\x1b[1;1Hfirst\x1b[4;1Hfourth\x1b[8;1Height";
+        // A replay: two blank rows stay as they are, three fold.
+        let replay = PreviewScreen::parse(output, ColorDepth::TrueColor);
+        assert_eq!(
+            replay.lines(40, Fit::Crop),
+            [
+                Line::Cells(0, 0..5),
+                Line::Cells(1, 0..0),
+                Line::Cells(2, 0..0),
+                Line::Cells(3, 0..6),
+                Line::Fold(3),
+                Line::Cells(7, 0..5),
+            ]
+        );
+        // The same output as a screen itself, a capture or a host's
+        // snapshot: row for row in every view.
+        let screen = PreviewScreen::of(&Reading::screen(output, None), ColorDepth::TrueColor);
+        assert_eq!(screen.line_count(40, Fit::Crop), 8);
+        assert!(
+            screen
+                .lines(40, Fit::Crop)
+                .iter()
+                .all(|line| matches!(line, Line::Cells(..)))
+        );
     }
 
     #[test]
