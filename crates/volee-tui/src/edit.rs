@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use ratatui::crossterm::event::KeyEvent;
+use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use volee_core::AgentId;
 use volee_host::{Size, Update, Welcome};
@@ -153,30 +153,44 @@ pub(crate) fn close(model: &mut Model, effects: &mut Vec<Effect>) {
 
 /// A key in edit mode: the leave key comes back, every other key goes to
 /// the agent.
+///
+/// What becomes of each key is traced, never the key itself: what a person
+/// types into an agent is theirs. Only whether Control was held is kept,
+/// which tells a shortcut from text.
 pub(crate) fn on_key(model: &mut Model, key: &KeyEvent, effects: &mut Vec<Effect>) {
+    let control = key.modifiers.contains(KeyModifiers::CONTROL);
     if KeyCombo::from_event(key) == model.keymap.leave_key() {
+        tracing::debug!("edit mode: the leave key");
         leave(model, effects);
         return;
     }
     let Some(live) = &mut model.live else {
+        tracing::debug!(control, "edit mode: a key with no live screen, dropped");
         return;
     };
     // Keys typed before the host answered are dropped: a few milliseconds.
     if live.phase != Phase::Live {
+        tracing::debug!(control, phase = ?live.phase, "edit mode: a key before the host answered, dropped");
         return;
     }
     // Typing brings the newest lines back into view.
     live.scroll_to_bottom();
     let input = if live.keys {
-        match key_press(key) {
-            Some(press) => LiveInput::Key(press),
-            None => return,
-        }
+        let Some(press) = key_press(key) else {
+            tracing::debug!(
+                control,
+                "edit mode: a key the host has no name for, dropped"
+            );
+            return;
+        };
+        tracing::debug!(control, "edit mode: a key sent by name");
+        LiveInput::Key(press)
     } else {
         let bytes = live.legacy_bytes(key);
         // A host from before 0.10 does not resume a program that suspends
         // itself: Claude Code would stay frozen.
         if bytes == [0x1a] {
+            tracing::debug!("edit mode: Ctrl+Z kept back from a host that would not resume");
             model.notify(
                 "Ctrl+Z is not sent to an agent in a volee host from before 0.10: nothing there \
                  would resume Claude Code. It gets a new host when it is stopped and resumed.",
@@ -185,8 +199,14 @@ pub(crate) fn on_key(model: &mut Model, key: &KeyEvent, effects: &mut Vec<Effect
             return;
         }
         if bytes.is_empty() {
+            tracing::debug!(control, "edit mode: a key with no bytes, dropped");
             return;
         }
+        tracing::debug!(
+            control,
+            length = bytes.len(),
+            "edit mode: a key sent as bytes"
+        );
         LiveInput::Bytes(bytes)
     };
     effects.push(Effect::LiveSend {
@@ -553,6 +573,97 @@ mod tests {
             edit: true,
             size: SIZE,
         }));
+    }
+
+    /// What the interface traces while `run` runs, at the debug level.
+    fn traced(run: impl FnOnce()) -> String {
+        use std::io::Write;
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone, Default)]
+        struct Kept(Arc<Mutex<Vec<u8>>>);
+        impl Write for Kept {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let kept = Kept::default();
+        let writer = kept.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, run);
+        let bytes = kept.0.lock().unwrap().clone();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    #[test]
+    fn the_log_says_what_became_of_a_key_never_the_key() {
+        // What is typed here must not be found in the log, whole or in part.
+        const TYPED: &str = "Zq9~Zq9~";
+        // A host that encodes keys: each key goes by name, Ctrl+Z included.
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "i");
+        answer(&mut model, 1, true);
+        let log = traced(|| {
+            press(&mut model, TYPED);
+            ctrl(&mut model, 'z');
+        });
+        assert_eq!(
+            log.matches("a key sent by name control=false").count(),
+            8,
+            "{log}"
+        );
+        assert_eq!(
+            log.matches("a key sent by name control=true").count(),
+            1,
+            "{log}"
+        );
+        assert!(!log.contains("Zq9") && !log.contains('~'), "{log}");
+
+        // A host from before 0.10: bytes, and Ctrl+Z kept back.
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "i");
+        answer(&mut model, 1, false);
+        let log = traced(|| {
+            press(&mut model, TYPED);
+            ctrl(&mut model, 'z');
+        });
+        assert_eq!(
+            log.matches("a key sent as bytes control=false length=1")
+                .count(),
+            8,
+            "{log}"
+        );
+        assert_eq!(log.matches("Ctrl+Z kept back").count(), 1, "{log}");
+        assert!(!log.contains("Zq9") && !log.contains('~'), "{log}");
+        assert!(
+            model
+                .notice
+                .as_ref()
+                .unwrap()
+                .text
+                .contains("Ctrl+Z is not sent")
+        );
+
+        // Before the host answers, a key is dropped, and the log says so.
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "i");
+        let log = traced(|| {
+            press(&mut model, "x");
+        });
+        assert_eq!(
+            log.matches("a key before the host answered, dropped")
+                .count(),
+            1,
+            "{log}"
+        );
     }
 
     #[test]

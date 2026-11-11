@@ -17,6 +17,13 @@ start it when they need it, so most of the time you never think about it.
 The daemon logs to `~/.local/state/volee/logs/daemon.log`. Set `VOLEE_LOG`
 to change the level, for example `VOLEE_LOG=debug volee daemon run`.
 
+The interface writes no log unless you ask: it owns your terminal, so it
+has nowhere to print. With `VOLEE_LOG` set, for example
+`VOLEE_LOG=volee_tui=debug volee`, it writes to
+`~/.local/state/volee/logs/interface.log`, a file only you can read. In
+edit mode that log says what became of each key (sent to the agent, kept
+back, dropped before the host answered), never the key itself.
+
 A command that starts the daemon may run inside an agent's session or a
 multiplexer pane. The daemon starts in its state directory and drops the
 variables that identify that session or pane (such as `CLAUDE_CODE_SESSION_ID`
