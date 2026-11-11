@@ -22,7 +22,7 @@ has nowhere to print. With `VOLEE_LOG` set, for example
 `VOLEE_LOG=volee_tui=debug volee`, it writes to
 `~/.local/state/volee/logs/interface.log`, a file only you can read. In
 edit mode that log says what became of each key (sent to the agent, kept
-back, dropped before the host answered), never the key itself.
+until the host answers, kept back, dropped), never the key itself.
 
 A command that starts the daemon may run inside an agent's session or a
 multiplexer pane. The daemon starts in its state directory and drops the
