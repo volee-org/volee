@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::Value;
 use volee_core::harness::{SessionKey, SessionOrigin};
 use volee_core::ids::ThreadId;
-use volee_core::message::{Message, Party, Receipt, Thread};
+use volee_core::message::{Message, MessageKind, Party, Receipt, Thread};
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
 use volee_core::{Agent, AgentId, Event, EventKind, Registry};
@@ -192,6 +192,7 @@ async fn send_message(shared: &Arc<Shared>, params: SendParams) -> Result<Sent, 
     if params.body.trim().is_empty() {
         return Err(DaemonError::InvalidParams("a message needs a body".into()));
     }
+    check_offer(&params)?;
     let mut state = shared.state.lock().await;
     let registry = state.registry();
     for party in params.to.iter().chain(std::iter::once(&params.from)) {
@@ -232,6 +233,7 @@ async fn send_message(shared: &Arc<Shared>, params: SendParams) -> Result<Sent, 
         body: params.body,
         refs: params.refs,
         in_reply_to: params.in_reply_to,
+        options: params.options,
         at: now,
         receipts: params
             .to
@@ -250,6 +252,21 @@ async fn send_message(shared: &Arc<Shared>, params: SendParams) -> Result<Sent, 
     events.push(Event::new(now, EventKind::MessagePosted { message }));
     state.commit(events)?;
     Ok(sent)
+}
+
+/// Refuses answers offered on anything but a question to the person, and
+/// answers that cannot be shown and picked (too many, too long, twice).
+fn check_offer(params: &SendParams) -> Result<(), DaemonError> {
+    if params.options.is_empty() {
+        return Ok(());
+    }
+    if params.kind != MessageKind::Question || !params.to.contains(&Party::Human) {
+        return Err(DaemonError::InvalidParams(
+            "only a question to the human offers answers to choose from".into(),
+        ));
+    }
+    volee_core::message::check_options(&params.options)
+        .map_err(|error| DaemonError::InvalidParams(error.to_string()))
 }
 
 /// Chooses a thread when the sender did not: the mission thread when every

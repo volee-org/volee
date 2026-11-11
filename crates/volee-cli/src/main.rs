@@ -329,6 +329,18 @@ enum MsgCommand {
         #[arg(long, value_enum, default_value_t = Kind::Note)]
         kind: Kind,
     },
+    /// List the questions agents asked you that you have not answered, with
+    /// the answers each one offers.
+    Questions,
+    /// Answer a question an agent asked you.
+    Answer {
+        /// The question: its id as `volee msg questions` prints it, or the
+        /// agent that asked it.
+        question: String,
+        /// Your answer: the number or the words of one of the answers the
+        /// question offers, or your own words.
+        answer: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -497,6 +509,10 @@ fn async_main(command: Command) -> ExitCode {
             } => cmd::tidy::run(agent.as_deref(), all, dry_run).await,
             Command::Msg(MsgCommand::Send { to, body, kind }) => {
                 cmd::msg::send(&to, body, kind.into()).await
+            }
+            Command::Msg(MsgCommand::Questions) => cmd::msg::questions().await,
+            Command::Msg(MsgCommand::Answer { question, answer }) => {
+                cmd::msg::answer(&question, &answer).await
             }
             Command::Mission(command) => mission(command).await,
             Command::Summary { target } => cmd::summary::run(&target).await,

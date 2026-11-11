@@ -290,6 +290,7 @@ async fn a_member_of_a_mission_writes_with_its_workers_and_is_never_judged() {
         body: "Which endpoint documents invoices?".into(),
         refs: vec![],
         in_reply_to: None,
+        options: Vec::new(),
         thread: None,
     };
     client

@@ -160,6 +160,7 @@ impl Source for DaemonSource {
             body: message.body,
             refs: vec![],
             in_reply_to: message.in_reply_to,
+            options: Vec::new(),
             thread: message.thread,
         };
         self.client

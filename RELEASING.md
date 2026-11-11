@@ -82,6 +82,7 @@ python3 journeys/wall.py --volee target/release/volee --sandbox <trusted reposit
 python3 journeys/other_ai.py --volee target/release/volee --sandbox <trusted repository>
 python3 journeys/other_ai.py --stand-in codex --volee target/release/volee --sandbox <trusted repository>
 python3 journeys/run.py --volee target/release/volee --sandbox <trusted repository>
+python3 journeys/question.py --volee target/release/volee --sandbox <trusted repository>
 python3 journeys/old_host.py --volee target/release/volee --old-volee <an older volee> --sandbox <trusted repository>
 ```
 

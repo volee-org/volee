@@ -368,6 +368,24 @@ fn message_lines(
                 body_style.patch(Style::default()),
             )]);
         }
+        // The answers a question offers, with the digit that picks each,
+        // until the person answered it.
+        if !message.options.is_empty() && registry.answer_to(message.id).is_none() {
+            let key = theme.style(StyleRole::HintKey);
+            for (number, option) in (1..).zip(&message.options) {
+                lines.push(vec![
+                    Span::styled(format!("  {number} "), key),
+                    Span::styled(
+                        text::truncate(option, width.saturating_sub(4)).into_owned(),
+                        theme.style(StyleRole::Text),
+                    ),
+                ]);
+            }
+            let hint = "press its number to answer, or reply in your own words";
+            for (start, end) in text::wrap(hint, width.saturating_sub(2)) {
+                lines.push(vec![Span::styled(format!("  {}", &hint[start..end]), dim)]);
+            }
+        }
     }
     lines
 }

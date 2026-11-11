@@ -117,6 +117,7 @@ mod tests {
             body: "Is total_cents stored?".into(),
             refs: vec![],
             in_reply_to: None,
+            options: Vec::new(),
             at: at(sent),
             receipts: to
                 .iter()

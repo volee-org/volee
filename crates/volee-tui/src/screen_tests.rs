@@ -555,6 +555,79 @@ fn messages_at_every_size() {
 }
 
 #[test]
+fn messages_with_a_question_that_offers_answers() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    crate::test_support::offer(&mut model, &["ok merge", "no"]);
+    // The third pinned question: its answers, numbered, under its text.
+    type_text(&demo, &mut model, "Ijj");
+    let offered = draw(&model);
+    assert!(offered.contains("1 ok merge"), "{offered}");
+    assert!(offered.contains("2 no"), "{offered}");
+    assert!(
+        offered.contains("press its number to answer, or reply in your own words"),
+        "{offered}"
+    );
+    // 1: the bottom line asks before sending.
+    type_text(&demo, &mut model, "1");
+    let asking = draw(&model);
+    assert!(
+        asking.contains("Answer \"ok merge\" to invoice-tools?"),
+        "{asking}"
+    );
+    assert_snapshot!(asking);
+
+    // In a small terminal the answers still show whole, and what to press
+    // wraps instead of being cut.
+    let (mut model, demo) = demo_model(80, 24, Theme::default());
+    crate::test_support::offer(&mut model, &["ok merge", "no"]);
+    type_text(&demo, &mut model, "Ijj");
+    let small = draw(&model);
+    for part in [
+        "1 ok merge",
+        "2 no",
+        "press its number to answer, or reply in",
+        "your own words",
+    ] {
+        assert!(small.contains(part), "{part}: {small}");
+    }
+}
+
+#[test]
+fn an_answered_question_no_longer_shows_its_answers() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    let question = crate::test_support::offer(&mut model, &["ok merge", "no"]);
+    let asked = model.registry.message(question).unwrap().clone();
+    let now = model.now;
+    let answer = volee_core::message::Message {
+        id: volee_core::MessageId::from_ulid(ulid::Ulid::from_parts(u64::MAX >> 16, 2)),
+        from: volee_core::message::Party::Human,
+        kind: volee_core::message::MessageKind::Answer,
+        body: "ok merge".into(),
+        in_reply_to: Some(question),
+        options: Vec::new(),
+        ..asked
+    };
+    update(
+        &mut model,
+        Msg::Events(vec![volee_core::Event::new(
+            now,
+            volee_core::event::EventKind::MessagePosted { message: answer },
+        )]),
+    );
+    // The thread of the question and its answer: the latest activity, so
+    // the row after the two questions still waiting.
+    type_text(&demo, &mut model, "Ijj");
+    let thread = draw(&model);
+    assert!(
+        thread.contains("Both pull requests are green. Merge them?"),
+        "{thread}"
+    );
+    assert!(thread.contains("answer · you: ok merge"), "{thread}");
+    assert!(!thread.contains("1 ok merge"), "{thread}");
+    assert!(!thread.contains("press its number"), "{thread}");
+}
+
+#[test]
 fn messages_reading_a_mission_thread_with_its_summary() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     // The row after the pinned question: the Invoicing mission's thread,

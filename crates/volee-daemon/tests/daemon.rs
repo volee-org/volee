@@ -128,6 +128,7 @@ fn human_note(to: AgentId, body: &str) -> SendParams {
         body: body.to_owned(),
         refs: vec![],
         in_reply_to: None,
+        options: Vec::new(),
         thread: None,
     }
 }
@@ -234,6 +235,7 @@ async fn a_reply_lands_in_the_thread_of_the_question() {
             body: "HT or TTC?".into(),
             refs: vec![],
             in_reply_to: None,
+            options: Vec::new(),
             thread: None,
         })
         .await
@@ -247,6 +249,95 @@ async fn a_reply_lands_in_the_thread_of_the_question() {
         registry(&client).await.unanswered_questions(),
         Vec::<&Message>::new()
     );
+}
+
+/// A question from the worker (agent 2) to the human, with answers offered.
+fn offer(options: &[&str]) -> SendParams {
+    SendParams {
+        from: Party::Agent(agent(2)),
+        to: vec![Party::Human],
+        kind: MessageKind::Question,
+        body: "Both pull requests are green. Merge them?".into(),
+        refs: vec![],
+        in_reply_to: None,
+        options: options.iter().map(|option| (*option).to_owned()).collect(),
+        thread: None,
+    }
+}
+
+#[tokio::test]
+async fn a_question_to_the_human_keeps_the_answers_it_offers() {
+    let daemon = start();
+    let client = connect(&daemon.socket).await;
+    let question = client
+        .call::<SendMessage>(offer(&["ok merge", "no"]))
+        .await
+        .unwrap();
+    let snapshot = registry(&client).await;
+    let asked = snapshot.message(question.message).unwrap();
+    assert_eq!(asked.options, ["ok merge", "no"]);
+    assert_eq!(snapshot.unanswered_questions(), [asked]);
+    assert_eq!(snapshot.answer_to(question.message), None);
+
+    // The person picks one: the answer is the option's own words, in reply
+    // to the question, and the question no longer waits.
+    let mut answer = human_note(agent(2), "ok merge");
+    answer.kind = MessageKind::Answer;
+    answer.in_reply_to = Some(question.message);
+    let sent = client.call::<SendMessage>(answer).await.unwrap();
+    let snapshot = registry(&client).await;
+    let asked = snapshot.message(question.message).unwrap();
+    let answered = snapshot.answer_to(question.message).unwrap();
+    assert_eq!(answered.id, sent.message);
+    assert_eq!(asked.chosen(&answered.body), Some("ok merge"));
+    assert_eq!(snapshot.unanswered_questions(), Vec::<&Message>::new());
+}
+
+#[tokio::test]
+async fn answers_are_offered_only_on_a_question_to_the_human() {
+    let daemon = start();
+    let client = connect(&daemon.socket).await;
+    let refused = |params: SendParams| {
+        let client = &client;
+        async move {
+            let error = client.call::<SendMessage>(params).await.unwrap_err();
+            let ClientError::Rpc(error) = error else {
+                panic!("expected an RPC error, got {error:?}");
+            };
+            assert_eq!(error.code, rpc::INVALID_PARAMS, "{}", error.message);
+            error.message
+        }
+    };
+    // Not a question.
+    let mut note = offer(&["ok merge", "no"]);
+    note.kind = MessageKind::Note;
+    assert!(refused(note).await.contains("only a question to the human"));
+    // A question to an agent: it answers in its own words.
+    let mut to_lead = offer(&["ok merge", "no"]);
+    to_lead.to = vec![Party::Agent(agent(1))];
+    assert!(
+        refused(to_lead)
+            .await
+            .contains("only a question to the human")
+    );
+    // Answers that cannot be shown and picked, each with its reason.
+    assert!(
+        refused(offer(&["ok merge"]))
+            .await
+            .contains("between 2 and 6 answers, not 1")
+    );
+    assert!(
+        refused(offer(&["yes", "no", "YES"]))
+            .await
+            .contains("offered twice")
+    );
+    assert!(
+        refused(offer(&["yes", "no\nmaybe"]))
+            .await
+            .contains("a few words on one line")
+    );
+    // Nothing was recorded.
+    assert_eq!(registry(&client).await.messages().count(), 0);
 }
 
 #[tokio::test]

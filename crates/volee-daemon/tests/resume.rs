@@ -182,6 +182,7 @@ fn note(to: AgentId, body: &str) -> SendParams {
         body: body.into(),
         refs: vec![],
         in_reply_to: None,
+        options: Vec::new(),
         thread: None,
     }
 }

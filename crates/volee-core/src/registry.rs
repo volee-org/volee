@@ -553,6 +553,14 @@ impl Registry {
             .collect()
     }
 
+    /// The person's answer to `question`: their first message that refers
+    /// to it, which is the one that took it off their list.
+    pub fn answer_to(&self, question: MessageId) -> Option<&Message> {
+        self.messages
+            .values()
+            .find(|message| message.from == Party::Human && message.in_reply_to == Some(question))
+    }
+
     /// Checks whether `from` may write to `to` (ADR 0006): people and volee
     /// write to anyone, agents write to people, and between agents, members
     /// of the same mission write to each other; otherwise an agent writes to

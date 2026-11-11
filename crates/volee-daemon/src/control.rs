@@ -605,6 +605,7 @@ fn stop_notice(state: &State, agent: AgentId) -> Option<Message> {
         ),
         refs: Vec::new(),
         in_reply_to: None,
+        options: Vec::new(),
         at: state.now(),
         receipts: vec![Receipt {
             to: Party::Agent(coordinator),

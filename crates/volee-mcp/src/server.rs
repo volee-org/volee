@@ -24,9 +24,10 @@ use crate::view::{AgentView, MessageView, WhoAmI, party_name};
 const INSTRUCTIONS: &str = "volee connects you with the other coding agents on this machine and \
 with the human who supervises them. Use list_agents to see who works on what, send_message to \
 write to an agent or to the human (by id, by name, or \"human\"), read_messages to read what was \
-sent to you, and report when your task is done, blocked or failed. A mission's coordinator calls \
-close_mission once every worker delivered and its final report is sent. Messages sent to you \
-also arrive on their own at the end of your turn.";
+sent to you, and report when your task is done, blocked or failed. When only the human can \
+decide, ask_human puts the question on top of their messages with the answers they choose from. \
+A mission's coordinator calls close_mission once every worker delivered and its final report is \
+sent. Messages sent to you also arrive on their own at the end of your turn.";
 
 /// The same for an agent of another harness that joined (ADR 0014): no
 /// hooks hand it messages, so it must read them.
@@ -35,7 +36,9 @@ whatever AI runs them, and with the human who supervises them. You joined volee 
 server, so messages sent to you wait until you call read_messages: call it when you start a \
 task, after you send a question, and before you finish. Use list_agents to see who works on \
 what and whom you may write to (can_message), send_message to write to an agent or to the human \
-(by id, by name, or \"human\"), and report when your task is done, blocked or failed.";
+(by id, by name, or \"human\"), ask_human when only the human can decide (the question stays on \
+top of their messages, with the answers they choose from), and report when your task is done, \
+blocked or failed.";
 
 /// Starting the server failed.
 #[derive(Debug, thiserror::Error)]
@@ -167,6 +170,17 @@ pub struct SendArgs {
     /// Files, commits or links the message refers to.
     #[serde(default)]
     pub refs: Vec<RefArg>,
+}
+
+/// Parameters of `ask_human`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AskArgs {
+    /// The question, short and complete: the human may read it hours later,
+    /// without your context.
+    pub question: String,
+    /// The answers the human chooses from: two to six, a few words each,
+    /// such as `["yes", "no"]`.
+    pub options: Vec<String>,
 }
 
 /// Parameters of `read_messages`.
@@ -399,9 +413,49 @@ impl VoleeMcp {
                 .filter_map(|r| r.into_reference(repo.as_deref()))
                 .collect(),
             in_reply_to,
+            options: Vec::new(),
             thread: None,
         })
         .await
+    }
+
+    /// Asks the human a question with the answers to choose from.
+    #[tool(
+        description = "Ask the human a question only they can decide, with the answers they \
+                       choose from (two to six, a few words each). It stays on top of their \
+                       messages until they answer. Their answer reaches you as a message in \
+                       reply to yours: one of your options, or their own words, which are never \
+                       a yes. Do not wait in a loop and do not ask whether to go on: decide, or \
+                       report."
+    )]
+    pub async fn ask_human(
+        &self,
+        Parameters(args): Parameters<AskArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.note("asked the human a question").await;
+        let asked = self
+            .inner
+            .client
+            .call::<SendMessage>(SendParams {
+                from: Party::Agent(self.inner.me),
+                to: vec![Party::Human],
+                kind: MessageKind::Question,
+                body: args.question,
+                refs: Vec::new(),
+                in_reply_to: None,
+                options: args.options,
+                thread: None,
+            })
+            .await;
+        match asked {
+            Ok(sent) => Ok(text(&format!(
+                "Asked (message {}). The human's answer will reach you as a message in reply \
+                 to it: end your turn, volee wakes you with it.",
+                sent.message
+            ))),
+            Err(ClientError::Rpc(error)) => Ok(refuse(&error.message)),
+            Err(error) => Err(ErrorData::internal_error(error.to_string(), None)),
+        }
     }
 
     /// Reads messages addressed to you and marks them read.
@@ -509,6 +563,7 @@ impl VoleeMcp {
                 .filter_map(|r| r.into_reference(repo.as_deref()))
                 .collect(),
             in_reply_to: None,
+            options: Vec::new(),
             thread: None,
         })
         .await

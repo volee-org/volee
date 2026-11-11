@@ -895,6 +895,7 @@ async fn alert_human(shared: &Arc<Shared>, agent: AgentId, error: &DaemonError) 
                 ),
                 refs: Vec::new(),
                 in_reply_to: None,
+                options: Vec::new(),
                 at: now,
                 receipts: vec![Receipt {
                     to: Party::Human,

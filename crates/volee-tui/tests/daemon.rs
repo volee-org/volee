@@ -178,6 +178,7 @@ async fn the_person_reads_and_a_daemon_without_claude_code_says_what_it_cannot_d
             body: "May I drop the old endpoint?".to_owned(),
             refs: vec![],
             in_reply_to: None,
+            options: Vec::new(),
             thread: None,
         })
         .await

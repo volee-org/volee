@@ -93,6 +93,27 @@ of a turn through the `Stop` hook, or by waking an idle agent. An agent that
 joined with `--join` has no hooks: this tool is the only way its messages
 reach it.
 
+### `ask_human`
+
+Asks the human a question that only they can decide, with the answers they
+choose from. The question stays on top of the human's messages, in the
+interface and in `volee msg questions`, until they answer it.
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `question` | string | The question, short and complete: the human may read it hours later. |
+| `options` | list of strings | The answers to choose from: two to six, each a few words on one line (40 characters at most), all different. |
+
+The answer reaches the agent as an `answer` message in reply to the
+question, like any other message. Its text is one of the options, in the
+option's own spelling, when the human picked one; anything else is the
+human's own words and is never a yes. The tool returns at once: the agent
+ends its turn and volee wakes it with the answer.
+
+`send_message` with the kind `question` still asks a question without
+options. Options on anything but a question to the human are refused
+([ADR 0031](../adr/0031-a-question-may-offer-its-answers.md)).
+
 ### `report`
 
 Tells the agent's parent, its mission's coordinator and the human that the

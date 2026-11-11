@@ -57,6 +57,7 @@
   - [0028. One emulator, and the wall inside the interface](adr/0028-one-emulator-and-the-wall-inside-the-interface.md)
   - [0029. volee run makes any program an agent](adr/0029-volee-run.md)
   - [0030. A multiplexer may say which panes run an agent](adr/0030-a-multiplexer-may-say-which-panes-run-an-agent.md)
+  - [0031. A question may offer its answers](adr/0031-a-question-may-offer-its-answers.md)
   - [Template](adr/template.md)
 
 # Project

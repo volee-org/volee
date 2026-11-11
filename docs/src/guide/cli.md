@@ -339,6 +339,38 @@ through volee's MCP server read their messages themselves, when they call
 `read_messages`; a message sent while one is stopped waits for its next
 start. `volee msg send` says, after sending, which of these cases applies.
 
+### Questions
+
+An agent that needs a decision asks you. Its question waits, on top of your
+[messages](interface.md#messages) in the interface, until you answer it:
+
+```sh
+volee msg questions
+```
+
+```text
+msg_x7k2pq  coordinator-invoicing asks, 2 min ago:
+  Both pull requests are green and reviewed. Merge them?
+  Answers: 1 ok merge · 2 no
+  Answer with `volee msg answer msg_x7k2pq <number>`.
+msg_8fq0zd  billing asks, 12 min ago:
+  Are amounts stored with or without tax?
+  Answer with `volee msg answer msg_8fq0zd "<your answer>"`.
+```
+
+```sh
+volee msg answer msg_x7k2pq 1              # the first answer it offers
+volee msg answer msg_x7k2pq "ok merge"     # the same, by its words
+volee msg answer billing "Without tax."    # the agent's name, when it asked one question
+```
+
+A question may offer the answers to choose from. Name one by its number or
+by its words, whatever their case: the agent then reads exactly the answer it
+offered. Anything else is sent as your own words, and volee says that it is
+not one of the offered answers: an agent that asked for a yes or a no must
+not take a sentence for a yes. The answer is linked to the question, which
+stops waiting.
+
 ## Summaries
 
 ```sh

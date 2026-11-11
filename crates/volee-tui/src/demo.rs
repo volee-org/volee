@@ -491,6 +491,7 @@ impl DemoSource {
                     body,
                     refs: Vec::new(),
                     in_reply_to,
+                    options: Vec::new(),
                     at: now,
                     receipts: vec![Receipt {
                         to: Party::Agent(to),

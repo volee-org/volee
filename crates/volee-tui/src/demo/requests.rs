@@ -241,6 +241,7 @@ fn note(ids: &mut Ids, thread: ThreadId, body: String) -> Event {
                 body,
                 refs: Vec::new(),
                 in_reply_to: None,
+                options: Vec::new(),
                 at: now,
                 receipts: vec![Receipt {
                     to: Party::Human,

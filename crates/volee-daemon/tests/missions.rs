@@ -431,6 +431,7 @@ async fn a_mission_closes_with_its_report_once_every_worker_delivered() {
             body: "Invoices are in billing#11 and api#12.".into(),
             refs: vec![],
             in_reply_to: None,
+            options: Vec::new(),
             thread: None,
         })
         .await
@@ -490,6 +491,7 @@ async fn the_report_must_come_from_the_mission_thread() {
             body: "Unrelated.".into(),
             refs: vec![],
             in_reply_to: None,
+            options: Vec::new(),
             thread: None,
         })
         .await
@@ -682,6 +684,7 @@ async fn coordinator_reports(client: &Client, body: &str) -> volee_core::Message
             body: body.into(),
             refs: vec![],
             in_reply_to: None,
+            options: Vec::new(),
             thread: None,
         })
         .await
