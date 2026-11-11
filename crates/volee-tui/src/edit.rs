@@ -15,7 +15,7 @@ use volee_host::{Size, Update, Welcome};
 
 use crate::app::{Effect, Model, Msg, Overlay};
 use crate::keymap::KeyCombo;
-use crate::live::{Live, LiveInput, Outcome, Phase, key_press};
+use crate::live::{Live, LiveInput, Outcome, Phase, TYPED_AHEAD_MAX, TypedAhead, key_press};
 use crate::text;
 
 /// The cells an agent's screen takes in the full-screen view of a terminal
@@ -231,11 +231,37 @@ pub(crate) fn on_key(model: &mut Model, key: &KeyEvent, effects: &mut Vec<Effect
         tracing::debug!(control, "edit mode: a key with no live screen, dropped");
         return;
     };
-    // Keys typed before the host answered are dropped: a few milliseconds.
-    if live.phase != Phase::Live {
-        tracing::debug!(control, phase = ?live.phase, "edit mode: a key before the host answered, dropped");
-        return;
+    match live.phase {
+        Phase::Live => send_key(model, key, effects),
+        // Typed before the host answered: it goes once the host does. On a
+        // busy machine, or for a view that starts its door first, that takes
+        // long enough for a person to start typing.
+        Phase::Connecting => {
+            if live.typed_ahead.len() < TYPED_AHEAD_MAX {
+                live.typed_ahead.push(TypedAhead::Key(*key));
+                tracing::debug!(control, "edit mode: a key kept until the host answers");
+            } else {
+                tracing::debug!(
+                    control,
+                    "edit mode: too many keys before the host answered, dropped"
+                );
+            }
+        }
+        Phase::Closed(_) => {
+            tracing::debug!(
+                control,
+                "edit mode: a key after the connection closed, dropped"
+            );
+        }
     }
+}
+
+/// Sends a key to the agent of the live screen, which the host answered.
+fn send_key(model: &mut Model, key: &KeyEvent, effects: &mut Vec<Effect>) {
+    let control = key.modifiers.contains(KeyModifiers::CONTROL);
+    let Some(live) = &mut model.live else {
+        return;
+    };
     // Typing brings the newest lines back into view.
     live.scroll_to_bottom();
     let input = if live.keys {
@@ -278,8 +304,24 @@ pub(crate) fn on_key(model: &mut Model, key: &KeyEvent, effects: &mut Vec<Effect
     });
 }
 
-/// Text pasted in edit mode goes to the agent.
+/// Text pasted in edit mode goes to the agent: once the host answered, when
+/// it did not yet.
 pub(crate) fn on_paste(model: &mut Model, text: &str, effects: &mut Vec<Effect>) {
+    if let Some(live) = model.live.as_mut()
+        && live.phase == Phase::Connecting
+        && live.editing
+    {
+        if live.typed_ahead.len() < TYPED_AHEAD_MAX {
+            live.typed_ahead.push(TypedAhead::Paste(text.to_owned()));
+        }
+        return;
+    }
+    send_paste(model, text, effects);
+}
+
+/// Sends pasted text to the agent of the live screen, which the host
+/// answered.
+fn send_paste(model: &Model, text: &str, effects: &mut Vec<Effect>) {
     let Some(live) = model.live.as_ref().filter(|live| live.phase == Phase::Live) else {
         return;
     };
@@ -404,21 +446,42 @@ pub(crate) fn on_msg(model: &mut Model, msg: Msg, effects: &mut Vec<Effect>) -> 
         return true;
     }
     match msg {
-        Msg::LiveOpened { link, welcome } => opened(model, link, &welcome),
+        Msg::LiveOpened { link, welcome } => opened(model, link, &welcome, effects),
         Msg::LiveUpdate { link, update } => updated(model, link, update, effects),
         Msg::LiveClosed { link, reason } => closed(model, link, &reason, effects),
         _ => false,
     }
 }
 
-/// The host welcomed a connection.
-pub(crate) fn opened(model: &mut Model, link: u64, welcome: &Welcome) -> bool {
+/// The host welcomed a connection. What the person typed meanwhile goes to
+/// the agent now, unless its program ended.
+pub(crate) fn opened(
+    model: &mut Model,
+    link: u64,
+    welcome: &Welcome,
+    effects: &mut Vec<Effect>,
+) -> bool {
     let Some(live) = model.live.as_mut().filter(|live| live.link == link) else {
         return false;
     };
     let wanted = live.editing;
     live.opened(welcome);
     let (agent, editing) = (live.agent, live.editing);
+    let typed = std::mem::take(&mut live.typed_ahead);
+    if editing {
+        if !typed.is_empty() {
+            tracing::debug!(
+                count = typed.len(),
+                "edit mode: what was typed before the host answered, sent"
+            );
+        }
+        for input in typed {
+            match input {
+                TypedAhead::Key(key) => send_key(model, &key, effects),
+                TypedAhead::Paste(text) => send_paste(model, &text, effects),
+            }
+        }
+    }
     if wanted && !editing {
         let name = model.name_of(agent);
         if is_view(model, agent) {
@@ -1036,18 +1099,76 @@ mod tests {
                 .contains("Ctrl+Z is not sent")
         );
 
-        // Before the host answers, a key is dropped, and the log says so.
+        // Before the host answers, a key waits for it, and the log says so.
         let (mut model, _) = hosted_model(120, 40);
         press(&mut model, "i");
         let log = traced(|| {
             press(&mut model, "x");
         });
         assert_eq!(
-            log.matches("a key before the host answered, dropped")
-                .count(),
+            log.matches("a key kept until the host answers").count(),
             1,
             "{log}"
         );
+    }
+
+    #[test]
+    fn what_is_typed_before_the_host_answers_reaches_the_agent_once_it_does() {
+        // Seen on a busy machine: the first letter typed right after
+        // entering edit mode was lost, while the screen already said "your
+        // keys go to".
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "i");
+        let mut early = press(&mut model, "t");
+        early.extend(press(&mut model, "y"));
+        early.extend(update(&mut model, Msg::Paste("pe".into())));
+        assert_eq!(sent(&early), [], "nothing is sent before the host answers");
+        let effects = update(
+            &mut model,
+            Msg::LiveOpened {
+                link: 1,
+                welcome: welcome(SIZE, true),
+            },
+        );
+        assert_eq!(
+            sent(&effects),
+            [
+                press_of("t", false),
+                press_of("y", false),
+                LiveInput::Paste("pe".into()),
+            ]
+        );
+        assert_eq!(model.live.as_ref().unwrap().typed_ahead, []);
+        // Typed afterwards, a key goes at once.
+        assert_eq!(sent(&press(&mut model, "d")), [press_of("d", false)]);
+    }
+
+    #[test]
+    fn what_is_typed_before_leaving_never_reaches_the_agent() {
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "i");
+        press(&mut model, "x");
+        // The leave key before the host answered: the keys stay with volee.
+        ctrl(&mut model, 'q');
+        let effects = update(
+            &mut model,
+            Msg::LiveOpened {
+                link: 2,
+                welcome: welcome(SIZE, true),
+            },
+        );
+        assert_eq!(sent(&effects), []);
+        // A host that never answers takes nothing either.
+        press(&mut model, "i");
+        press(&mut model, "y");
+        update(
+            &mut model,
+            Msg::LiveClosed {
+                link: 3,
+                reason: "Connection refused (os error 61)".into(),
+            },
+        );
+        assert_eq!(model.live.as_ref().unwrap().typed_ahead, []);
     }
 
     #[test]
