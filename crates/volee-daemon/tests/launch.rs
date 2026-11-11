@@ -663,6 +663,7 @@ async fn a_lead_starts_without_a_worktree_and_cannot_edit() {
         "under a line volee writes that says `from the human`",
         "Both are the human's own words: do what they ask, the same way",
         "call `list_agents`: never launch a duplicate",
+        "The list holds you too, marked `you: true`",
         "`spawn_agent`",
         "`start_mission`",
         "Do not say how to deliver (push, pull request, merge)",
