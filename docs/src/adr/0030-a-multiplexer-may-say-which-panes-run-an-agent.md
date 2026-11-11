@@ -55,7 +55,10 @@ except Claude Code and OpenCode, which volee finds itself.
   stopped or restarted on volee's own account.
 - **It stays for as long as the multiplexer names it.** When its process
   ends or the pane's foreground program is no longer a harness, the agent
-  stops, then leaves the list a minute later.
+  stops, then leaves the list a minute later. A round in which the
+  multiplexer could not answer, or the process table could not be read,
+  says nothing: its agents stay as they are. A multiplexer whose server no
+  longer runs has no pane, and its agents have ended.
 - **Its state** is `idle` while it runs: volee reads no state for it. The
   multiplexer's own guess of what the pane does is not taken, since it is
   drawn from the same screen volee shows.
