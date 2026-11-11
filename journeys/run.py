@@ -233,6 +233,12 @@ def main():
                 str([(agent["harness"], agent["location"].get("kind"),
                       len(agent.get("sessions") or [])) for agent in rows])
                 + " · session pid {}".format(session.get("pid")))
+        workspace = (rows[0] if rows else {}).get("workspace") or {}
+        j.check("its repository and branch are read in the directory it runs in",
+                workspace.get("repo_root")
+                and os.path.realpath(workspace["repo_root"]) == os.path.realpath(j.sandbox)
+                and workspace.get("branch"),
+                "{} · {}".format(workspace.get("repo_root"), workspace.get("branch")))
         j.tuios("send-text", "-s", j.session, "-w", "claude", "/exit")
         keys_in("claude", "Enter")
         j.check("quit in its terminal, it stops",

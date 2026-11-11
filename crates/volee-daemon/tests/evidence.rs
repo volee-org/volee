@@ -362,10 +362,34 @@ fn settings(clone: &Path) -> volee_config::Config {
     volee_config::Config::parse(&text, Path::new("config.toml"), Path::new("/nowhere")).unwrap()
 }
 
-/// Whether the daemon fetched the repository of one agent, launched by
-/// `launched_by`, before its first evidence, with `[git] fetch` set to
-/// `fetch`. The fetch, when allowed, runs before the evidence is read.
-async fn fetched_before_the_first_check(fetch: Fetch, launched_by: LaunchedBy) -> bool {
+/// A program the person runs under volee, in `cwd` (`volee run`).
+fn run_by_the_person(cwd: &Path) -> Event {
+    at(EventKind::AgentRegistered {
+        agent: agent(1),
+        name: "agent-1".into(),
+        role: Role::Independent,
+        harness: HarnessKind::Other("codex".into()),
+        launched_by: LaunchedBy::Human,
+        parent: None,
+        mission: None,
+        workspace: Workspace::at(cwd),
+        location: Location::Host { id: "h1".into() },
+    })
+}
+
+/// An agent launched by `launched_by`, in `cwd`.
+fn launched(launched_by: LaunchedBy) -> impl Fn(&Path) -> Event {
+    move |cwd| registered_by(1, Role::Lead, cwd, None, launched_by)
+}
+
+/// Whether the daemon fetched the repository of one agent, registered by
+/// `registration` in a worktree, before its first evidence, with `[git]
+/// fetch` set to `fetch`. The fetch, when allowed, runs before the evidence
+/// is read.
+async fn fetched_before_the_first_check(
+    fetch: Fetch,
+    registration: impl Fn(&Path) -> Event,
+) -> bool {
     let sandbox = Sandbox::new();
     let (clone, worktree) = sandbox.project();
     let pushed = sandbox.pushed_by_a_teammate();
@@ -375,7 +399,7 @@ async fn fetched_before_the_first_check(fetch: Fetch, launched_by: LaunchedBy) -
         settings,
         ..EvidenceSources::git(Arc::new(sandbox.cli()))
     };
-    let log = vec![registered_by(1, Role::Lead, &worktree, None, launched_by)];
+    let log = vec![registration(&worktree)];
     let daemon = start(log, Arc::new(ManualClock::at(10_000)), evidence);
     let client = Client::connect(&daemon.socket).await.unwrap();
     eventually(&client, "a first check", |registry, _| {
@@ -388,10 +412,14 @@ async fn fetched_before_the_first_check(fetch: Fetch, launched_by: LaunchedBy) -
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn only_the_repositories_the_person_allows_are_fetched() {
     // By default, the repositories of agents volee launched, and only those.
-    assert!(fetched_before_the_first_check(Fetch::Launched, LaunchedBy::Human).await);
-    assert!(!fetched_before_the_first_check(Fetch::Launched, LaunchedBy::Outside).await);
-    assert!(fetched_before_the_first_check(Fetch::All, LaunchedBy::Outside).await);
-    assert!(!fetched_before_the_first_check(Fetch::Never, LaunchedBy::Human).await);
+    assert!(fetched_before_the_first_check(Fetch::Launched, launched(LaunchedBy::Human)).await);
+    assert!(!fetched_before_the_first_check(Fetch::Launched, launched(LaunchedBy::Outside)).await);
+    assert!(fetched_before_the_first_check(Fetch::All, launched(LaunchedBy::Outside)).await);
+    assert!(!fetched_before_the_first_check(Fetch::Never, launched(LaunchedBy::Human)).await);
+    // A program the person runs under volee is their own work, in their
+    // own checkout: volee launched nothing there.
+    assert!(!fetched_before_the_first_check(Fetch::Launched, run_by_the_person).await);
+    assert!(fetched_before_the_first_check(Fetch::All, run_by_the_person).await);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

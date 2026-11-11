@@ -73,6 +73,9 @@ agent (`Agent::generic`):
   idle once it has stayed the same for a few seconds, stopped when the
   program ended. volee cannot tell when it waits for the person;
 - `volee stop` ends its program, as closing its terminal would;
+- its repository and branch are read like any agent's, and its repository
+  is not fetched on its account (`[git] fetch`): the person started that
+  work, in their own checkout;
 - nothing hands it a message, and nothing resumes it, after it ended or
   after a reboot. The composer, `volee msg send` and the refusal to open an
   ended one say so, instead of advising a message that would resume it;
@@ -110,6 +113,9 @@ command ends the program it started: nothing runs unseen.
   session is found and opened without it.
 - Typing into the program makes its screen change, so the agent shows as
   working while a person types.
+- The program keeps the whole environment of the terminal it was typed in,
+  the variables of a multiplexer included: whatever reads them still sees
+  the pane the command was typed in, after the person left it.
 - Each run leaves a host record and a log in the hosts directory, like any
   host. Nothing removes them yet.
 - The kind rests on a combination of recorded facts, not on a field of its
