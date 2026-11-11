@@ -753,7 +753,10 @@ async fn a_mission_without_a_remote_is_merged_by_volee_after_ok_merge_then_close
         .collect();
     assert_eq!(
         said,
-        ["Mission \"Invoicing\" is closed. Tidied: billing (worktrees removed, branches kept)."]
+        [
+            "Mission \"Invoicing\" is closed. Merged: billing (feat/invoices into main). Tidied: \
+         billing (worktrees removed, branches kept)."
+        ]
     );
     assert_eq!(
         told(&done, Party::Agent(agent(LEAD)))
@@ -813,7 +816,8 @@ async fn a_main_checkout_with_uncommitted_changes_is_left_alone_until_the_person
     let done = wound_down(&client).await;
     assert_eq!(
         closing(&done).unwrap(),
-        "Mission \"Invoicing\" is closed. Tidied: billing (worktrees removed, branches kept)."
+        "Mission \"Invoicing\" is closed. Merged: billing (feat/invoices into main). Tidied: \
+         billing (worktrees removed, branches kept)."
     );
     assert!(daemon.repo.join("invoices.rs").is_file());
     assert_eq!(
@@ -914,9 +918,15 @@ async fn what_was_merged_stays_merged_when_another_merge_fails() {
         .unwrap();
     let done = wound_down(&client).await;
     let said = closing(&done).unwrap();
+    let branch = if merged == "billing" {
+        "feat/invoices"
+    } else {
+        "feat/taxes"
+    };
     assert!(
         said.contains(&format!(
-            "Tidied: {merged} (worktrees removed, branches kept)."
+            "Merged: {merged} ({branch} into main). Tidied: {merged} (worktrees removed, \
+             branches kept)."
         )),
         "{said}"
     );
@@ -970,7 +980,8 @@ async fn a_pull_request_is_merged_on_the_forge_with_the_repository_s_method() {
     assert_eq!(daemon.forge.merges(), [squash.clone(), squash]);
     assert_eq!(
         closing(&done).unwrap(),
-        "Mission \"Invoicing\" is closed. Tidied: billing (worktrees removed, branches kept)."
+        "Mission \"Invoicing\" is closed. Merged: billing (feat/invoices into main, PR #7). \
+         Tidied: billing (worktrees removed, branches kept)."
     );
     assert!(done.agent(worker).is_none());
     assert!(!worktree.exists());
@@ -1016,7 +1027,8 @@ async fn a_pull_request_the_person_merged_themselves_is_not_merged_again() {
     assert_eq!(failures(&done), Vec::<&Message>::new());
     assert_eq!(
         closing(&done).unwrap(),
-        "Mission \"Invoicing\" is closed. Tidied: billing (worktrees removed, branches kept)."
+        "Mission \"Invoicing\" is closed. Merged: billing (feat/invoices into main, PR #7). \
+         Tidied: billing (worktrees removed, branches kept)."
     );
 }
 
@@ -1097,7 +1109,8 @@ async fn an_approved_mission_the_daemon_did_not_finish_is_merged_when_it_starts_
     );
     assert_eq!(
         closing(&done).unwrap(),
-        "Mission \"Invoicing\" is closed. Tidied: billing (worktrees removed, branches kept)."
+        "Mission \"Invoicing\" is closed. Merged: billing (feat/invoices into main). Tidied: \
+         billing (worktrees removed, branches kept)."
     );
     assert!(done.agent(worker).is_none());
     assert!(!worktree.exists());
@@ -1125,6 +1138,7 @@ async fn a_worker_whose_work_did_not_land_is_kept_when_the_person_closes_its_mis
         "{said}"
     );
     assert!(!said.contains("Tidied"), "{said}");
+    assert!(!said.contains("Merged"), "{said}");
     assert!(worktree.is_dir(), "its worktree is kept");
     assert!(done.agent(worker).is_some(), "and so is its row");
     assert!(branch_exists(&daemon.repo, "refs/heads/feat/invoices"));
@@ -1176,7 +1190,8 @@ async fn the_person_who_merged_and_closes_themselves_gets_the_same_tidying() {
     assert!(branch_exists(&daemon.repo, "refs/heads/feat/invoices"));
     assert_eq!(
         closing(&done).unwrap(),
-        "Mission \"Invoicing\" is closed. Tidied: billing (worktrees removed, branches kept)."
+        "Mission \"Invoicing\" is closed. Merged: billing (feat/invoices into main). Tidied: \
+         billing (worktrees removed, branches kept)."
     );
 }
 

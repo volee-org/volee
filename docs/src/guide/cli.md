@@ -453,9 +453,9 @@ what you said.
 
 A closed mission is tidied in one gesture: volee removes the worktree of
 every worker whose work landed, keeps its branch, forgets the agent, stops
-the coordinator, and tells you in your messages what it tidied and what it
-kept, with the reason (uncommitted changes, work that did not land). It
-never forces and never deletes a branch.
+the coordinator, and tells you in your messages what is merged, what it
+tidied and what it kept, with the reason (uncommitted changes, work that did
+not land). It never forces and never deletes a branch.
 
 `volee mission close` is you closing a mission yourself, without the
 coordinator and without a merge: it refuses a mission whose workers have

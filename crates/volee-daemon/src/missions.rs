@@ -20,7 +20,7 @@ use volee_core::message::{Message, MessageKind, Party, Receipt};
 use volee_core::mission::{MissionKind, MissionStatus};
 use volee_core::role::Role;
 use volee_core::supervisor::{Notice, supervise};
-use volee_core::{AgentId, Event, EventKind, MissionId, Registry};
+use volee_core::{Agent, AgentId, Event, EventKind, MissionId, Registry};
 use volee_git::MergeMethod;
 use volee_proto::methods::{AgentParams, SeqEvent, TidyOutcome, TidyParams};
 
@@ -450,8 +450,8 @@ async fn conclude(shared: &Arc<Shared>, mission: MissionId, failures: &[Failure]
 /// What closing a mission leaves to do, in one gesture: every worker whose
 /// work landed is tidied (its worktree removed, its branch kept, the agent
 /// forgotten), the coordinator is stopped once its turn ended and forgotten,
-/// and the person is told what was tidied and what was kept, with the
-/// reason. Nothing is forced: a worker that is kept stays as it is.
+/// and the person is told what is merged, what was tidied and what was kept,
+/// with the reason. Nothing is forced: a worker that is kept stays as it is.
 ///
 /// `last_turn` says that the coordinator may be in the turn the person's
 /// approval woke: it is left to end it. A mission the person closes by hand
@@ -474,6 +474,15 @@ pub(crate) async fn wind_down(shared: Arc<Shared>, mission: MissionId, last_turn
     };
     let ids: Vec<AgentId> = workers.iter().map(|(id, _)| *id).collect();
     crate::evidence::check_now(&shared, &ids, CHECK_TIMEOUT).await;
+    // What was merged, read before the tidying forgets the agents.
+    let merged: Vec<String> = {
+        let state = shared.state.lock().await;
+        let registry = state.registry();
+        ids.iter()
+            .filter_map(|id| registry.agent(*id))
+            .filter_map(landed)
+            .collect()
+    };
 
     let mut tidied = Vec::new();
     let mut kept = Vec::new();
@@ -499,9 +508,54 @@ pub(crate) async fn wind_down(shared: Arc<Shared>, mission: MissionId, last_turn
             "{name}: it still runs; stop it with `volee stop {name}`"
         ));
     }
-    if let Err(error) = say_what_was_tidied(&shared, mission, &tidied, &kept).await {
-        tracing::warn!(%error, %mission, "cannot say what closing the mission tidied");
+    let done = Done {
+        merged,
+        tidied,
+        kept,
+    };
+    if let Err(error) = say_what_was_done(&shared, mission, &done).await {
+        tracing::warn!(%error, %mission, "cannot say what closing the mission did");
     }
+}
+
+/// What the end of a mission did, as its closing message says it.
+struct Done {
+    /// The workers whose work is merged, with the branches.
+    merged: Vec<String>,
+    /// The workers whose worktree was removed.
+    tidied: Vec<String>,
+    /// The agents that were kept, each with the reason.
+    kept: Vec<String>,
+}
+
+/// A worker's merged work in a few words, such as `billing (feat/invoices
+/// into main, PR #7)`; `None` when its work was not merged (a report is not
+/// a merge).
+fn landed(agent: &Agent) -> Option<String> {
+    let delivery = &agent.delivery;
+    let pull_request = delivery
+        .pull_request_at_tip()
+        .filter(|pr| pr.state == PrState::Merged);
+    if agent.role != Role::Worker || (!delivery.merged_into_base && pull_request.is_none()) {
+        return None;
+    }
+    let mut what = match (&agent.workspace.branch, &agent.workspace.base) {
+        (Some(branch), Some(base)) => format!("{branch} into {base}"),
+        (Some(branch), None) => branch.clone(),
+        _ => String::new(),
+    };
+    if let Some(pr) = pull_request {
+        if !what.is_empty() {
+            what.push_str(", ");
+        }
+        // Writing to a String cannot fail.
+        let _ = write!(what, "PR #{}", pr.number);
+    }
+    Some(if what.is_empty() {
+        agent.name.clone()
+    } else {
+        format!("{} ({what})", agent.name)
+    })
 }
 
 /// Stops the coordinator of a closed mission, then forgets it. Returns
@@ -563,20 +617,29 @@ async fn settled(
     }
 }
 
-/// Tells the person, and the lead that asked for the mission, what closing
-/// it tidied and what it kept.
-async fn say_what_was_tidied(
+/// Tells the person, and the lead that asked for the mission, what its end
+/// did: what is merged, what was tidied and what was kept. It says the
+/// merges in so many words: who reads only "closed, branches kept" takes it
+/// that nothing was merged.
+async fn say_what_was_done(
     shared: &Arc<Shared>,
     mission: MissionId,
-    tidied: &[String],
-    kept: &[String],
+    done: &Done,
 ) -> Result<(), DaemonError> {
+    let Done {
+        merged,
+        tidied,
+        kept,
+    } = done;
     let mut state = shared.state.lock().await;
     let Some(record) = state.registry().mission(mission) else {
         return Ok(());
     };
     let mut body = format!("Mission \"{}\" is closed.", record.title);
     // Writing to a String cannot fail.
+    if !merged.is_empty() {
+        let _ = write!(body, " Merged: {}.", merged.join(", "));
+    }
     if !tidied.is_empty() {
         let _ = write!(
             body,

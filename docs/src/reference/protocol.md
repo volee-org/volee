@@ -229,7 +229,7 @@ agent closes a mission. Without `report`, the report the coordinator
 presented is kept, else its latest report in the mission's thread. After a
 close, by the human or by the daemon, the daemon tidies the workers whose
 work landed, stops the coordinator, and posts one message in the mission's
-thread that says what it tidied and what it kept.
+thread that says what is merged, what it tidied and what it kept.
 
 ## Events and replicas
 

@@ -107,8 +107,10 @@ work itself, closes the mission and tidies it. No agent merges or closes.
   every worker whose work landed (its worktree removed, its branch kept,
   the agent forgotten: [ADR 0011](0011-safety-and-delivery-evidence.md),
   unchanged), stops the coordinator and forgets it, and tells the person,
-  and the lead, in one message what was tidied and what was kept, with the
-  reason. After an approval, the turn the person's answer woke in the
+  and the lead, in one message what is merged, what was tidied and what was
+  kept, with the reason. It names the merges: a reader of "closed, branches
+  kept" alone takes it that nothing was merged, as a lead did in a real
+  mission. After an approval, the turn the person's answer woke in the
   coordinator is left to end first. Nothing is forced. An aborted mission
   is not tidied: aborting keeps everything.
 - **An approval is carried out even if the daemon stops.** A mission that

@@ -152,12 +152,12 @@ volee merges each worker's work itself, its pull request on GitHub, or its
 branch into the base branch in a repository without a remote, and the
 mission closes. No agent merges. Closing tidies the mission in one gesture:
 the workers' worktrees are removed, their branches kept, the coordinator
-stopped, and one message tells you what was tidied and what was kept, with
-the reason. On `no`, or on an answer in your own words, nothing is merged
-and the mission stays open. If a merge cannot go through (a required review
-is missing, your main checkout has uncommitted changes), nothing is forced:
-volee tells you why, and the coordinator presents its report again once it
-is settled.
+stopped, and one message tells you what is merged, what was tidied and what
+was kept, with the reason. On `no`, or on an answer in your own words,
+nothing is merged and the mission stays open. If a merge cannot go through
+(a required review is missing, your main checkout has uncommitted changes),
+nothing is forced: volee tells you why, and the coordinator presents its
+report again once it is settled.
 
 ```sh
 volee mission ls --all

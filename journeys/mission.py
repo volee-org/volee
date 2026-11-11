@@ -284,9 +284,9 @@ def main():
                     str(repo.worktrees(branch)))
         j.keys("Escape", 0.5)
         j.keys("I", 1.5)
-        j.check("one message says what was tidied",
-                j.sees("is closed.", "Tidied:", "worktrees removed", "branches kept",
-                       timeout=20))
+        j.check("one message says what is merged and what was tidied",
+                j.sees("is closed.", "Merged:", branch + " into " + repos[0].base,
+                       "Tidied:", "worktrees removed", "branches kept", timeout=20))
         j.check("no question is left waiting", "question for you" not in j.screen())
         j.check("the thread still names the coordinator, which left the list",
                 coordinator + " → you" in j.screen()
