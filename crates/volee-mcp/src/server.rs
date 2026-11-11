@@ -448,7 +448,8 @@ impl VoleeMcp {
     #[tool(
         description = "Every agent volee knows on this machine, the ones that need attention \
                        first: id, name, role, state, repository, branch, mission, and whether you \
-                       may send it a message (can_message)."
+                       may send it a message (can_message). Your own entry is in the list too, \
+                       marked you: true."
     )]
     pub async fn list_agents(
         &self,

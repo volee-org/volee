@@ -174,6 +174,20 @@ async fn list_agents_says_who_the_caller_may_write_to() {
         serde_json::Value::Null,
         "no flag for the caller itself"
     );
+    let you = |name: &str| {
+        agents
+            .iter()
+            .find(|a| a["name"] == name)
+            .map(|a| a["you"].clone())
+            .unwrap()
+    };
+    assert_eq!(
+        you("api"),
+        true,
+        "the caller's own entry says it is the caller"
+    );
+    assert_eq!(you("lead"), serde_json::Value::Null);
+    assert_eq!(you("docs"), serde_json::Value::Null);
 }
 
 #[tokio::test]
