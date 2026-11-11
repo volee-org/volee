@@ -28,13 +28,14 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0019](0019-a-host-process-holds-each-agent-terminal.md) | A volee-host process holds each agent's terminal (supersedes 0002) | Accepted |
 | [0020](0020-libghostty-vt-emulates-terminals.md) | libghostty-vt emulates every terminal volee reads | Accepted |
 | [0021](0021-take-over-watch-and-the-wall-of-screens.md) | Take over with `a` or `volee attach`, leave with Ctrl+Q, watch on a wall | Accepted |
-| [0022](0022-harness-profiles.md) | A profile per harness says how to launch, resume, find and read it | Accepted |
-| [0023](0023-every-agent-on-the-machine.md) | volee shows every agent on the machine, and adopts the ones it did not start (supersedes 0018; amended by 0027) | Accepted |
+| [0022](0022-harness-profiles.md) | A profile per harness says how to launch, resume, find and read it (amended by 0029) | Accepted |
+| [0023](0023-every-agent-on-the-machine.md) | volee shows every agent on the machine, and adopts the ones it did not start (supersedes 0018; amended by 0027 and 0029) | Accepted |
 | [0024](0024-agents-come-back-after-a-reboot.md) | Agents interrupted by a reboot come back in new hosts | Accepted |
 | [0025](0025-key-sequences-a-leader-and-which-key-popups.md) | Key sequences, a leader key and which-key popups; every key configurable | Proposed |
 | [0026](0026-edit-mode-types-into-an-agent-inside-volee.md) | Edit mode types into an agent inside volee; the host encodes keys | Proposed |
 | [0027](0027-open-without-owning.md) | volee opens every agent where it runs, and its list shows what runs (amends 0023, 0026, 0021 and 0004) | Accepted |
 | [0028](0028-one-emulator-and-the-wall-inside-the-interface.md) | One emulator for every screen, and the wall inside the interface (completes 0020; amends 0021, 0026 and 0027) | Accepted |
+| [0029](0029-volee-run.md) | `volee run` makes any program an agent, in the terminal it is typed in (amends 0022 and 0023) | Accepted |
 
 ## Not built yet
 
@@ -60,18 +61,23 @@ to come:
   crates.io release.
 - [0022](0022-harness-profiles.md): profiles for Codex CLI, Gemini CLI,
   Grok Build and the others the ADR lists. Only Claude Code and OpenCode
-  (measured on OpenCode 2.2.5) have one; other programs run in a host with
-  the generic profile (`volee host spawn`), without a state, a resume or an
-  agent in volee's list. ACP as a source of states for hosted agents is
-  not built either.
+  (measured on OpenCode 2.2.5) have one; other programs run with the
+  generic profile, as agents of the list (`volee run`,
+  [0029](0029-volee-run.md)) or in a host on its own (`volee host spawn`):
+  a state read on the screen, and no resume. ACP as a source of states for
+  hosted agents is not built either.
 - [0023](0023-every-agent-on-the-machine.md): finding agents in the process
   table for harnesses other than OpenCode (Claude Code sessions are still
   found through `claude agents --json`), and adopting them (`codex resume`,
   `gemini --resume`), which needs their profiles.
 - [0027](0027-open-without-owning.md): a door for a session in a tmux pane
-  (the pane is brought forward instead) and for an OpenCode agent started
-  in a plain terminal (in a tuios pane, it opens like any agent in a
-  pane).
+  (the pane is brought forward instead) and for an agent started in a plain
+  terminal (in a tuios pane, it opens like any agent in a pane; started
+  with `volee run`, it runs in a host and has one,
+  [0029](0029-volee-run.md)).
+- [0029](0029-volee-run.md): exact states for `volee run -- claude`, by
+  joining the session Claude Code lists to the agent; a way to remove the
+  records of ended hosts.
 - [0028](0028-one-emulator-and-the-wall-inside-the-interface.md): a live
   preview of a Claude Code background session that is not open, which
   would need a client on the session; volee shows its replay, and says

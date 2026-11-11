@@ -54,6 +54,9 @@ code, not by trust.
   yourself opens the same way, where it runs: `enter` or a double click
   puts a terminal on it inside volee (`claude attach` on a background
   session, the pane of a tuios session), with nothing stopped or restarted.
+- Any other program runs under volee from your terminal: `volee run --
+  codex` starts it in a volee host, with your terminal on it, and it is
+  listed, shown and opened like the others.
 - The list is what runs now, one row per session, as Claude Code's own
   agents view lists them: a session that is gone leaves it.
 - After a reboot, the daemon resumes the agents the reboot interrupted, with

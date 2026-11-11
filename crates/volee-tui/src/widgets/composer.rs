@@ -15,6 +15,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::Span;
 use ratatui::widgets::{Clear, Widget};
+use volee_core::Agent;
 use volee_core::message::MessageKind;
 
 use super::{panel, put_spans, truncated};
@@ -124,21 +125,11 @@ fn header(model: &Model, draft: &Draft, name: &str) -> Vec<Vec<Span<'static>>> {
             Span::styled(format!("\"{first_line}\""), theme.style(StyleRole::Text)),
         ]);
     }
-    // Sessions started outside volee have no hooks to receive messages: the
-    // person talks to them by opening them. An agent of another harness that
-    // joined through MCP reads its messages itself.
-    if let Some(agent) = model
+    if let Some(note) = model
         .registry
         .agent(draft.to)
-        .filter(|agent| !agent.managed())
+        .and_then(|agent| unhanded(agent, name))
     {
-        let note = if agent.joined() {
-            format!("{name} joined through MCP: it reads this when it calls read_messages.")
-        } else {
-            format!(
-                "{name} was started outside volee, which hands it no message: open it (enter) to talk to it."
-            )
-        };
         lines.push(vec![Span::styled(
             note,
             theme.style(StyleRole::Placeholder),
@@ -158,9 +149,151 @@ fn header(model: &Model, draft: &Draft, name: &str) -> Vec<Vec<Span<'static>>> {
     lines
 }
 
+/// What the composer says of an agent that nothing hands a message to, when
+/// `agent` is one. Sessions started outside volee have no hooks to receive
+/// messages: the person talks to them by opening them. An agent of another
+/// harness that joined through MCP reads its messages itself. A program
+/// started with `volee run` is typed into, and once it ended nothing reads
+/// what is sent to it.
+fn unhanded(agent: &Agent, name: &str) -> Option<String> {
+    if agent.joined() {
+        return Some(format!(
+            "{name} joined through MCP: it reads this when it calls read_messages."
+        ));
+    }
+    if agent.generic() {
+        return Some(if agent.state.is_live() {
+            format!(
+                "{name} was started with volee run, which hands it no message: open it (enter) to talk to it."
+            )
+        } else {
+            format!("{name} was started with volee run and ended: nothing resumes it to read this.")
+        });
+    }
+    (!agent.managed()).then(|| {
+        format!(
+            "{name} was started outside volee, which hands it no message: open it (enter) to talk to it."
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ulid::Ulid;
+    use volee_core::harness::{HarnessKind, SessionKey, SessionOrigin};
+    use volee_core::role::{LaunchedBy, Role};
+    use volee_core::state::AgentState;
+    use volee_core::time::Timestamp;
+    use volee_core::workspace::{Location, Workspace};
+    use volee_core::{AgentId, Event, EventKind, Registry};
+
+    /// An agent as its registration, a session when it has one, and a state
+    /// make it.
+    fn agent(
+        role: Role,
+        launched_by: LaunchedBy,
+        harness: HarnessKind,
+        location: Location,
+        session: Option<SessionKey>,
+        state: AgentState,
+    ) -> Agent {
+        let id = AgentId::from_ulid(Ulid::from_parts(1, 1));
+        let mut events = vec![EventKind::AgentRegistered {
+            agent: id,
+            name: "billing".into(),
+            role,
+            harness,
+            launched_by,
+            parent: None,
+            mission: None,
+            workspace: Workspace::default(),
+            location,
+        }];
+        if let Some(session) = session {
+            events.push(EventKind::SessionLinked {
+                agent: id,
+                session,
+                origin: SessionOrigin::Discovered,
+            });
+        }
+        events.push(EventKind::StateChanged {
+            agent: id,
+            state,
+            detail: None,
+        });
+        let events: Vec<Event> = events
+            .into_iter()
+            .map(|kind| Event::new(Timestamp::from_millis(1), kind))
+            .collect();
+        Registry::from_events(&events)
+            .unwrap()
+            .agent(id)
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn the_composer_says_who_is_handed_no_message_and_why() {
+        let host = || Location::Host { id: "h1".into() };
+        let opencode = || HarnessKind::Other("opencode".into());
+        let note = |agent: &Agent| unhanded(agent, "billing");
+
+        // An agent volee launched or adopted is handed its messages.
+        let launched = agent(
+            Role::Lead,
+            LaunchedBy::Human,
+            HarnessKind::ClaudeCode,
+            host(),
+            Some(SessionKey::claude("s")),
+            AgentState::Idle,
+        );
+        assert_eq!(note(&launched), None);
+
+        // A program started with `volee run`: typed into while it runs.
+        let run = |state| {
+            agent(
+                Role::Independent,
+                LaunchedBy::Human,
+                opencode(),
+                host(),
+                None,
+                state,
+            )
+        };
+        let running = note(&run(AgentState::Idle)).unwrap();
+        assert!(running.contains("started with volee run"), "{running}");
+        assert!(running.contains("open it (enter)"), "{running}");
+        // Once it ended, nothing can be opened and nothing reads the
+        // message.
+        let ended = note(&run(AgentState::Stopped)).unwrap();
+        assert!(ended.contains("nothing resumes it"), "{ended}");
+        assert!(!ended.contains("open it"), "{ended}");
+
+        // A session started outside volee, and an agent that joined through
+        // MCP, keep their own words.
+        let outside = agent(
+            Role::Independent,
+            LaunchedBy::Outside,
+            opencode(),
+            Location::Terminal,
+            Some(SessionKey {
+                harness: opencode(),
+                id: "pid-1".into(),
+            }),
+            AgentState::Idle,
+        );
+        assert!(note(&outside).unwrap().contains("started outside volee"));
+        let joined = agent(
+            Role::Independent,
+            LaunchedBy::Outside,
+            HarnessKind::Other("codex".into()),
+            Location::Unknown,
+            None,
+            AgentState::Idle,
+        );
+        assert!(note(&joined).unwrap().contains("joined through MCP"));
+    }
 
     fn rows(text: &str, width: usize) -> Vec<&str> {
         text::wrap(text, width)

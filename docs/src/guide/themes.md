@@ -134,7 +134,7 @@ edge = "#3b4261"
 | `role.coordinator` | The coordinator of a mission. |
 | `role.worker` | A worker in one repository. |
 | `role.subagent` | A helper started by another agent inside its session. |
-| `role.independent` | A session volee did not launch. |
+| `role.independent` | A session volee did not launch, or a program run with `volee run`. |
 | `edge` | Lines between cards, and who launched whom in the network view. |
 | `edge.pulse` | A message moving along an edge of the network view. |
 | `edge.message` | Agents that exchanged messages, in the network view. |

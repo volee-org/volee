@@ -38,6 +38,19 @@ pub(crate) struct Spawn {
 /// Starts a host in the background, detached from this terminal, and waits
 /// until it answers. Prints its id.
 pub(crate) fn spawn(dir: &HostDir, spawn: Spawn) -> anyhow::Result<()> {
+    let id = start(dir, spawn)?;
+    println!("{id}");
+    Ok(())
+}
+
+/// Starts a host in the background, detached from this terminal, waits
+/// until it runs its program, and returns its id.
+///
+/// A host binds its socket first, then starts its program, then writes its
+/// record. Only the record says that the program runs: a caller that went
+/// on once the socket answered would find no record yet, or a host that
+/// stops a moment later because its program could not start.
+pub(crate) fn start(dir: &HostDir, spawn: Spawn) -> anyhow::Result<String> {
     dir.ensure()
         .with_context(|| format!("cannot create {}", dir.path().display()))?;
     let id = spawn
@@ -81,23 +94,49 @@ pub(crate) fn spawn(dir: &HostDir, spawn: Spawn) -> anyhow::Result<()> {
         .spawn()
         .context("cannot start the host")?;
     let deadline = Instant::now() + Duration::from_secs(5);
-    while std::os::unix::net::UnixStream::connect(&socket).is_err() {
+    let record = dir.record(&id);
+    // The record of this very host: an earlier host of the same id may have
+    // left one.
+    let host = child.id();
+    let started = || {
+        volee_host::HostRecord::read(&record).is_ok_and(|record| record.host_pid == host)
+            && std::os::unix::net::UnixStream::connect(&socket).is_ok()
+    };
+    while !started() {
         if let Some(status) = child.try_wait()? {
+            let log = dir.log(&id);
+            // A program that cannot start is the usual reason, and the host
+            // wrote it: said here, its log has nothing more to tell.
+            if let Some(reason) = std::fs::read_to_string(&log)
+                .ok()
+                .as_deref()
+                .and_then(failure)
+            {
+                let _ = std::fs::remove_file(&log);
+                bail!("{reason}");
+            }
             bail!(
                 "the host stopped before answering ({status}); see {}",
-                dir.log(&id).display()
+                log.display()
             );
         }
         if Instant::now() > deadline {
             bail!(
-                "the host did not answer within 5 seconds; see {}",
+                "the host did not start its program within 5 seconds; see {}",
                 dir.log(&id).display()
             );
         }
         thread::sleep(Duration::from_millis(20));
     }
-    println!("{id}");
-    Ok(())
+    Ok(id)
+}
+
+/// Why a host could not run, as the last error of its log says it, on one
+/// line.
+fn failure(log: &str) -> Option<String> {
+    let (_, reason) = log.rsplit_once("the host could not run error=")?;
+    let reason = reason.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!reason.is_empty()).then_some(reason)
 }
 
 /// A host id names files in the hosts directory: letters, digits, `_`, `-`
@@ -235,6 +274,12 @@ pub(crate) fn attach(dir: &HostDir, id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Ends the program of a host this command started and cannot use: nothing
+/// is reported, since the reason it is ended is.
+pub(crate) fn end(dir: &HostDir, id: &str) {
+    let _ = volee_host::stop(&dir.socket(id), &client_name("run"));
+}
+
 /// Asks a host to end its program.
 pub(crate) fn stop(dir: &HostDir, id: &str) -> anyhow::Result<()> {
     check_id(id)?;
@@ -276,5 +321,25 @@ mod tests {
         for id in ["", "../x", "a/b", ".hidden", "-x", "two words"] {
             assert!(check_id(id).is_err(), "{id}");
         }
+    }
+
+    #[test]
+    fn a_host_that_could_not_run_says_why_on_one_line() {
+        // As the host writes it when its program is not found.
+        let log = "2026-11-11T06:54:25.251149Z ERROR volee::cmd::host: the host could not run \
+                   error=cannot start opencodee: Unable to spawn opencodee because:\nNo viable \
+                   candidates found in PATH \"/usr/bin:/bin\"\n";
+        assert_eq!(
+            failure(log).as_deref(),
+            Some(
+                "cannot start opencodee: Unable to spawn opencodee because: No viable candidates \
+                 found in PATH \"/usr/bin:/bin\""
+            )
+        );
+        // The last failure of a log that holds several, and none for a log
+        // that holds none.
+        let twice = format!("{log}INFO later\n{}", log.replace("opencodee", "other"));
+        assert!(failure(&twice).is_some_and(|reason| reason.contains("other")));
+        assert_eq!(failure("INFO host started\n"), None);
     }
 }

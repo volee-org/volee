@@ -55,6 +55,7 @@
   - [0026. Edit mode inside volee](adr/0026-edit-mode-types-into-an-agent-inside-volee.md)
   - [0027. Open without owning](adr/0027-open-without-owning.md)
   - [0028. One emulator, and the wall inside the interface](adr/0028-one-emulator-and-the-wall-inside-the-interface.md)
+  - [0029. volee run makes any program an agent](adr/0029-volee-run.md)
   - [Template](adr/template.md)
 
 # Project

@@ -18,7 +18,7 @@ use volee_proto::PROTOCOL_VERSION;
 use volee_proto::methods::{
     AbortMission, Adopt, AgentParams, Attach, CloseMission, CreateMission, Diff, Empty, EventBatch,
     EventsSince, Forget, HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams,
-    Method, Open, Preview, RecordActivity, RefreshDiscovery, SendMessage, SendParams, Sent,
+    Method, Open, Preview, RecordActivity, RefreshDiscovery, Run, SendMessage, SendParams, Sent,
     Shutdown, SinceParams, Spawn, Status, StatusInfo, StatusParams, Stop, Summarize, Tidy,
     WaitParams, WaitReply,
 };
@@ -57,6 +57,7 @@ pub(crate) async fn dispatch(
         }
         HookWait::NAME => respond(hook_wait(shared, parse::<HookWait>(params)?).await),
         Spawn::NAME => respond(crate::launch::spawn(shared, parse::<Spawn>(params)?).await),
+        Run::NAME => respond(crate::launch::run(shared, parse::<Run>(params)?).await),
         Preview::NAME => respond(control::preview(shared, parse::<Preview>(params)?).await),
         Diff::NAME => respond(control::diff(shared, parse::<Diff>(params)?).await),
         Attach::NAME => respond(control::attach(shared, parse::<Attach>(params)?).await),

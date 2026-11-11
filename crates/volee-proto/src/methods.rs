@@ -407,6 +407,37 @@ method!(
     Spawned
 );
 
+/// Parameters of [`Run`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunParams {
+    /// The id of a volee host the client started, in the daemon's hosts
+    /// directory: the program it runs becomes an agent.
+    pub host: String,
+    /// The agent's name; the host's own name, else the name of the
+    /// program's directory, when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// The result of [`Run`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ran {
+    /// The new agent.
+    pub agent: AgentId,
+    /// Its name.
+    pub name: String,
+}
+
+method!(
+    /// Makes the program a volee host runs an agent of the list (`volee
+    /// run`): any program, with the generic profile (ADR 0022). The client
+    /// starts the host itself, in the person's own terminal environment.
+    Run,
+    "agents.run",
+    RunParams,
+    Ran
+);
+
 /// The size of a terminal, in cells.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScreenSize {
@@ -842,6 +873,7 @@ mod tests {
             RecordActivity::NAME,
             Tidy::NAME,
             Spawn::NAME,
+            Run::NAME,
             Preview::NAME,
             Diff::NAME,
             Attach::NAME,

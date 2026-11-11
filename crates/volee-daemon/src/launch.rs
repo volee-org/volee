@@ -26,7 +26,7 @@ use volee_core::workspace::{Location, Workspace};
 use volee_core::{AgentId, Event, EventKind, MissionId};
 use volee_git::Git;
 use volee_harness::{Harness, PermissionMode, SpawnSpec};
-use volee_proto::methods::{SpawnParams, Spawned};
+use volee_proto::methods::{Ran, RunParams, SpawnParams, Spawned};
 
 use crate::error::DaemonError;
 use crate::server::Shared;
@@ -218,6 +218,17 @@ fn opencode_started(
 /// from its screen, and messages reach it when volee resumes it.
 async fn spawn_opencode(shared: &Arc<Shared>, params: SpawnParams) -> Result<Spawned, DaemonError> {
     use volee_harness::opencode;
+    // An independent agent of a harness without hooks, launched by the
+    // human and still without a session, is what a program started with
+    // `volee run` is (`Agent::generic`, ADR 0029): a launch has a place in
+    // the work.
+    if !matches!(params.role, Role::Lead | Role::Worker) {
+        return Err(DaemonError::InvalidParams(format!(
+            "agents.spawn launches OpenCode leads and workers, not a {} agent: `volee run -- \
+             opencode` runs it on its own",
+            params.role.label()
+        )));
+    }
     let git = git(shared)?;
     let task = params.task.trim().to_owned();
     if task.is_empty() {
@@ -293,6 +304,155 @@ async fn spawn_opencode(shared: &Arc<Shared>, params: SpawnParams) -> Result<Spa
         }),
         Err(error) => Err(kept(error.into(), &target.root, &worktree, &params.branch)),
     }
+}
+
+/// `agents.run` (`volee run`): the program of a volee host the client
+/// started becomes an agent (ADR 0029).
+///
+/// The client starts the host, not the daemon: the program then runs in the
+/// person's own terminal environment (its `PATH`, its keys), which a host
+/// started by the daemon would not have. The daemon only records the agent.
+/// It has the generic profile (ADR 0022): its states come from its screen,
+/// it is shown, opened and stopped like any agent in a host, and nothing
+/// resumes it or hands it a message.
+pub(crate) async fn run(shared: &Arc<Shared>, params: RunParams) -> Result<Ran, DaemonError> {
+    let id = params.host;
+    // The id names files in the hosts directory.
+    let names_a_file = !id.is_empty()
+        && id.len() <= 64
+        && !id.starts_with(['.', '-'])
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+    if !names_a_file {
+        return Err(DaemonError::InvalidParams(format!(
+            "{id:?} is not the id of a volee host"
+        )));
+    }
+    let path = hosts_dir(shared).join(format!("{id}.json"));
+    let record = blocking(move || volee_host::HostRecord::read(&path))
+        .await?
+        .map_err(|_| DaemonError::NotFound(format!("no volee host {id} runs here")))?;
+    if record.exit.is_some() {
+        return Err(DaemonError::Refused(format!(
+            "the program of the volee host {id} has ended"
+        )));
+    }
+    let program = record
+        .command
+        .first()
+        .and_then(|program| Path::new(program).file_name())
+        .map_or_else(
+            || "program".to_owned(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+    let folder = record
+        .cwd
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned());
+    // The name asked for, else the host's own, else its directory's: a
+    // name of spaces is no name.
+    let named = |name: Option<String>| {
+        name.map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+    };
+    let name = named(params.name)
+        .or_else(|| named(record.name))
+        .or(folder)
+        .unwrap_or_else(|| program.clone());
+    let mut state = shared.state.lock().await;
+    if state
+        .registry()
+        .agents()
+        .any(|agent| agent.location.host() == Some(id.as_str()))
+    {
+        return Err(DaemonError::Refused(format!(
+            "the volee host {id} already runs an agent"
+        )));
+    }
+    let agent = state.new_agent_id();
+    let now = state.now();
+    state.commit(vec![
+        Event::new(
+            now,
+            EventKind::AgentRegistered {
+                agent,
+                name: name.clone(),
+                // No place in the organization of the work: with the human
+                // as its launcher, this is what tells a run agent
+                // (`Agent::generic`).
+                role: Role::Independent,
+                harness: HarnessKind::Other(program),
+                launched_by: LaunchedBy::Human,
+                parent: None,
+                mission: None,
+                workspace: Workspace::at(&record.cwd),
+                location: Location::Host { id },
+            },
+        ),
+        // Its host answered: the program runs. Never `launching`, the state
+        // in which a listed session of the same directory would be taken
+        // for the one volee waits for.
+        Event::new(
+            now,
+            EventKind::StateChanged {
+                agent,
+                state: AgentState::Working,
+                detail: None,
+            },
+        ),
+    ])?;
+    Ok(Ran { agent, name })
+}
+
+/// Why the agent `name`, whose host no longer runs its program, cannot be
+/// opened, and what brings it back.
+pub(crate) fn not_running(name: &str, generic: bool) -> DaemonError {
+    DaemonError::Refused(if generic {
+        format!(
+            "the program of {name} ended, and nothing resumes a program started with `volee \
+             run`: run it again"
+        )
+    } else {
+        format!("{name} is not running: send it a message to resume it in a new volee host")
+    })
+}
+
+/// The processes of the programs that run in the hosts of agents started
+/// with `volee run`: the process each host started and every process below
+/// it, since a command may go through a wrapper (`npx`, a shell). A harness
+/// that lists one of them as a session lists the agent volee already has.
+pub(crate) async fn run_programs(shared: &Arc<Shared>) -> std::collections::HashSet<u32> {
+    use std::collections::HashSet;
+    let hosts: Vec<String> = {
+        let state = shared.state.lock().await;
+        state
+            .registry()
+            .agents()
+            .filter(|agent| agent.generic())
+            .filter_map(|agent| agent.location.host().map(str::to_owned))
+            .collect()
+    };
+    if hosts.is_empty() {
+        return HashSet::new();
+    }
+    let dir = hosts_dir(shared);
+    let runner = shared.processes.clone();
+    blocking(move || {
+        let started: Vec<u32> = hosts
+            .iter()
+            .filter_map(|id| volee_host::HostRecord::read(&dir.join(format!("{id}.json"))).ok())
+            .filter(|record| record.exit.is_none())
+            .filter_map(|record| record.child_pid)
+            .collect();
+        // Without a process table, or when it cannot be read, the processes
+        // the hosts started are all that is known.
+        runner
+            .and_then(|runner| volee_harness::processes::with_descendants(&*runner, &started).ok())
+            .unwrap_or_else(|| started.into_iter().collect())
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// Runs the repository's setup commands in the new worktree, if it has any

@@ -450,7 +450,10 @@ impl Refresher {
                 (
                     found.workspace.clone(),
                     found.delivery.unmerged_tip.clone(),
-                    found.launched_by != LaunchedBy::Outside,
+                    // A program the person runs under volee (`volee run`)
+                    // is their own work in their own checkout, not work
+                    // volee started.
+                    found.launched_by != LaunchedBy::Outside && !found.generic(),
                 )
             })
             .await

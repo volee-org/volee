@@ -2,7 +2,8 @@
 //! Code: the interface starts its daemon, lists a background session,
 //! opens it by Enter where it runs, types into it, and comes back
 //! (ADR 0027); the wall shows the session's screen, and the mouse reaches a
-//! session opened from it (ADR 0028).
+//! session opened from it (ADR 0028); `volee run` makes any program an
+//! agent, in the terminal it is typed in, then in the interface (ADR 0029).
 //!
 //! The interface runs in a pseudo-terminal, driven by keys and read as a
 //! screen, like a person's terminal. The stand-in is a shell script named
@@ -123,9 +124,19 @@ impl World {
 }
 
 impl Drop for World {
-    /// The daemon the interface started runs on its own: a test that fails
-    /// must not leave it behind.
+    /// The daemon the interface started runs on its own, and so do the
+    /// hosts `volee run` started: a test that fails must not leave them
+    /// behind.
     fn drop(&mut self) {
+        for record in files_of(&self.path("state/hosts")) {
+            let host = std::fs::read(&record)
+                .ok()
+                .and_then(|json| serde_json::from_slice::<serde_json::Value>(&json).ok())
+                .and_then(|record| record["host_pid"].as_u64());
+            if let Some(pid) = host {
+                let _ = Command::new("kill").arg(pid.to_string()).output();
+            }
+        }
         let _ = self.volee(&["daemon", "stop"]);
     }
 }
@@ -193,11 +204,19 @@ impl Terminal {
 
 /// Starts the interface in a pseudo-terminal of `SIZE` and connects to it.
 fn interface(world: &World) -> (thread::JoinHandle<()>, Terminal) {
+    terminal(world, "tui", &[])
+}
+
+/// Starts `volee <args>` in a pseudo-terminal of `SIZE`, as typed in a
+/// person's terminal in the directory `work`, and connects to it.
+fn terminal(world: &World, id: &str, args: &[&str]) -> (thread::JoinHandle<()>, Terminal) {
     let dir = HostDir::new(world.path("terminal"));
+    let mut command = vec![env!("CARGO_BIN_EXE_volee").to_owned()];
+    command.extend(args.iter().map(|arg| (*arg).to_owned()));
     let config = HostConfig {
-        id: "tui".to_owned(),
+        id: id.to_owned(),
         dir: dir.clone(),
-        command: vec![env!("CARGO_BIN_EXE_volee").to_owned()],
+        command,
         cwd: world.path("work"),
         env: world.env(),
         env_remove: SESSION_VARIABLES
@@ -214,7 +233,7 @@ fn interface(world: &World) -> (thread::JoinHandle<()>, Terminal) {
     let host = thread::spawn(move || {
         volee_host::run(config).unwrap();
     });
-    let socket = dir.socket("tui");
+    let socket = dir.socket(id);
     assert!(
         wait(10, || std::os::unix::net::UnixStream::connect(&socket)
             .is_ok()),
@@ -324,6 +343,206 @@ fn a_background_session_is_listed_opened_typed_into_and_left() {
         "a view outlived its daemon: {:?}",
         views(&world)
     );
+}
+
+/// The agents `volee ls --json` lists.
+fn listed(world: &World) -> Vec<serde_json::Value> {
+    let output = world.volee(&["ls", "--json"]);
+    let listed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_default();
+    listed
+        .as_array()
+        .or_else(|| listed["agents"].as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn named(world: &World, name: &str) -> Option<serde_json::Value> {
+    listed(world)
+        .into_iter()
+        .find(|agent| agent["name"] == name)
+}
+
+#[test]
+fn a_program_run_under_volee_is_an_agent_here_and_in_the_interface() {
+    let world = World::new();
+    world.install_claude(REPEATS);
+
+    // Typed in a terminal: the program starts under volee, in this
+    // directory, and this terminal is on it.
+    let program = "echo the program says hello; exec cat";
+    let (shell, mut here) = terminal(
+        &world,
+        "shell",
+        &["run", "--name", "ledger", "--", "sh", "-c", program],
+    );
+    // The program's screen takes the terminal over.
+    here.sees("the program says hello");
+    here.text("typed by hand");
+    here.key("enter", false);
+    assert!(
+        wait(30, || here.screen().matches("typed by hand").count() >= 2),
+        "the program never repeated what was typed:\n{}",
+        here.screen()
+    );
+
+    // It is an agent of the list: in a volee host, started by the person,
+    // on its own, known by its program.
+    let ledger = named(&world, "ledger").expect("the program is listed");
+    assert_eq!(ledger["location"]["kind"], "host", "{ledger}");
+    assert_eq!(ledger["launched_by"]["by"], "human", "{ledger}");
+    assert_eq!(ledger["role"], "independent", "{ledger}");
+    assert_eq!(ledger["harness"]["other"], "sh", "{ledger}");
+    assert_eq!(ledger["sessions"].as_array().map(Vec::len), Some(0));
+    let cwd = ledger["workspace"]["cwd"].as_str().unwrap_or_default();
+    assert!(
+        std::fs::canonicalize(cwd).ok() == std::fs::canonicalize(world.path("work")).ok(),
+        "it runs in the directory the command was typed in: {cwd}"
+    );
+
+    // The leave key gives the terminal back; the program keeps running.
+    here.key("q", true);
+    here.sees("back from ledger; it keeps running");
+    assert!(
+        wait(15, || shell.is_finished()),
+        "volee run never came back:\n{}",
+        here.screen()
+    );
+    assert!(
+        wait(15, || named(&world, "ledger")
+            .is_some_and(|agent| agent["state"]["state"] != "stopped")),
+        "the program stopped with its terminal"
+    );
+
+    // From the interface it opens like any agent: Enter, and its screen is
+    // the one left in the terminal.
+    let (host, mut terminal) = interface(&world);
+    terminal.sees("ledger");
+    terminal.key("/", false);
+    terminal.text("ledger");
+    terminal.key("enter", false);
+    terminal.sees("\u{258c}");
+    terminal.key("enter", false);
+    terminal.sees("your keys go to ledger");
+    terminal.sees("typed by hand");
+    terminal.text("typed in volee");
+    terminal.key("enter", false);
+    assert!(
+        wait(30, || terminal.screen().matches("typed in volee").count()
+            >= 2),
+        "the program never repeated what was typed in the interface:\n{}",
+        terminal.screen()
+    );
+    // The leave key takes the keys back: the screen of an agent in a host
+    // stays, live, and `z` goes back to the list.
+    terminal.key("q", true);
+    terminal.sees("z back");
+    assert!(
+        !terminal.screen().contains("your keys go to ledger"),
+        "the keys are still the program's:\n{}",
+        terminal.screen()
+    );
+    terminal.key("z", false);
+    terminal.sees("Agents");
+
+    // Nothing hands it a message, and the command says so.
+    let told = world.volee(&["msg", "send", "ledger", "are you there?"]);
+    let told =
+        String::from_utf8_lossy(&told.stdout).into_owned() + &String::from_utf8_lossy(&told.stderr);
+    assert!(told.contains("started with `volee run`"), "{told}");
+
+    // Stopped from volee like any agent in a host; then nothing resumes
+    // it, and opening it says so.
+    let stopped = world.volee(&["stop", "ledger"]);
+    assert!(
+        stopped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stopped.stderr)
+    );
+    assert!(
+        wait(15, || named(&world, "ledger")
+            .is_some_and(|agent| agent["state"]["state"] == "stopped")),
+        "the program never stopped: {:?}",
+        named(&world, "ledger")
+    );
+    let reopened = world.volee(&["attach", "ledger"]);
+    assert!(!reopened.status.success());
+    let said = String::from_utf8_lossy(&reopened.stderr);
+    assert!(
+        said.contains("nothing resumes a program started with `volee run`"),
+        "{said}"
+    );
+
+    terminal.key("q", false);
+    assert!(
+        wait(15, || host.is_finished()),
+        "the interface never quit:\n{}",
+        terminal.screen()
+    );
+}
+
+#[test]
+fn without_a_terminal_volee_run_starts_the_program_and_says_how_to_open_it() {
+    let world = World::new();
+    world.install_claude(REPEATS);
+    // No terminal on standard input or output, as from a script.
+    let mut command = Command::new(env!("CARGO_BIN_EXE_volee"));
+    command
+        .args(["run", "--", "sh", "-c", "echo from a script; exec cat"])
+        .current_dir(world.path("work"))
+        .env_clear()
+        .envs(world.env())
+        .stdin(std::process::Stdio::null());
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Named after its directory, and the way in is said.
+    let said = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        said.contains("work runs under volee: `volee attach work` opens it."),
+        "{said}"
+    );
+    let work = named(&world, "work").expect("the program is listed");
+    assert_eq!(work["location"]["kind"], "host", "{work}");
+    // Its screen is read like any agent's.
+    assert!(
+        wait(15, || {
+            let logs = world.volee(&["logs", "work"]);
+            String::from_utf8_lossy(&logs.stdout).contains("from a script")
+        }),
+        "volee logs never showed the program's screen"
+    );
+
+    // A command that cannot start is no agent, and the reason is said.
+    let mut command = Command::new(env!("CARGO_BIN_EXE_volee"));
+    command
+        .args(["run", "--", "volee-no-such-program"])
+        .current_dir(world.path("work"))
+        .env_clear()
+        .envs(world.env())
+        .stdin(std::process::Stdio::null());
+    let output = command.output().unwrap();
+    assert!(!output.status.success());
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        said.contains("cannot start volee-no-such-program") && said.contains("PATH"),
+        "{said}"
+    );
+    assert!(
+        files_of(&world.path("state/hosts")).iter().all(|file| file
+            .to_string_lossy()
+            .contains(work["location"]["id"].as_str().unwrap())),
+        "the host that never ran left files: {:?}",
+        files_of(&world.path("state/hosts"))
+    );
+    let hosted: Vec<String> = listed(&world)
+        .iter()
+        .filter(|agent| agent["location"]["kind"] == "host")
+        .map(|agent| agent["name"].to_string())
+        .collect();
+    assert_eq!(hosted, ["\"work\""], "one program runs under volee");
 }
 
 #[test]

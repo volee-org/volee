@@ -97,6 +97,7 @@ Everything ships as **one binary**, `volee`, with subcommands:
 | `volee spawn`, `volee mission ...` | Launch agents and missions. |
 | `volee ls`, `volee msg send`, `volee diff`, `volee tidy` | Scriptable views, messaging and cleanup. |
 | `volee attach`, `volee adopt` | Open an agent in this terminal, where it runs; move a session volee did not start into a host. |
+| `volee run -- <command>` | Run any program as an agent: the command starts a host here, the daemon records its program as an agent, and this terminal is on it ([ADR 0029](../adr/0029-volee-run.md)). |
 | `volee host ...` | Run any command line in a host, list, watch, take over and stop hosts. The daemon starts every agent through `volee host spawn`, which runs `volee host run` detached. |
 | `volee hook <event>` | Called by Claude Code hooks of the agents volee launched. |
 | `volee mcp` | MCP server over stdio, used by agents to talk to each other. |

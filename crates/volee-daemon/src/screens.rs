@@ -91,10 +91,33 @@ struct Hosted {
     /// Stopped with no reason given, as a listing may have stopped it before
     /// its host was read: the host's end gives the reason.
     unexplained_stop: bool,
-    /// Its harness has hooks (Claude Code): they give its states, the host
-    /// only says whether it runs.
-    hooked: bool,
+    followed: Followed,
     held: bool,
+}
+
+/// What gives the states of a hosted agent.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Followed {
+    /// The hooks of its harness (Claude Code): the host only says whether it
+    /// runs.
+    ByHooks,
+    /// Its screen: its harness reports no state.
+    OnScreen,
+    /// Its screen too, for a program started with `volee run`: once it
+    /// ended, nothing brings it back, and its row leaves the list.
+    OnScreenUntilItEnds,
+}
+
+impl Followed {
+    fn of(agent: &volee_core::Agent) -> Self {
+        if agent.harness == HarnessKind::ClaudeCode {
+            Self::ByHooks
+        } else if agent.generic() {
+            Self::OnScreenUntilItEnds
+        } else {
+            Self::OnScreen
+        }
+    }
 }
 
 /// Follows every agent in a host: whether its host runs and, for a harness
@@ -114,7 +137,7 @@ async fn hosted_states(shared: &Arc<Shared>) {
                     host: agent.location.host()?.to_owned(),
                     state: agent.state.clone(),
                     unexplained_stop: agent.state == AgentState::Stopped && agent.detail.is_none(),
-                    hooked: agent.harness == HarnessKind::ClaudeCode,
+                    followed: Followed::of(agent),
                     held: agent.hold.is_some(),
                 })
             })
@@ -126,7 +149,7 @@ async fn hosted_states(shared: &Arc<Shared>) {
         host,
         state: current,
         unexplained_stop,
-        hooked,
+        followed,
         held,
     } in hosted
     {
@@ -142,6 +165,9 @@ async fn hosted_states(shared: &Arc<Shared>) {
             shared.screens.answered(agent);
             if let Some(exit) = &welcome.exit {
                 if !running && !unexplained_stop {
+                    if followed == Followed::OnScreenUntilItEnds {
+                        expire(shared, agent).await;
+                    }
                     continue;
                 }
                 explain = !running;
@@ -155,7 +181,7 @@ async fn hosted_states(shared: &Arc<Shared>) {
                     AgentState::Idle,
                     Some("its volee host still runs it".to_owned()),
                 )
-            } else if hooked {
+            } else if followed == Followed::ByHooks {
                 continue;
             } else {
                 match shared.screens.changed(agent, &screen) {
@@ -165,7 +191,13 @@ async fn hosted_states(shared: &Arc<Shared>) {
                 }
             }
         } else {
-            if !running || !shared.screens.missed(agent) {
+            if !running {
+                if followed == Followed::OnScreenUntilItEnds {
+                    expire(shared, agent).await;
+                }
+                continue;
+            }
+            if !shared.screens.missed(agent) {
                 continue;
             }
             (
@@ -185,6 +217,25 @@ async fn hosted_states(shared: &Arc<Shared>) {
                 },
             )]);
         }
+    }
+}
+
+/// Takes the agent of a program started with `volee run` out of the list
+/// once its program has been ended for a while: nothing resumes it, so there
+/// is nothing left to do with its row. It stays long enough for its end to
+/// be seen, like a session volee only watched (ADR 0027).
+async fn expire(shared: &Arc<Shared>, agent: AgentId) {
+    let mut state = shared.state.lock().await;
+    let now = state.now();
+    let expired = state
+        .registry()
+        .agent(agent)
+        .filter(|record| record.generic() && !record.state.is_live())
+        .and_then(|record| gone(record, now));
+    if let Some(event) = expired
+        && let Err(error) = state.commit(vec![event])
+    {
+        tracing::error!(%error, "cannot take an ended program out of the list");
     }
 }
 
@@ -221,9 +272,18 @@ async fn opencode_processes(shared: &Arc<Shared>) -> Option<Vec<volee_mux::Hoste
     let listed =
         tokio::task::spawn_blocking(move || volee_harness::opencode::list_processes(&*runner))
             .await;
-    let Ok(Ok(listing)) = listed else {
+    let Ok(Ok(mut listing)) = listed else {
         return None;
     };
+    // A process that runs in the host of an agent started with `volee run`
+    // is that agent (ADR 0029), whatever the name of the volee program that
+    // started the host.
+    let in_hosts = crate::launch::run_programs(shared).await;
+    if !in_hosts.is_empty() {
+        listing
+            .sessions
+            .retain(|session| session.pid.is_none_or(|pid| !in_hosts.contains(&pid)));
+    }
     let live = crate::panes::hosted(&listing.sessions);
     let mut state = shared.state.lock().await;
     let now = state.now();

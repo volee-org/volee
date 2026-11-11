@@ -71,6 +71,16 @@ enum Command {
         #[arg(long)]
         harness: Option<String>,
     },
+    /// Run any program as an agent, in this terminal; Ctrl+Q leaves it
+    /// running.
+    Run {
+        /// The agent's name; the name of this directory when absent.
+        #[arg(long)]
+        name: Option<String>,
+        /// The command line, after `--`.
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
     /// Take an agent over in this terminal; Ctrl+Q comes back.
     Attach {
         /// The agent: its name, short id or id.
@@ -475,6 +485,7 @@ fn async_main(command: Command) -> ExitCode {
             Command::Ls { json } => cmd::ls::run(json).await,
             Command::Attach { agent } => cmd::agent::attach(&agent).await,
             Command::Logs { agent } => cmd::agent::logs(&agent).await,
+            Command::Run { name, command } => cmd::run::run(name, command).await,
             Command::Diff { agent, full } => cmd::agent::diff(&agent, full).await,
             Command::Stop { agent } => cmd::agent::stop(&agent).await,
             Command::Adopt { agent } => cmd::agent::adopt(&agent).await,

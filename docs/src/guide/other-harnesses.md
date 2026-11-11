@@ -1,12 +1,60 @@
 # Agents of other harnesses
 
 volee finds Claude Code sessions by itself, and launches, finds and resumes
-[OpenCode](#opencode) agents too. An agent of another harness, such as
-Codex CLI or Gemini CLI, joins volee through its MCP server instead: it
-then shows up in `volee ls` and in the interface, can write to you and read
-your answers, and, inside a mission, can talk with the mission's other
-agents, whatever AI runs them. The decision behind it is
-[ADR 0014](../adr/0014-agents-of-other-harnesses-join-through-mcp.md).
+[OpenCode](#opencode) agents too. For any other AI, there are two ways in,
+and they add up:
+
+- **[`volee run`](#any-program-volee-run)** starts it under volee from your
+  terminal: it is in the list, you see its screen and you open it from the
+  interface, like any agent. This works for any program, today.
+- **[Joining](#join)** gives it volee's MCP tools: it can write to you, read
+  your answers and, inside a mission, talk with the mission's other agents,
+  whatever AI runs them
+  ([ADR 0014](../adr/0014-agents-of-other-harnesses-join-through-mcp.md)).
+
+## Any program: `volee run`
+
+```sh
+cd ~/code/billing
+volee run -- codex                      # any command line, after --
+volee run --name invoices -- gemini     # with a name of your choice
+```
+
+`volee run` starts the program in a volee host, in the directory you are
+in and with your terminal's environment, exactly as if you had typed the
+command alone. Your terminal is on it at once: you use the program as
+usual. `ctrl-q` gives the terminal back and the program keeps running; it
+is now an agent of the list, named after its directory unless you named it
+([ADR 0029](../adr/0029-volee-run.md)).
+
+From there it is an agent in a host, like the ones volee launches: its
+preview, its tile on the wall and the full-screen view show its exact
+screen, `enter` opens it inside volee where you type into it, `volee attach
+<name>` opens it in a terminal, and `volee stop <name>` ends it. Run from a
+script, with no terminal, the command starts the program and prints how to
+open it.
+
+What volee knows of such a program is its screen, and nothing else:
+
+- **State.** A screen that changes is working, one unchanged for a few
+  seconds is idle, a program that ended is stopped. volee cannot tell when
+  it waits for you, and it shows as working while you type into it.
+- **Messages.** Nothing hands it a message: you talk to it by typing into
+  it. The composer and `volee msg send` say so. To give it volee's tools,
+  [join](#join) it as well.
+- **No resume.** When the program ends, by itself, by `volee stop` or with
+  a reboot, nothing starts it again. Its row shows the end for a minute,
+  then leaves the list; run the command again to have it back.
+- **One row.** A program that volee also finds by itself (Claude Code in
+  its own list, OpenCode in the process table) is listed once, as the
+  program you ran, even when the command went through a wrapper such as
+  `npx` or a shell.
+
+For Claude Code, prefer what volee finds by itself when you can: a session
+in a tuios or tmux pane, or a background session, is listed with its exact
+state, its name and its summary, and opens where it runs. `volee run --
+claude` is for a plain terminal, which has no door otherwise: you get the
+door, with the screen-read state above.
 
 ## OpenCode
 
@@ -49,7 +97,9 @@ stop it with `volee stop`, like any agent in a host.
   - **In a plain terminal**, volee has no door on it and says so: switch to
     that terminal. To drive it from volee, quit it, then adopt it (`A`, or
     `volee adopt`): volee resumes it in a host, which only works when it
-    was started with `--session`, since volee needs the session id.
+    was started with `--session`, since volee needs the session id. Or
+    start it with [`volee run -- opencode`](#any-program-volee-run) next
+    time: it then runs in a host from the start.
 
 ## Join
 
@@ -134,7 +184,8 @@ your version, such as `cwd` or `timeout`.
   joined. Joining again with another mission, or without one, changes its
   membership.
 - **Not resumed.** volee never starts or resumes it: you start its harness.
-  To have volee start a program it has no profile for, run it in a host
-  with `volee host spawn -- <command>` ([hosts](cli.md#hosts)): you get its
-  exact screen and can take it over, but no state, no resume and no agent
-  in volee's list.
+- **Its screen.** An agent that only joined has no screen in volee: its
+  harness runs in a terminal of yours. Start the harness with
+  [`volee run`](#any-program-volee-run) to have its screen and a door on it
+  too; the program you ran and the agent that joined are then two rows, one
+  for the screen and one for the messages.
