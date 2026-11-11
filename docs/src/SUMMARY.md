@@ -60,6 +60,7 @@
   - [0031. A question may offer its answers](adr/0031-a-question-may-offer-its-answers.md)
   - [0032. A mission is merged only after approval](adr/0032-a-mission-is-merged-only-after-the-person-approved.md)
   - [0033. A lead makes others work](adr/0033-a-lead-makes-others-work.md)
+  - [0034. A session in its own terminal opens once it left it](adr/0034-a-session-in-its-own-terminal-opens-once-it-left-it.md)
   - [Template](adr/template.md)
 
 # Project

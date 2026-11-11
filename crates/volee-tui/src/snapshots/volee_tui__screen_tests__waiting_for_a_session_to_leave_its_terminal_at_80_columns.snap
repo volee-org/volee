@@ -1,0 +1,5 @@
+---
+source: crates/volee-tui/src/screen_tests.rs
+expression: waiting_for_a_move(80)
+---
+" broken-links runs in its own terminal: press ← on its empty prompt there, and v"

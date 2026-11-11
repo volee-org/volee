@@ -42,6 +42,9 @@ impl From<PreviewText> for Reading {
     }
 }
 
+/// How long a request for a fresh listing waits for it, in milliseconds.
+const RELIST_TIMEOUT_MILLIS: u64 = 2_000;
+
 /// How many events wait for the interface before the feed waits for it.
 const BACKLOG: usize = 1_024;
 
@@ -208,6 +211,17 @@ impl Source for DaemonSource {
             },
             None => Door::Elsewhere,
         })
+    }
+
+    async fn relist(&self) {
+        // What the listing changes comes as events: its answer, and a
+        // daemon too old to give one, are not waited for.
+        let _ = self
+            .client
+            .call::<volee_proto::methods::RefreshDiscovery>(volee_proto::methods::RefreshParams {
+                timeout_ms: Some(RELIST_TIMEOUT_MILLIS),
+            })
+            .await;
     }
 
     async fn mark_read(&self, message: MessageId) -> Result<(), SourceError> {

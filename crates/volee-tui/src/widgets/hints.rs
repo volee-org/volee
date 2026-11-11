@@ -261,6 +261,7 @@ fn render_prompt(model: &Model, prompt: Prompt, area: Rect, buf: &mut Buffer) {
             spans.extend(join(answers, usize::from(area.width)));
             spans
         }
+        Prompt::AwaitMove(agent) => await_move(model, agent),
         Prompt::AdoptAndTakeOver(agent) => {
             let mut spans = vec![
                 Span::styled(
@@ -305,6 +306,30 @@ fn render_prompt(model: &Model, prompt: Prompt, area: Rect, buf: &mut Buffer) {
         }
     };
     put_spans(buf, area.x, area.y, &spans, area.width);
+}
+
+/// What the bottom line says while volee waits for a session to leave the
+/// terminal that holds it (ADR 0034): the key to press, where, and the key
+/// that gives the wait up. The key to press comes early in the sentence: a
+/// narrow terminal cuts the end of the line.
+fn await_move(model: &Model, agent: volee_core::AgentId) -> Vec<Span<'static>> {
+    let theme = &model.theme;
+    vec![
+        Span::styled(
+            format!(
+                "{} runs in its own terminal: press ← on its empty prompt there, and volee \
+                 opens it here.",
+                model.name_of(agent)
+            ),
+            theme.style(StyleRole::Input),
+        ),
+        Span::raw(SEPARATOR),
+        Span::styled(
+            model.keymap.key_of(Context::Confirm, Action::Back, "esc"),
+            theme.style(StyleRole::HintKey),
+        ),
+        Span::styled(" cancel", theme.style(StyleRole::HintText)),
+    ]
 }
 
 /// One group of spans per hint (`j/k` and ` move`), with its action.

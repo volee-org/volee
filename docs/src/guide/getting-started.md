@@ -105,9 +105,13 @@ stay what they are: `enter` (or `volee attach`) on a background session
 runs Claude Code's own `claude attach` on it, and `enter` on a session in a
 tuios pane shows that pane. Nothing is stopped or restarted, and `Ctrl+Q`
 leaves the session running as it was. Messages are for the agents volee
-launched: to say something to another session, open it and type. A session
-in a terminal volee cannot reach says so; in Claude Code, the left arrow on
-its empty prompt moves it to the background, where volee opens it.
+launched: to say something to another session, open it and type.
+
+A Claude Code session you typed in a terminal of its own, in a tab of any
+terminal application, is held by that terminal: nothing else can show it.
+`enter` on it says which key to press there, the left arrow on its empty
+prompt, which has Claude Code move the conversation to the background, and
+volee opens it by itself once you pressed it, on the same row.
 
 `volee adopt <agent>` (`A` in the interface, which asks first) is for a
 session you want volee to drive from now on: it stops the session and

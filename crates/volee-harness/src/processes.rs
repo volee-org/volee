@@ -33,6 +33,31 @@ pub fn with_descendants(
     Ok(below(&roots, &parents))
 }
 
+/// Those of `pids` that are processes of the table now, from one `ps`.
+///
+/// A session that a harness stopped listing has ended when its process is
+/// gone, and has gone elsewhere when its process still runs (a Claude Code
+/// conversation moved to the background leaves its terminal's process
+/// showing the list of agents). Without `ps`, none can be said to run.
+pub fn running(runner: &dyn CommandRunner, pids: &[u32]) -> Result<HashSet<u32>, HarnessError> {
+    if pids.is_empty() {
+        return Ok(HashSet::new());
+    }
+    // The same command line as the other readings of the table.
+    let ps = Invocation::new("ps", Duration::from_secs(5)).args(["-axo", "pid=,ppid=,args="]);
+    let output = match runner.run(&ps) {
+        Ok(output) => output,
+        Err(RunError::NotFound { .. }) => return Ok(HashSet::new()),
+        Err(error) => return Err(HarnessError::Run(error)),
+    };
+    let table = parents(&String::from_utf8_lossy(&output.stdout));
+    Ok(pids
+        .iter()
+        .copied()
+        .filter(|pid| table.contains_key(pid))
+        .collect())
+}
+
 /// The parent of every process of a `ps -o pid=,ppid=,...` table.
 fn parents(table: &str) -> HashMap<u32, u32> {
     table
@@ -122,6 +147,23 @@ mod tests {
             !found.contains(&710),
             "a claude started in a shell is its own"
         );
+    }
+
+    #[test]
+    fn a_process_runs_when_the_table_holds_it() {
+        let found = running(&Table(Some(PS)), &[710, 999, 610]).unwrap();
+        assert_eq!(found, set(&[710, 610]), "999 is in no line of the table");
+        // A number that only appears as a parent, or inside a command line,
+        // is not a process of the table.
+        let table = "  20     7 /bin/tool --port 999\n";
+        assert_eq!(running(&Table(Some(table)), &[7, 999]).unwrap(), set(&[]));
+    }
+
+    #[test]
+    fn without_ps_no_process_can_be_said_to_run() {
+        assert_eq!(running(&Table(None), &[710]).unwrap(), set(&[]));
+        // And nothing is asked for no process.
+        assert_eq!(running(&Table(None), &[]).unwrap(), set(&[]));
     }
 
     #[test]

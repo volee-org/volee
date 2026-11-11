@@ -27,7 +27,9 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 
 use volee_core::harness::HarnessKind;
-use volee_core::reconcile::{Listing, continued, reconcile, settling};
+use volee_core::reconcile::{
+    ListedSession, Listing, continued, moved_to_background, reconcile, settling,
+};
 use volee_core::role::LaunchedBy;
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
@@ -308,6 +310,8 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
             .retain(|session| session.pid.is_none_or(|pid| !in_hosts.contains(&pid)));
     }
     let hosted = crate::panes::hosted(&listing.sessions);
+    // Read before the state is locked again: it asks the process table.
+    let left = left_running(shared, &listing).await;
     let mut state = shared.state.lock().await;
     let now = state.now();
     let claimed = claim_expected(&mut state, &listing, now);
@@ -325,6 +329,17 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
         match state.commit(moved) {
             Ok(_) => linked = true,
             Err(error) => tracing::error!(%error, "cannot follow sessions that changed their id"),
+        }
+    }
+    // And so does a conversation that left its terminal for the background,
+    // where it goes on under a new id in another process (ADR 0034).
+    let moved = moved_to_background(state.registry(), &left, &listing, now);
+    if !moved.is_empty() {
+        match state.commit(moved) {
+            Ok(_) => linked = true,
+            Err(error) => {
+                tracing::error!(%error, "cannot follow conversations moved to the background");
+            }
         }
     }
     state.sessions_mut().record(&listing);
@@ -372,6 +387,39 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
         changed,
         hosted,
     }
+}
+
+/// The sessions the previous listing showed in a terminal, that `listing`
+/// no longer shows, and whose process still runs: their conversation may go
+/// on in the background (ADR 0034). A session that ended took its process
+/// with it. Without a process table to read, nothing can be said, and none
+/// is returned.
+async fn left_running(shared: &Arc<Shared>, listing: &Listing) -> Vec<ListedSession> {
+    let left = shared.state.lock().await.sessions().left_terminal(listing);
+    if left.is_empty() {
+        return left;
+    }
+    let Some(runner) = shared.processes.clone() else {
+        return Vec::new();
+    };
+    let pids: Vec<u32> = left.iter().filter_map(|session| session.pid).collect();
+    let running =
+        tokio::task::spawn_blocking(move || volee_harness::processes::running(&*runner, &pids))
+            .await;
+    let running = match running {
+        Ok(Ok(running)) => running,
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "cannot read the process table");
+            return Vec::new();
+        }
+        Err(error) => {
+            tracing::error!(%error, "reading the process table panicked");
+            return Vec::new();
+        }
+    };
+    left.into_iter()
+        .filter(|session| session.pid.is_some_and(|pid| running.contains(&pid)))
+        .collect()
 }
 
 /// How long a session the daemon started may take to appear in a listing

@@ -40,6 +40,7 @@ multiplexer to type through, and a few short prompts on a small model.
 cargo build --release -p volee-cli
 python3 journeys/open.py      --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/pane.py      --volee target/release/volee --sandbox ~/code/sandbox
+python3 journeys/terminal.py  --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/edit_mode.py --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/wall.py      --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/other_ai.py  --volee target/release/volee --sandbox ~/code/sandbox
@@ -60,6 +61,7 @@ you can look (`tuios attach volee-journey-...`).
 | --- | --- | --- |
 | `open.py` | Starts a Claude Code background session by hand, compares volee's list with what Claude Code lists (every session one row, no row without a session), opens the session by Enter, types into it, checks that it is the same session in the same process, leaves, opens it again once stopped, and removes it. | Its own, isolated |
 | `pane.py` | Starts Claude Code by hand in a tuios pane: it shows in the list after ten seconds, Enter opens the pane inside volee, typing reaches it, text typed in the pane while the agent rests shows in the preview and on the wall, the pane's own screen is found row for row in the preview, on the wall, full size and in `volee logs`, `/clear` keeps its row, and quitting it takes it off the list. | Its own, isolated |
+| `terminal.py` | Types `claude` in a terminal of its own, with no multiplexer around it: a pseudo-terminal the journey holds, which is what a tab of any terminal application is to the program typed in it. volee lists the session in a terminal it cannot reach. Enter on it says which key to press there and waits; Escape gives the wait up and Enter waits again. The left arrow, pressed in that terminal, has Claude Code move the conversation to the background under another session id: volee opens it by itself, on the same row and no other, what is typed reaches the conversation, which remembers what it was told in its terminal, and nothing was stopped or copied. From then on Enter opens it at once. | Its own, isolated |
 | `edit_mode.py` | Launches an agent, shows it full screen, types into it in edit mode, sends Esc, Ctrl+Z and a two-line paste, leaves with Ctrl+Q, then checks in a pseudo-terminal that the agent follows the panel's size. | Its own, isolated |
 | `wall.py` | Launches an agent and starts a background session by hand, in a window the size of a large terminal: the preview of the first is its live screen, `5` shows both screens side by side, each opens from the wall with Enter or `i`, takes what is typed and comes back to the wall, `z` shows one full size, and the wall opens no terminal and resizes nothing. Last, the same screen is compared cell by cell between the preview, the full-screen view and the wall, for both. | Its own, isolated |
 | `other_ai.py` | Starts OpenCode by hand in a tuios pane, in a directory of its own: it shows in the list as an agent of another harness, in its pane; its preview and its tile on the wall are the pane's screen, row for row; Enter opens the pane inside volee, typing reaches it, the leave key comes back and it is the same process; quit, it stops and leaves the list. Nothing is asked of a model. With `--stand-in codex`, the same trip for a harness volee has no listing for: a copy of `cat` named `codex`, which tuios takes for Codex CLI by its name and volee finds through tuios. | Its own, isolated |
@@ -118,7 +120,14 @@ agent's.
 - A window of a headless tuios session has 80 columns and 24 rows.
   `resize()` gives the interface the size of the terminal the trip needs.
 - Add every new thing the journey starts to `agents`, `branches`,
-  `background` or `by_hand`, so that `cleanup()` removes it.
+  `background` or `by_hand`, so that `cleanup()` removes it. A terminal the
+  journey holds itself comes from `terminal()`, which `cleanup()` closes.
+- A notice leaves the bottom line after four seconds. A check that says
+  "no failure was shown" reads the screen as it was when volee answered
+  the key: read later, it passed on a version that had shown the failure.
+- Claude Code lists a conversation that arrives in the background about a
+  second before it has a process. Read its process id once it has one: a
+  check that compared with the first listing compared with nothing.
 - Check what the trip rests on before you make it. A journey that needs an
   older daemon, a session in a pane or an agent in a host says so with a
   check of its own, and stops when it does not hold: a check that fails

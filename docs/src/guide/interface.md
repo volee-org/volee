@@ -543,7 +543,8 @@ the door it already has
 | A Claude Code background session, running or finished | shows it with Claude Code's own `claude attach`, in a terminal inside volee |
 | A tuios pane | shows that pane, with `tuios pane-view` |
 | A tmux pane | brings the pane forward (below) |
-| A terminal volee cannot reach | says so, on the bottom line |
+| A terminal of its own, for a Claude Code session | says which key to press there, waits, then opens it (below) |
+| A terminal of its own, for another harness | says so, on the bottom line |
 
 Nothing is stopped, restarted or adopted for it: it is the same session, in
 the same process, with its own tools and settings. `Ctrl+Q` closes the
@@ -557,9 +558,28 @@ own agents view: opening it starts it again, under the same session, as
 (`Ctrl+Z`) closes it too, and the left arrow on the session's empty prompt
 shows Claude Code's own agents view there, as in any terminal.
 
-A Claude Code session in a terminal volee cannot reach becomes reachable
-when you press the left arrow on its empty prompt, in that terminal:
-Claude Code moves it to the background, where volee opens it.
+A Claude Code session typed in a terminal of its own, in a tab of your
+terminal application with no multiplexer around it, is held by that
+terminal: nothing else can show it or type in it. `enter` on it does not
+fail. The bottom line says what to do, and volee waits:
+
+```text
+dashboard runs in its own terminal: press ← on its empty prompt there, and volee opens it here.   esc cancel
+```
+
+Press the left arrow there, while the session rests or while it works:
+Claude Code moves the conversation to the background, where a turn under
+way goes on, and volee opens it by itself, on the same row. `esc` gives
+the wait up, and it ends with the session if you quit it there. From then
+on it is a background session like any other: `enter` opens it at once.
+In its own terminal, Claude Code now shows its list of agents; Escape
+twice shows the conversation there again.
+
+The row keeps its place in the list and takes the name Claude Code gives
+the conversation in the background: the one you gave with `--name`, or a
+title made from the conversation when Claude Code had named the session.
+It works the same in every terminal application: volee asks none of them
+for anything ([ADR 0034](../adr/0034-a-session-in-its-own-terminal-opens-once-it-left-it.md)).
 
 Agents volee launched before 0.10 run in older hosts, which outlive an
 upgrade: edit mode sends them the bytes a terminal sends, so typing works,

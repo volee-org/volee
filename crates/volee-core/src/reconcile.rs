@@ -91,6 +91,18 @@ pub const GONE_GRACE_MS: u64 = 60_000;
 /// once.
 pub const SETTLE_MS: u64 = 10_000;
 
+/// How long a background session that started beside a live session in a
+/// terminal, in the same directory, waits before it becomes an agent of its
+/// own, in milliseconds; and how long a background session without a process
+/// counts as starting, not as finished. It may be that session's
+/// conversation on its way to the background ([`moved_to_background`]).
+/// Measured with Claude Code, three times: the listing taken at the key
+/// press shows the session in the terminal and the new one in the
+/// background, which has no process yet; for about a second (0.7 s to 1.4 s)
+/// listings show the new one alone, still without a process; then it has
+/// one. A listing taken in between must not make a second agent of it.
+pub const MOVE_SETTLE_MS: u64 = 5_000;
+
 /// Returns the events that bring `registry` in line with `listing`.
 ///
 /// - A listed session that belongs to an agent updates the agent's state when
@@ -108,8 +120,10 @@ pub const SETTLE_MS: u64 = 10_000;
 /// - Any other listed session that nobody owns becomes a new `independent`
 ///   agent, alive or not: a finished background session that the harness
 ///   still lists is one the person can still open. A live session outside
-///   the background waits until it has lived [`SETTLE_MS`]. Sessions of
-///   forgotten agents are always skipped.
+///   the background waits until it has lived [`SETTLE_MS`], and a background
+///   session beside a live session in a terminal, in the same directory,
+///   until it has lived [`MOVE_SETTLE_MS`], with or without a process.
+///   Sessions of forgotten agents are always skipped.
 /// - An agent volee only watches ([`Agent::watched`]) is one session
 ///   (ADR 0027): it takes the name and the place (background or terminal)
 ///   the harness gives that session. One that holds several sessions keeps
@@ -154,13 +168,17 @@ pub fn reconcile(
                 if let Some(waiting) = awaiting_session(registry, listing, session, &adopted) {
                     adopted.push(waiting.id);
                     adopt(waiting, session, now, &mut events);
-                } else if settled(session, now) {
+                } else if settled(session, listing, now) {
                     discover(new_agent_id(), session, now, &mut events);
                 }
             }
             // Finished, and still listed: the harness keeps it for the
-            // person, so volee shows it.
-            None if session.background => discover(new_agent_id(), session, now, &mut events),
+            // person, so volee shows it. One that just started beside a
+            // session in a terminal has no process yet, and waits like a
+            // live one: it may be that session's conversation.
+            None if session.background && settled(session, listing, now) => {
+                discover(new_agent_id(), session, now, &mut events);
+            }
             None => {}
         }
     }
@@ -171,21 +189,33 @@ pub fn reconcile(
 }
 
 /// Whether a live session nobody owns has lived long enough to become an
-/// agent: a background session at once, any other after [`SETTLE_MS`].
-fn settled(session: &ListedSession, now: Timestamp) -> bool {
-    session.background
-        || session
+/// agent: a session in a terminal after [`SETTLE_MS`]; a background session
+/// at once, unless a live session runs in a terminal in its directory, which
+/// it may be continuing: then after [`MOVE_SETTLE_MS`]. A session whose
+/// start time is unknown has.
+fn settled(session: &ListedSession, listing: &Listing, now: Timestamp) -> bool {
+    let lived = |millis: u64| {
+        session
             .started_at
-            .is_none_or(|started| started.millis_until(now) >= SETTLE_MS)
+            .is_none_or(|started| started.millis_until(now) >= millis)
+    };
+    if !session.background {
+        return lived(SETTLE_MS);
+    }
+    let beside_a_terminal = listing
+        .sessions
+        .iter()
+        .any(|other| other.alive && !other.background && other.cwd == session.cwd);
+    !beside_a_terminal || lived(MOVE_SETTLE_MS)
 }
 
 /// Whether `listing` holds a session that will become an agent once it has
-/// lived [`SETTLE_MS`]: the caller should list again soon, not wait as if
-/// nothing was happening.
+/// lived long enough ([`SETTLE_MS`], [`MOVE_SETTLE_MS`]): the caller should
+/// list again soon, not wait as if nothing was happening.
 pub fn settling(registry: &Registry, listing: &Listing, now: Timestamp) -> bool {
     listing.sessions.iter().any(|session| {
-        session.alive
-            && !settled(session, now)
+        (session.alive || session.background)
+            && !settled(session, listing, now)
             && !registry.is_ignored(&session.key)
             && registry.agent_for_session(&session.key).is_none()
     })
@@ -251,6 +281,117 @@ pub fn continued<'a>(
         ));
     }
     events
+}
+
+/// The events for conversations that left a terminal for the harness's
+/// background, where they go on under a new session id (ADR 0034).
+///
+/// Claude Code does this when the person presses the left arrow on a
+/// session's empty prompt: a background process takes the conversation
+/// under a new session id, and the terminal's own process stays, to show
+/// the list of agents. Nothing in a listing links the two sessions.
+///
+/// `left` are the sessions that stopped being listed **while their process
+/// kept running**: the caller looked. A session that ended took its process
+/// with it and is not one of them, whatever started beside it. One of them
+/// that ran in a terminal, as the session of an agent volee watches
+/// ([`Agent::watched`]), is continued by the background session of the same
+/// directory that nobody owns, that did not start before it, and that runs
+/// or just started (a conversation that arrives in the background is listed
+/// about a second before it has a process, [`MOVE_SETTLE_MS`]): the one
+/// that carries its name when several are there, the only one otherwise,
+/// and none when that leaves a doubt (two sessions left that directory, or
+/// two arrived under other names). The agent releases the old session and
+/// takes the new one, so that its row stays; [`reconcile`] then gives it the
+/// name and the place of that session.
+///
+/// Apply the returned events before calling [`reconcile`].
+pub fn moved_to_background<'a>(
+    registry: &Registry,
+    left: impl IntoIterator<Item = &'a ListedSession>,
+    listing: &Listing,
+    now: Timestamp,
+) -> Vec<Event> {
+    let listed_now = |key: &SessionKey| listing.sessions.iter().any(|session| &session.key == key);
+    let left: Vec<(&Agent, &ListedSession)> = left
+        .into_iter()
+        .filter(|before| {
+            before.key.harness == listing.harness && !before.background && !listed_now(&before.key)
+        })
+        .filter_map(|before| {
+            let agent = registry.agent_for_session(&before.key)?;
+            let current = agent
+                .current_session()
+                .is_some_and(|link| link.key == before.key);
+            (current && agent.watched()).then_some((agent, before))
+        })
+        .collect();
+    let mut taken: Vec<&SessionKey> = Vec::new();
+    let mut events = Vec::new();
+    for (agent, before) in &left {
+        let arrived: Vec<&ListedSession> = listing
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.background
+                    && (session.alive || just_started(session, now))
+                    && session.cwd == before.cwd
+                    && !started_before(session, before)
+                    && !taken.contains(&&session.key)
+                    && !registry.is_ignored(&session.key)
+                    && registry.agent_for_session(&session.key).is_none()
+            })
+            .collect();
+        let namesakes: Vec<&ListedSession> = arrived
+            .iter()
+            .copied()
+            .filter(|session| before.name.is_some() && session.name == before.name)
+            .collect();
+        let alone = left
+            .iter()
+            .filter(|(_, other)| other.cwd == before.cwd)
+            .count()
+            == 1;
+        let successor = match (namesakes.as_slice(), arrived.as_slice()) {
+            ([namesake], _) => *namesake,
+            ([], [only]) if alone => *only,
+            _ => continue,
+        };
+        taken.push(&successor.key);
+        events.push(Event::new(
+            now,
+            EventKind::SessionReleased {
+                agent: agent.id,
+                session: before.key.clone(),
+            },
+        ));
+        events.push(Event::new(
+            now,
+            EventKind::SessionLinked {
+                agent: agent.id,
+                session: successor.key.clone(),
+                origin: SessionOrigin::Discovered,
+            },
+        ));
+    }
+    events
+}
+
+/// Whether `session` started less than [`MOVE_SETTLE_MS`] ago: without a
+/// process, it is one that starts, not one that finished.
+fn just_started(session: &ListedSession, now: Timestamp) -> bool {
+    session
+        .started_at
+        .is_some_and(|started| started.millis_until(now) < MOVE_SETTLE_MS)
+}
+
+/// Whether `session` started before `other` did, as far as the harness
+/// says when they started.
+fn started_before(session: &ListedSession, other: &ListedSession) -> bool {
+    matches!(
+        (session.started_at, other.started_at),
+        (Some(started), Some(reference)) if started < reference
+    )
 }
 
 /// A watched agent is one session (ADR 0027). One that holds several, as
@@ -1137,6 +1278,361 @@ mod tests {
         }
     }
 
+    /// A conversation as Claude Code lists it once it runs in the
+    /// background: a handle, another process, and when it got there.
+    fn in_background(id: &str, name: &str, started: i64) -> ListedSession {
+        ListedSession {
+            name: Some(name.to_owned()),
+            pid: Some(9_000),
+            started_at: Some(Timestamp::from_millis(started)),
+            ..listed(id, AgentState::Idle, true)
+        }
+    }
+
+    #[test]
+    fn a_conversation_moved_to_the_background_keeps_its_agent() {
+        // The left arrow on the empty prompt of a session in a terminal:
+        // another process, another session id, and a name Claude Code made
+        // from the conversation.
+        let mut registry = Registry::new();
+        let before = listing(vec![process("first", 100, 1_000)]);
+        sync(&mut registry, &before, 60_000);
+        let agent = owner(&registry, "first").id;
+        assert_eq!(registry.agent(agent).unwrap().location, Location::Terminal);
+        let after = listing(vec![in_background("second", "Fix the invoices", 61_000)]);
+        let at = Timestamp::from_millis(62_000);
+        let moved = moved_to_background(&registry, &before.sessions, &after, at);
+        assert_eq!(moved.len(), 2, "{moved:?}");
+        apply_all(&mut registry, &moved);
+        sync(&mut registry, &after, 62_000);
+        assert_eq!(registry.agents().count(), 1, "the same row, and no other");
+        let kept = registry.agent(agent).unwrap();
+        assert_eq!(kept.sessions.len(), 1);
+        assert_eq!(
+            kept.current_session().unwrap().key,
+            SessionKey::claude("second")
+        );
+        assert_eq!(kept.location, Location::Background);
+        assert_eq!(kept.name, "Fix the invoices");
+        assert_eq!(kept.state, AgentState::Idle);
+        let first = SessionKey::claude("first");
+        assert!(registry.agent_for_session(&first).is_none());
+    }
+
+    /// The same conversation during its first second in the background:
+    /// listed, without a process yet, and waiting for the person, as Claude
+    /// Code says of it.
+    fn arriving(id: &str, name: &str, started: i64) -> ListedSession {
+        ListedSession {
+            alive: false,
+            pid: None,
+            state: AgentState::NeedsInput {
+                request: InputRequest::Other {
+                    detail: "blocked".into(),
+                },
+            },
+            ..in_background(id, name, started)
+        }
+    }
+
+    #[test]
+    fn a_conversation_is_followed_before_it_has_a_process_in_the_background() {
+        // What Claude Code lists during the second that follows the key:
+        // both sessions, then the new one alone, neither time with a process.
+        let mut registry = Registry::new();
+        let before = listing(vec![process("first", 100, 1_000)]);
+        sync(&mut registry, &before, 60_000);
+        let agent = owner(&registry, "first").id;
+        let both = listing(vec![
+            process("first", 100, 1_000),
+            arriving("second", "alpha-f7", 61_000),
+        ]);
+        assert_eq!(sync(&mut registry, &both, 61_100), []);
+        assert!(settling(&registry, &both, Timestamp::from_millis(61_100)));
+        let alone = listing(vec![arriving("second", "alpha-f7", 61_000)]);
+        let at = Timestamp::from_millis(61_900);
+        let moved = moved_to_background(&registry, &both.sessions, &alone, at);
+        assert_eq!(moved.len(), 2, "{moved:?}");
+        apply_all(&mut registry, &moved);
+        sync(&mut registry, &alone, 61_900);
+        assert_eq!(registry.agents().count(), 1, "the same row, and no other");
+        let kept = registry.agent(agent).unwrap();
+        assert_eq!(
+            kept.current_session().unwrap().key,
+            SessionKey::claude("second")
+        );
+        assert_eq!(kept.location, Location::Background);
+        assert!(kept.state.is_live(), "it did not end: {:?}", kept.state);
+        // Once it has a process, its state is all that changes.
+        let running = listing(vec![in_background("second", "alpha-f7", 61_000)]);
+        sync(&mut registry, &running, 63_900);
+        assert_eq!(registry.agents().count(), 1);
+        assert_eq!(registry.agent(agent).unwrap().state, AgentState::Idle);
+    }
+
+    #[test]
+    fn a_finished_background_session_is_no_conversation_on_its_way() {
+        // No process either, but it started long ago: a session that ended
+        // and that Claude Code still lists.
+        let mut registry = Registry::new();
+        let before = listing(vec![process("first", 100, 1_000)]);
+        sync(&mut registry, &before, 60_000);
+        let finished = ListedSession {
+            state: AgentState::Stopped,
+            ..arriving("old", "an older task", 30_000)
+        };
+        let after = listing(vec![finished.clone()]);
+        let at = Timestamp::from_millis(62_000);
+        let none: Vec<Event> = Vec::new();
+        assert_eq!(
+            moved_to_background(&registry, &before.sessions, &after, at),
+            none
+        );
+        // Beside the session in the terminal, it is a row of its own at once.
+        let both = listing(vec![process("first", 100, 1_000), finished]);
+        assert!(!settling(&registry, &both, at));
+        sync(&mut registry, &both, 62_000);
+        assert_eq!(registry.agents().count(), 2);
+        assert_eq!(owner(&registry, "old").state, AgentState::Stopped);
+    }
+
+    #[test]
+    fn a_listing_that_shows_both_sessions_makes_no_second_agent() {
+        // Claude Code lists the background session a moment before it stops
+        // listing the one in the terminal.
+        let mut registry = Registry::new();
+        let before = listing(vec![process("first", 100, 1_000)]);
+        sync(&mut registry, &before, 60_000);
+        let agent = owner(&registry, "first").id;
+        let both = listing(vec![
+            process("first", 100, 1_000),
+            in_background("second", "alpha-f7", 61_000),
+        ]);
+        assert_eq!(sync(&mut registry, &both, 61_200), []);
+        assert!(settling(&registry, &both, Timestamp::from_millis(61_200)));
+        assert_eq!(registry.agents().count(), 1);
+        // The next listing shows the background session alone: the agent's.
+        let after = listing(vec![in_background("second", "alpha-f7", 61_000)]);
+        let at = Timestamp::from_millis(63_200);
+        let moved = moved_to_background(&registry, &both.sessions, &after, at);
+        apply_all(&mut registry, &moved);
+        sync(&mut registry, &after, 63_200);
+        assert_eq!(registry.agents().count(), 1);
+        assert_eq!(owner(&registry, "second").id, agent);
+    }
+
+    #[test]
+    fn a_background_session_beside_a_terminal_becomes_an_agent_after_a_moment() {
+        // Someone starts a background session where a terminal session
+        // runs, and that one stays: two conversations, two agents.
+        let wait = i64::try_from(MOVE_SETTLE_MS).unwrap();
+        let mut registry = Registry::new();
+        let both = listing(vec![
+            process("first", 100, 1_000),
+            in_background("second", "another task", 61_000),
+        ]);
+        sync(&mut registry, &both, 60_000);
+        assert_eq!(registry.agents().count(), 1);
+        assert_eq!(sync(&mut registry, &both, 61_000 + wait - 1), []);
+        sync(&mut registry, &both, 61_000 + wait);
+        assert_eq!(registry.agents().count(), 2);
+        assert!(!settling(
+            &registry,
+            &both,
+            Timestamp::from_millis(61_000 + wait)
+        ));
+    }
+
+    #[test]
+    fn a_background_session_waits_for_no_terminal_of_another_directory() {
+        let mut registry = Registry::new();
+        let elsewhere = ListedSession {
+            cwd: "/work/beta".into(),
+            ..process("first", 100, 1_000)
+        };
+        let ended = ListedSession {
+            alive: false,
+            ..process("ended", 101, 1_000)
+        };
+        let both = listing(vec![
+            elsewhere,
+            ended,
+            in_background("second", "a task", 61_000),
+        ]);
+        sync(&mut registry, &both, 61_100);
+        assert_eq!(owner(&registry, "second").location, Location::Background);
+    }
+
+    #[test]
+    fn a_session_that_left_is_continued_only_without_a_doubt() {
+        let mut registry = Registry::new();
+        let before = listing(vec![process("first", 100, 1_000)]);
+        sync(&mut registry, &before, 60_000);
+        let at = Timestamp::from_millis(62_000);
+        let none: Vec<Event> = Vec::new();
+        let moved = |registry: &Registry, after: &Listing| {
+            moved_to_background(registry, &before.sessions, after, at)
+        };
+        // Two sessions arrived under other names: which one is it?
+        let two = listing(vec![
+            in_background("second", "a task", 61_000),
+            in_background("third", "another task", 61_500),
+        ]);
+        assert_eq!(moved(&registry, &two), none);
+        // One of them carries its name: that one.
+        let namesake = listing(vec![
+            in_background("second", "a task", 61_000),
+            in_background("third", "alpha-f7", 61_500),
+        ]);
+        let events = moved(&registry, &namesake);
+        assert!(
+            matches!(
+                events.last().map(|event| &event.kind),
+                Some(EventKind::SessionLinked { session, .. }) if session.id == "third"
+            ),
+            "{events:?}"
+        );
+        // A session of another directory, one that started before the
+        // session left behind, one that ended (no process, and it did not
+        // just start), one in a terminal: no.
+        for other in [
+            ListedSession {
+                cwd: "/work/beta".into(),
+                ..in_background("second", "a task", 61_000)
+            },
+            in_background("second", "a task", 500),
+            ListedSession {
+                alive: false,
+                ..in_background("second", "a task", 50_000)
+            },
+            process("second", 101, 61_000),
+        ] {
+            assert_eq!(moved(&registry, &listing(vec![other])), none);
+        }
+        // The session still listed did not leave.
+        let still = listing(vec![
+            process("first", 100, 1_000),
+            in_background("second", "a task", 61_000),
+        ]);
+        assert_eq!(moved(&registry, &still), none);
+        // A session that already has an owner is not taken from it.
+        let after = listing(vec![in_background("second", "a task", 61_000)]);
+        let mut owned = registry.clone();
+        sync(&mut owned, &after, 70_000);
+        assert_eq!(moved(&owned, &after), none);
+        // A forgotten session is nobody's to take.
+        let mut forgetful = registry.clone();
+        let stranger = AgentId::from_ulid(Ulid::from_parts(5, 5));
+        forgetful
+            .apply(&Event::new(
+                at,
+                EventKind::AgentRegistered {
+                    agent: stranger,
+                    name: "forgotten".into(),
+                    role: Role::Independent,
+                    harness: HarnessKind::ClaudeCode,
+                    launched_by: LaunchedBy::Outside,
+                    parent: None,
+                    mission: None,
+                    workspace: Workspace::at("/work/alpha"),
+                    location: Location::Background,
+                },
+            ))
+            .unwrap();
+        forgetful
+            .apply(&Event::new(
+                at,
+                EventKind::SessionLinked {
+                    agent: stranger,
+                    session: SessionKey::claude("second"),
+                    origin: SessionOrigin::Discovered,
+                },
+            ))
+            .unwrap();
+        forgetful
+            .apply(&Event::new(
+                at,
+                EventKind::AgentForgotten { agent: stranger },
+            ))
+            .unwrap();
+        assert_eq!(moved(&forgetful, &after), none);
+    }
+
+    #[test]
+    fn two_sessions_that_left_one_directory_are_told_apart_by_name_only() {
+        let mut registry = Registry::new();
+        let other = ListedSession {
+            name: Some("alpha-0b".into()),
+            ..process("other", 200, 2_000)
+        };
+        let before = listing(vec![process("first", 100, 1_000), other]);
+        sync(&mut registry, &before, 60_000);
+        let at = Timestamp::from_millis(62_000);
+        // One arrival under a new name: whose is it?
+        let unnamed = listing(vec![in_background("second", "a task", 61_000)]);
+        let none: Vec<Event> = Vec::new();
+        assert_eq!(
+            moved_to_background(&registry, &before.sessions, &unnamed, at),
+            none
+        );
+        // Both arrive under the names they had: each agent keeps its own.
+        let named = listing(vec![
+            in_background("second", "alpha-0b", 61_000),
+            in_background("third", "alpha-f7", 61_200),
+        ]);
+        let events = moved_to_background(&registry, &before.sessions, &named, at);
+        let mut followed = registry.clone();
+        apply_all(&mut followed, &events);
+        assert_eq!(owner(&followed, "third").name, "alpha-f7");
+        assert_eq!(owner(&followed, "second").name, "alpha-0b");
+        assert_eq!(followed.agents().count(), 2);
+        // Two sessions under one name left, and one arrived under it: one
+        // agent takes it, and the other is not given the same session.
+        let mut twins = Registry::new();
+        let before = listing(vec![
+            process("first", 100, 1_000),
+            process("other", 200, 2_000),
+        ]);
+        sync(&mut twins, &before, 60_000);
+        let one = listing(vec![in_background("second", "alpha-f7", 61_000)]);
+        let events = moved_to_background(&twins, &before.sessions, &one, at);
+        assert_eq!(events.len(), 2, "{events:?}");
+        apply_all(&mut twins, &events);
+        assert_eq!(twins.agents().count(), 2);
+    }
+
+    #[test]
+    fn only_a_watched_agent_in_a_terminal_is_moved_by_a_listing() {
+        // An agent volee launched learns it from its hooks.
+        let mut registry = Registry::new();
+        let agent = launched(&mut registry, 1, "/work/alpha");
+        let before = listing(vec![process("mine", 5, 1_000)]);
+        sync(&mut registry, &before, 1_500);
+        assert!(
+            registry
+                .agent(agent)
+                .unwrap()
+                .owns_session(&SessionKey::claude("mine"))
+        );
+        let after = listing(vec![in_background("next", "a task", 1_800)]);
+        let at = Timestamp::from_millis(2_000);
+        let none: Vec<Event> = Vec::new();
+        assert_eq!(
+            moved_to_background(&registry, &before.sessions, &after, at),
+            none
+        );
+        // A background session that is no longer listed was removed: the
+        // one that starts next is another conversation.
+        let mut registry = Registry::new();
+        let before = listing(vec![in_background("first", "a task", 1_000)]);
+        sync(&mut registry, &before, 60_000);
+        let after = listing(vec![in_background("second", "a task", 61_000)]);
+        assert_eq!(
+            moved_to_background(&registry, &before.sessions, &after, at),
+            none
+        );
+    }
+
     #[test]
     fn a_session_started_elsewhere_waits_until_it_has_settled() {
         let settle = i64::try_from(SETTLE_MS).unwrap();
@@ -1165,7 +1661,12 @@ mod tests {
         let mut registry = Registry::new();
         let mut background = listed("bg", AgentState::Working, true);
         background.started_at = Some(Timestamp::from_millis(1_000));
-        let no_start = interactive("no-start");
+        // In another directory: beside a terminal session of its own
+        // directory, a background session waits a moment.
+        let no_start = ListedSession {
+            cwd: "/work/beta".into(),
+            ..interactive("no-start")
+        };
         let both = listing(vec![background, no_start]);
         assert!(!settling(&registry, &both, Timestamp::from_millis(1_001)));
         sync(&mut registry, &both, 1_001);

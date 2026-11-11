@@ -33,13 +33,14 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0024](0024-agents-come-back-after-a-reboot.md) | Agents interrupted by a reboot come back in new hosts | Accepted |
 | [0025](0025-key-sequences-a-leader-and-which-key-popups.md) | Key sequences, a leader key and which-key popups; every key configurable | Proposed |
 | [0026](0026-edit-mode-types-into-an-agent-inside-volee.md) | Edit mode types into an agent inside volee; the host encodes keys | Proposed |
-| [0027](0027-open-without-owning.md) | volee opens every agent where it runs, and its list shows what runs (amends 0023, 0026, 0021 and 0004) | Accepted |
+| [0027](0027-open-without-owning.md) | volee opens every agent where it runs, and its list shows what runs (amends 0023, 0026, 0021 and 0004; amended by 0034) | Accepted |
 | [0028](0028-one-emulator-and-the-wall-inside-the-interface.md) | One emulator for every screen, and the wall inside the interface (completes 0020; amends 0021, 0026 and 0027) | Accepted |
 | [0029](0029-volee-run.md) | `volee run` makes any program an agent, in the terminal it is typed in (amends 0022 and 0023) | Accepted |
 | [0030](0030-a-multiplexer-may-say-which-panes-run-an-agent.md) | A multiplexer may say which of its panes run an agent (amends 0023 and 0015) | Accepted |
 | [0031](0031-a-question-may-offer-its-answers.md) | A question to the person may offer its answers (amends 0006) | Accepted |
 | [0032](0032-a-mission-is-merged-only-after-the-person-approved.md) | A mission is merged only after the person approved its report (amends 0007 and 0011) | Accepted |
 | [0033](0033-a-lead-makes-others-work.md) | A lead is the agent you talk to, and it makes others work (amends 0007) | Accepted |
+| [0034](0034-a-session-in-its-own-terminal-opens-once-it-left-it.md) | A session in a terminal of its own opens once it left it, on the same row (amends 0027) | Accepted |
 
 ## Not built yet
 
@@ -82,10 +83,16 @@ to come:
   on stand-in programs: Codex CLI and Gemini CLI themselves were not
   available where it was made.
 - [0027](0027-open-without-owning.md): a door for a session in a tmux pane
-  (the pane is brought forward instead) and for an agent started in a plain
-  terminal (in a tuios pane, it opens like any agent in a pane; started
-  with `volee run`, it runs in a host and has one,
-  [0029](0029-volee-run.md)).
+  (the pane is brought forward instead) and for an agent of another harness
+  started in a plain terminal (in a tuios pane, it opens like any agent in
+  a pane; started with `volee run`, it runs in a host and has one,
+  [0029](0029-volee-run.md)). A Claude Code session in a plain terminal
+  opens once the person moved it to the background
+  ([0034](0034-a-session-in-its-own-terminal-opens-once-it-left-it.md)).
+- [0034](0034-a-session-in-its-own-terminal-opens-once-it-left-it.md):
+  pressing the left arrow for the person where the terminal application
+  has a door for it (Ghostty 1.4 on macOS was measured to have one), and
+  waiting from `volee attach` as the interface does.
 - [0029](0029-volee-run.md): exact states for `volee run -- claude`, by
   joining the session Claude Code lists to the agent; a way to remove the
   records of ended hosts.

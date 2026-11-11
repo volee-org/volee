@@ -82,6 +82,16 @@ group.
   agent becomes `stopped` (it ran in a terminal) or `lost` (it ran in the
   background). It never becomes `done` because it disappeared.
 
+Two rules run before it, each on the listing and the one before. A session
+that changes its id inside the same process keeps its agent (`continued`).
+And a session in a terminal that stops being listed while its process still
+runs did not end: its conversation went on in the background, under another
+session id, and the agent takes the background session that continues it
+(`moved_to_background`). The daemon reads the process table for it, and a
+background session that just started beside a session in a terminal waits
+five seconds before it becomes an agent of its own
+([ADR 0034](../adr/0034-a-session-in-its-own-terminal-opens-once-it-left-it.md)).
+
 The daemon runs it (module `discovery` of `volee-daemon`) against `claude
 agents --json --all`, which costs about 0.17 s of CPU and starts a Node
 process each time, so the cadence follows who watches and what changes:
@@ -96,8 +106,10 @@ process each time, so the cadence follows who watches and what changes:
   (`idle_discovery_interval`);
 - a new interactive subscription lists at once, so the interface opens on
   fresh data, and so does a `discovery.refresh` request, which answers once
-  a listing that started after it is applied (`volee ls` sends one; requests
-  made meanwhile share the listing). Both bring the two-second wait back.
+  a listing that started after it is applied (`volee ls` sends one, and so
+  does the interface every two seconds while it waits for a session to leave
+  its terminal; requests made meanwhile share the listing). Both bring the
+  two-second wait back.
 
 Hook events never shorten the wait: agents volee launched report through
 their hooks in real time whatever discovery does, and resetting on them

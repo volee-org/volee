@@ -7,18 +7,19 @@
 mod common;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::FakeHarness;
 use tokio::net::UnixListener;
 use volee_core::harness::SessionKey;
 use volee_core::reconcile::ListedSession;
-use volee_core::state::AgentState;
+use volee_core::state::{AgentState, InputRequest};
 use volee_core::time::Timestamp;
+use volee_core::workspace::Location;
 use volee_core::{Event, Registry};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
-use volee_harness::Harness;
+use volee_harness::{CommandRunner, Harness, Invocation, Output, RunError};
 use volee_proto::client::Client;
 use volee_proto::methods::{
     EventsSince, RefreshDiscovery, RefreshParams, SinceParams, Subscribe, SubscribeParams,
@@ -63,6 +64,34 @@ fn start_backing_off(shortest: Duration, longest: Duration) -> Running {
 }
 
 fn start_cadence(watched: Duration, longest: Duration, idle: Duration) -> Running {
+    start_reading(watched, longest, idle, None)
+}
+
+/// The process table as `ps` prints it: the test writes it.
+#[derive(Debug, Default)]
+struct Table(Mutex<String>);
+
+impl CommandRunner for Table {
+    fn run(&self, invocation: &Invocation) -> Result<Output, RunError> {
+        assert_eq!(invocation.program.to_string_lossy(), "ps");
+        Ok(Output::success(self.0.lock().unwrap().clone()))
+    }
+}
+
+/// A daemon that lists every 10 ms and reads `table` as the machine's
+/// process table.
+fn start_with_processes(table: &Arc<Table>) -> Running {
+    let often = Duration::from_millis(10);
+    let table = Arc::clone(table) as Arc<dyn CommandRunner>;
+    start_reading(often, often, often, Some(table))
+}
+
+fn start_reading(
+    watched: Duration,
+    longest: Duration,
+    idle: Duration,
+    processes: Option<Arc<dyn CommandRunner>>,
+) -> Running {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::rooted(dir.path());
     let socket = paths.socket.clone();
@@ -83,7 +112,7 @@ fn start_cadence(watched: Duration, longest: Duration, idle: Duration) -> Runnin
         volee_bin: None,
         multiplexers: Vec::new(),
         hosts: false,
-        processes: None,
+        processes,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -341,6 +370,109 @@ async fn a_session_that_changes_its_id_in_place_keeps_its_row() {
     let kept = registry.agent(agent).unwrap();
     assert_eq!(kept.sessions.len(), 1);
     assert_eq!(kept.state, AgentState::Idle);
+}
+
+/// A conversation as Claude Code lists it once it runs in the background:
+/// a handle, another process, and when it got there.
+fn in_background(id: &str, name: &str, started: i64) -> ListedSession {
+    let mut session = session(id, name, AgentState::Idle, true);
+    session.pid = Some(9_000);
+    session.started_at = Some(Timestamp::from_millis(started));
+    session
+}
+
+#[tokio::test]
+async fn a_conversation_moved_to_the_background_keeps_its_row() {
+    // The clock stands at ten seconds: a session started at zero has settled.
+    let table = Arc::new(Table::default());
+    let daemon = start_with_processes(&table);
+    daemon
+        .harness
+        .set(vec![in_terminal("first-0000-0000", 29_159, 0)]);
+    let found = until(&daemon.socket, |r| r.agents().count() == 1).await;
+    let agent = found.agents().next().unwrap().id;
+    assert_eq!(found.agent(agent).unwrap().location, Location::Terminal);
+
+    // The left arrow on its empty prompt, as Claude Code was measured to
+    // list it. First the conversation shows twice: in its terminal, and in
+    // the background, where it has no process yet. A listing that shows
+    // both makes no second row.
+    "  700     1 -fish\n29159   700 claude\n".clone_into(&mut table.0.lock().unwrap());
+    let moved = in_background("second-000-0000", "Fix the invoices", 9_900);
+    let mut arriving = moved.clone();
+    arriving.alive = false;
+    arriving.pid = None;
+    arriving.state = AgentState::NeedsInput {
+        request: InputRequest::Other {
+            detail: "blocked".into(),
+        },
+    };
+    daemon.harness.set(vec![
+        in_terminal("first-0000-0000", 29_159, 0),
+        arriving.clone(),
+    ]);
+    let seen = daemon.harness.listings();
+    eventually("discovery lists the two sessions", || {
+        daemon.harness.listings() >= seen + 3
+    })
+    .await;
+    assert_eq!(registry(&daemon.socket).await.agents().count(), 1);
+
+    // Then, for about a second, in the background only and still without a
+    // process, while the terminal's process stays to show the list of
+    // agents: the row follows the conversation there.
+    daemon.harness.set(vec![arriving]);
+    let second = SessionKey::claude("second-000-0000");
+    let registry = until(&daemon.socket, |r| r.agent_for_session(&second).is_some()).await;
+    assert_eq!(
+        registry.agents().count(),
+        1,
+        "the same row, not a second one"
+    );
+    let kept = registry.agent(agent).unwrap();
+    assert_eq!(kept.sessions.len(), 1);
+    assert_eq!(kept.location, Location::Background);
+    assert_eq!(kept.name, "Fix the invoices");
+    assert!(kept.state.is_live(), "it did not end: {:?}", kept.state);
+
+    // Last, it has its process: the same row, at rest.
+    daemon.harness.set(vec![moved]);
+    let registry = until(&daemon.socket, |r| {
+        r.agent(agent)
+            .is_some_and(|kept| kept.state == AgentState::Idle)
+    })
+    .await;
+    assert_eq!(registry.agents().count(), 1);
+}
+
+#[tokio::test]
+async fn a_session_that_ended_is_not_continued_by_one_that_starts_beside_it() {
+    // The process of the session is in no table: the session ended. And
+    // without a table to read, nothing says that it did not.
+    for table in [Some(Arc::new(Table::default())), None] {
+        let daemon = match &table {
+            Some(table) => start_with_processes(table),
+            None => start(),
+        };
+        daemon
+            .harness
+            .set(vec![in_terminal("first-0000-0000", 29_159, 0)]);
+        let registry = until(&daemon.socket, |r| r.agents().count() == 1).await;
+        let agent = registry.agents().next().unwrap().id;
+
+        // The person quits it, and a background session starts in the same
+        // directory before the next listing.
+        daemon.harness.set(vec![in_background(
+            "second-000-0000",
+            "Another task",
+            9_900,
+        )]);
+        let second = SessionKey::claude("second-000-0000");
+        let registry = until(&daemon.socket, |r| r.agent_for_session(&second).is_some()).await;
+        assert_eq!(registry.agents().count(), 2, "another row");
+        assert_ne!(registry.agent_for_session(&second).unwrap().id, agent);
+        assert_eq!(registry.agent(agent).unwrap().state, AgentState::Stopped);
+    }
 }
 
 #[tokio::test]

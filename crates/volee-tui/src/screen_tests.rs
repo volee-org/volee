@@ -279,6 +279,36 @@ fn jump_prompt() {
     assert_snapshot!(draw(&model));
 }
 
+/// The bottom line while volee waits for a session to leave its own
+/// terminal (ADR 0034), in a terminal `width` columns wide.
+fn waiting_for_a_move(width: u16) -> String {
+    use volee_core::event::{Event, EventKind};
+    use volee_core::workspace::Location;
+    let (mut model, demo) = demo_model(width, 24, Theme::default());
+    let agent = agent_id(start(), crate::demo::BROKEN_LINKS);
+    let location = Location::Terminal;
+    let moved = Event::new(start(), EventKind::LocationChanged { agent, location });
+    let effects = update(&mut model, Msg::Events(vec![moved]));
+    serve(&demo, &mut model, effects);
+    let mut effects = Vec::new();
+    model.select(agent, &mut effects);
+    serve(&demo, &mut model, effects);
+    keys(&demo, &mut model, &[KeyCode::Enter]);
+    let screen = draw(&model);
+    screen.lines().last().unwrap_or_default().to_owned()
+}
+
+#[test]
+fn waiting_for_a_session_to_leave_its_terminal() {
+    assert_snapshot!(waiting_for_a_move(120));
+}
+
+#[test]
+fn waiting_for_a_session_to_leave_its_terminal_at_80_columns() {
+    // The key to press there comes before the cut.
+    assert_snapshot!(waiting_for_a_move(80));
+}
+
 /// The demo at its start on a view, in a terminal of the given size.
 fn view_at(tab: char, width: u16, height: u16) -> String {
     let (mut model, demo) = demo_model(width, height, Theme::default());

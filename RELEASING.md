@@ -77,6 +77,7 @@ real agent.
 cargo build --release --locked -p volee-cli
 python3 journeys/open.py --volee target/release/volee --sandbox <trusted repository>
 python3 journeys/pane.py --volee target/release/volee --sandbox <trusted repository>
+python3 journeys/terminal.py --volee target/release/volee --sandbox <trusted repository>
 python3 journeys/edit_mode.py --volee target/release/volee --sandbox <trusted repository>
 python3 journeys/wall.py --volee target/release/volee --sandbox <trusted repository>
 python3 journeys/other_ai.py --volee target/release/volee --sandbox <trusted repository>
