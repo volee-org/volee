@@ -24,7 +24,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `agents.forget` | `agent` | none |
 | `agents.join` | `name`, `harness`, `cwd`, optional `mission` | `agent`, `rejoined` |
 | `agents.activity` | `agent`, `activity` | none |
-| `agents.preview` | `agent` | `screen`: the agent's recent terminal output, with its escape sequences |
+| `agents.preview` | `agent` | `screen`: terminal output that draws the agent's screen, with its escape sequences; `exact`: whether it is the screen itself, row for row, or the replay of a session's output; `size` (`cols`, `rows`): the size of the terminal it was drawn in, when the daemon knows it |
 | `agents.diff` | `agent`, optional `full` | `text`: a summary by file, or the full patch; `truncated` |
 | `agents.attach` | `agent` | `program`, `args`, `cwd`, `env_remove`, `hint`: the command that opens the agent in the client's terminal |
 | `agents.open` | `agent`, `cols`, `rows` | `socket`: a volee host to connect to, for a client that shows the agent inside its own screen; `view`: whether it is a view on a session that runs elsewhere |
@@ -107,7 +107,9 @@ server sends one per tool call). It refuses agents that did not join.
 
 For an agent in a volee host
 ([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md)),
-`agents.preview` returns a snapshot of the host's screen, `agents.attach`
+`agents.preview` returns a snapshot of the host's screen (`exact`, with the
+`size` of the host's terminal: a snapshot redraws its screen in a terminal
+of that size only), `agents.attach`
 returns the `volee host attach` command for the client to run (Ctrl+Q comes
 back), and `agents.stop` asks the host to end the program. For a Claude
 Code background session that volee does not host, `agents.attach` returns
@@ -137,7 +139,11 @@ volee just launched is reachable before any listing shows it. They refuse (`-320
 agent whose session runs in a terminal of its own, which only that terminal
 can show or control, and answer `-32001` when the harness no longer knows the
 session. `agents.stop` also refuses agents volee did not launch
-([ADR 0011](../adr/0011-safety-and-delivery-evidence.md)).
+([ADR 0011](../adr/0011-safety-and-delivery-evidence.md)). What
+`agents.preview` returns for them is the replay of the session's output,
+or the end of the setup log of an agent that never had a session: `exact`
+is false, and a client may repair it as a replay
+([ADR 0028](../adr/0028-one-emulator-and-the-wall-inside-the-interface.md)).
 
 `agents.attach` returns a command for the client to run in its own terminal,
 with the environment variables in `env_remove` removed; the harness keeps the
@@ -146,7 +152,8 @@ agent running when the person comes back.
 An agent whose session runs in a multiplexer pane the daemon found
 ([ADR 0015](../adr/0015-tuios-location-adapter.md)) is not refused:
 `agents.preview` returns what the pane shows, each row placed with a cursor
-move, and `agents.attach` returns an empty `program` and a `focus` object
+move (`exact`, without a `size`: it draws the same cells in any terminal
+large enough), and `agents.attach` returns an empty `program` and a `focus` object
 (`multiplexer`, `session`, `steps`, `attach`). The client runs each step, a
 program and its arguments, in order, in its own environment and without
 giving up its terminal, so that the multiplexer acts on the person's own

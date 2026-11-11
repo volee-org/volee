@@ -80,24 +80,34 @@ def held_screen(j, name):
 
 def replayed_screen(j, name):
     """The session volee does not host: its three views show what the daemon reads,
-    the same replay, which `volee logs` prints whole."""
+    the same replay, which `volee logs` prints whole. A view reads it every few
+    seconds, and a screen still changes for a while after a turn (a hint goes away):
+    the screen is first left to come to rest, each view is given the time of a few
+    readings to show it, and the comparison counts when the screen has not changed."""
     def read():
         return [cells(line) for line in j.volee_run("logs", name).stdout.splitlines()]
+
+    def view(title, margin, screen, same):
+        def caught_up():
+            rows, width = j.frame(title, margin)
+            return rows is not None and same(rows, screen, width)[0]
+        j.wait(caught_up, 20, 1)
+        return j.frame(title, margin)
 
     if not j.select(name):
         return
     for _ in range(3):
-        before = read()
-        j.wait(lambda: j.frame("Preview · " + name, margin=1)[0] is not None, 10)
-        preview, preview_width = j.frame("Preview · " + name, margin=1)
+        before = j.still(read)
+        if not before:
+            continue
+        preview, preview_width = view("Preview · " + name, 1, before, same_tail)
         j.keys("5", 3.0)
-        tile, tile_width = j.frame(name)
+        tile, tile_width = view(name, 0, before, same_tail)
         j.keys("q", 1.0)
         j.keys("z", 2.0)
-        full, full_width = j.frame("Screen · " + name, margin=1)
+        full, full_width = view("Screen · " + name, 1, before, in_order)
         j.keys("Escape", 1.0)
-        after = read()
-        if before and before == after:
+        if read() == before:
             break
     else:
         j.check("the session's screen stays still while its three views are compared", False)

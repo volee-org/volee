@@ -3,8 +3,10 @@
 The trip: Claude Code started by hand in a pane of tuios shows in the list once it
 has lived a few seconds, with the pane it runs in; Enter opens that pane inside
 volee; what is typed reaches the session and it answers; the leave key comes back
-and the pane goes on as before. `/clear` in the pane starts a new session in the
-same process: the row stays the same row. Quit, the session leaves the list.
+and the pane goes on as before. Text typed in the pane itself and left in its input
+box shows in the preview, and leaves the wall once erased: the agent rests, and its
+screen is still read. `/clear` in the pane starts a new session in the same process:
+the row stays the same row. Quit, the session leaves the list.
 
 In between, the proof asked of the one terminal component (ADR 0028), for a pane:
 what tuios captures of the pane is the pane's screen, and the preview, the tile of
@@ -20,6 +22,10 @@ import shlex
 from journey import Journey, arguments, cells, cut, same_tail
 
 PANE = "agent"
+
+# Typed in the pane and left in its input box: the screen changes, the agent does
+# nothing, and nothing is asked of the model.
+LEFT = "left-here-42"
 
 # A shell command for Claude Code's `!` mode, which runs it and shows its output: two
 # marks with four blank rows between them. The marks are computed, so that they show
@@ -77,18 +83,18 @@ def same_screen(j, name, pane_rows):
         j.check("the pane's screen stays still while its views are compared", False)
         return
     width = max(len(row) for row in before)
-    for what, view, view_width in (("the preview", preview, preview_width),
-                                   ("its tile on the wall", tile, tile_width),
-                                   ("the full-screen view", full, full_width),
-                                   ("volee logs", logs, width)):
-        if view is None:
+    for what, shown, shown_width in (("the preview", preview, preview_width),
+                                     ("its tile on the wall", tile, tile_width),
+                                     ("the full-screen view", full, full_width),
+                                     ("volee logs", logs, width)):
+        if shown is None:
             j.check(what + " shows the pane's screen", False, "no such frame on screen")
             continue
-        same, compared, difference = same_tail(view, before, view_width)
+        same, compared, difference = same_tail(shown, before, shown_width)
         j.check("{} shows the pane's screen row for row".format(what), same,
-                difference or "{} cells compared, in {} columns".format(compared, view_width))
-        j.check("{} shows the gap as the pane holds it".format(what), gap(view) == gap(before),
-                "{} blank rows, the pane holds {}".format(gap(view), gap(before)))
+                difference or "{} cells compared, in {} columns".format(compared, shown_width))
+        j.check("{} shows the gap as the pane holds it".format(what), gap(shown) == gap(before),
+                "{} blank rows, the pane holds {}".format(gap(shown), gap(before)))
     whole = [cut(row, len(row)) for row in before]
     while whole and not whole[-1]:
         whole.pop()
@@ -160,11 +166,28 @@ def main():
         j.check("the view ends by itself once nobody uses it",
                 j.wait(lambda: not j.views(), 40, 2), str(j.views()))
 
-        # ---- the same screen in the three views -------------------------------------
-        # A tall, narrow terminal: the preview then takes most of the height, and holds
-        # the pane's whole screen.
+        # ---- at rest, its screen stays current --------------------------------------
+        # A tall, narrow terminal: the preview then takes most of the height and holds
+        # the pane's whole screen. In 80 columns and 24 rows it has five rows, which an
+        # agent's status lines fill.
         j.check("the window takes the size of a tall, narrow terminal", j.resize(96, 60),
                 "{} lines".format(len(j.screen().splitlines())))
+        j.tuios("send-text", "-s", j.session, "-w", PANE, LEFT)
+        j.check("the pane shows what was typed in it", j.wait(lambda: LEFT in pane_screen(), 10))
+        if not j.check("typed in its pane while the agent rests, the preview shows it",
+                       j.sees(LEFT, timeout=20, every=1)):
+            j.show("the list, while the pane's input box holds " + LEFT)
+        j.keys("5", 2.0)
+        j.check("so does its tile on the wall", j.sees("Wall", LEFT, timeout=20, every=1))
+        j.tuios("send-keys", "-s", j.session, "-w", PANE, "Backspace", "--repeat", str(len(LEFT)))
+        j.check("the pane shows it erased", j.wait(lambda: LEFT not in pane_screen(), 10))
+        j.check("erased in its pane, it leaves the tile of an agent at rest",
+                j.wait(lambda: "Wall" in j.screen() and LEFT not in j.screen(), 40, 1))
+        j.keys("q", 1.0)
+        j.check("and the preview", j.wait(lambda: "Agents" in j.screen()
+                                          and LEFT not in j.screen(), 20, 1))
+
+        # ---- the same screen in the three views -------------------------------------
         in_pane(GAP)
         j.check("the pane's screen holds a gap of blank rows",
                 j.wait(lambda: gap(pane_rows()) >= 3, 30, 1),

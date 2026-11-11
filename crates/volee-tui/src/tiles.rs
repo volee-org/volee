@@ -5,8 +5,8 @@
 //! A tile shows its agent where it runs. An agent in a volee host is
 //! followed live, through a connection that only watches. Any other is read
 //! through the source, as the preview is, again every few seconds while it
-//! works. No tile takes an agent's input or resizes its terminal: opening
-//! the selected one does, as from the list.
+//! works and less often at rest. No tile takes an agent's input or resizes
+//! its terminal: opening the selected one does, as from the list.
 //!
 //! The wall's selection is the interface's: moving on the wall moves in the
 //! list, and the keys the list has for its selected agent (open it, show it
@@ -31,6 +31,11 @@ use crate::source::{self, SourceError};
 /// while its agent works. Longer than the preview's two seconds: a page
 /// holds several of them.
 const REFRESH_MILLIS: u64 = 5_000;
+
+/// The same while its agent rests. Its screen still changes (the last lines
+/// of a turn land after the reading its end asked for, a person types in
+/// its pane), less often: a page of agents at rest costs a read per tile.
+const REST_REFRESH_MILLIS: u64 = 15_000;
 
 /// The smallest tile worth reading, border included: a row or a column of
 /// the wall holds up to three of them. A tile shows the bottom of a screen,
@@ -516,7 +521,8 @@ fn tile_for(
 }
 
 /// Asks the source for the screens that are due: never read, read before
-/// their agent changed state, or read a while ago for an agent that works.
+/// their agent changed state, or read a while ago (a shorter while for an
+/// agent that works).
 fn read_due(model: &Model, wall: &mut Wall, effects: &mut Vec<Effect>) -> bool {
     if model.offline.is_some() {
         return false;
@@ -537,10 +543,15 @@ fn read_due(model: &Model, wall: &mut Wall, effects: &mut Vec<Effect>) -> bool {
         if reading.loading || (reading.unsupported && !moved) {
             continue;
         }
+        let period = if agent.state.is_busy() {
+            REFRESH_MILLIS
+        } else {
+            REST_REFRESH_MILLIS
+        };
         let due = match reading.asked_at {
             None => true,
             Some(_) if moved => true,
-            Some(at) => agent.state.is_busy() && at.millis_until(model.now) >= REFRESH_MILLIS,
+            Some(at) => at.millis_until(model.now) >= period,
         };
         if !due {
             continue;

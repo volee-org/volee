@@ -252,6 +252,11 @@ const NOTICE_MILLIS: i64 = 4_000;
 /// How often the preview of a busy agent is refreshed.
 const PREVIEW_REFRESH_MILLIS: u64 = 2_000;
 
+/// How often the preview of an agent at rest is refreshed. Its screen still
+/// changes: the last lines of a turn land after the last reading, a person
+/// types in its pane, a turn too short to be seen as work runs.
+const PREVIEW_REST_REFRESH_MILLIS: u64 = 5_000;
+
 /// The preview of the selected agent.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PreviewState {
@@ -1613,20 +1618,29 @@ fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool
         model.notice = None;
         changed = true;
     }
-    let busy = model
-        .selected_agent()
-        .is_some_and(|agent| agent.state.is_busy());
-    let due = model
-        .preview
-        .requested_at
-        .is_none_or(|at| at.millis_until(now) >= PREVIEW_REFRESH_MILLIS);
+    // The screen of an agent that runs is read again: often while it works,
+    // now and then at rest. An agent that ended keeps the screen it left.
+    let period = model.selected_agent().and_then(|agent| {
+        if agent.state.is_busy() {
+            Some(PREVIEW_REFRESH_MILLIS)
+        } else if agent.state.is_live() {
+            Some(PREVIEW_REST_REFRESH_MILLIS)
+        } else {
+            None
+        }
+    });
+    let due = period.is_some_and(|period| {
+        model
+            .preview
+            .requested_at
+            .is_none_or(|at| at.millis_until(now) >= period)
+    });
     let live = model.selected.is_some_and(|agent| {
         crate::edit::live_for(model, agent) || crate::tiles::follows(model, agent)
     });
     let wanted =
         !model.preview.loading && !model.preview.unsupported && model.offline.is_none() && !live;
-    if busy
-        && wanted
+    if wanted
         && due
         && let Some(selected) = model.selected
     {

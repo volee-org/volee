@@ -87,7 +87,7 @@ the agents of the list that run (the filter applies), wherever they run:
 | Where the agent runs | Its tile |
 | --- | --- |
 | A volee host | followed live, on a connection that only watches |
-| Anywhere else | the screen the daemon reads, as for the preview: again every five seconds while the agent works, and once when its state changes |
+| Anywhere else | the screen the daemon reads, as for the preview: again every five seconds while the agent works, every fifteen seconds while it rests, and at once when its state changes |
 
 - A tile shows the bottom of the screen, cut on the right, under the
   agent's name and state. It never takes an agent's input and never
@@ -120,11 +120,11 @@ machine, whatever they run, from a shell, without the daemon.
   says how far that goes, and where a screen is only a replay.
 - The wall is useful on a machine where volee hosts nothing: it shows the
   sessions that run in the background and in multiplexer panes.
-- A tile of an agent volee does not host is up to five seconds late, and a
-  page of such tiles costs a read per tile every five seconds while those
-  agents work (`claude logs` for a background session, `capture-pane` for a
-  pane). A live tile would need a client on the session, which resizes it
-  ([ADR 0027](0027-open-without-owning.md)).
+- A tile of an agent volee does not host is up to five seconds late while
+  its agent works and up to fifteen while it rests, and a page of such
+  tiles costs a read per tile at that pace (`claude logs` for a background
+  session, `capture-pane` for a pane). A live tile would need a client on
+  the session, which resizes it ([ADR 0027](0027-open-without-owning.md)).
 - A tile shows the bottom of a screen: with a status line of several rows
   under the prompt, a tile of fourteen rows shows a few rows of the
   conversation. Which rows of a screen matter is a harness's business, and
@@ -160,14 +160,17 @@ Both are fixed in 0.12.1, and the proof stays in the repository:
 
 - `crates/volee-tui/src/same_screen.rs` draws the three views of one
   screen, for an agent in a volee host and for a session read through the
-  source, and compares every cell a view shows (character, colors,
-  attributes) with the emulator's cell and with the same cell of the two
-  other views. Its screen holds what made the views differ and what could:
-  wide characters on a view's edge, a background to the end of a row, a gap
-  of blank rows, a cursor block.
+  source (since 0.12.2 twice for the latter: a multiplexer's capture,
+  which is a screen, and a replay), and compares every cell a view shows
+  (character, colors, attributes) with the emulator's cell and with the
+  same cell of the two other views. Its screen holds what made the views
+  differ and what could: wide characters on a view's edge, a background to
+  the end of a row, a gap of blank rows, a cursor block.
 - `journeys/wall.py` makes the comparison by keyboard on real agents, as
   far as a capture of the screen tells (the characters, not the colors),
   and counts it only when the screen did not change meanwhile.
+  `journeys/pane.py` makes it for a session in a tuios pane, against the
+  pane's own screen as tuios gives it, which volee has no part in.
 
 What the proof establishes depends on where a screen comes from:
 
@@ -175,15 +178,30 @@ What the proof establishes depends on where a screen comes from:
 | --- | --- | --- |
 | A volee host | the host's screen, row for row | yes, and live |
 | A view open on the session | the view's screen, row for row | yes, while the view is open |
-| A multiplexer pane | what the multiplexer captured, read as a replay | its cells, yes; a run of blank rows shows as one |
+| A multiplexer pane | what the multiplexer captured, row for row (0.12.1 read it as a replay: a run of blank rows showed as one) | yes, as of the last reading |
 | A Claude Code background session, not open | the replay of `claude logs`, a run of blank rows shown as one | its cells, as far as measured; the blank rows between its conversation and its prompt are left out |
 
 The plan's words were "an exact preview everywhere", with the size
-guessing and the blank-row repair gone. The last two rows do not meet
-them, and for both the reason is in volee, not in what it reads.
+guessing and the blank-row repair gone. In 0.12.1 the last two rows did
+not meet them, and for both the reason was in volee, not in what it reads.
 
-A pane's capture is exact and is still read with a replay's repairs: the
-daemon does not yet say which kind of reading it returns.
+A pane's capture is exact, and 0.12.1 read it with a replay's repairs:
+the daemon did not say which kind of reading it returned. Since 0.12.2 it
+does. `agents.preview` says whether what it returns is the screen itself
+(a volee host's snapshot, a multiplexer's capture of a pane) or the replay
+of a session's output, and the interface keeps a screen row for row: the
+preview, the wall, the full-screen view and `volee logs` show a pane's
+blank rows as the pane holds them.
+
+The daemon also gives the size of a host's terminal, which a snapshot
+needs. A snapshot redraws its screen in a terminal of that size only, and
+the interface told the size from what the snapshot wrote, fifty rows at
+least: the snapshot of a host taller than that lost its first rows
+(`volee logs`, and the preview until its live connection opened). A
+capture needs no size: each of its rows is placed with a cursor move, so
+it draws the same cells in any terminal large enough.
+
+The last row is still open.
 
 For a background session, this decision first said that an exact screen
 needs a client on the session. That was written before it was measured,
@@ -218,6 +236,26 @@ background session is open.
 Not measured: a session whose terminal has another size than 200 by 50,
 and a session that ran for hours, where earlier versions showed gaps in
 what had been drawn long before.
+
+### A screen at rest
+
+Comparing a pane's own screen with volee's views by keyboard found what a
+comparison of cells at one moment cannot: a screen read through the daemon
+was read again only while its agent worked (the preview), or while it
+worked and once when its state changed (a tile). At rest it went stale.
+After a command typed in a pane, the preview still showed the screen of
+the session's start, until the selection moved.
+
+An agent at rest still has a screen that changes: a person types in its
+pane, the last lines of a turn land after the reading its end asked for,
+a turn runs that is too short for volee to see as work, and Claude Code
+itself takes a hint away from its last row some twenty seconds after a
+turn (measured on background sessions). Since 0.12.2 the
+preview reads the screen of a selected agent at rest again every five
+seconds, and a tile every fifteen: a page of tiles costs a read per tile,
+and one read of a background session takes Claude Code about 0.6 second
+(0.17 second of processor time, measured on an idle session). An agent
+that ended keeps the screen it left, which nothing reads again.
 
 ## Alternatives considered
 

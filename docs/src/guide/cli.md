@@ -124,7 +124,8 @@ volee forget <agent>        # stop listing an agent that no longer runs
 ```
 
 `volee logs` prints the agent's screen as it looks now, as plain text. For
-an agent in a volee host, that is the exact screen the host holds. For a
+an agent in a volee host, that is the exact screen the host holds; for a
+session in a tuios or tmux pane, the pane's screen, row for row. For a
 Claude Code background session, volee replays what `claude logs` recorded
 and keeps the last frame, which can miss what was drawn long ago and never
 redrawn.

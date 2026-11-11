@@ -72,8 +72,7 @@ to come:
   (the pane is brought forward instead) and for an OpenCode agent started
   elsewhere.
 - [0028](0028-one-emulator-and-the-wall-inside-the-interface.md): an exact
-  preview everywhere. A multiplexer pane's capture is exact and is read
-  with a replay's repairs. The replay of a Claude Code background session
+  preview of a Claude Code background session that is not open. Its replay
   is its screen, as far as measured, and the preview shows it with a run
   of blank rows counted as one: whether it should is open. Also not built:
   a tile or a preview that leaves out a harness's prompt and status lines,
