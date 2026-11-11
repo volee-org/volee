@@ -124,6 +124,19 @@ impl World {
         });
     }
 
+    /// The daemon reads an agent's evidence, as it does when the agent
+    /// stops: `delivery`, read now.
+    fn reads(&mut self, n: u128, delivery: Delivery) {
+        let checked_at = Some(self.now());
+        self.set_delivery(
+            n,
+            Delivery {
+                checked_at,
+                ..delivery
+            },
+        );
+    }
+
     /// Supervises, applies the decision's events, and returns the decision.
     fn step(&mut self) -> Decision {
         let decision = supervise(&self.registry, mission_id());
@@ -263,11 +276,53 @@ fn a_worker_that_ended_its_session_without_working_is_judged() {
     let mut world = World::new(MissionKind::Change);
     world.register(1, Role::Worker, "billing");
     world.starts(1, AgentState::Stopped);
+    world.reads(1, Delivery::default());
     world.step();
     assert_eq!(
         world.assessments()[&agent(1)].verdict,
         Verdict::NotDelivered
     );
+}
+
+#[test]
+fn a_worker_is_judged_on_evidence_read_since_it_stopped() {
+    // A worker commits, reports and stops before volee ever read its branch
+    // (it lived less than a refresh interval): until the read its stop
+    // causes, there is nothing to judge, and it is never said to have no
+    // commits.
+    let mut world = World::new(MissionKind::Change);
+    world.register(1, Role::Worker, "billing");
+    world.set_state(1, AgentState::Idle);
+    assert_eq!(world.step().notices, []);
+    assert!(world.assessments().is_empty());
+    world.reads(
+        1,
+        Delivery {
+            commits: 1,
+            push: PushState::NoRemote,
+            ..Delivery::default()
+        },
+    );
+    let decision = world.step();
+    assert!(
+        decision
+            .notices
+            .iter()
+            .all(|notice| !notice.body.contains("stopped without delivering")),
+        "{:?}",
+        decision.notices
+    );
+    assert_eq!(decision.notices[0].kind, MessageKind::Report);
+    assert!(
+        decision.notices[0].body.contains("delivered: 1 commit"),
+        "{}",
+        decision.notices[0].body
+    );
+    // Evidence read before the stop is not judged either.
+    world.set_state(1, AgentState::Working);
+    world.reads(1, Delivery::default());
+    world.set_state(1, AgentState::Idle);
+    assert_eq!(world.step(), Decision::default());
 }
 
 #[test]
@@ -283,7 +338,8 @@ fn working_workers_are_not_judged() {
 fn a_worker_that_stops_without_pushing_is_reported_to_the_coordinator() {
     let mut world = World::new(MissionKind::Change);
     world.register(1, Role::Worker, "billing");
-    world.set_delivery(
+    world.set_state(1, AgentState::Done);
+    world.reads(
         1,
         Delivery {
             commits: 2,
@@ -291,7 +347,6 @@ fn a_worker_that_stops_without_pushing_is_reported_to_the_coordinator() {
             ..Delivery::default()
         },
     );
-    world.set_state(1, AgentState::Done);
     let decision = world.step();
     let notice = &decision.notices[0];
     assert_eq!(notice.to, [Party::Agent(agent(COORDINATOR))]);
@@ -311,6 +366,7 @@ fn supervising_twice_says_nothing_new() {
     let mut world = World::new(MissionKind::Change);
     world.register(1, Role::Worker, "billing");
     world.set_state(1, AgentState::Done);
+    world.reads(1, Delivery::default());
     assert!(!world.step().is_empty());
     assert_eq!(world.step(), Decision::default());
 }
@@ -321,9 +377,10 @@ fn new_evidence_brings_a_new_verdict() {
     world.register(1, Role::Worker, "billing");
     world.register(2, Role::Worker, "api");
     world.set_state(1, AgentState::Done);
+    world.reads(1, Delivery::default());
     world.set_state(2, AgentState::Working);
     world.step();
-    world.set_delivery(1, shipped());
+    world.reads(1, shipped());
     let decision = world.step();
     assert_eq!(decision.notices.len(), 1);
     assert_eq!(decision.notices[0].kind, MessageKind::Report);
@@ -337,8 +394,8 @@ fn when_every_worker_delivered_the_coordinator_is_asked_for_the_report() {
     world.register(1, Role::Worker, "billing");
     world.register(2, Role::Worker, "api");
     for n in [1, 2] {
-        world.set_delivery(n, shipped());
         world.set_state(n, AgentState::Idle);
+        world.reads(n, shipped());
     }
     let decision = world.step();
     assert_eq!(world.status(), MissionStatus::Reporting);
@@ -356,8 +413,8 @@ fn ready(kind: MissionKind) -> World {
     world.register(1, Role::Worker, "billing");
     world.register(2, Role::Worker, "api");
     for n in [1, 2] {
-        world.set_delivery(n, shipped());
         world.set_state(n, AgentState::Idle);
+        world.reads(n, shipped());
         if kind == MissionKind::Analysis {
             world.post(
                 100 + n,
@@ -416,8 +473,8 @@ fn answer(world: &mut World, n: u128, question: MessageId, words: &str) {
 fn the_coordinator_is_asked_to_present_its_report_and_to_merge_nothing() {
     let mut world = World::new(MissionKind::Change);
     world.register(1, Role::Worker, "billing");
-    world.set_delivery(1, shipped());
     world.set_state(1, AgentState::Idle);
+    world.reads(1, shipped());
     let decision = world.step();
     let last = decision.notices.last().unwrap();
     assert!(last.body.contains("`request_approval`"), "{}", last.body);
@@ -595,8 +652,8 @@ fn work_that_changes_under_a_presented_report_voids_it() {
     world.step();
     let mut dirty = shipped();
     dirty.dirty = true;
-    world.set_delivery(1, dirty);
     world.set_state(1, AgentState::Idle);
+    world.reads(1, dirty);
     let decision = world.step();
     assert_eq!(world.status(), MissionStatus::Running);
     let alert = decision.notices.last().unwrap();
@@ -612,7 +669,7 @@ fn work_that_changes_under_a_presented_report_voids_it() {
     world.step();
     assert_eq!(world.status(), MissionStatus::Running);
     // Delivered again: the coordinator is asked for a new report.
-    world.set_delivery(1, shipped());
+    world.reads(1, shipped());
     let again = world.step();
     assert_eq!(world.status(), MissionStatus::Reporting);
     assert!(
@@ -638,7 +695,7 @@ fn merges_seen_after_the_approval_keep_the_mission_approved() {
     let mut merged = shipped();
     merged.commits = 0;
     merged.pull_request.as_mut().unwrap().state = PrState::Merged;
-    world.set_delivery(1, merged);
+    world.reads(1, merged);
     let decision = world.step();
     assert_eq!(world.status(), MissionStatus::Approved);
     // The coordinator learns that the merge is seen.
@@ -662,8 +719,8 @@ fn in_a_repository_without_a_remote_committed_work_is_delivered() {
         ..Delivery::default()
     };
     // Nothing committed yet.
-    world.set_delivery(1, local(0, false));
     world.set_state(1, AgentState::Idle);
+    world.reads(1, local(0, false));
     world.step();
     assert_eq!(
         world.assessments()[&agent(1)].verdict,
@@ -671,14 +728,14 @@ fn in_a_repository_without_a_remote_committed_work_is_delivered() {
     );
     assert_eq!(world.assessments()[&agent(1)].evidence, "no commits");
     // Committed, with changes left.
-    world.set_delivery(1, local(2, true));
+    world.reads(1, local(2, true));
     world.step();
     assert_eq!(
         world.assessments()[&agent(1)].evidence,
         "uncommitted changes"
     );
     // Committed and clean: no push and no pull request are asked for.
-    world.set_delivery(1, local(2, false));
+    world.reads(1, local(2, false));
     world.step();
     assert_eq!(world.assessments()[&agent(1)].verdict, Verdict::Delivered);
     assert_eq!(
@@ -689,7 +746,7 @@ fn in_a_repository_without_a_remote_committed_work_is_delivered() {
     // The same evidence with a remote is not delivered.
     let mut with_remote = local(2, false);
     with_remote.push = PushState::NoUpstream;
-    world.set_delivery(1, with_remote);
+    world.reads(1, with_remote);
     world.step();
     assert_eq!(
         world.assessments()[&agent(1)].evidence,
@@ -704,8 +761,8 @@ fn a_delivered_worker_working_again_keeps_the_mission_reporting() {
     // for the final report a second time.
     let mut world = World::new(MissionKind::Change);
     world.register(1, Role::Worker, "billing");
-    world.set_delivery(1, shipped());
     world.set_state(1, AgentState::Idle);
+    world.reads(1, shipped());
     world.step();
     assert_eq!(world.status(), MissionStatus::Reporting);
     world.set_state(1, AgentState::Working);
@@ -719,8 +776,8 @@ fn a_delivered_worker_working_again_keeps_the_mission_reporting() {
 fn a_regression_moves_the_mission_back_to_running() {
     let mut world = World::new(MissionKind::Change);
     world.register(1, Role::Worker, "billing");
-    world.set_delivery(1, shipped());
     world.set_state(1, AgentState::Idle);
+    world.reads(1, shipped());
     world.step();
     assert_eq!(world.status(), MissionStatus::Reporting);
     // It works again and stops with changes it did not commit.
@@ -728,8 +785,8 @@ fn a_regression_moves_the_mission_back_to_running() {
     world.step();
     let mut dirty = shipped();
     dirty.dirty = true;
-    world.set_delivery(1, dirty);
     world.set_state(1, AgentState::Idle);
+    world.reads(1, dirty);
     world.step();
     assert_eq!(world.status(), MissionStatus::Running);
     assert_eq!(
@@ -755,8 +812,8 @@ fn a_merged_pull_request_is_delivery_even_without_new_commits() {
     let mut delivery = shipped();
     delivery.commits = 0;
     delivery.pull_request.as_mut().unwrap().state = PrState::Merged;
-    world.set_delivery(1, delivery);
     world.set_state(1, AgentState::Stopped);
+    world.reads(1, delivery);
     world.step();
     let assessment = &world.registry.mission(mission_id()).unwrap().assessments[&agent(1)];
     assert_eq!(assessment.verdict, Verdict::Delivered);
@@ -773,8 +830,8 @@ fn a_pull_request_at_another_commit_proves_nothing() {
     let pr = delivery.pull_request.as_mut().unwrap();
     pr.state = PrState::Merged;
     pr.head = Some("0dd5ed".into());
-    world.set_delivery(1, delivery);
     world.set_state(1, AgentState::Stopped);
+    world.reads(1, delivery);
     world.step();
     let assessment = &world.registry.mission(mission_id()).unwrap().assessments[&agent(1)];
     assert_eq!(assessment.verdict, Verdict::NotDelivered);
