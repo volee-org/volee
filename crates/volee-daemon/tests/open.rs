@@ -119,6 +119,7 @@ fn start(mux: FakeMux) -> Running {
         volee_bin: None,
         multiplexers: vec![Arc::new(mux) as Arc<dyn Multiplexer>],
         hosts: false,
+        processes: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

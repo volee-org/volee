@@ -92,6 +92,7 @@ fn start_with(events: Vec<Event>) -> Fixture {
             volee_bin: None,
             multiplexers: Vec::new(),
             hosts: false,
+            processes: None,
         },
     ));
     Fixture { socket, _dir: dir }

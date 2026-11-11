@@ -19,6 +19,9 @@ multiplexer to type through, and a few short prompts on a small model.
   with `tuios send-keys` and read with `tuios capture-pane`. Your own sessions
   are not touched.
 - Claude Code, logged in.
+- For `other_ai.py`, [OpenCode](https://opencode.ai) on `PATH`. It is only
+  started and typed into: no model is asked anything, so it needs no
+  account.
 - Python 3.9 or later (the scripts use the standard library only).
 - A **sandbox**: a git repository that Claude Code already trusts (run
   `claude` in it once and accept). The journeys make throwaway branches and
@@ -32,6 +35,7 @@ python3 journeys/open.py      --volee target/release/volee --sandbox ~/code/sand
 python3 journeys/pane.py      --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/edit_mode.py --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/wall.py      --volee target/release/volee --sandbox ~/code/sandbox
+python3 journeys/other_ai.py  --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/old_host.py  --volee target/release/volee --old-volee ~/bin/volee-0.9.1 --sandbox ~/code/sandbox
 python3 journeys/installed.py --sandbox ~/code/sandbox --expect 0.12.0
 ```
@@ -47,6 +51,7 @@ you can look (`tuios attach volee-journey-...`).
 | `pane.py` | Starts Claude Code by hand in a tuios pane: it shows in the list after ten seconds, Enter opens the pane inside volee, typing reaches it, text typed in the pane while the agent rests shows in the preview and on the wall, the pane's own screen is found row for row in the preview, on the wall, full size and in `volee logs`, `/clear` keeps its row, and quitting it takes it off the list. | Its own, isolated |
 | `edit_mode.py` | Launches an agent, shows it full screen, types into it in edit mode, sends Esc, Ctrl+Z and a two-line paste, leaves with Ctrl+Q, then checks in a pseudo-terminal that the agent follows the panel's size. | Its own, isolated |
 | `wall.py` | Launches an agent and starts a background session by hand, in a window the size of a large terminal: the preview of the first is its live screen, `5` shows both screens side by side, each opens from the wall with Enter or `i`, takes what is typed and comes back to the wall, `z` shows one full size, and the wall opens no terminal and resizes nothing. Last, the same screen is compared cell by cell between the preview, the full-screen view and the wall, for both. | Its own, isolated |
+| `other_ai.py` | Starts OpenCode by hand in a tuios pane, in a directory of its own: it shows in the list as an agent of another harness, in its pane; its preview and its tile on the wall are the pane's screen, row for row; Enter opens the pane inside volee, typing reaches it, the leave key comes back and it is the same process; quit, it stops and leaves the list. Nothing is asked of a model. | Its own, isolated |
 | `old_host.py` | The same typing on an agent whose host an older release started (hosts outlive upgrades). | Its own, started by the older binary |
 | `installed.py` | The installed volee with your own daemon and your own list: compares the list with what Claude Code lists, launches one throwaway agent, types into it and shows it on the wall, starts one background session by hand and opens it by Enter, then removes both. Run it after installing a release. | Yours |
 

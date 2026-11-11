@@ -105,7 +105,9 @@ keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
 In this order, one release per step:
 
 - Other harnesses: finding their agents wherever they run, a door on each,
-  and `volee run -- <command>` to start any program in a host.
+  and `volee run -- <command>` to start any program in a host. Done so
+  far: an OpenCode agent started by hand in a tuios or tmux pane is placed
+  in its pane, and opens there like any agent in a pane.
 - Missions as a lead agent runs them, with the rules that make a lead a
   good one.
 

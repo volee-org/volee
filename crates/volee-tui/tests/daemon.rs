@@ -86,6 +86,7 @@ fn start_with(events: Vec<Event>) -> Running {
         volee_bin: None,
         multiplexers: Vec::new(),
         hosts: false,
+        processes: None,
     };
     let task = tokio::spawn(Daemon::serve(listener, config));
     Running {

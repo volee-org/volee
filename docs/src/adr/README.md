@@ -70,7 +70,8 @@ to come:
   `gemini --resume`), which needs their profiles.
 - [0027](0027-open-without-owning.md): a door for a session in a tmux pane
   (the pane is brought forward instead) and for an OpenCode agent started
-  elsewhere.
+  in a plain terminal (in a tuios pane, it opens like any agent in a
+  pane).
 - [0028](0028-one-emulator-and-the-wall-inside-the-interface.md): a live
   preview of a Claude Code background session that is not open, which
   would need a client on the session; volee shows its replay, and says

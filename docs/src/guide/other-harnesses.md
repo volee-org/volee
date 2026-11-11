@@ -38,12 +38,18 @@ stop it with `volee stop`, like any agent in a host.
 - **Started elsewhere.** An OpenCode agent you started yourself is found in
   the process table (not the background service,
   `opencode serve --service`), with its directory, and so its repository
-  and branch. It is
-  shown until its process ends, then leaves the list a minute later. volee
-  has no door on an OpenCode agent in a terminal yet: to type into it from
-  volee, quit it, then adopt it (`A`, or `volee adopt`): volee resumes it
-  in a host, which only works when it was started with `--session`, since
-  volee needs the session id.
+  and branch. It is shown until its process ends, then leaves the list a
+  minute later.
+  - **In a tuios or tmux pane**, it is an agent in a pane like any other
+    ([panes](interface.md#agents-in-tuios-panes)): the list says which
+    pane, its preview and its tile on the wall are the pane's screen, and
+    in a tuios pane `enter` opens it inside volee, where you type into it;
+    `ctrl-q` comes back and it goes on as before. Nothing is stopped or
+    restarted for it.
+  - **In a plain terminal**, volee has no door on it and says so: switch to
+    that terminal. To drive it from volee, quit it, then adopt it (`A`, or
+    `volee adopt`): volee resumes it in a host, which only works when it
+    was started with `--session`, since volee needs the session id.
 
 ## Join
 

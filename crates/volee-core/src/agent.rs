@@ -113,10 +113,13 @@ impl Agent {
     /// launch and only knows through its MCP server. Its state comes from
     /// that server, and messages reach it when it reads them.
     ///
-    /// volee discovers the sessions of no other harness yet, so an agent of
-    /// another harness that volee did not launch is a joined one.
+    /// volee knows a joined agent by no session: an agent of another
+    /// harness that volee found by itself, in the process table or in a
+    /// pane, has one, and is a watched agent ([`Agent::watched`]).
     pub fn joined(&self) -> bool {
-        self.launched_by == LaunchedBy::Outside && matches!(self.harness, HarnessKind::Other(_))
+        self.launched_by == LaunchedBy::Outside
+            && matches!(self.harness, HarnessKind::Other(_))
+            && self.sessions.is_empty()
     }
 
     /// Whether volee drives the agent: it launched it, or the agent runs in

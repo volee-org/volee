@@ -86,6 +86,7 @@ fn start() -> Running {
         volee_bin: None,
         multiplexers: Vec::new(),
         hosts: false,
+        processes: None,
     };
     let task = tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -115,6 +116,7 @@ fn empty(paths: Paths) -> Config {
         volee_bin: None,
         multiplexers: Vec::new(),
         hosts: false,
+        processes: None,
     }
 }
 

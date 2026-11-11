@@ -665,7 +665,9 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
                 },
             },
         );
-        if member.role != Role::Subagent {
+        // The agent of another harness joined through volee's MCP server
+        // (ADR 0014): volee knows it by no session.
+        if member.role != Role::Subagent && index != INFRA {
             script.at(
                 -member.born,
                 EventKind::SessionLinked {
