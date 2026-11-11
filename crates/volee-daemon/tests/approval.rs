@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use common::{FakeHarness, git, repository};
+use common::{FakeHarness, git, launch_handle, repository};
 use tokio::net::UnixListener;
 use ulid::Ulid;
 use volee_core::delivery::{ChecksState, PrState, PullRequest};
@@ -371,7 +371,47 @@ async fn until(client: &Client, ready: impl Fn(&Registry) -> bool) -> Registry {
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    panic!("the registry never reached the expected state");
+    panic!(
+        "the registry never reached the expected state:\n{}",
+        described(&registry(client).await)
+    );
+}
+
+/// The mission, its verdicts, its agents and its thread, for a wait that
+/// timed out.
+fn described(registry: &Registry) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    if let Some(mission) = registry.mission(mission_id()) {
+        let _ = writeln!(out, "mission: {:?}", mission.status);
+        for (worker, assessment) in &mission.assessments {
+            let _ = writeln!(
+                out,
+                "  verdict on {worker}: {:?} ({})",
+                assessment.verdict, assessment.evidence
+            );
+        }
+    }
+    for agent in registry.agents() {
+        let _ = writeln!(
+            out,
+            "agent {} {} ({:?}): {:?} since {:?}, worked {}, sessions {}, delivery `{}` checked \
+             {:?}",
+            agent.id,
+            agent.name,
+            agent.role,
+            agent.state,
+            agent.state_since,
+            agent.worked,
+            agent.sessions.len(),
+            agent.delivery.summary(),
+            agent.delivery.checked_at
+        );
+    }
+    for message in registry.thread_messages(thread_id()) {
+        let _ = writeln!(out, "  {:?}: {}", message.from, message.body);
+    }
+    out
 }
 
 async fn until_status(client: &Client, status: MissionStatus) -> Registry {
@@ -409,15 +449,17 @@ fn commits(worktree: &Path, file: &str, content: &str) {
     git(worktree, &["commit", "--quiet", "-m", "Add invoices"]);
 }
 
-/// The session of the worker in `worktree`, its turn ended, as the harness
-/// lists it; `n` tells two sessions apart.
-fn ended(worktree: &Path, n: u8) -> ListedSession {
+/// The session of the worker of the `n`th launch (from one), in `worktree`,
+/// its turn ended, as the harness lists it: under the handle the harness gave
+/// that launch.
+fn ended(worktree: &Path, n: usize) -> ListedSession {
+    let handle = launch_handle(n);
     ListedSession {
         alive: true,
         background: true,
-        handle: Some(format!("abcd123{n}")),
+        handle: Some(handle.clone()),
         ..ListedSession::new(
-            SessionKey::claude(format!("abcd123{n}-5b60-4cdc-8cf3-000000000001")),
+            SessionKey::claude(format!("{handle}-5b60-4cdc-8cf3-000000000001")),
             worktree,
             AgentState::Done,
         )
@@ -771,7 +813,7 @@ async fn a_mission_without_a_remote_is_merged_by_volee_after_ok_merge_then_close
         daemon
             .harness
             .actions()
-            .contains(&("remove-delivered".to_owned(), "abcd1231".to_owned())),
+            .contains(&("remove-delivered".to_owned(), launch_handle(1))),
         "{:?}",
         daemon.harness.actions()
     );
