@@ -71,6 +71,14 @@ agent's.
   sleep followed by one look.
 - Ask the agent for answers that cannot be on the screen already (a word in
   uppercase), and check the answer, not the prompt.
+- Keep apart what volee does and what the agent says. `answered()` tells
+  that the typed text became a turn and that the agent wrote under it; what
+  it wrote is another check, which says the answer it got. An agent that
+  answers something else is not a defect of volee, and the run must say so
+  at a glance.
+- Never tell the agent, in one message, how to answer the next ones: "reply
+  only OK" in a first message once made a small model answer OK to the
+  question that followed.
 - A window of a headless tuios session has 80 columns and 24 rows.
   `resize()` gives the interface the size of the terminal the trip needs.
 - Add every new thing the journey starts to `agents`, `branches`,
