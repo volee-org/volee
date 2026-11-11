@@ -44,6 +44,10 @@ do*. volee shows what they do.
   the ones started elsewhere. A Claude Code session you started yourself
   opens where it runs, in the background or in a tuios pane, with nothing
   stopped or restarted; the list is what runs now.
+- **Any other AI, from your terminal**: `volee run -- <command>` runs any
+  program under volee. Your terminal is on it at once, and it is listed,
+  shown and opened like the others
+  ([Agents of other harnesses](guide/other-harnesses.md)).
 - **Worktrees ready to work**: your setup commands, such as `bun install`,
   run in each new worktree before its agent starts.
 
