@@ -11,8 +11,9 @@ its two answers; `1` then `y` says "ok merge". Only then is each worker's branch
 merged into the main branch of its repository, with a merge commit, by volee itself:
 no agent merges. volee then closes the mission, tidies the workers' worktrees, keeps
 their branches, stops the coordinator, and says so in one message, which the lead
-hears too. Last, a task in one repository: the lead gives it to one agent itself,
-which commits and reports to it; nobody merges it.
+hears too. Last, a task in one repository, which the person asks for by a message
+from a shell (`volee msg send`): the lead gives it to one agent itself, which commits
+and reports to it; nobody merges it.
 
 Real agents do the work, on a small model: the goal is a file of one line in each
 repository.
@@ -422,46 +423,48 @@ def main():
                 ((j.agent(lead) or {}).get("state") or {}).get("state")
                 in ("idle", "done", "working"), str((j.agent(lead) or {}).get("state")))
 
-        # ---- one task in one repository: the lead gives it to one agent ------------
+        # ---- one task in one repository, asked by a message: one agent does it ------
+        # The person writes to the lead from a shell this time. What volee hands it
+        # as from the human is the human's own word, as much as what they type.
         merged = repos[0].head()
-        if j.select(lead):
-            j.keys("Enter", 2.0)
-            j.check("the lead opens again for another request",
-                    j.sees("your keys go to " + lead, timeout=30))
-            j.type(("Now launch one agent in the repository {a}, on a branch named "
-                    "`{solo}`, to add a file named `{solo}.txt` at the root of the "
-                    "repository, containing exactly the line `solo {stamp}`, and to "
-                    "commit it with the message `test: add {solo}.txt`. Nothing "
-                    "else.").format(a=repos[0].name, solo=solo, stamp=j.stamp))
-            j.keys("Enter")
+        sent = j.volee_run(
+            "msg", "send", lead,
+            ("Now launch one agent in the repository {a}, on a branch named `{solo}`, to "
+             "add a file named `{solo}.txt` at the root of the repository, containing "
+             "exactly the line `solo {stamp}`, and to commit it with the message `test: "
+             "add {solo}.txt`. Nothing else.").format(a=repos[0].name, solo=solo,
+                                                      stamp=j.stamp))
+        j.check("`volee msg send` writes to the lead", sent.returncode == 0,
+                (sent.stdout + sent.stderr).strip()[:200])
 
-            def launched():
-                return next((agent for agent in j.agents_listed()
-                             if agent.get("workspace", {}).get("branch") == solo), None)
-            agent = j.wait(launched, PLANNING, 2) or {}
-            if agent.get("name"):
-                j.agents.append(agent["name"])
-            j.check("the lead launches one agent on that branch, outside any mission",
-                    agent.get("role") == "worker" and not agent.get("mission")
-                    and agent.get("workspace", {}).get("repo") == repos[0].name,
-                    str((agent.get("name"), agent.get("role"), agent.get("mission")))[:200])
-            j.check("the agent answers to the lead", agent.get("parent") == row.get("id"),
-                    "{} / {}".format(agent.get("parent"), row.get("id")))
-            j.check("the agent commits its work on its branch",
-                    j.wait(lambda: repos[0].git("rev-list", "--count", merged + ".." + solo)
-                           == "1", WORKING, 3),
-                    repos[0].git("log", "--oneline", merged + ".." + solo))
-            j.check("nobody merges it: the main branch has not moved",
-                    repos[0].head() == merged)
-            # The agent reports to its lead once its work is committed.
-            committed = int(repos[0].git("log", "-1", "--format=%ct", solo) or 0) * 1000
+        def launched():
+            return next((agent for agent in j.agents_listed()
+                         if agent.get("workspace", {}).get("branch") == solo), None)
+        agent = j.wait(launched, PLANNING, 2) or {}
+        if agent.get("name"):
+            j.agents.append(agent["name"])
+        j.check("the lead does what the message asks: one agent on that branch, outside "
+                "any mission",
+                agent.get("role") == "worker" and not agent.get("mission")
+                and agent.get("workspace", {}).get("repo") == repos[0].name,
+                str((agent.get("name"), agent.get("role"), agent.get("mission")))[:200])
+        j.check("the agent answers to the lead", agent.get("parent") == row.get("id"),
+                "{} / {}".format(agent.get("parent"), row.get("id")))
+        j.check("the agent commits its work on its branch",
+                j.wait(lambda: repos[0].git("rev-list", "--count", merged + ".." + solo)
+                       == "1", WORKING, 3),
+                repos[0].git("log", "--oneline", merged + ".." + solo))
+        j.check("nobody merges it: the main branch has not moved",
+                repos[0].head() == merged)
+        # The agent reports to its lead once its work is committed.
+        committed = int(repos[0].git("log", "-1", "--format=%ct", solo) or 0) * 1000
+        told = j.wait(lambda: spoke_since(j, lead, committed), 180, 2)
+        if j.select(lead):
+            j.keys("z", 1.5)
             j.check("the lead takes a turn once the agent reported, to tell the person",
-                    j.wait(lambda: spoke_since(j, lead, committed), 180, 2),
-                    "it said: " + j.last_answer())
+                    told, "it said: " + j.last_answer())
             j.show("the lead, after one agent's work")
-            j.keys("ctrl+q", 1.5)
-            j.keys("Escape", 1.0)
-            j.keys("Escape", 1.0)
+            j.keys("Escape", 0.5)
         j.keys("q", 1.0)
     finally:
         if j.keep:

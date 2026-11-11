@@ -189,6 +189,9 @@ asked, as in the section above: the question waits in your messages (`I`),
 not in the lead's conversation. A lead never answers for you, even when you
 tell it your answer: it tells you where to give it.
 
+You can also write to a lead without opening it, with `m` on its row or
+`volee msg send <lead> "..."`: it takes that as what you say.
+
 `volee lead "Add invoices to billing and to the API."` starts it with the
 request at once.
 

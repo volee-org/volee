@@ -256,9 +256,11 @@ A lead has no worktree and Claude Code's editing tools are turned off for
 it. It gets two more MCP tools than the other agents: `spawn_agent`, for one
 task in one repository, and `start_mission`, for work across several. What
 it launches reports to it; it tells you in a line what it launched, and in
-three lines what came back. `volee lead` typed again where that lead runs
-is refused, and says how to open it; give another lead a name of its own
-with `--name`.
+three lines what came back. You can also write to it without opening it:
+`volee msg send <lead> "..."` from a shell, or `m` on its row in the
+interface. It takes that as what you say, the same as what you type in its
+terminal. `volee lead` typed again where that lead runs is refused, and
+says how to open it; give another lead a name of its own with `--name`.
 
 `volee lead`, `volee spawn` and `volee mission new` refuse to run in the
 shell of an agent volee launched, like the commands that speak for you: an
