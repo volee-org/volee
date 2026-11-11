@@ -26,6 +26,13 @@ multiplexer to type through, and a few short prompts on a small model.
 - A **sandbox**: a git repository that Claude Code already trusts (run
   `claude` in it once and accept). The journeys make throwaway branches and
   worktrees in it, named `journey-...`, and remove them.
+- For `mission.py`, a second such repository (`--other-sandbox`, by default
+  the directory `beta` next to the sandbox), neither with a remote, both
+  with nothing uncommitted. The mission merges a one-line file into the main
+  branch of each; the journey then puts each main branch back at the commit
+  it started from, which it does only when every commit above it is its own.
+  Its agents run in Claude Code's `auto` permission mode, since they commit
+  and merge without a person at their keyboard.
 
 ## Running them
 
@@ -39,6 +46,7 @@ python3 journeys/other_ai.py  --volee target/release/volee --sandbox ~/code/sand
 python3 journeys/other_ai.py  --stand-in codex --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/run.py       --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/question.py  --volee target/release/volee --sandbox ~/code/sandbox
+python3 journeys/mission.py   --volee target/release/volee --sandbox ~/code/sandbox --other-sandbox ~/code/sandbox-two
 python3 journeys/old_host.py  --volee target/release/volee --old-volee ~/bin/volee-0.9.1 --sandbox ~/code/sandbox
 python3 journeys/installed.py --sandbox ~/code/sandbox --expect 0.12.0
 ```
@@ -57,6 +65,7 @@ you can look (`tuios attach volee-journey-...`).
 | `other_ai.py` | Starts OpenCode by hand in a tuios pane, in a directory of its own: it shows in the list as an agent of another harness, in its pane; its preview and its tile on the wall are the pane's screen, row for row; Enter opens the pane inside volee, typing reaches it, the leave key comes back and it is the same process; quit, it stops and leaves the list. Nothing is asked of a model. With `--stand-in codex`, the same trip for a harness volee has no listing for: a copy of `cat` named `codex`, which tuios takes for Codex CLI by its name and volee finds through tuios. | Its own, isolated |
 | `run.py` | Types `volee run -- opencode` in a terminal (a tuios pane), in a directory of its own: the terminal is on the program, volee lists it once in a volee host though it also finds it in the process table, and its preview is the screen the person sees, row for row; the leave key gives the terminal back and it keeps running; from the interface Enter opens it, typing reaches it, and its tile on the wall shows its screen; `volee attach` opens it in a terminal again; quit there, it stops, volee says that nothing resumes it, and it leaves the list. Then `volee run -- claude`: one row, though Claude Code lists its session. Nothing is asked of a model. | Its own, isolated |
 | `question.py` | An agent of another harness joins through volee's MCP server and asks the person a question that offers its answers: the messages window shows it on top with its answers numbered; the number of an answer asks before anything is sent, `n` takes it back, `y` sends it, and the agent reads exactly the answer it offered, in reply to its question, which stops waiting. Two more questions are answered from a shell with `volee msg answer`, by the number of an answer and in the person's own words. The journey itself speaks MCP as that agent's harness would: nothing is asked of a model. | Its own, isolated |
+| `mission.py` | Starts a mission across two repositories without a remote, with real agents: its coordinator launches one worker per repository, each commits its work on a branch of its own, and the coordinator merges nothing: it presents its report and the mission waits for the person. In the interface the report sits on top of the messages with its two answers; `1` then `y` says "ok merge". Only then does the coordinator merge each branch into the main branch of its repository and close the mission; the workers' worktrees are removed, their branches kept, the coordinator stopped, and one message says so. The journey then puts both repositories back where they were. | Its own, isolated |
 | `old_host.py` | The same typing on an agent whose host an older release started (hosts outlive upgrades). | Its own, started by the older binary |
 | `installed.py` | The installed volee with your own daemon and your own list: compares the list with what Claude Code lists, launches one throwaway agent, types into it and shows it on the wall, starts one background session by hand and opens it by Enter, then removes both. Run it after installing a release. | Yours |
 
