@@ -2,8 +2,8 @@
 
 The last check before and after a release: the installed binary, the real daemon and
 its real list of agents. The journey compares that list with what Claude Code lists,
-launches one throwaway agent in the sandbox and types into it, starts one background
-session by hand and opens it by Enter, then removes both. It finds them by their
+launches one throwaway agent in the sandbox, types into it and shows it on the wall,
+starts one background session by hand and opens it by Enter, then removes both. It finds them by their
 unique names and touches no other agent.
 
     python3 journeys/installed.py --sandbox ~/code/sandbox [--expect 0.11.0]
@@ -44,6 +44,24 @@ def launched_agent(j, name):
     j.check("the leave key comes back, the screen stays",
             j.sees("Screen · " + name + " · live", timeout=10))
     j.keys("z", 1.0)
+
+
+def the_wall(j, name):
+    """The wall of screens, kept to the journey's own agent by the filter: no key
+    here reaches anyone else's agent."""
+    if not j.select(name):
+        return
+    j.keys("5", 2.0)
+    j.check("5 shows the wall, on the agents of the filtered list",
+            j.sees("Wall", "1 agent runs", name, timeout=15))
+    live = j.wait(lambda: any(name in line and "live" in line
+                              for line in j.screen().splitlines()), 15)
+    j.check("its tile follows the agent live and shows its screen",
+            live and j.sees("SKY", timeout=15))
+    j.show("the wall on the installed volee")
+    j.keys("q", 1.0)
+    j.check("q leaves the wall",
+            j.wait(lambda: "Wall ·" not in j.screen() and "Agents" in j.screen(), 10))
 
 
 def session_by_hand(j, name):
@@ -100,7 +118,9 @@ def main():
         j.open_interface()
         if not j.check("the interface opens", j.sees("Agents", timeout=30)):
             return
-        launched_agent(j, "journey-installed-" + j.stamp)
+        launched = "journey-installed-" + j.stamp
+        launched_agent(j, launched)
+        the_wall(j, launched)
         session_by_hand(j, "journey-installed-bg-" + j.stamp)
         j.keys("q", 1.0)
     finally:

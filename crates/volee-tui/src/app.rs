@@ -111,6 +111,8 @@ pub(crate) enum Overlay {
     Launch(Box<LaunchDialog>),
     /// The selected agent's screen, full size.
     Screen,
+    /// The wall of screens, kept in [`Model::wall`].
+    Wall,
 }
 
 /// What the interface knows from the configuration and the machine.
@@ -618,6 +620,9 @@ pub(crate) struct Model {
     /// The live screen of the full-screen view, for an agent in a volee
     /// host (ADR 0026).
     pub(crate) live: Option<Live>,
+    /// The wall of screens, while it shows or while what was opened from
+    /// it does (ADR 0028).
+    pub(crate) wall: Option<crate::tiles::Wall>,
     /// The number of the last live screen connection.
     pub(crate) next_link: u64,
     /// The agent the source is opening (ADR 0027).
@@ -705,6 +710,7 @@ impl Model {
             take_over_after_adopt: None,
             edit_when_hosted: None,
             live: None,
+            wall: None,
             next_link: 0,
             opening: None,
             door: None,
@@ -786,6 +792,7 @@ impl Model {
                 return vec![Context::Attached];
             }
             Some(Overlay::Screen) => return vec![Context::Screen],
+            Some(Overlay::Wall) => return vec![Context::Wall],
             None => {}
         }
         if self.filter.editing {
@@ -850,6 +857,20 @@ impl Model {
             error,
             until: self.now.plus_millis(NOTICE_MILLIS),
         });
+    }
+
+    /// Notes a click on an agent and tells whether it is the second of a
+    /// double click: on the same agent, soon after the first.
+    pub(crate) fn double_click(&mut self, agent: AgentId) -> bool {
+        let now = std::time::Instant::now();
+        let double = self
+            .last_click
+            .take()
+            .is_some_and(|(last, at)| last == agent && now.duration_since(at) <= DOUBLE_CLICK);
+        if !double {
+            self.last_click = Some((agent, now));
+        }
+        double
     }
 
     pub(crate) fn name_of(&self, agent: AgentId) -> String {
@@ -1264,7 +1285,6 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     match msg {
         Msg::Key(key) => dirty = on_key_event(model, &key, &mut effects),
         // In edit mode the mouse does nothing: the keys are the agent's.
-        Msg::Mouse(_) if crate::edit::editing(model) => dirty = false,
         Msg::Mouse(mouse) => dirty = on_mouse(model, mouse, &mut effects),
         Msg::Paste(text) if crate::edit::editing(model) => {
             crate::edit::on_paste(model, &text, &mut effects);
@@ -1347,6 +1367,9 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     }
     crate::edit::settle(model, &mut effects);
     model.relayout();
+    // The wall follows the list as it now is, before the preview follows
+    // the selection the wall may have moved.
+    dirty |= crate::tiles::settle(model, &mut effects);
     // The layout pass may have moved the selection (the agent left, or the
     // filter hides it): the preview follows, and shows nothing once nothing
     // is selected, rather than the screen of an agent that left.
@@ -1404,6 +1427,7 @@ fn resumed(
 fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool {
     match answer {
         Msg::PreviewLoaded { agent, result } => {
+            let on_wall = crate::tiles::loaded(model, agent, &result);
             if model.preview.agent == Some(agent) {
                 model.preview.loading = false;
                 match result {
@@ -1419,7 +1443,7 @@ fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool 
                     }
                 }
             } else {
-                return false;
+                return on_wall;
             }
         }
         Msg::DiffLoaded {
@@ -1596,9 +1620,9 @@ fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool
         .preview
         .requested_at
         .is_none_or(|at| at.millis_until(now) >= PREVIEW_REFRESH_MILLIS);
-    let live = model
-        .selected
-        .is_some_and(|agent| crate::edit::live_for(model, agent));
+    let live = model.selected.is_some_and(|agent| {
+        crate::edit::live_for(model, agent) || crate::tiles::follows(model, agent)
+    });
     let wanted =
         !model.preview.loading && !model.preview.unsupported && model.offline.is_none() && !live;
     if busy
@@ -1608,6 +1632,8 @@ fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool
     {
         model.request_preview(selected, effects);
     }
+    // The selected agent's own screen, live, when it runs in a volee host.
+    changed |= crate::edit::follow_selected(model, effects);
     changed
 }
 
@@ -1762,7 +1788,7 @@ pub(crate) fn perform(
     match action {
         Action::Back => {
             if model.overlay == Some(Overlay::Screen) {
-                crate::edit::close(model, effects);
+                crate::edit::leave_screen(model, effects);
             }
             back(model);
         }
@@ -1797,7 +1823,7 @@ pub(crate) fn perform(
         Action::FullScreen => open_full_screen(model, effects),
         Action::Forget => ask_forget(model),
         Action::Adopt => adopt_selected(model),
-        Action::ShowWall => show_wall(model, effects),
+        Action::ShowWall => crate::tiles::open(model, effects),
         Action::Diff => {
             if let Some(agent) = model.selected {
                 open_diff(model, agent, false, effects);
@@ -1844,7 +1870,7 @@ pub(crate) fn perform(
                 model.request_preview(agent, effects);
                 // The live screen connects again: a new snapshot.
                 if model.overlay == Some(Overlay::Screen) {
-                    crate::edit::watch(model, agent, effects);
+                    crate::edit::refresh(model, agent, effects);
                 }
             }
         }
@@ -1865,6 +1891,7 @@ fn perform_windows(
     match (context, action) {
         (_, Action::Quit) => request_quit(model, effects),
         (Context::Themes, _) => crate::themes::perform(model, action, effects),
+        (Context::Wall, _) => crate::tiles::perform(model, action, effects),
         (Context::Inbox, _) => crate::inbox::perform(model, action, effects),
         (Context::Tools, _) => crate::tools::perform(model, action, effects),
         (_, Action::Messages) => crate::inbox::open(model),
@@ -2008,50 +2035,8 @@ fn adopt_selected(model: &mut Model) {
     }
 }
 
-/// Opens the wall of screens (ADR 0021): the agents of the current list that
-/// run in a volee host, as tiles of their live screens, in this terminal
-/// until the person comes back with `q`.
-fn show_wall(model: &mut Model, effects: &mut Vec<Effect>) {
-    let hosts: Vec<String> = model
-        .rail
-        .iter()
-        .filter_map(|entry| model.registry.agent(entry.agent))
-        .filter(|agent| agent.state.is_live())
-        .filter_map(|agent| agent.location.host().map(str::to_owned))
-        .collect();
-    if hosts.is_empty() {
-        model.notify(
-            "No agent of the list runs in a volee host: the wall shows agents volee launched \
-             or adopted.",
-            false,
-        );
-        return;
-    }
-    let Ok(program) = std::env::current_exe() else {
-        model.notify("Cannot find the volee program to open the wall.", true);
-        return;
-    };
-    effects.push(Effect::RunTool {
-        label: "the wall".to_owned(),
-        detached: false,
-        take_over: TakeOver {
-            program: program.display().to_string(),
-            args: vec![
-                "host".to_owned(),
-                "wall".to_owned(),
-                "--ids".to_owned(),
-                hosts.join(","),
-            ],
-            cwd: None,
-            env_remove: Vec::new(),
-            hint: None,
-            focus: None,
-        },
-    });
-}
-
 /// Shows the selected agent's screen full size, refreshed.
-fn open_full_screen(model: &mut Model, effects: &mut Vec<Effect>) {
+pub(crate) fn open_full_screen(model: &mut Model, effects: &mut Vec<Effect>) {
     if let Some(agent) = model.selected {
         model.overlay = Some(Overlay::Screen);
         model.preview.scroll = 0;
@@ -2461,16 +2446,17 @@ fn scroll_screen(model: &mut Model, action: Action) {
     // The screen fills the terminal but its frame, its margin and
     // the hint line: it scrolls until its first line is in sight.
     let (columns, rows) = model.size;
-    let live = model
-        .live
-        .as_ref()
-        .and_then(|live| live.preview(&model.theme));
-    let lines = live
-        .as_ref()
-        .or(model.preview.screen.as_ref())
-        .map_or(0, |screen| {
-            screen.line_count(columns.saturating_sub(3), Fit::Wrap)
-        });
+    let lines = {
+        let live = model
+            .live
+            .as_ref()
+            .and_then(|live| live.preview(&model.theme));
+        live.as_deref()
+            .or(model.preview.screen.as_ref())
+            .map_or(0, |screen| {
+                screen.line_count(columns.saturating_sub(3), Fit::Wrap)
+            })
+    };
     let most = lines.saturating_sub(rows.saturating_sub(3));
     let scroll = &mut model.preview.scroll;
     *scroll = match action {
@@ -2549,6 +2535,9 @@ fn scroll_view(model: &mut Model, down: bool, sideways: bool, effects: &mut Vec<
 /// The mouse over a window: the wheel scrolls it, a click closes one that
 /// holds nothing typed; returns whether anything changed.
 fn on_overlay_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> bool {
+    if model.overlay == Some(Overlay::Wall) {
+        return crate::tiles::on_mouse(model, mouse, effects);
+    }
     let action = match mouse.kind {
         MouseEventKind::ScrollDown => Action::Down,
         MouseEventKind::ScrollUp => Action::Up,
@@ -2579,6 +2568,9 @@ fn on_overlay_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effe
     let context = match model.overlay {
         Some(Overlay::Help { .. }) => Context::Help,
         Some(Overlay::Diff(_)) => Context::Diff,
+        // The full-screen view reads back through what the agent wrote, as
+        // the wheel does in edit mode for a program without the mouse.
+        Some(Overlay::Screen) => Context::Screen,
         Some(Overlay::Inbox(_)) => {
             for _ in 0..2 {
                 crate::inbox::perform(model, action, effects);
@@ -2598,6 +2590,10 @@ fn on_overlay_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effe
 const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(450);
 
 fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> bool {
+    // In edit mode the mouse is the agent's, like the keys.
+    if crate::edit::editing(model) {
+        return crate::edit::on_mouse(model, mouse, effects);
+    }
     let (column, row) = (mouse.column, mouse.row);
     if model.prompt.is_some() {
         return false;
@@ -2611,14 +2607,8 @@ fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> 
                 model.focus = pane;
                 model.select(agent, effects);
                 // A second click on the same agent, soon after: open it.
-                let now = std::time::Instant::now();
-                let double = model.last_click.take().is_some_and(|(last, at)| {
-                    last == agent && now.duration_since(at) <= DOUBLE_CLICK
-                });
-                if double {
+                if model.double_click(agent) {
                     open_agent(model, agent, effects);
-                } else {
-                    model.last_click = Some((agent, now));
                 }
                 true
             }

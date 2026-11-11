@@ -8,14 +8,19 @@ read with `tuios capture-pane`.
 Nothing here is imported by volee, and nothing here runs in CI.
 """
 import argparse
+import fcntl
 import json
 import os
+import pty
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
+import termios
+import threading
 import time
 
 # What a Claude Code session leaves in the environment of its children. A journey
@@ -94,6 +99,8 @@ class Journey:
         self.background = []
         # Names of the sessions the journey started by hand, in a pane.
         self.by_hand = []
+        # The client that gives the interface's window its size, if any.
+        self.viewer = None
 
     # ---- output -----------------------------------------------------------------
 
@@ -298,6 +305,50 @@ class Journey:
         return self.tuios("new-window", "-s", self.session, self.window, "--",
                           "env", *pairs, binary or self.volee)
 
+    def resize(self, cols, rows):
+        """Gives the interface's window `cols` columns and `rows` rows. A window of a
+        headless tuios session has 80 columns and 24 rows until a client shows it:
+        `tuios pane-view` shows one pane with nothing around it, here in a
+        pseudo-terminal of the wanted size that the journey holds until its end."""
+        self.close_viewer()
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execvpe("tuios", ["tuios", "pane-view", "-s", self.session, "-w", self.window],
+                       self.clean)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+        try:
+            os.kill(pid, signal.SIGWINCH)
+        except OSError:
+            pass
+
+        def drain():
+            try:
+                while os.read(fd, 65536):
+                    pass
+            except OSError:
+                pass
+        threading.Thread(target=drain, daemon=True).start()
+        self.viewer = (pid, fd)
+        return bool(self.wait(lambda: len(self.screen().splitlines()) >= rows - 2, 15))
+
+    def close_viewer(self):
+        if self.viewer is None:
+            return
+        pid, fd = self.viewer
+        self.viewer = None
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+
     def keys(self, keys, pause=0.4):
         """Presses keys, named as `tuios send-keys` names them: `Enter`, `ctrl+q`, `z`."""
         self.tuios("send-keys", "-s", self.session, "-w", self.window, keys)
@@ -341,6 +392,7 @@ class Journey:
 
     def cleanup(self):
         """Stops and removes everything the journey started."""
+        self.close_viewer()
         for name in self.agents:
             self.volee_run("stop", name)
         if self.agents:

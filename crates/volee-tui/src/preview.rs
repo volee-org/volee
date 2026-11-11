@@ -8,13 +8,13 @@
 //! are drawn, cropped to the panel: the bottom of the screen stays in view,
 //! since that is where the latest output and the prompt are.
 
-use std::num::NonZeroU16;
 use std::ops::Range;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use unicode_width::UnicodeWidthChar;
+use volee_term::Screen;
 
 use crate::theme::{ColorDepth, StyleRole, Theme};
 
@@ -225,39 +225,40 @@ pub(crate) struct PreviewScreen {
 }
 
 impl PreviewScreen {
-    /// Runs raw terminal output through the emulator.
+    /// Runs raw terminal output through the emulator (libghostty-vt, as
+    /// everywhere in volee: ADR 0020).
     pub(crate) fn parse(output: &str, depth: ColorDepth) -> Self {
         let (height, width) = screen_size(output);
-        let (Some(rows), Some(columns)) = (NonZeroU16::new(height), NonZeroU16::new(width)) else {
+        let Ok(mut screen) = Screen::new(width, height, 0) else {
             return Self::default();
         };
-        let mut parser = vt100::Parser::new(rows, columns, 0);
-        parser.process(output.as_bytes());
-        Self::from_screen(parser.screen(), depth)
+        screen.feed(output.as_bytes());
+        Self::from_emulator(&mut screen, depth).unwrap_or_default()
     }
 
-    /// The cells of an emulated screen, as the preview keeps them.
-    pub(crate) fn from_screen(screen: &vt100::Screen, depth: ColorDepth) -> Self {
-        let (rows, columns) = screen.size();
-        let (height, width) = (rows.get(), columns.get());
-        let mut parsed: Vec<Vec<PreviewCell>> = Vec::with_capacity(usize::from(height));
+    /// The cells of an emulated screen, as the preview keeps them; `None`
+    /// when the emulator cannot be read.
+    pub(crate) fn from_emulator(screen: &mut Screen, depth: ColorDepth) -> Option<Self> {
+        let frame = screen.frame().ok()?;
+        let height = frame.rows.len();
+        if height == 0 {
+            return Some(Self::default());
+        }
+        let mut parsed: Vec<Vec<PreviewCell>> = Vec::with_capacity(height);
         let mut last_text = 0;
-        for row in 0..height {
-            let mut cells = Vec::new();
-            for column in 0..width {
-                let Some(cell) = screen.cell(row, column) else {
-                    break;
-                };
-                cells.push(PreviewCell {
-                    symbol: if cell.has_contents() {
-                        cell.contents().to_owned()
-                    } else {
+        for (row, drawn) in frame.rows.iter().enumerate() {
+            let mut cells: Vec<PreviewCell> = drawn
+                .iter()
+                .map(|cell| PreviewCell {
+                    symbol: if cell.symbol.is_empty() {
                         " ".to_owned()
+                    } else {
+                        cell.symbol.clone()
                     },
-                    style: style_of(cell, depth),
-                    continuation: cell.is_wide_continuation(),
-                });
-            }
+                    style: adapted(cell.style, depth),
+                    continuation: cell.continuation,
+                })
+                .collect();
             while cells
                 .last()
                 .is_some_and(|cell| cell.symbol == " " && cell.style.bg.is_none())
@@ -269,8 +270,8 @@ impl PreviewScreen {
             }
             parsed.push(cells);
         }
-        let (cursor_row, _) = screen.cursor_position();
-        let anchor = usize::from(last_text.max(cursor_row).min(height - 1));
+        let (_, cursor_row) = screen.cursor_position();
+        let anchor = last_text.max(usize::from(cursor_row)).min(height - 1);
         // A replay leaves blank what it never redrew: on a tall Claude Code
         // screen, rows of nothing between the conversation and the status
         // line, where the frame of the prompt was drawn before the replay
@@ -287,10 +288,10 @@ impl PreviewScreen {
                 kept_anchor = rows.len().saturating_sub(1);
             }
         }
-        Self {
+        Some(Self {
             rows,
             anchor: u16::try_from(kept_anchor).unwrap_or(u16::MAX),
-        }
+        })
     }
 
     /// How many lines the screen takes in `width` columns (see
@@ -425,36 +426,20 @@ pub fn screen_text(output: &str) -> String {
     lines.join("\n")
 }
 
-fn color(color: vt100::Color, depth: ColorDepth) -> Option<Color> {
-    match color {
-        vt100::Color::Default => None,
-        vt100::Color::Idx(index) => Some(Color::Indexed(index)),
-        vt100::Color::Rgb(r, g, b) => Some(depth.adapt(Color::Rgb(r, g, b))),
-    }
-}
-
-pub(crate) fn style_of(cell: &vt100::Cell, depth: ColorDepth) -> Style {
-    let mut style = Style {
-        fg: color(cell.fgcolor(), depth),
-        bg: color(cell.bgcolor(), depth),
-        ..Style::default()
-    };
-    for (on, modifier) in [
-        (cell.bold(), Modifier::BOLD),
-        (cell.dim(), Modifier::DIM),
-        (cell.italic(), Modifier::ITALIC),
-        (cell.underline(), Modifier::UNDERLINED),
-        (cell.inverse(), Modifier::REVERSED),
-    ] {
-        if on {
-            style = style.add_modifier(modifier);
-        }
-    }
+/// A cell's style for a terminal of this color depth: palette colors and
+/// default colors stay as they are, so that the person's theme applies, and
+/// an RGB color becomes what the terminal can show.
+pub(crate) fn adapted(mut style: Style, depth: ColorDepth) -> Style {
+    let adapt = |color: Option<Color>| color.map(|color| depth.adapt(color));
+    style.fg = adapt(style.fg);
+    style.bg = adapt(style.bg);
     style
 }
 
 #[cfg(test)]
 mod tests {
+    use ratatui::style::Modifier;
+
     use super::*;
 
     #[test]

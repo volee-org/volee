@@ -58,7 +58,6 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 ulid = "3.0.0"
 unicode-width = "0.2.3"
-vt100 = "0.18.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

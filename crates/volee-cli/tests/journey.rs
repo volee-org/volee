@@ -1,7 +1,8 @@
-//! The base trip, with the real `volee` binary and a stand-in for Claude
+//! The base trips, with the real `volee` binary and a stand-in for Claude
 //! Code: the interface starts its daemon, lists a background session,
 //! opens it by Enter where it runs, types into it, and comes back
-//! (ADR 0027).
+//! (ADR 0027); the wall shows the session's screen, and the mouse reaches a
+//! session opened from it (ADR 0028).
 //!
 //! The interface runs in a pseudo-terminal, driven by keys and read as a
 //! screen, like a person's terminal. The stand-in is a shell script named
@@ -34,6 +35,14 @@ const SESSION_VARIABLES: &[&str] = &[
     "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CODE_CHILD_SESSION",
 ];
+
+/// What the stand-in's `attach` runs: a program that repeats what is typed.
+const REPEATS: &str = "exec cat";
+
+/// The same, for a program that asks for the mouse, as an agent's interface
+/// does: it turns mouse reporting on (clicks, in the SGR format), then
+/// shows every byte it receives, control characters spelled out.
+const WANTS_THE_MOUSE: &str = "printf '\\033[?1000h\\033[?1006h'; stty raw -echo; exec cat -v";
 
 /// One run: a directory that holds everything, and the environment that
 /// keeps the binary inside it.
@@ -75,9 +84,8 @@ impl World {
     }
 
     /// Installs the stand-in for Claude Code: it lists one background
-    /// session, running, and `attach` opens it as a program that repeats
-    /// what is typed.
-    fn install_claude(&self) {
+    /// session, running, and `attach` opens it as the program `attached`.
+    fn install_claude(&self, attached: &str) {
         let listing = serde_json::json!([{
             "pid": std::process::id(),
             "id": "7d3c1f0a",
@@ -95,7 +103,7 @@ impl World {
              case \"$1\" in\n\
              --version) echo '2.1.322 (Claude Code)' ;;\n\
              agents) cat '{listing}' ;;\n\
-             attach) echo \"session $2 of the stand-in\"; exec cat ;;\n\
+             attach) echo \"session $2 of the stand-in\"; {attached} ;;\n\
              logs) printf 'what the session printed\\r\\n' ;;\n\
              *) echo \"unexpected: $*\" >&2; exit 1 ;;\n\
              esac\n",
@@ -162,6 +170,12 @@ impl Terminal {
             ctrl,
         };
         self.keys.key(&press).unwrap();
+        thread::sleep(Duration::from_millis(60));
+    }
+
+    /// Bytes as the person's terminal sends them, such as a mouse report.
+    fn bytes(&self, bytes: &[u8]) {
+        self.keys.input(bytes).unwrap();
         thread::sleep(Duration::from_millis(60));
     }
 
@@ -232,7 +246,7 @@ fn files_of(dir: &Path) -> Vec<PathBuf> {
 #[test]
 fn a_background_session_is_listed_opened_typed_into_and_left() {
     let world = World::new();
-    world.install_claude();
+    world.install_claude(REPEATS);
     let (host, mut terminal) = interface(&world);
 
     // The interface starts its daemon, which lists the stand-in's session.
@@ -309,5 +323,53 @@ fn a_background_session_is_listed_opened_typed_into_and_left() {
         wait(15, || views(&world).is_empty()),
         "a view outlived its daemon: {:?}",
         views(&world)
+    );
+}
+
+#[test]
+fn the_wall_shows_a_session_and_the_mouse_reaches_it_once_opened() {
+    let world = World::new();
+    world.install_claude(WANTS_THE_MOUSE);
+    let (host, mut terminal) = interface(&world);
+    terminal.sees("invoices");
+
+    // The wall: the session's screen, as its harness replays it, though
+    // volee hosts nothing of it.
+    terminal.key("5", false);
+    terminal.sees("Wall");
+    terminal.sees("1 agent runs");
+    terminal.sees("what the session printed");
+
+    // Enter opens the selected tile's session, as from the list.
+    terminal.key("enter", false);
+    terminal.sees("session 7d3c1f0a of the stand-in");
+    terminal.sees("your keys go to invoices");
+
+    // The program asked for the mouse: a click on its screen reaches it, on
+    // its own cell (the screen starts two columns and one row inside the
+    // interface), in the format it asked for. Press, then release.
+    terminal.bytes(b"\x1b[<0;20;10M");
+    terminal.bytes(b"\x1b[<0;20;10m");
+    terminal.sees("^[[<0;18;9M");
+    terminal.sees("^[[<0;18;9m");
+    // A click on the frame around it is volee's: nothing more arrives.
+    terminal.bytes(b"\x1b[<0;1;1M");
+    terminal.bytes(b"\x1b[<0;1;1m");
+    terminal.text("x");
+    terminal.sees("9mx");
+
+    // The leave key comes back to the wall the session was opened from.
+    terminal.key("q", true);
+    terminal.sees("Left invoices: it keeps running");
+    terminal.sees("1 agent runs");
+
+    // `q` leaves the wall, then the interface.
+    terminal.key("q", false);
+    terminal.sees("Agents");
+    terminal.key("q", false);
+    assert!(
+        wait(15, || host.is_finished()),
+        "the interface never quit:\n{}",
+        terminal.screen()
     );
 }

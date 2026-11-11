@@ -6,13 +6,15 @@ use std::rc::Rc;
 use libghostty_vt::Terminal;
 use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
 use libghostty_vt::render::{CellIterator, RenderState, RowIterator};
+use libghostty_vt::screen::CellWide;
 use libghostty_vt::terminal::{
     ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode, Options,
-    PrimaryDeviceAttributes, SecondaryDeviceAttributes, TertiaryDeviceAttributes,
+    PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes, TertiaryDeviceAttributes,
 };
 
 use crate::Error;
 use crate::keys::{self, KeyInput};
+use crate::mouse::{self, MouseInput};
 
 /// How volee answers a version query (XTVERSION) when it answers for the
 /// person's terminal.
@@ -36,6 +38,9 @@ pub struct StyledCell {
     /// Its style, in ratatui's terms. Palette colors stay indexed so that the
     /// person's own palette applies.
     pub style: ratatui::style::Style,
+    /// The cell is the second half of a wide character, drawn by the cell
+    /// before it: it shows nothing of its own.
+    pub continuation: bool,
 }
 
 /// The visible screen at one moment, row by row, with the cursor.
@@ -165,6 +170,65 @@ impl Screen {
         keys::encode_paste(&self.terminal, text)
     }
 
+    /// The bytes for a mouse event, encoded the way the program asked
+    /// (tracking mode and format); empty when it did not ask for that kind
+    /// of event, or for no mouse event at all.
+    pub fn encode_mouse(&self, input: &MouseInput) -> Result<Vec<u8>, Error> {
+        mouse::encode_mouse(&self.terminal, input, self.size())
+    }
+
+    /// Whether the program asked for mouse events.
+    pub fn wants_mouse(&self) -> bool {
+        self.terminal.is_mouse_tracking().unwrap_or(false)
+    }
+
+    /// Whether the program asked for application cursor keys (DECCKM).
+    pub fn application_cursor(&self) -> bool {
+        self.terminal.mode(Mode::DECCKM).unwrap_or(false)
+    }
+
+    /// Whether the program turned bracketed paste on.
+    pub fn bracketed_paste(&self) -> bool {
+        self.terminal.mode(Mode::BRACKETED_PASTE).unwrap_or(false)
+    }
+
+    /// Moves the view `lines` lines back into the history (towards the
+    /// newest lines when negative) and returns how many lines back it now
+    /// is. A view that is scrolled back stays on the same lines while the
+    /// program writes. [`Screen::frame`] reads the view; [`Screen::text`]
+    /// and [`Screen::snapshot`] do not depend on it.
+    pub fn scroll(&mut self, lines: isize) -> usize {
+        if lines != 0 {
+            // For the emulator, up is negative.
+            self.terminal
+                .scroll_viewport(ScrollViewport::Delta(lines.saturating_neg()));
+        }
+        self.scrolled_back()
+    }
+
+    /// Brings the view back to the newest lines.
+    pub fn scroll_to_bottom(&mut self) {
+        self.terminal.scroll_viewport(ScrollViewport::Bottom);
+    }
+
+    /// How many lines back in the history the view is; 0 at the newest
+    /// lines.
+    pub fn scrolled_back(&self) -> usize {
+        self.terminal.scrollbar().map_or(0, |bar| {
+            let below = bar.total.saturating_sub(bar.offset.saturating_add(bar.len));
+            usize::try_from(below).unwrap_or(usize::MAX)
+        })
+    }
+
+    /// The cursor's column and row on the screen, whether the program
+    /// shows it or not.
+    pub fn cursor_position(&self) -> (u16, u16) {
+        (
+            self.terminal.cursor_x().unwrap_or(0),
+            self.terminal.cursor_y().unwrap_or(0),
+        )
+    }
+
     /// The window title the program set, if any.
     pub fn title(&self) -> Option<String> {
         self.terminal
@@ -273,7 +337,12 @@ impl Screen {
                     symbol.clear();
                 }
                 let style = crate::style::to_ratatui(&cell.style()?);
-                cells.push(StyledCell { symbol, style });
+                let continuation = matches!(cell.raw_cell()?.wide()?, CellWide::SpacerTail);
+                cells.push(StyledCell {
+                    symbol,
+                    style,
+                    continuation,
+                });
             }
             rows.push(cells);
         }
@@ -451,5 +520,145 @@ mod tests {
             frame.rows[0][1].style.fg,
             Some(ratatui::style::Color::Rgb(1, 2, 3))
         );
+    }
+
+    #[test]
+    fn a_wide_character_takes_two_cells_and_draws_once() {
+        let mut screen = screen_after(10, 2, "a\u{4e2d}b".as_bytes());
+        let frame = screen.frame().expect("frame");
+        let row = &frame.rows[0];
+        let cells: Vec<(&str, bool)> = row[..4]
+            .iter()
+            .map(|cell| (cell.symbol.as_str(), cell.continuation))
+            .collect();
+        assert_eq!(
+            cells,
+            [("a", false), ("\u{4e2d}", false), ("", true), ("b", false)]
+        );
+        // A blank cell is not the half of anything.
+        assert!(!row[5].continuation);
+    }
+
+    /// The first line of the view, trimmed.
+    fn top_line(screen: &mut Screen) -> String {
+        let frame = screen.frame().expect("frame");
+        let line: String = frame.rows[0]
+            .iter()
+            .map(|cell| {
+                if cell.symbol.is_empty() {
+                    " "
+                } else {
+                    cell.symbol.as_str()
+                }
+            })
+            .collect();
+        line.trim().to_owned()
+    }
+
+    #[test]
+    fn the_view_scrolls_back_and_stays_on_its_lines() {
+        let mut screen = Screen::new(20, 4, 1000).expect("screen");
+        for line in 1..=20 {
+            screen.feed(format!("line {line}\r\n").as_bytes());
+        }
+        assert_eq!(screen.scrolled_back(), 0);
+        assert_eq!(top_line(&mut screen), "line 18");
+        assert_eq!(screen.scroll(5), 5);
+        assert_eq!(top_line(&mut screen), "line 13");
+        // The frame reads the view too.
+        let frame = screen.frame().expect("frame");
+        assert_eq!(frame.rows[0][5].symbol, "1");
+        assert_eq!(frame.rows[0][6].symbol, "3");
+        // What the program writes meanwhile does not move the view.
+        screen.feed(b"line 21\r\nline 22\r\n");
+        assert_eq!(top_line(&mut screen), "line 13");
+        assert_eq!(screen.scrolled_back(), 7);
+        // Forward again, and never past either end.
+        assert_eq!(screen.scroll(-3), 4);
+        assert_eq!(screen.scroll(-100), 0);
+        assert_eq!(top_line(&mut screen), "line 20");
+        let all = screen.scroll(1_000);
+        assert_eq!(top_line(&mut screen), "line 1");
+        assert_eq!(screen.scroll(1), all, "already at the first line");
+        screen.scroll_to_bottom();
+        assert_eq!(screen.scrolled_back(), 0);
+    }
+
+    fn mouse(kind: crate::MouseKind, column: u16, row: u16) -> MouseInput {
+        MouseInput {
+            kind,
+            column,
+            row,
+            shift: false,
+            alt: false,
+            ctrl: false,
+        }
+    }
+
+    #[test]
+    fn the_mouse_is_encoded_only_as_the_program_asked() {
+        use crate::{MouseButton, MouseKind};
+        let press = mouse(MouseKind::Press(MouseButton::Left), 4, 2);
+        // A program that did not ask gets nothing.
+        let quiet = screen_after(40, 10, b"hello");
+        assert!(!quiet.wants_mouse());
+        assert_eq!(quiet.encode_mouse(&press).expect("encode"), b"");
+
+        // Clicks and the wheel, in the SGR format.
+        let clicks = screen_after(40, 10, b"\x1b[?1000h\x1b[?1006h");
+        assert!(clicks.wants_mouse());
+        let encode = |screen: &Screen, input: MouseInput| {
+            String::from_utf8(screen.encode_mouse(&input).expect("encode")).expect("text")
+        };
+        assert_eq!(encode(&clicks, press), "\x1b[<0;5;3M");
+        let release = mouse(MouseKind::Release(MouseButton::Left), 4, 2);
+        assert_eq!(encode(&clicks, release), "\x1b[<0;5;3m");
+        let right = mouse(MouseKind::Press(MouseButton::Right), 0, 0);
+        assert_eq!(encode(&clicks, right), "\x1b[<2;1;1M");
+        assert_eq!(
+            encode(&clicks, mouse(MouseKind::WheelUp, 4, 2)),
+            "\x1b[<64;5;3M"
+        );
+        assert_eq!(
+            encode(&clicks, mouse(MouseKind::WheelDown, 4, 2)),
+            "\x1b[<65;5;3M"
+        );
+        // It asked for clicks, not for moves.
+        let drag = mouse(MouseKind::Drag(MouseButton::Left), 5, 2);
+        assert_eq!(encode(&clicks, drag), "");
+
+        // Moves with a button held, once it asks for them.
+        let drags = screen_after(40, 10, b"\x1b[?1002h\x1b[?1006h");
+        assert_eq!(encode(&drags, drag), "\x1b[<32;6;3M");
+        assert_eq!(encode(&drags, mouse(MouseKind::Move, 5, 2)), "");
+    }
+
+    #[test]
+    fn modifiers_are_part_of_a_mouse_event() {
+        use crate::{MouseButton, MouseKind};
+        let screen = screen_after(40, 10, b"\x1b[?1000h\x1b[?1006h");
+        let input = MouseInput {
+            ctrl: true,
+            ..mouse(MouseKind::Press(MouseButton::Left), 0, 0)
+        };
+        assert_eq!(
+            screen.encode_mouse(&input).expect("encode"),
+            b"\x1b[<16;1;1M"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_keeps_the_mouse_and_cursor_key_modes() {
+        let mut original = screen_after(30, 5, b"\x1b[?1000h\x1b[?1006h\x1b[?1h\x1b[?2004h");
+        assert!(original.application_cursor() && original.bracketed_paste());
+        let copy = replay(&mut original);
+        assert!(
+            copy.wants_mouse(),
+            "the copy encodes the mouse as the original"
+        );
+        assert!(copy.application_cursor());
+        assert!(copy.bracketed_paste());
+        let plain = screen_after(30, 5, b"hello");
+        assert!(!plain.application_cursor() && !plain.bracketed_paste());
     }
 }

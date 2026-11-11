@@ -1,6 +1,8 @@
-//! The wall of screens (ADR 0021): every running host as a tile of its live
-//! screen. A prototype that runs on hosts directly; it becomes the fifth
-//! view of the interface once the daemon launches agents in hosts.
+//! The wall of the volee hosts of the machine (ADR 0021), as a program of
+//! its own: `volee host wall` shows every running host as a tile of its
+//! live screen, whatever it runs. The interface has its own wall, of the
+//! agents of its list, wherever they run (`tiles.rs`, ADR 0028); the two
+//! share their keys.
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -222,6 +224,8 @@ impl Wall {
             Some(Keyed::Right) => self.selected = (self.selected + 1).min(last),
             Some(Keyed::Up) => self.selected = self.selected.saturating_sub(columns),
             Some(Keyed::Down) => self.selected = (self.selected + columns).min(last),
+            Some(Keyed::First) => self.selected = 0,
+            Some(Keyed::Last) => self.selected = last,
             _ => {}
         }
         // A new page or the zoom changes which tiles need a watcher.
@@ -325,6 +329,7 @@ fn grid(count: usize) -> (usize, usize) {
     }
 }
 
+/// The areas of `count` tiles that share `area`, row by row.
 fn tile_areas(area: Rect, count: usize) -> Vec<Rect> {
     let (columns, rows) = grid(count);
     let row_areas = Layout::vertical(vec![Constraint::Fill(1); rows]).split(area);

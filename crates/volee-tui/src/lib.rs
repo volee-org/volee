@@ -46,6 +46,7 @@ pub mod source;
 mod text;
 pub mod theme;
 mod themes;
+mod tiles;
 mod tools;
 mod view;
 mod views;

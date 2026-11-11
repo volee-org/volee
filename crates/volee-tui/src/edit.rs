@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use volee_core::AgentId;
 use volee_host::{Size, Update, Welcome};
@@ -103,10 +103,73 @@ fn connect(model: &mut Model, agent: AgentId, edit: bool, effects: &mut Vec<Effe
     true
 }
 
-/// Shows the agent's screen live in the full-screen view, when it runs in
-/// a volee host; returns whether it does.
+/// Shows the agent's screen live, when it runs in a volee host; returns
+/// whether it does. A screen the interface already follows is kept.
 pub(crate) fn watch(model: &mut Model, agent: AgentId, effects: &mut Vec<Effect>) -> bool {
+    following(model, agent) || connect(model, agent, false, effects)
+}
+
+/// Whether the interface follows `agent`'s screen without holding its
+/// input.
+fn following(model: &Model, agent: AgentId) -> bool {
+    model.live.as_ref().is_some_and(|live| {
+        live.agent == agent && !live.editing && !matches!(live.phase, Phase::Closed(_))
+    })
+}
+
+/// Connects again to the agent's host, for a new snapshot of its screen.
+pub(crate) fn refresh(model: &mut Model, agent: AgentId, effects: &mut Vec<Effect>) -> bool {
     connect(model, agent, false, effects)
+}
+
+/// Follows the screen of the selected agent when it runs in a volee host:
+/// one connection serves the preview, the full-screen view and edit mode
+/// (ADR 0028). Called on every tick, so that moving through the list opens
+/// no connection per row. Returns whether anything changed.
+pub(crate) fn follow_selected(model: &mut Model, effects: &mut Vec<Effect>) -> bool {
+    // The full-screen view and an agent being opened manage their own, and
+    // the wall follows every screen of its page itself.
+    if model.overlay == Some(Overlay::Screen) || model.opening.is_some() || model.wall.is_some() {
+        return false;
+    }
+    let selected = model.selected;
+    let followed = model.live.as_ref().map(|live| live.agent);
+    // Followed already, or tried: a host that did not answer is not asked
+    // again until the selection changes.
+    if followed.is_some() && followed == selected {
+        return false;
+    }
+    let mut changed = false;
+    if followed.is_some() {
+        close(model, effects);
+        changed = true;
+    }
+    let Some(agent) = selected else {
+        return changed;
+    };
+    let runs = model
+        .registry
+        .agent(agent)
+        .is_some_and(|record| record.state.is_live());
+    if model.offline.is_some() || !runs || host_socket(model, agent).is_none() {
+        return changed;
+    }
+    connect(model, agent, false, effects)
+}
+
+/// The full-screen view closes. A view on a session that runs elsewhere
+/// closes with it; the screen of an agent in a volee host stays followed,
+/// for the preview.
+pub(crate) fn leave_screen(model: &mut Model, effects: &mut Vec<Effect>) {
+    let Some(live) = &model.live else {
+        return;
+    };
+    let (agent, editing, live_now) = (live.agent, live.editing, live.phase == Phase::Live);
+    if is_view(model, agent) || !live_now {
+        close(model, effects);
+    } else if editing {
+        connect(model, agent, false, effects);
+    }
 }
 
 /// Enters edit mode on the agent: its screen full size inside volee, your
@@ -231,6 +294,76 @@ pub(crate) fn on_paste(model: &mut Model, text: &str, effects: &mut Vec<Effect>)
     });
 }
 
+/// How many lines one notch of the wheel scrolls back.
+const WHEEL_LINES: isize = 3;
+
+/// The mouse in edit mode. A program that asked for the mouse gets it, on
+/// the cell under the pointer, encoded the way it asked: clicks, drags and
+/// the wheel. For any other program the wheel reads back through what it
+/// wrote, as in a terminal. Returns whether the screen changed.
+pub(crate) fn on_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effect>) -> bool {
+    let area = screen_area(model.size);
+    let Some(live) = model.live.as_mut().filter(|live| live.phase == Phase::Live) else {
+        return false;
+    };
+    if live.wants_mouse() {
+        // Only on the agent's own cells: the frame around them is volee's.
+        let inside = mouse.column >= area.x
+            && mouse.row >= area.y
+            && mouse.column - area.x < live.size.cols.min(area.width)
+            && mouse.row - area.y < live.size.rows.min(area.height);
+        if !inside || live.scroll > 0 {
+            return false;
+        }
+        let bytes = live.mouse_bytes(&volee_term::MouseInput {
+            kind: mouse_kind(mouse.kind),
+            column: mouse.column - area.x,
+            row: mouse.row - area.y,
+            shift: mouse.modifiers.contains(KeyModifiers::SHIFT),
+            alt: mouse.modifiers.contains(KeyModifiers::ALT),
+            ctrl: mouse.modifiers.contains(KeyModifiers::CONTROL),
+        });
+        if !bytes.is_empty() {
+            effects.push(Effect::LiveSend {
+                link: live.link,
+                input: LiveInput::Bytes(bytes),
+            });
+        }
+        return false;
+    }
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            live.scroll_by(WHEEL_LINES);
+            true
+        }
+        MouseEventKind::ScrollDown => {
+            live.scroll_by(-WHEEL_LINES);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// A mouse event of the person's terminal, as the emulator names it.
+fn mouse_kind(kind: MouseEventKind) -> volee_term::MouseKind {
+    use volee_term::MouseKind;
+    let button = |button| match button {
+        MouseButton::Left => volee_term::MouseButton::Left,
+        MouseButton::Middle => volee_term::MouseButton::Middle,
+        MouseButton::Right => volee_term::MouseButton::Right,
+    };
+    match kind {
+        MouseEventKind::Down(pressed) => MouseKind::Press(button(pressed)),
+        MouseEventKind::Up(released) => MouseKind::Release(button(released)),
+        MouseEventKind::Drag(held) => MouseKind::Drag(button(held)),
+        MouseEventKind::Moved => MouseKind::Move,
+        MouseEventKind::ScrollUp => MouseKind::WheelUp,
+        MouseEventKind::ScrollDown => MouseKind::WheelDown,
+        MouseEventKind::ScrollLeft => MouseKind::WheelLeft,
+        MouseEventKind::ScrollRight => MouseKind::WheelRight,
+    }
+}
+
 /// The terminal changed size: in edit mode, the agent's follows.
 pub(crate) fn on_resize(model: &mut Model, effects: &mut Vec<Effect>) {
     if !editing(model) {
@@ -250,6 +383,26 @@ pub(crate) fn on_resize(model: &mut Model, effects: &mut Vec<Effect>) {
 /// A message of a live screen's connection; returns whether anything
 /// changed.
 pub(crate) fn on_msg(model: &mut Model, msg: Msg, effects: &mut Vec<Effect>) -> bool {
+    let (Msg::LiveOpened { link, .. }
+    | Msg::LiveUpdate { link, .. }
+    | Msg::LiveClosed { link, .. }) = &msg
+    else {
+        return false;
+    };
+    let link = *link;
+    // A tile of the wall only shows its screen: that its program ended, or
+    // that another terminal types into it, calls for no word.
+    if let Some(tile) = crate::tiles::live_mut(model, link) {
+        match msg {
+            Msg::LiveOpened { welcome, .. } => tile.opened(&welcome),
+            Msg::LiveUpdate { update, .. } => {
+                tile.apply(update);
+            }
+            Msg::LiveClosed { reason, .. } => tile.closed(reason),
+            _ => {}
+        }
+        return true;
+    }
     match msg {
         Msg::LiveOpened { link, welcome } => opened(model, link, &welcome),
         Msg::LiveUpdate { link, update } => updated(model, link, update, effects),
@@ -301,7 +454,6 @@ pub(crate) fn updated(
     let was_editing = live.editing;
     let agent = live.agent;
     match live.apply(update) {
-        Outcome::Drawn => {}
         // The program of a view is the door, not the agent: it ends when
         // the person leaves through it (Ctrl+Z in `claude attach`), and the
         // agent keeps running.
@@ -320,10 +472,14 @@ pub(crate) fn updated(
                 model.notify(format!("Left {name}: it keeps running."), false);
             }
         }
-        Outcome::Exited { .. } => {
+        // Said where the person looks at that screen, not for a preview.
+        Outcome::Exited { .. } if model.overlay == Some(Overlay::Screen) => {
             let name = model.name_of(agent);
             model.notify(format!("{name} has ended."), !was_editing);
         }
+        // The end of a program whose screen only fills the preview needs
+        // no word: the list says it.
+        Outcome::Drawn | Outcome::Exited { .. } => {}
         Outcome::InputTaken => {
             let name = model.name_of(agent);
             model.notify(
@@ -552,6 +708,89 @@ mod tests {
         );
     }
 
+    fn mouse(model: &mut Model, kind: MouseEventKind, column: u16, row: u16) -> Vec<Effect> {
+        update(
+            model,
+            Msg::Mouse(MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            }),
+        )
+    }
+
+    fn output(model: &mut Model, link: u64, bytes: &[u8]) {
+        update(
+            model,
+            Msg::LiveUpdate {
+                link,
+                update: Update::Output(bytes.to_vec()),
+            },
+        );
+    }
+
+    #[test]
+    fn a_program_that_asked_for_the_mouse_gets_it_on_its_own_cells() {
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "i");
+        answer(&mut model, 1, true);
+        // The program turns mouse reporting on, in the SGR format.
+        output(&mut model, 1, b"\x1b[?1000h\x1b[?1006h");
+        let left = MouseEventKind::Down(MouseButton::Left);
+        // The agent's screen starts at column 2, row 1 of the terminal.
+        assert_eq!(
+            sent(&mouse(&mut model, left, 6, 3)),
+            [LiveInput::Bytes(b"\x1b[<0;5;3M".to_vec())]
+        );
+        assert_eq!(
+            sent(&mouse(
+                &mut model,
+                MouseEventKind::Up(MouseButton::Left),
+                6,
+                3
+            )),
+            [LiveInput::Bytes(b"\x1b[<0;5;3m".to_vec())]
+        );
+        assert_eq!(
+            sent(&mouse(&mut model, MouseEventKind::ScrollUp, 2, 1)),
+            [LiveInput::Bytes(b"\x1b[<64;1;1M".to_vec())]
+        );
+        // The frame and the bottom line are volee's: nothing is sent.
+        assert_eq!(sent(&mouse(&mut model, left, 0, 0)), []);
+        assert_eq!(sent(&mouse(&mut model, left, 6, 39)), []);
+        // It asked for clicks, not for moves.
+        assert_eq!(sent(&mouse(&mut model, MouseEventKind::Moved, 6, 3)), []);
+        assert!(editing(&model), "the mouse never leaves edit mode");
+    }
+
+    #[test]
+    fn for_any_other_program_the_wheel_reads_back() {
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "i");
+        answer(&mut model, 1, true);
+        // More lines than the screen holds.
+        for line in 1..=80 {
+            output(&mut model, 1, format!("line {line}\r\n").as_bytes());
+        }
+        // Nothing goes to a program that did not ask for the mouse.
+        let click = MouseEventKind::Down(MouseButton::Left);
+        assert_eq!(sent(&mouse(&mut model, click, 6, 3)), []);
+        assert_eq!(sent(&mouse(&mut model, MouseEventKind::ScrollUp, 6, 3)), []);
+        assert_eq!(model.live.as_ref().unwrap().scroll, 3);
+        mouse(&mut model, MouseEventKind::ScrollUp, 6, 3);
+        assert_eq!(model.live.as_ref().unwrap().scroll, 6);
+        mouse(&mut model, MouseEventKind::ScrollDown, 6, 3);
+        assert_eq!(model.live.as_ref().unwrap().scroll, 3);
+        // What the agent writes meanwhile does not move the view: it is
+        // further back.
+        output(&mut model, 1, b"line 81\r\nline 82\r\n");
+        assert_eq!(model.live.as_ref().unwrap().scroll, 5);
+        // Typing comes back to the newest lines.
+        press(&mut model, "x");
+        assert_eq!(model.live.as_ref().unwrap().scroll, 0);
+    }
+
     #[test]
     fn z_watches_an_agent_in_a_host_live() {
         let (mut model, _) = hosted_model(120, 40);
@@ -573,6 +812,142 @@ mod tests {
             edit: true,
             size: SIZE,
         }));
+    }
+
+    /// One second later.
+    fn tick(model: &mut Model, seconds: i64) -> Vec<Effect> {
+        let at = crate::test_support::start().plus_millis(seconds * 1_000);
+        update(model, Msg::Tick(at))
+    }
+
+    fn opens(effects: &[Effect]) -> Vec<(u64, bool)> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::LiveOpen { link, edit, .. } => Some((*link, *edit)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn closes(effects: &[Effect]) -> Vec<u64> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::LiveClose { link } => Some(*link),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_selected_agent_s_screen_is_followed_for_the_preview() {
+        let (mut model, agent) = hosted_model(120, 40);
+        // Nothing at once: moving through the list opens no connection per
+        // row. On the next tick, one watcher.
+        assert!(model.live.is_none());
+        assert_eq!(opens(&tick(&mut model, 1)), [(1, false)]);
+        assert_eq!(model.overlay, None, "no view opens by itself");
+        answer(&mut model, 1, true);
+        assert!(live_for(&model, agent));
+        // The same connection, tick after tick.
+        assert_eq!(opens(&tick(&mut model, 2)), []);
+
+        // `z` shows that screen full size: the connection is there already.
+        let effects = press(&mut model, "z");
+        assert_eq!(opens(&effects), Vec::<(u64, bool)>::new());
+        assert_eq!(model.overlay, Some(Overlay::Screen));
+        // Back: the preview goes on following it.
+        let effects = press(&mut model, "z");
+        assert_eq!(closes(&effects), Vec::<u64>::new());
+        assert_eq!(model.overlay, None);
+        assert!(live_for(&model, agent));
+
+        // Edit mode takes the input on a connection of its own, and gives
+        // the watcher back when the full-screen view closes.
+        let effects = press(&mut model, "i");
+        assert_eq!(
+            (closes(&effects), opens(&effects)),
+            (vec![1], vec![(2, true)])
+        );
+        answer(&mut model, 2, true);
+        let effects = ctrl(&mut model, 'q');
+        assert_eq!(
+            (closes(&effects), opens(&effects)),
+            (vec![2], vec![(3, false)])
+        );
+        answer(&mut model, 3, true);
+        press(&mut model, "z");
+        assert!(live_for(&model, agent));
+    }
+
+    #[test]
+    fn another_selection_drops_the_screen_that_was_followed() {
+        let (mut model, _) = hosted_model(120, 40);
+        tick(&mut model, 1);
+        answer(&mut model, 1, true);
+        // Another agent, which runs in no volee host.
+        press(&mut model, "j");
+        let effects = tick(&mut model, 2);
+        assert_eq!((closes(&effects), opens(&effects)), (vec![1], vec![]));
+        assert!(model.live.is_none());
+        // Back on the hosted one: followed again.
+        press(&mut model, "k");
+        assert_eq!(opens(&tick(&mut model, 3)), [(2, false)]);
+    }
+
+    #[test]
+    fn a_host_that_does_not_answer_is_not_asked_at_every_tick() {
+        let (mut model, _) = hosted_model(120, 40);
+        assert_eq!(opens(&tick(&mut model, 1)), [(1, false)]);
+        update(
+            &mut model,
+            Msg::LiveClosed {
+                link: 1,
+                reason: "No such file or directory (os error 2)".into(),
+            },
+        );
+        assert!(
+            model.notice.is_none(),
+            "a preview that cannot connect says nothing"
+        );
+        for second in 2..6 {
+            assert_eq!(opens(&tick(&mut model, second)), []);
+        }
+    }
+
+    #[test]
+    fn the_wheel_reads_back_in_the_full_screen_view() {
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "z");
+        answer(&mut model, 1, true);
+        // More lines than the screen holds: the first ones leave it.
+        let lines = "one more line\r\n".repeat(80);
+        update(
+            &mut model,
+            Msg::LiveUpdate {
+                link: 1,
+                update: Update::Output(lines.into_bytes()),
+            },
+        );
+        let wheel = |model: &mut Model, kind| {
+            update(
+                model,
+                Msg::Mouse(MouseEvent {
+                    kind,
+                    column: 20,
+                    row: 10,
+                    modifiers: KeyModifiers::NONE,
+                }),
+            )
+        };
+        wheel(&mut model, MouseEventKind::ScrollUp);
+        assert_eq!(model.live.as_ref().unwrap().scroll, 2);
+        wheel(&mut model, MouseEventKind::ScrollUp);
+        assert_eq!(model.live.as_ref().unwrap().scroll, 4);
+        wheel(&mut model, MouseEventKind::ScrollDown);
+        wheel(&mut model, MouseEventKind::ScrollDown);
+        assert_eq!(model.live.as_ref().unwrap().scroll, 0);
     }
 
     /// What the interface traces while `run` runs, at the debug level.

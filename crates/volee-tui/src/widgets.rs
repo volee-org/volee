@@ -14,6 +14,7 @@ pub(crate) mod launch;
 pub(crate) mod palette;
 pub(crate) mod rail;
 pub(crate) mod theme_picker;
+pub(crate) mod tiles;
 pub(crate) mod tools;
 pub(crate) mod top_bar;
 
@@ -58,7 +59,38 @@ pub(crate) fn panel(
     if focused {
         return panel_with(buf, area, title, border);
     }
-    framed(buf, area, title, border, theme.style(StyleRole::Title))
+    framed(
+        buf,
+        area,
+        title,
+        border,
+        theme.style(StyleRole::Title),
+        BorderType::Rounded,
+    )
+}
+
+/// Draws one panel among several of a kind, such as a tile of the wall, and
+/// returns the area inside. The selected one has a thick border: it shows
+/// without colors too.
+pub(crate) fn panel_among(
+    buf: &mut Buffer,
+    area: Rect,
+    title: Vec<Span<'_>>,
+    selected: bool,
+    theme: &Theme,
+) -> Rect {
+    if selected {
+        let border = theme.style(StyleRole::BorderFocused);
+        return framed(
+            buf,
+            area,
+            title,
+            border,
+            border.add_modifier(Modifier::BOLD),
+            BorderType::Thick,
+        );
+    }
+    panel(buf, area, title, false, theme)
 }
 
 /// Draws a panel whose border and bold title take `border`, such as the
@@ -75,6 +107,7 @@ pub(crate) fn panel_with(
         title,
         border,
         border.add_modifier(Modifier::BOLD),
+        BorderType::Rounded,
     )
 }
 
@@ -84,6 +117,7 @@ fn framed(
     title: Vec<Span<'_>>,
     border: Style,
     title_style: Style,
+    border_type: BorderType,
 ) -> Rect {
     let mut spans = vec![Span::raw(" ")];
     for span in title {
@@ -92,7 +126,7 @@ fn framed(
     }
     spans.push(Span::raw(" "));
     Block::bordered()
-        .border_type(BorderType::Rounded)
+        .border_type(border_type)
         .border_style(border)
         .title(Line::from(spans))
         .render(area, buf);

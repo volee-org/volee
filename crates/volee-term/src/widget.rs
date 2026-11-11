@@ -88,6 +88,10 @@ impl Widget for FrameView<'_> {
             let row = &self.frame.rows[index];
             for (dx, cell) in row.iter().take(usize::from(area.width)).enumerate() {
                 let Ok(dx) = u16::try_from(dx) else { break };
+                // The cell before it draws both halves of a wide character.
+                if cell.continuation {
+                    continue;
+                }
                 let target = &mut buf[(area.x + dx, area.y + dy)];
                 target.set_symbol(if cell.symbol.is_empty() {
                     " "
@@ -117,6 +121,7 @@ mod tests {
                                 c.to_string()
                             },
                             style: ratatui::style::Style::default(),
+                            continuation: false,
                         })
                         .collect()
                 })

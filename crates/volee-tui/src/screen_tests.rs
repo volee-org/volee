@@ -123,6 +123,107 @@ fn the_leader_shows_what_follows() {
 }
 
 #[test]
+fn the_preview_of_a_hosted_agent_is_its_live_screen() {
+    let (mut model, _) = crate::test_support::hosted_model(120, 40);
+    update(
+        &mut model,
+        Msg::Tick(crate::test_support::start().plus_millis(1_000)),
+    );
+    let size = volee_host::Size { cols: 80, rows: 12 };
+    update(
+        &mut model,
+        Msg::LiveOpened {
+            link: 1,
+            welcome: crate::test_support::welcome(size, true),
+        },
+    );
+    let screen = b"\x1b[2J\x1b[H\x1b[32m\xe2\x8f\xba\x1b[0m The tests pass: 356 of 356.\r\n\r\n> commit and push";
+    update(
+        &mut model,
+        Msg::LiveUpdate {
+            link: 1,
+            update: volee_host::Update::Snapshot(screen.to_vec()),
+        },
+    );
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn the_wall_of_screens() {
+    let (mut model, demo) = demo_model(160, 48, Theme::default());
+    type_text(&demo, &mut model, "5");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn the_wall_follows_an_agent_in_a_volee_host_live() {
+    let (mut model, agent) = crate::test_support::hosted_model(160, 48);
+    let effects = crate::test_support::press(&mut model, "5");
+    let link = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LiveOpen { link, .. } => Some(*link),
+            _ => None,
+        })
+        .unwrap();
+    serve(&crate::test_support::demo(), &mut model, effects);
+    let size = volee_host::Size { cols: 90, rows: 20 };
+    update(
+        &mut model,
+        Msg::LiveOpened {
+            link,
+            welcome: crate::test_support::welcome(size, true),
+        },
+    );
+    let screen = b"\x1b[2J\x1b[H\x1b[32m\xe2\x8f\xba\x1b[0m The tests pass: 356 of 356.\r\n\r\n> commit and push";
+    update(
+        &mut model,
+        Msg::LiveUpdate {
+            link,
+            update: volee_host::Update::Snapshot(screen.to_vec()),
+        },
+    );
+    assert_eq!(model.selected, Some(agent));
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn a_tile_without_a_screen_says_why_and_what_volee_knows() {
+    let (mut model, demo) = demo_model(160, 48, Theme::default());
+    let effects = update(
+        &mut model,
+        Msg::Key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE)),
+    );
+    // The source reads every screen but the first it is asked for, whose
+    // session runs in a terminal volee cannot reach.
+    let mut refused = None;
+    for effect in effects {
+        if let Effect::LoadPreview(agent) = effect {
+            let result = if refused.is_none() {
+                refused = Some(agent);
+                Err(crate::source::SourceError::Unsupported(
+                    "it runs in a terminal of its own: switch to that terminal to see or \
+                     control it"
+                        .into(),
+                ))
+            } else {
+                demo.screen_at(agent, model.now)
+            };
+            update(&mut model, Msg::PreviewLoaded { agent, result });
+        }
+    }
+    assert!(refused.is_some());
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn the_wall_on_its_last_page() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    type_text(&demo, &mut model, "5G");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
 fn the_command_palette() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     type_text(&demo, &mut model, ":show");

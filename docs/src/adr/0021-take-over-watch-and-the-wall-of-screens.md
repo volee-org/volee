@@ -1,7 +1,12 @@
 # 0021. Take over with `a` or `volee attach`, leave with Ctrl+Q, watch on a wall
 
-- Status: Accepted; taking over from the interface amended by [0026](0026-edit-mode-types-into-an-agent-inside-volee.md)
+- Status: Accepted; taking over from the interface amended by [0026](0026-edit-mode-types-into-an-agent-inside-volee.md), the wall by [0028](0028-one-emulator-and-the-wall-inside-the-interface.md)
 - Date: 2026-11-08
+
+Since [ADR 0028](0028-one-emulator-and-the-wall-inside-the-interface.md),
+the interface's wall is a view of the interface itself, on every agent of
+the list that runs, in a volee host or not. `volee host wall` stays the
+wall described below.
 
 Since [ADR 0026](0026-edit-mode-types-into-an-agent-inside-volee.md), `i`
 or `a` in the interface enters edit mode inside volee's full-screen view

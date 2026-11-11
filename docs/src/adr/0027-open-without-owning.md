@@ -130,7 +130,9 @@ adopts.
 - The full-screen view (`z`) of a background session is still the replay
   of `claude logs`: an exact screen needs a client, which resizes the
   session.
-- The mouse is not forwarded to an opened agent yet.
+- The mouse is not forwarded to an opened agent yet
+  ([ADR 0028](0028-one-emulator-and-the-wall-inside-the-interface.md)
+  forwards it).
 - The log has three new kinds of events. An interface from before 0.11
   connected to a newer daemon stops updating and says that it cannot read
   an event: restart it.

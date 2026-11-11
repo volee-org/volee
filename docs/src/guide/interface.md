@@ -34,12 +34,12 @@ Everything on the screen comes from the daemon, and so do the actions:
 | What | What the daemon uses |
 | --- | --- |
 | The agents, their states and messages | Its own records, kept up to date as hosts and sessions come and go. |
-| The preview of an agent's screen | The agent's volee host, which holds its exact screen. For agents volee does not host: tuios or tmux, for a session in one of their panes (`capture-pane`); Claude Code, which replays a background session's output (`claude logs`). volee's setup log, for an agent whose session has not started yet. |
+| The preview of an agent's screen | The agent's volee host, which holds its exact screen: the interface follows it live while the agent is selected. For agents volee does not host: tuios or tmux, for a session in one of their panes (`capture-pane`); Claude Code, which replays a background session's output (`claude logs`). volee's setup log, for an agent whose session has not started yet. |
 | An agent's changes (`d`) | git, in the agent's worktree or folder. |
 | Opening an agent (`enter`, `i`, `a`, a double click) | A terminal on the agent, which the interface connects to: the volee host it runs in, or a view the daemon starts on the session where it runs (`claude attach` on a Claude Code background session, `tuios pane-view` on a tuios pane). tmux brings forward the pane of a session in one of its panes. |
 | The live full-screen view (`z`) | The agent's volee host. |
 | Adopting an agent (`A`) | Claude Code, which stops the background session (`claude stop`), then a new volee host, which resumes its conversation. |
-| The wall of screens (`5`) | The volee hosts of the agents in the list. |
+| The wall of screens (`5`) | For each agent of the list that runs: its volee host, followed live, or what the preview uses for an agent volee does not host. |
 | Writing to an agent (`m`) | Its own records and the agent's hooks. |
 
 When the daemon cannot do something, because Claude Code or git is
@@ -300,31 +300,61 @@ make the time scale finer or coarser, from a second to an hour per column;
 
 ## The wall of screens
 
-`5` (or `Space w`) opens the wall: the agents of the current list that run in a volee
-host, each as a tile of its live screen, over the whole terminal. The
-filter (`/`) applies, so filter first to watch one mission or one
-repository. A page holds up to nine tiles, laid out as one, two, four, six
-or nine depending on how many agents there are; moving past the last tile
-of a page shows the next one.
+`5` (or `Space w`) opens the wall: the agents of the current list that run,
+each as a tile of its screen, over the whole terminal. The filter (`/`)
+applies, so filter first to watch one mission or one repository.
 
-Each tile shows its agent's screen at the agent's own size, cut on the
-right when the tile is narrower, and never resizes the agent; its title is
-the agent's name and the title its program set. Agents volee does not host
-are not on the wall.
+```text
+ Wall · 5 agents run
+┏ ! invoice-tools · needs you ━━━━━━┓╭ ▸ invoicing · working · live ────╮
+┃ ⏺ Before I go on, one question:   ┃│ ⏺ The tests pass: 356 of 356.    │
+┃   Should create_invoice accept a  ┃│                                  │
+┃   draft flag?                     ┃│ ❯ commit and push                │
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛╰──────────────────────────────────╯
+ h/j/k/l move   z full screen   enter open   q back
+```
+
+Every agent that runs has its tile, wherever it runs:
+
+- an agent in a volee host is followed **live** (its title says so);
+- any other agent (a Claude Code background session, a session in a tuios
+  or tmux pane) shows the screen volee reads for its preview, read again
+  every five seconds while the agent works and once when its state
+  changes.
+
+A tile shows the bottom of its agent's screen, where the prompt and the
+questions are, cut on the right when the tile is narrower, under the
+agent's name and state. The wall only looks: it never takes an agent's
+input and never resizes its terminal.
+
+A session in a terminal volee cannot read (Claude Code started by hand in
+a terminal window, outside tuios and tmux) has no screen to show. Its tile
+says so, then what volee knows of the agent: where it works, where it
+runs, what it did last. Opening it says how to make it reachable.
+
+A page holds as many tiles as your terminal shows at a readable size (at
+least 40 columns by 14 rows each): two in an 80 by 24 terminal, nine in a
+large one, up to sixteen in a very large one. Moving past the last tile of
+a page shows the next page, and the first row says which page this is.
+
+The wall's selection is the list's: the selected tile has a thick border,
+and leaving the wall leaves the list on that agent.
 
 | Keys | What it does |
 | --- | --- |
 | arrows, `h`, `j`, `k`, `l` | move between tiles |
-| `z` | show the selected tile alone, over the whole wall; `z` or `esc` brings the wall back |
-| `a`, `enter` | take over the selected agent; the leave key (`Ctrl+Q`) comes back to the wall |
+| `g g`, `G` | the first and the last screen |
+| `enter`, `i`, `a`, a double click | open the selected agent, as from the list ([edit mode](#edit-mode-typing-into-an-agent)); leaving it comes back to the wall |
+| `z` | show the selected screen full size; `z` or `esc` comes back to the wall |
+| a click | select a tile |
 | `q`, `esc` | come back to the interface |
 
 These are the defaults of the `wall` context: `[tui.keys.wall]` changes
 them, like any other key ([Keys](#keys)).
 
-The wall runs as `volee host wall`, the interface stepping aside while it
-is open. From a shell, `volee host wall` opens it on every running host
-([hosts](cli.md#hosts)).
+From a shell, `volee host wall` shows every running volee host of the
+machine as a wall of its own, whatever the hosts run and without the
+daemon ([hosts](cli.md#hosts)).
 
 ## Moving around
 
@@ -447,15 +477,23 @@ and the bottom line say **EDIT** and whose keys these are now:
 Every key goes to the agent, `Esc`, `q` and `Ctrl+C` included, and so does
 what you paste, in one piece (as a bracketed paste when the agent turned it
 on). `Ctrl+Q` gives the keys back to volee: the screen stays, live, `i`
-types again, and `z` or `esc` comes back to the list. The mouse does
-nothing in edit mode. `Ctrl+Q` never reaches the agent; to use another
-key, set `leave` in `[tui.keys.attached]` ([Keys](#keys)).
+types again, and `z` or `esc` comes back to the list. `Ctrl+Q` never
+reaches the agent; to use another key, set `leave` in
+`[tui.keys.attached]` ([Keys](#keys)).
+
+The mouse goes to the agent too, when its program asked for it (Claude Code
+does): clicks, drags and the wheel land on the agent's own cells. For a
+program that did not ask, the wheel scrolls back through what it wrote,
+as it does in the full-screen view outside edit mode. A click on the frame
+around the screen does nothing.
 
 In edit mode the agent's terminal takes the size of the panel, so that
 its screen is drawn cell for cell, cursor included, and follows when your
 terminal changes size; it keeps that size when you leave. Only edit mode
 and `volee attach` set an agent's size: the preview, the full-screen view
-and the wall never resize it. volee encodes your keys the way the agent
+and the wall never resize it. For an agent in a volee host, the three show
+the same live screen as edit mode: the preview follows the selected agent
+as it writes, and its title says `live`. volee encodes your keys the way the agent
 asked (the kitty keyboard protocol Claude Code turns on, or the usual
 encoding), and `Ctrl+Z`, which suspends Claude Code, is followed by its
 resumption: in a volee host there is no shell to bring it back.
@@ -665,7 +703,7 @@ popups and the hints.
 | `F`, `space f` | forget the selected agent: stop listing it (asks first) | `forget` |
 | `space n` | launch an agent in a new worktree | `new-agent` |
 | `space N` | create a mission, which launches its coordinator | `new-mission` |
-| `space w`, `5` | show the agents in volee hosts as a wall of live screens | `show-wall` |
+| `space w`, `5` | show the screens of the agents that run, side by side, as a wall | `show-wall` |
 | `space t` | pick a colour theme, with a live preview; volee keeps your choice | `pick-theme` |
 | `space k` | list every key, in every context | `all-keys` |
 | `:` | the command palette: type part of a command's name and press enter | `commands` |
@@ -928,10 +966,12 @@ popups and the hints.
 | `j`, `↓` | the screen below | `down` |
 | `k`, `↑` | the screen above | `up` |
 | `l`, `→` | the screen on the right | `right` |
-| `z` | the selected screen alone, full size, and back | `full-screen` |
-| `a`, `enter` | take over the selected agent; the leave key comes back to the wall | `take-over` |
+| `gg`, `home` | the first screen | `first` |
+| `G`, `end` | the last screen | `last` |
+| `z` | the selected screen alone, full size; back comes back to the wall | `full-screen` |
+| `enter`, `i`, `a` | open the selected agent: your keys go to it; the leave key (ctrl-q) comes back to the wall | `take-over` |
 | `q`, `esc` | leave the wall | `back` |
-| `ctrl-c` | leave the wall | `quit` |
+| `ctrl-c` | quit volee; in `volee host wall`, leave the wall | `quit` |
 
 ### Edit mode (`attached`)
 

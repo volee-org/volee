@@ -31,8 +31,9 @@ cargo build --release -p volee-cli
 python3 journeys/open.py      --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/pane.py      --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/edit_mode.py --volee target/release/volee --sandbox ~/code/sandbox
+python3 journeys/wall.py      --volee target/release/volee --sandbox ~/code/sandbox
 python3 journeys/old_host.py  --volee target/release/volee --old-volee ~/bin/volee-0.9.1 --sandbox ~/code/sandbox
-python3 journeys/installed.py --sandbox ~/code/sandbox --expect 0.11.0
+python3 journeys/installed.py --sandbox ~/code/sandbox --expect 0.12.0
 ```
 
 Each prints one `PASS` or `FAIL` line per check, the screens it saw at the
@@ -45,8 +46,9 @@ you can look (`tuios attach volee-journey-...`).
 | `open.py` | Starts a Claude Code background session by hand, compares volee's list with what Claude Code lists (every session one row, no row without a session), opens the session by Enter, types into it, checks that it is the same session in the same process, leaves, opens it again once stopped, and removes it. | Its own, isolated |
 | `pane.py` | Starts Claude Code by hand in a tuios pane: it shows in the list after ten seconds, Enter opens the pane inside volee, typing reaches it, `/clear` keeps its row, and quitting it takes it off the list. | Its own, isolated |
 | `edit_mode.py` | Launches an agent, shows it full screen, types into it in edit mode, sends Esc, Ctrl+Z and a two-line paste, leaves with Ctrl+Q, then checks in a pseudo-terminal that the agent follows the panel's size. | Its own, isolated |
+| `wall.py` | Launches an agent and starts a background session by hand, in a window the size of a large terminal: the preview of the first is its live screen, `5` shows both screens side by side, each opens from the wall with Enter or `i`, takes what is typed and comes back to the wall, `z` shows one full size, and the wall opens no terminal and resizes nothing. | Its own, isolated |
 | `old_host.py` | The same typing on an agent whose host an older release started (hosts outlive upgrades). | Its own, started by the older binary |
-| `installed.py` | The installed volee with your own daemon and your own list: compares the list with what Claude Code lists, launches one throwaway agent and types into it, starts one background session by hand and opens it by Enter, then removes both. Run it after installing a release. | Yours |
+| `installed.py` | The installed volee with your own daemon and your own list: compares the list with what Claude Code lists, launches one throwaway agent, types into it and shows it on the wall, starts one background session by hand and opens it by Enter, then removes both. Run it after installing a release. | Yours |
 
 ## What a journey leaves behind
 
@@ -69,6 +71,8 @@ agent's.
   sleep followed by one look.
 - Ask the agent for answers that cannot be on the screen already (a word in
   uppercase), and check the answer, not the prompt.
+- A window of a headless tuios session has 80 columns and 24 rows.
+  `resize()` gives the interface the size of the terminal the trip needs.
 - Add every new thing the journey starts to `agents`, `branches`,
   `background` or `by_hand`, so that `cleanup()` removes it.
 - Check what the trip rests on before you make it. A journey that needs an

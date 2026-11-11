@@ -94,7 +94,7 @@ and resumes it in a new host if it stopped. `volee attach` hands your
 terminal to the agent, from any terminal; `Ctrl+Q` returns to where you were,
 and the agent keeps running. In the interface, `enter` opens the agent
 inside volee and sends it your keys until `Ctrl+Q`, `z` shows its screen
-full size, and `5` shows every agent of the list as a wall of live screens.
+full size, and `5` shows the screens of the agents that run, side by side.
 After `volee stop`, volee does not resume the agent on its own, even when
 other agents write to it: your next message to it does.
 

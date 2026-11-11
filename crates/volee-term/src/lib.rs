@@ -13,12 +13,14 @@
 
 mod boundary;
 mod keys;
+mod mouse;
 mod screen;
 mod style;
 mod widget;
 
 pub use boundary::Boundary;
 pub use keys::KeyInput;
+pub use mouse::{MouseButton, MouseInput, MouseKind};
 pub use screen::{Frame, Screen, Signals, StyledCell};
 pub use widget::FrameView;
 
