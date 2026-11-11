@@ -705,11 +705,12 @@ async fn a_lead_takes_what_the_person_asks_and_a_name_and_a_model() {
 }
 
 #[tokio::test]
-async fn one_lead_runs_in_a_directory_and_a_lead_needs_a_directory() {
+async fn the_same_lead_is_not_started_twice_and_a_lead_needs_a_directory() {
     let daemon = start();
     let client = Client::connect(&daemon.socket).await.unwrap();
     let first = client.call::<StartLead>(lead_here(&daemon)).await.unwrap();
-    // A second one here would be a duplicate: the first is there to talk to.
+    // The same command again would be a duplicate: the first is there to
+    // talk to.
     let twice = rpc_error(
         client
             .call::<StartLead>(lead_here(&daemon))
@@ -726,7 +727,16 @@ async fn one_lead_runs_in_a_directory_and_a_lead_needs_a_directory() {
         twice.message
     );
     assert_eq!(daemon.harness.launches().len(), 1);
-    // Elsewhere, another lead may run.
+    // Another lead here, under a name of its own, is the person's choice.
+    let second = client
+        .call::<StartLead>(LeadParams {
+            name: Some("tower-two".into()),
+            ..lead_here(&daemon)
+        })
+        .await
+        .unwrap();
+    assert_ne!(second.agent, first.agent);
+    // Elsewhere, a lead may run under the default name of that directory.
     let elsewhere = daemon.repo.parent().unwrap().to_path_buf();
     let other = client
         .call::<StartLead>(LeadParams {

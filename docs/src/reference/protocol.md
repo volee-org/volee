@@ -209,8 +209,8 @@ already works, and `missions.create` a title under which a mission is
 already open: each refusal names the agent to write to instead
 ([ADR 0033](../adr/0033-a-lead-makes-others-work.md)). When `requested_by`
 names an agent, it must be a lead, and the mission's coordinator is
-registered with that lead as its parent. `agents.lead` refuses a second
-lead in a directory where one runs.
+registered with that lead as its parent. `agents.lead` refuses a lead
+under the name of one that runs in the same directory.
 
 `missions.request_approval` is refused (`-32002`) unless `by` is the
 mission's coordinator and the mission is `reporting`: every worker

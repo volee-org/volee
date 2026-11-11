@@ -237,12 +237,13 @@ pub(crate) async fn lead(
             },
             str::to_owned,
         );
-    // One lead per directory: a second one would be a duplicate, and the
-    // first is there to talk to.
+    // The same lead twice in a directory would be a duplicate: the first
+    // is there to talk to. Another one, under another name, is a choice.
     {
         let state = shared.state.lock().await;
         if let Some(there) = state.registry().agents().find(|agent| {
             agent.role == Role::Lead
+                && agent.name == name
                 && agent.workspace.worktree.is_none()
                 && agent.launched_by != LaunchedBy::Outside
                 && agent.state.is_live()
@@ -1685,6 +1686,56 @@ mod tests {
             super::worktree_name(root, Path::new("/work/alpha/.claude/worktrees/a/b")),
             None
         );
+    }
+
+    #[test]
+    fn a_resumed_lead_gets_the_instructions_of_a_lead_again() {
+        use volee_core::harness::HarnessKind;
+        use volee_core::role::{LaunchedBy, Role};
+        use volee_core::time::Timestamp;
+        use volee_core::workspace::{Location, Workspace};
+        use volee_core::{AgentId, Event, EventKind, Registry};
+
+        let id = |n| AgentId::from_ulid(ulid::Ulid::from_parts(1, n));
+        let registered = |n, workspace: Workspace| {
+            Event::new(
+                Timestamp::from_millis(1),
+                EventKind::AgentRegistered {
+                    agent: id(n),
+                    name: format!("agent-{n}"),
+                    role: Role::Lead,
+                    harness: HarnessKind::ClaudeCode,
+                    launched_by: LaunchedBy::Human,
+                    parent: None,
+                    mission: None,
+                    workspace,
+                    location: Location::Background,
+                },
+            )
+        };
+        let registry = Registry::from_events(&[
+            // Started with `volee lead`: no worktree.
+            registered(1, Workspace::at("/work")),
+            // Launched with `volee spawn`: it works itself, in its worktree.
+            registered(
+                2,
+                Workspace {
+                    repo: Some("alpha".into()),
+                    repo_root: Some("/work/alpha".into()),
+                    worktree: Some("/work/alpha/.claude/worktrees/feat-x".into()),
+                    branch: Some("feat/x".into()),
+                    base: Some("main".into()),
+                    ..Workspace::at("/work/alpha/.claude/worktrees/feat-x")
+                },
+            ),
+        ])
+        .unwrap();
+        let lead = super::instructions_for(&registry, registry.agent(id(1)).unwrap());
+        assert_eq!(lead, super::lead_instructions());
+        assert!(lead.contains("You never write code yourself"), "{lead}");
+        let works = super::instructions_for(&registry, registry.agent(id(2)).unwrap());
+        assert!(works.contains("worktree of alpha"), "{works}");
+        assert!(!works.contains("You are a lead"), "{works}");
     }
 
     #[test]

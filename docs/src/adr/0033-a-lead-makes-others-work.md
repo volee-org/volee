@@ -32,9 +32,10 @@ the two.
   editing tools turned off: a lead never codes. From a terminal the command
   opens it at once, and the leave key gives the terminal back while it
   keeps running ([ADR 0026](0026-edit-mode-types-into-an-agent-inside-volee.md));
-  it opens like any agent from the interface. One lead runs in a directory:
-  a second `volee lead` there is refused and names the first. `volee spawn`
-  is unchanged: it launches an agent that works itself, in its worktree.
+  it opens like any agent from the interface. The same command typed again
+  where that lead runs is refused and says how to open it; another lead
+  there takes a name of its own. `volee spawn` is unchanged: it launches an
+  agent that works itself, in its worktree.
 - **A lead launches through two tools.** `spawn_agent` launches an agent on
   one task in one repository; the agent's parent is the lead, so it reports
   to it. `start_mission` starts a mission in the lead's name. Both are
