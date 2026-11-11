@@ -185,7 +185,9 @@ repository or a mission for several, tells you in one line what it
 launched, and gives the hand back. It never codes, and it does not watch
 its agents: volee wakes it when one reports, and it tells you in three
 lines what is done, the proof and what is left. Before a merge you are
-asked, as in the section above; a lead never answers for you.
+asked, as in the section above: the question waits in your messages (`I`),
+not in the lead's conversation. A lead never answers for you, even when you
+tell it your answer: it tells you where to give it.
 
 `volee lead "Add invoices to billing and to the API."` starts it with the
 request at once.

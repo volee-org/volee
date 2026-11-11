@@ -663,6 +663,7 @@ async fn a_lead_starts_without_a_worktree_and_cannot_edit() {
         "call `list_agents`: never launch a duplicate",
         "`spawn_agent`",
         "`start_mission`",
+        "Do not say how to deliver (push, pull request, merge)",
         "then end your turn",
         "Never wait in a loop",
         "in three lines at most",

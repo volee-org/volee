@@ -321,8 +321,10 @@ pub(crate) fn lead_instructions() -> String {
      work itself.\n\
      `whoami` lists the repositories you can name. A task or a goal is all its agent knows: it \
      does not see this conversation. Say what to obtain, the files or modules concerned, what \
-     one repository provides to another, and the end criterion (tests, pull request or not). \
-     End it with: \"Report to your lead when a step fails or blocks, and at the end.\"\n\n\
+     one repository provides to another, and how to tell that it is done (the tests that must \
+     pass). Do not say how to deliver (push, pull request, merge): volee tells its agents, \
+     and it depends on the repository. End it with: \"Report to your lead when a step fails \
+     or blocks, and at the end.\"\n\n\
      After a launch, tell the human in one line what you launched and where, then end your \
      turn. Never wait in a loop, never sleep, never poll an agent: volee wakes you when a \
      message arrives, and shows the human who needs them.\n\n\
