@@ -111,7 +111,8 @@ human's own words and is never a yes. The tool returns at once: the agent
 ends its turn and volee wakes it with the answer.
 
 `send_message` with the kind `question` still asks a question without
-options. Options on anything but a question to the human are refused.
+options. Options on anything but a question to the human are refused
+([ADR 0031](../adr/0031-a-question-may-offer-its-answers.md)).
 
 ### `report`
 

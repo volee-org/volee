@@ -12,7 +12,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0003](0003-daemon-and-event-log.md) | A daemon with an event log is the single source of truth | Accepted |
 | [0004](0004-sources-and-reconciliation.md) | Hooks, harness listing, git and forge are reconciled into one model | Accepted |
 | [0005](0005-harness-neutral-agent-protocol.md) | Agents talk to volee through MCP and the CLI | Accepted |
-| [0006](0006-messaging.md) | Typed, threaded messages delivered through documented hooks | Accepted |
+| [0006](0006-messaging.md) | Typed, threaded messages delivered through documented hooks (amended by 0031) | Accepted |
 | [0007](0007-missions.md) | Missions are run by a supervisor program and a coordinator agent | Accepted |
 | [0008](0008-multiplexers-are-optional.md) | Multiplexers are optional location adapters | Accepted |
 | [0009](0009-tui-architecture.md) | The TUI follows the Elm architecture with one keymap table | Accepted |
@@ -37,6 +37,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0028](0028-one-emulator-and-the-wall-inside-the-interface.md) | One emulator for every screen, and the wall inside the interface (completes 0020; amends 0021, 0026 and 0027) | Accepted |
 | [0029](0029-volee-run.md) | `volee run` makes any program an agent, in the terminal it is typed in (amends 0022 and 0023) | Accepted |
 | [0030](0030-a-multiplexer-may-say-which-panes-run-an-agent.md) | A multiplexer may say which of its panes run an agent (amends 0023 and 0015) | Accepted |
+| [0031](0031-a-question-may-offer-its-answers.md) | A question to the person may offer its answers (amends 0006) | Accepted |
 
 ## Not built yet
 

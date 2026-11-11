@@ -188,9 +188,10 @@ pub(crate) fn reply(registry: &Registry, row: Row) -> Option<Reply> {
     })
 }
 
-/// The question a row waits on, when it offers answers to choose from and
-/// the person has not answered it: the row's own question, or the one a
-/// reply from its thread would answer.
+/// The question a row waits on, when it offers answers to choose from: the
+/// row's own question, or the one a reply from its thread would answer.
+/// Both wait for the person: an answered question is no row, and no reply
+/// answers it.
 pub(crate) fn offered(registry: &Registry, row: Row) -> Option<&volee_core::message::Message> {
     let question = match row {
         Row::Question(id) => Some(id),
@@ -198,7 +199,7 @@ pub(crate) fn offered(registry: &Registry, row: Row) -> Option<&volee_core::mess
     }?;
     registry
         .message(question)
-        .filter(|message| !message.options.is_empty() && registry.answer_to(question).is_none())
+        .filter(|message| !message.options.is_empty())
 }
 
 /// A digit typed in the messages window: asks, on the bottom line, whether

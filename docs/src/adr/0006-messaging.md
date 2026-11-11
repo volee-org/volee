@@ -1,6 +1,7 @@
 # 0006. Typed, threaded messages delivered through documented hooks
 
-- Status: Accepted
+- Status: Accepted (amended by [0031](0031-a-question-may-offer-its-answers.md): a
+  question to the person may offer its answers)
 - Date: 2026-11-06
 
 ## Context
