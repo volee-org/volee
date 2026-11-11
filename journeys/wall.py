@@ -9,9 +9,15 @@ to the wall; `q` leaves the wall on the agent it was on.
 
 The wall only looks: it opens no terminal on a session and resizes none.
 
+Last, the proof asked of the one terminal component: the same screen, compared cell
+by cell between the preview, the full-screen view and the wall, for the agent volee
+hosts and for the session it does not. A capture tells the characters, not the colors
+(a test compares those): each view must show the same characters in the same cells,
+and the comparison only counts when the screen did not change while it was made.
+
     python3 journeys/wall.py --volee target/release/volee --sandbox ~/code/sandbox
 """
-from journey import Journey, arguments
+from journey import Journey, arguments, cells, in_order, same_tail
 
 SPELL = "Reply only with the word made of these letters, in uppercase: "
 
@@ -33,6 +39,84 @@ def move_to(j, name):
     if name not in selected_tile(j):
         j.keys("h", 0.8)
     return name in selected_tile(j)
+
+
+def held_screen(j, name):
+    """The agent in a volee host, whose screen volee holds: the full-screen view
+    shows it cell for cell; the preview and its tile must show its last rows."""
+    def full():
+        j.keys("z", 1.5)
+        rows, width = j.frame("Screen · " + name, margin=1)
+        j.keys("Escape", 1.0)
+        return rows, width
+
+    for _ in range(3):
+        before, width = full()
+        preview, preview_width = j.frame("Preview · " + name, margin=1)
+        j.keys("5", 2.0)
+        tile, tile_width = j.frame(name)
+        j.keys("q", 1.0)
+        after, _ = full()
+        if before and before == after:
+            break
+    else:
+        j.check("the agent's screen stays still while its three views are compared", False)
+        return
+    size = j.host_size(name) or (0, 0)
+    if not j.check("the full-screen view holds the agent's screen cell for cell",
+                   0 < size[0] <= width and size[1] <= len(before),
+                   "screen {}x{} in a view of {}x{}".format(size[0], size[1], width,
+                                                            len(before))):
+        return
+    for what, view, view_width in (("the preview", preview, preview_width),
+                                   ("its tile on the wall", tile, tile_width)):
+        if view is None:
+            j.check(what + " shows the agent's screen", False, "no such frame on screen")
+            continue
+        same, compared, difference = same_tail(view, before, view_width)
+        j.check("{} shows the same cells as the full-screen view".format(what), same,
+                difference or "{} cells compared, in {} columns".format(compared, view_width))
+
+
+def replayed_screen(j, name):
+    """The session volee does not host: its three views show what the daemon reads,
+    the same replay, which `volee logs` prints whole."""
+    def read():
+        return [cells(line) for line in j.volee_run("logs", name).stdout.splitlines()]
+
+    if not j.select(name):
+        return
+    for _ in range(3):
+        before = read()
+        j.wait(lambda: j.frame("Preview · " + name, margin=1)[0] is not None, 10)
+        preview, preview_width = j.frame("Preview · " + name, margin=1)
+        j.keys("5", 3.0)
+        tile, tile_width = j.frame(name)
+        j.keys("q", 1.0)
+        j.keys("z", 2.0)
+        full, full_width = j.frame("Screen · " + name, margin=1)
+        j.keys("Escape", 1.0)
+        after = read()
+        if before and before == after:
+            break
+    else:
+        j.check("the session's screen stays still while its three views are compared", False)
+        return
+    for what, view, view_width in (("the preview", preview, preview_width),
+                                   ("its tile on the wall", tile, tile_width)):
+        if view is None:
+            j.check(what + " shows the session's screen", False, "no such frame on screen")
+            continue
+        same, compared, difference = same_tail(view, before, view_width)
+        j.check("{} shows the same cells as what the daemon reads".format(what), same,
+                difference or "{} cells compared, in {} columns".format(compared, view_width))
+    if full is None:
+        j.check("the full-screen view shows the session's screen", False,
+                "no such frame on screen")
+        return
+    same, compared, difference = in_order(full, before, full_width)
+    j.check("the full-screen view shows the same rows, the long ones wrapped", same,
+            difference or "{} cells compared, in {} columns".format(compared, full_width))
 
 
 def main():
@@ -153,6 +237,10 @@ def main():
         rows = [line for line in j.screen().splitlines() if "▌" in line]
         j.check("on the agent the wall was on", bool(rows) and hosted in rows[0],
                 (rows or ["no selected row"])[0][:100])
+
+        # ---- the same screen in the three views ----------------------------------------
+        held_screen(j, hosted)
+        replayed_screen(j, outside)
         j.keys("Escape", 0.5)
         j.keys("q", 1.0)
     finally:

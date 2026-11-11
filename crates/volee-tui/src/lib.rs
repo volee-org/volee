@@ -54,6 +54,8 @@ pub mod wall;
 mod widgets;
 
 #[cfg(test)]
+mod same_screen;
+#[cfg(test)]
 mod screen_tests;
 #[cfg(test)]
 mod test_support;

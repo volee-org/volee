@@ -99,7 +99,9 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
 - **Preview.** The selected agent's terminal screen, kept up to date while
   it works. For an agent in a volee host, it is the exact screen the host
   holds, status line and prompt frame included, drawn at the agent's own
-  size: looking at an agent never resizes it. The bottom of the screen,
+  size: looking at an agent never resizes it. The preview, the full-screen
+  view and the agent's tile on the wall show the same cells of that screen,
+  its cursor and its blank rows included. The bottom of the screen,
   where the latest output is, stays in view; scroll it with `j` and `k` when
   the panel has the keyboard. Lines wider than the panel are cut at its
   edge. `z` shows that screen full size, its

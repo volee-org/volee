@@ -40,8 +40,7 @@ impl<'a> FrameView<'a> {
 }
 
 fn is_blank(row: &[StyledCell]) -> bool {
-    row.iter()
-        .all(|cell| cell.symbol.trim().is_empty() && cell.style.bg.is_none())
+    row.iter().all(StyledCell::shows_nothing)
 }
 
 fn rows_shown(frame: &Frame, height: usize) -> Vec<usize> {
@@ -151,6 +150,17 @@ mod tests {
     fn the_cursor_is_never_cut_off_the_top() {
         let f = frame(&["> ", "x", "y", "z", "w", "v", "far below"], Some((2, 0)));
         assert_eq!(FrameView::new(&f).rows_shown(3), [0, 1, 2]);
+    }
+
+    #[test]
+    fn a_cursor_block_alone_on_its_row_is_not_a_blank_row() {
+        use ratatui::style::{Modifier, Style};
+        // Blank rows around a row that holds only a blank in reverse video,
+        // which is how an agent's interface draws its cursor.
+        let mut f = frame(&["answer", "", "", " ", "", "", "status"], None);
+        f.rows[3][0].style = Style::new().add_modifier(Modifier::REVERSED);
+        // The runs of blank rows around it shrink; its own row stays.
+        assert_eq!(FrameView::new(&f).rows_shown(5), [0, 1, 3, 4, 6]);
     }
 
     #[test]

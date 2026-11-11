@@ -71,9 +71,12 @@ to come:
 - [0027](0027-open-without-owning.md): a door for a session in a tmux pane
   (the pane is brought forward instead) and for an OpenCode agent started
   elsewhere.
-- [0028](0028-one-emulator-and-the-wall-inside-the-interface.md): a tile or
-  a preview that leaves out a harness's prompt and status lines, to show
-  more of the conversation in a small space.
+- [0028](0028-one-emulator-and-the-wall-inside-the-interface.md): an exact
+  preview everywhere. The preview, the full-screen view and the tile of a
+  Claude Code background session that is not open are its replay, and a
+  multiplexer pane's capture is read with a replay's repairs. Also not
+  built: a tile or a preview that leaves out a harness's prompt and status
+  lines, to show more of the conversation in a small space.
 - [0024](0024-agents-come-back-after-a-reboot.md): with
   `resume_after_reboot = false`, interrupted agents show as stopped and
   resume when you write to them, rather than offering a resume action.
