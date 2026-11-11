@@ -196,10 +196,14 @@ blank rows as the pane holds them.
 The daemon also gives the size of a host's terminal, which a snapshot
 needs. A snapshot redraws its screen in a terminal of that size only, and
 the interface told the size from what the snapshot wrote, fifty rows at
-least: the snapshot of a host taller than that lost its first rows
-(`volee logs`, and the preview until its live connection opened). A
-capture needs no size: each of its rows is placed with a cursor move, so
-it draws the same cells in any terminal large enough.
+least: the snapshot of a host taller than that lost its first rows, and
+that of a shorter host, which carries the host's history for a client
+that scrolls back, showed rows of that history above the screen
+(`volee logs`, and the preview until its live connection opened). On a
+real machine, `volee logs` printed fifty rows for an agent whose terminal
+holds forty-five. A capture needs no size: each of its rows is placed
+with a cursor move, so it draws the same cells in any terminal large
+enough.
 
 The last row is still open.
 

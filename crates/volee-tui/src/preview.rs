@@ -522,6 +522,34 @@ mod tests {
     }
 
     #[test]
+    fn a_short_host_s_snapshot_carries_its_history_and_its_size_leaves_it_out() {
+        // A terminal of 80 by 10 that wrote 30 rows: 20 went into its history,
+        // which the snapshot carries for a client that scrolls back.
+        let mut held = Screen::new(80, 10, 100).unwrap();
+        for row in 1..=30 {
+            held.feed(format!("row {row}\r\n").as_bytes());
+        }
+        held.feed(b"prompt");
+        let snapshot = String::from_utf8(held.snapshot().unwrap()).unwrap();
+        let own = PreviewScreen::from_emulator(&mut held, ColorDepth::TrueColor).unwrap();
+        assert_eq!(own.text().first().map(String::as_str), Some("row 22"));
+
+        // Read in a terminal of the host's size, the history scrolls away:
+        // what is left is the screen.
+        let sized = PreviewScreen::of(
+            &Reading::screen(snapshot.clone(), Some((80, 10))),
+            ColorDepth::TrueColor,
+        );
+        assert_eq!(sized, own);
+
+        // Without the size, the reader's terminal is taller than the host's
+        // and shows rows of history above the screen.
+        let guessed = PreviewScreen::of(&Reading::screen(snapshot, None), ColorDepth::TrueColor);
+        assert!(guessed.text().len() > own.text().len());
+        assert_eq!(guessed.text().first().map(String::as_str), Some("row 1"));
+    }
+
+    #[test]
     fn without_its_size_a_tall_snapshot_loses_its_first_rows() {
         // What a daemon that does not say the size leaves the reader with:
         // the size the output tells, 50 rows here, in which the snapshot
