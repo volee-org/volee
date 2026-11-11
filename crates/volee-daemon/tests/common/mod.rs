@@ -120,6 +120,14 @@ impl FakeHarness {
     }
 }
 
+/// The handle the fake harness gives the session of its `n`th launch, from
+/// one: `abcd1234`, then `abcd1235`... Each launch has its own, as each
+/// Claude Code session does: the daemon tells the sessions it started apart
+/// by their handles.
+pub(crate) fn launch_handle(n: usize) -> String {
+    format!("abcd{}", 1233 + n)
+}
+
 pub(crate) fn unsupported(what: &str) -> HarnessError {
     HarnessError::CommandFailed {
         command: what.to_owned(),
@@ -159,9 +167,10 @@ impl Harness for FakeHarness {
         if *self.refuse_launches.lock().unwrap() {
             return Err(unsupported("--bg"));
         }
-        self.launches.lock().unwrap().push(spec.clone());
+        let mut launches = self.launches.lock().unwrap();
+        launches.push(spec.clone());
         Ok(Spawned {
-            handle: "abcd1234".to_owned(),
+            handle: launch_handle(launches.len()),
             name: Some(spec.name.clone()),
             origin: SessionOrigin::Started,
         })
