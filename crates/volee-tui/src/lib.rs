@@ -33,6 +33,7 @@ mod edit;
 mod editor;
 mod history;
 mod inbox;
+mod journal;
 pub mod keymap;
 mod launch;
 mod layout;

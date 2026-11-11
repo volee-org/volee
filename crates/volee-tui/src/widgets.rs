@@ -6,10 +6,12 @@ pub(crate) mod card;
 pub(crate) mod composer;
 pub(crate) mod detail;
 pub(crate) mod diff;
+pub(crate) mod for_you;
 pub(crate) mod handover;
 pub(crate) mod help;
 pub(crate) mod hints;
 pub(crate) mod inbox;
+pub(crate) mod journal;
 pub(crate) mod keys;
 pub(crate) mod launch;
 pub(crate) mod palette;
@@ -24,7 +26,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Widget};
-use volee_core::{Agent, AgentState};
+use volee_core::AgentState;
 
 use crate::app::{Model, inner};
 use crate::text;
@@ -132,17 +134,6 @@ fn framed(
         .title(Line::from(spans))
         .render(area, buf);
     inner(area)
-}
-
-/// Where an agent works, in a few words: `repo › branch`, or its mission
-/// when it works outside any repository, like a coordinator.
-pub(crate) fn place_label(model: &Model, agent: &Agent) -> String {
-    if agent.workspace.repo.is_none()
-        && let Some(mission) = agent.mission.and_then(|id| model.registry.mission(id))
-    {
-        return format!("◆ {}", mission.title);
-    }
-    agent.workspace.label()
 }
 
 /// Spans cut to `max` cells; the last one kept ends with `…` when cut.

@@ -28,8 +28,8 @@ use std::str::FromStr;
 
 use ratatui::style::{Color, Modifier, Style};
 use serde::Deserialize;
-use volee_core::AgentState;
 use volee_core::role::Role;
+use volee_core::{AgentId, AgentState};
 
 macro_rules! style_roles {
     ($($(#[doc = $doc:literal])+ $variant:ident => $key:literal,)+) => {
@@ -145,6 +145,26 @@ style_roles! {
     ChecksPending => "checks.pending",
     /// Activity sparklines on cards.
     Sparkline => "sparkline",
+    /// The first of the nine colors that tell agents apart: each worker and
+    /// each session started on its own keeps one, on its card's border, its
+    /// name and its activity.
+    Agent1 => "agent.1",
+    /// The second color that tells agents apart.
+    Agent2 => "agent.2",
+    /// The third color that tells agents apart.
+    Agent3 => "agent.3",
+    /// The fourth color that tells agents apart.
+    Agent4 => "agent.4",
+    /// The fifth color that tells agents apart.
+    Agent5 => "agent.5",
+    /// The sixth color that tells agents apart.
+    Agent6 => "agent.6",
+    /// The seventh color that tells agents apart.
+    Agent7 => "agent.7",
+    /// The eighth color that tells agents apart.
+    Agent8 => "agent.8",
+    /// The ninth color that tells agents apart.
+    Agent9 => "agent.9",
     /// Keys in the hint bar and in the help.
     HintKey => "hint.key",
     /// Descriptions in the hint bar and in the help.
@@ -488,6 +508,34 @@ impl Theme {
             Role::Subagent => StyleRole::RoleSubagent,
             Role::Independent => StyleRole::RoleIndependent,
         })
+    }
+
+    /// The colors that tell agents apart, in order.
+    pub const AGENT_COLORS: [StyleRole; 9] = [
+        StyleRole::Agent1,
+        StyleRole::Agent2,
+        StyleRole::Agent3,
+        StyleRole::Agent4,
+        StyleRole::Agent5,
+        StyleRole::Agent6,
+        StyleRole::Agent7,
+        StyleRole::Agent8,
+        StyleRole::Agent9,
+    ];
+
+    /// The color of the agent `id`, one of [`Self::AGENT_COLORS`] picked from
+    /// its id: the same agent keeps the same color from one run to the next.
+    pub fn agent_color(&self, id: AgentId) -> Style {
+        // FNV-1a over the id's text: stable, and spread over the palette.
+        let hash = id
+            .to_string()
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+        let colors = Self::AGENT_COLORS.len() as u64;
+        let index = usize::try_from(hash % colors).unwrap_or(0);
+        self.style(Self::AGENT_COLORS[index])
     }
 
     /// A theme with no colors at all, used only if the default theme could

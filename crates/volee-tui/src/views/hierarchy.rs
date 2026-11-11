@@ -1,7 +1,10 @@
-//! The hierarchy view: who launched whom, as a tree of cards.
+//! The tree view: who launched whom, as a tree of cards.
 //!
-//! Roots are agents without a known parent (leads first, independent
-//! sessions last). Subagents hang under their parent's card as satellites
+//! It shows the tree of the selected agent: its root (a lead, a mission
+//! started by the person) and everything under it, children side by side
+//! under their parent. Agents that nobody launched and that launched nobody,
+//! such as sessions started on their own, show side by side instead, in rows
+//! ([`Show`]). Subagents hang under their parent's card as satellites
 //! instead of taking a level of the tree. The tree is placed by
 //! [`tree_layout`](super::tree_layout) at one of three levels of detail
 //! (cards, compact cards, dots), chosen from the available room unless the
@@ -17,7 +20,6 @@ use volee_core::{Agent, AgentId, Registry};
 
 use super::tree_layout::{self, Forest, Node, Placement, Spacing};
 use crate::app::Model;
-use crate::text;
 use crate::theme::StyleRole;
 use crate::widgets::card::{self, CardContext};
 use crate::widgets::{self, canvas::Canvas};
@@ -64,7 +66,7 @@ impl Zoom {
     }
 
     /// Room between cards at this level.
-    const fn spacing(self) -> Spacing {
+    pub(crate) const fn spacing(self) -> Spacing {
         match self {
             Self::Cards => Spacing {
                 gap: 2,
@@ -86,21 +88,6 @@ impl Zoom {
             },
         }
     }
-
-    /// The width and the height of a card, without satellites.
-    pub(crate) fn card_size(self, name: &str) -> (u16, u16) {
-        match self {
-            Self::Cards => (card::FULL_WIDTH, 6),
-            Self::Compact => (card::COMPACT_WIDTH, 3),
-            Self::Dots => (dot_width(name, 2), 1),
-        }
-    }
-}
-
-/// The width of a dot label (`prefix` 2: glyph and space), or of a satellite
-/// line under a dot (`prefix` 5: branch, space, glyph and space).
-fn dot_width(name: &str, prefix: u16) -> u16 {
-    prefix + u16::try_from(text::width(name).min(card::NAME_MAX)).unwrap_or(0)
 }
 
 /// The detail level the person asked for.
@@ -165,11 +152,68 @@ pub(crate) struct Scene {
     pub(crate) height: u16,
 }
 
+/// What the view shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) enum Show {
+    /// Every tree.
+    #[default]
+    Everything,
+    /// One tree: an agent and everything under it.
+    Tree(AgentId),
+    /// The agents that nobody launched and that launched nobody, such as
+    /// sessions started on their own, side by side in rows.
+    Loners,
+}
+
+impl Show {
+    /// What to show: the subtree the person entered, else the tree of the
+    /// selected agent, else every tree.
+    pub(crate) fn of(
+        registry: &Registry,
+        subtree: Option<AgentId>,
+        selected: Option<AgentId>,
+    ) -> Self {
+        if let Some(root) = subtree.filter(|id| registry.agent(*id).is_some()) {
+            return Self::Tree(root);
+        }
+        let Some(root) = selected.and_then(|id| root_of(registry, id)) else {
+            return Self::Everything;
+        };
+        if launched_others(registry, root) {
+            Self::Tree(root)
+        } else {
+            Self::Loners
+        }
+    }
+}
+
+/// The agent at the top of `agent`'s tree.
+fn root_of(registry: &Registry, agent: AgentId) -> Option<AgentId> {
+    let mut current = registry.agent(agent)?;
+    let mut seen = BTreeSet::from([current.id]);
+    while let Some(parent) = current.parent.and_then(|id| registry.agent(id)) {
+        if !seen.insert(parent.id) {
+            break;
+        }
+        current = parent;
+    }
+    Some(current.id)
+}
+
+/// Whether `agent` launched agents that take a level of the tree (its
+/// subagents hang under its card and do not).
+fn launched_others(registry: &Registry, agent: AgentId) -> bool {
+    registry
+        .children(agent)
+        .iter()
+        .any(|child| child.role != Role::Subagent)
+}
+
 /// What a scene is built from; the scene is rebuilt only when it changes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SceneKey {
     agents: Vec<(AgentId, Option<AgentId>, Role, String)>,
-    focus: Option<AgentId>,
+    show: Show,
     zoom: ZoomChoice,
     area: (u16, u16),
 }
@@ -177,7 +221,7 @@ pub(crate) struct SceneKey {
 /// The inputs of a scene.
 pub(crate) fn scene_key(
     registry: &Registry,
-    focus: Option<AgentId>,
+    show: Show,
     zoom: ZoomChoice,
     area: (u16, u16),
 ) -> SceneKey {
@@ -186,7 +230,7 @@ pub(crate) fn scene_key(
             .agents()
             .map(|agent| (agent.id, agent.parent, agent.role, agent.name.clone()))
             .collect(),
-        focus,
+        show,
         zoom,
         area,
     }
@@ -203,12 +247,17 @@ const fn role_rank(role: Role) -> u8 {
     }
 }
 
-/// The roots to show: the focused agent, or every root in display order.
-fn roots(registry: &Registry, focus: Option<AgentId>) -> Vec<&Agent> {
-    if let Some(agent) = focus.and_then(|id| registry.agent(id)) {
-        return vec![agent];
-    }
-    let mut roots = registry.roots();
+/// The roots to show, in display order.
+fn roots(registry: &Registry, show: Show) -> Vec<&Agent> {
+    let mut roots = match show {
+        Show::Tree(root) => return registry.agent(root).into_iter().collect(),
+        Show::Everything => registry.roots(),
+        Show::Loners => registry
+            .roots()
+            .into_iter()
+            .filter(|agent| !launched_others(registry, agent.id))
+            .collect(),
+    };
     roots.sort_by_key(|agent| role_rank(agent.role));
     roots
 }
@@ -218,16 +267,17 @@ fn roots(registry: &Registry, focus: Option<AgentId>) -> Vec<&Agent> {
 struct AgentTree {
     agents: Vec<AgentId>,
     names: Vec<String>,
+    roles: Vec<Role>,
     satellites: Vec<Vec<AgentId>>,
     children: Vec<Vec<usize>>,
     roots: Vec<usize>,
 }
 
 impl AgentTree {
-    fn new(registry: &Registry, focus: Option<AgentId>) -> Self {
+    fn new(registry: &Registry, show: Show) -> Self {
         let mut tree = Self::default();
         let mut seen = BTreeSet::new();
-        for root in roots(registry, focus) {
+        for root in roots(registry, show) {
             if let Some(index) = tree.add(registry, root, &mut seen) {
                 tree.roots.push(index);
             }
@@ -247,6 +297,7 @@ impl AgentTree {
         let index = self.agents.len();
         self.agents.push(agent.id);
         self.names.push(agent.name.clone());
+        self.roles.push(agent.role);
         self.satellites.push(Vec::new());
         self.children.push(Vec::new());
         let mut satellites = Vec::new();
@@ -264,12 +315,13 @@ impl AgentTree {
     fn forest(&self, registry: &Registry, zoom: Zoom) -> Forest {
         let nodes = (0..self.agents.len())
             .map(|index| {
-                let (card_width, card_height) = zoom.card_size(&self.names[index]);
+                let (card_width, card_height) =
+                    card::size(zoom, self.roles[index], &self.names[index]);
                 let satellites = &self.satellites[index];
                 let satellite_width = satellites
                     .iter()
                     .filter_map(|id| registry.agent(*id))
-                    .map(|agent| dot_width(&agent.name, 5))
+                    .map(|agent| card::dot_width(&agent.name, 5))
                     .max()
                     .unwrap_or(0);
                 // Dots are as wide as their labels and attach at their glyph;
@@ -311,15 +363,14 @@ fn collect_satellites(
 }
 
 impl Scene {
-    /// Places the hierarchy (or the subtree of `focus`) in an area of
-    /// `area` cells.
+    /// Places what `show` asks for in an area of `area` cells.
     pub(crate) fn build(
         registry: &Registry,
-        focus: Option<AgentId>,
+        show: Show,
         choice: ZoomChoice,
         area: (u16, u16),
     ) -> Self {
-        let tree = AgentTree::new(registry, focus);
+        let tree = AgentTree::new(registry, show);
         let candidates: &[Zoom] = match &choice {
             ZoomChoice::Auto => &Zoom::ALL,
             ZoomChoice::Fixed(zoom) => std::slice::from_ref(zoom),
@@ -327,7 +378,11 @@ impl Scene {
         let mut chosen = None;
         for zoom in candidates {
             let forest = tree.forest(registry, *zoom);
-            let layout = tree_layout::fit(&forest, zoom.spacing(), area.0);
+            let layout = if show == Show::Loners {
+                tree_layout::grid(&forest, zoom.spacing(), area.0)
+            } else {
+                tree_layout::fit(&forest, zoom.spacing(), area.0)
+            };
             let fits = layout.width <= area.0 && layout.height <= area.1;
             chosen = Some((*zoom, layout));
             if fits {
@@ -341,7 +396,7 @@ impl Scene {
             .map(|index| SceneNode {
                 agent: tree.agents[index],
                 place: layout.nodes[index],
-                card_height: zoom.card_size(&tree.names[index]).1,
+                card_height: card::size(zoom, tree.roles[index], &tree.names[index]).1,
                 satellites: tree.satellites[index].clone(),
                 children: tree.children[index].clone(),
                 stacked: layout.stacking.parents.contains(&index),
@@ -537,9 +592,10 @@ pub(crate) fn outline(registry: &Registry, focus: Option<AgentId>) -> Vec<(Agent
             walk(registry, child, &inner, guide, out, seen);
         }
     }
+    let show = focus.map_or(Show::Everything, Show::Tree);
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
-    for root in roots(registry, focus) {
+    for root in roots(registry, show) {
         walk(registry, root, "", "", &mut out, &mut seen);
     }
     out
@@ -828,7 +884,7 @@ mod tests {
     fn subagents_are_satellites_and_independents_come_last() {
         let scene = Scene::build(
             &registry(),
-            None,
+            Show::Everything,
             ZoomChoice::Fixed(Zoom::Cards),
             (500, 100),
         );
@@ -841,7 +897,7 @@ mod tests {
             gateway.satellites,
             [id(EXPLORE_HANDLERS), id(EXPLORE_TRACES)]
         );
-        assert_eq!(gateway.place.height, 6 + 2);
+        assert_eq!(gateway.place.height, 9 + 2);
         assert!(!scene.nodes.iter().any(|n| n.agent == id(EXPLORE_TRACES)));
         assert_eq!(scene.nodes[0].agent, id(TOWER));
         let infra = scene.nodes.iter().find(|n| n.agent == id(INFRA)).unwrap();
@@ -851,15 +907,20 @@ mod tests {
     #[test]
     fn the_automatic_zoom_picks_the_most_detail_that_fits() {
         let registry = registry();
-        let roomy = Scene::build(&registry, None, ZoomChoice::Auto, (162, 32));
+        let roomy = Scene::build(&registry, Show::Everything, ZoomChoice::Auto, (162, 32));
         assert_eq!(roomy.zoom, Zoom::Cards);
         assert!(roomy.automatic);
         assert!(roomy.width <= 162 && roomy.height <= 32);
-        let medium = Scene::build(&registry, None, ZoomChoice::Auto, (88, 24));
+        let medium = Scene::build(&registry, Show::Everything, ZoomChoice::Auto, (88, 24));
         assert_eq!(medium.zoom, Zoom::Compact);
-        let small = Scene::build(&registry, None, ZoomChoice::Auto, (40, 12));
+        let small = Scene::build(&registry, Show::Everything, ZoomChoice::Auto, (40, 12));
         assert_eq!(small.zoom, Zoom::Dots);
-        let fixed = Scene::build(&registry, None, ZoomChoice::Fixed(Zoom::Cards), (40, 12));
+        let fixed = Scene::build(
+            &registry,
+            Show::Everything,
+            ZoomChoice::Fixed(Zoom::Cards),
+            (40, 12),
+        );
         assert_eq!(fixed.zoom, Zoom::Cards);
         assert!(!fixed.automatic);
     }
@@ -868,7 +929,7 @@ mod tests {
     fn a_focused_subtree_has_one_root() {
         let scene = Scene::build(
             &registry(),
-            Some(id(INVOICING)),
+            Show::Tree(id(INVOICING)),
             ZoomChoice::Auto,
             (162, 32),
         );
@@ -888,7 +949,7 @@ mod tests {
     fn spatial_navigation_follows_the_picture() {
         let scene = Scene::build(
             &registry(),
-            None,
+            Show::Everything,
             ZoomChoice::Fixed(Zoom::Cards),
             (500, 100),
         );

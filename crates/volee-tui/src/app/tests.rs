@@ -101,9 +101,11 @@ fn the_most_urgent_agent_is_selected_and_previewed_first() {
     let effects = update(&mut model, Msg::Events(demo().events_until(start())));
     assert_eq!(model.selected, Some(id(INVOICE_TOOLS)));
     assert_eq!(effects, [Effect::LoadPreview(id(INVOICE_TOOLS))]);
+    // The list holds each tree under its root, the leads' first: the most
+    // urgent agent is selected wherever it is in it.
     assert_eq!(
-        names(&model)[..3],
-        ["invoice-tools", "invoice-schema", "explore-traces"]
+        names(&model)[..4],
+        ["tower", "invoicing", "invoice-schema", "invoice-tools"]
     );
 }
 
@@ -112,21 +114,19 @@ fn j_and_k_follow_the_list() {
     let mut model = model(120, 40);
     assert_eq!(
         press(&mut model, "j"),
-        [Effect::LoadPreview(id(INVOICE_SCHEMA))]
+        [Effect::LoadPreview(id(INVOICE_PAGE))]
     );
-    assert_eq!(model.selected, Some(id(INVOICE_SCHEMA)));
+    assert_eq!(model.selected, Some(id(INVOICE_PAGE)));
     press(&mut model, "k");
     assert_eq!(model.selected, Some(id(INVOICE_TOOLS)));
+    press(&mut model, "gg");
+    assert_eq!(model.selected, Some(id(TOWER)));
     press(&mut model, "k");
-    assert_eq!(
-        model.selected,
-        Some(id(INVOICE_TOOLS)),
-        "the top stays the top"
-    );
+    assert_eq!(model.selected, Some(id(TOWER)), "the top stays the top");
     press(&mut model, "G");
     assert_eq!(model.selected, model.rail.last().map(|entry| entry.agent));
     press(&mut model, "gg");
-    assert_eq!(model.selected, Some(id(INVOICE_TOOLS)));
+    assert_eq!(model.selected, Some(id(TOWER)));
 }
 
 #[test]
@@ -176,10 +176,10 @@ fn the_filter_narrows_the_list_live_and_escape_clears_it() {
     assert_eq!(
         names(&model),
         [
-            "invoice-tools",
+            "invoicing",
             "invoice-schema",
-            "invoice-page",
-            "invoicing"
+            "invoice-tools",
+            "invoice-page"
         ]
     );
     // While typing, letters are text, not commands.
@@ -243,7 +243,7 @@ fn the_keys_popup_the_leader_and_vim_keys() {
     assert_eq!(model.overlay, Some(Overlay::Keys));
     press(&mut model, "j");
     assert_eq!(model.overlay, None);
-    assert_eq!(model.selected, Some(id(INVOICE_SCHEMA)));
+    assert_eq!(model.selected, Some(id(INVOICE_PAGE)));
     // `? ?` lists every key.
     press(&mut model, "??");
     assert_eq!(model.overlay, Some(Overlay::Help { scroll: 0 }));
@@ -253,9 +253,9 @@ fn the_keys_popup_the_leader_and_vim_keys() {
     assert_eq!(model.pending_keys, [KeyCombo::char('g')]);
     key(&mut model, KeyCode::Esc);
     assert_eq!(model.pending_keys, Vec::<KeyCombo>::new());
-    assert_eq!(model.selected, Some(id(INVOICE_SCHEMA)), "nothing moved");
+    assert_eq!(model.selected, Some(id(INVOICE_PAGE)), "nothing moved");
     press(&mut model, "gg");
-    assert_eq!(model.selected, Some(id(INVOICE_TOOLS)));
+    assert_eq!(model.selected, Some(id(TOWER)));
     // The leader opens the launch dialog; `n` no longer does.
     press(&mut model, "n");
     assert!(model.overlay.is_none(), "n is the next match");
@@ -1587,7 +1587,9 @@ fn s_focuses_a_subtree_until_the_selection_leaves_it() {
     assert!(model.subtree.contains(&id(LATENCY_AUDIT)));
     press(&mut model, "'t");
     assert_eq!(model.subtree, []);
-    assert_eq!(model.scene.nodes.len(), 10);
+    // The tower's tree: its two missions and their five workers; the
+    // sessions started on their own are not in it.
+    assert_eq!(model.scene.nodes.len(), 8);
 }
 
 #[test]
@@ -1660,11 +1662,19 @@ fn small_screens_show_the_hierarchy_in_the_list() {
     );
     assert_eq!(model.layout.mode, Mode::Narrow);
     assert_eq!(model.focus, Pane::Rail);
-    assert_eq!(model.rail_order, RailOrder::Tree);
+    // The list holds every tree under its root, grouped by kind: the
+    // tower's first, under its group's title.
+    assert_eq!(model.rail_order, RailOrder::Groups);
     assert_eq!(names(&model)[..3], ["tower", "invoicing", "invoice-schema"]);
+    assert_eq!(model.rail[0].group, Some("LEADS"));
     assert_eq!(model.rail[2].guides, "│  ├─ ");
+    // A subtree entered with `s` is the list, as a tree.
+    press(&mut model, "'n");
+    press(&mut model, "s");
+    assert_eq!(model.rail_order, RailOrder::Tree);
+    assert_eq!(names(&model)[0], "invoicing");
     press(&mut model, "2");
-    assert_eq!(model.rail_order, RailOrder::Urgency);
+    assert_eq!(model.rail_order, RailOrder::Groups);
 }
 
 #[test]
@@ -1672,11 +1682,23 @@ fn the_selection_does_not_move_the_panels() {
     let mut model = model(120, 40);
     let layout = model.layout;
     let scene = model.scene.clone();
-    for keys in ["j", "j", "'t", "'p", "G"] {
+    // Within the tower's tree, the tree stays as it is.
+    assert_eq!(model.show, Show::Tree(id(TOWER)));
+    for keys in ["j", "j", "'t", "'p"] {
         press(&mut model, keys);
         assert_eq!(model.layout, layout);
         assert_eq!(model.scene, scene);
     }
+    // A session started on its own shows with the others like it; the
+    // panels stay where they are.
+    press(&mut model, "'i");
+    assert_eq!(model.layout, layout);
+    assert_eq!(model.show, Show::Loners);
+    let loners: Vec<AgentId> = model.scene.nodes.iter().map(|node| node.agent).collect();
+    assert_eq!(loners.len(), 2, "infra and broken-links");
+    assert!(loners.contains(&id(INFRA)));
+    press(&mut model, "'t");
+    assert_eq!(model.scene, scene, "back to the tower's tree");
 }
 
 #[test]

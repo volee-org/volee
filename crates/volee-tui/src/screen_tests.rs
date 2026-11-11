@@ -825,9 +825,13 @@ fn states_are_colored_by_the_theme() {
     let terminal = terminal(&model);
     let buffer = terminal.backend().buffer();
     let rail = model.layout.rail;
-    // The first row of the list is an agent that needs you.
-    let glyph = &buffer[(rail.x + 4, rail.y + 1)];
-    assert_eq!(glyph.symbol(), "!");
+    // The glyph of an agent that needs you, in the list: invoice-schema,
+    // under invoicing, under the tower, the group's title above them.
+    let row = rail.y + 1 + 3;
+    let glyph = (rail.x..rail.right())
+        .map(|x| &buffer[(x, row)])
+        .find(|cell| cell.symbol() == "!")
+        .expect("the row of an agent that needs you");
     assert_eq!(Some(glyph.fg), theme.style(StyleRole::StateNeedsInput).fg);
     assert_eq!(glyph.fg, Color::Yellow);
 }

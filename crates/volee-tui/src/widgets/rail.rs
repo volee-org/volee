@@ -1,9 +1,15 @@
-//! The list of agents, the most urgent first (or as a tree on small screens).
+//! The list of agents: each tree under its root, the roots grouped by kind
+//! (leads, missions, sessions in a terminal, sessions in the background),
+//! one row per agent, in the agent's color.
 //!
 //! ```text
 //! ╭ Agents ─────────────────────╮
-//! │ s ! invoice-schema    2 min │
-//! │     needs you · billing › … │
+//! │ LEADS                       │
+//! │▌t ▸ tower            24 min │
+//! │ n ├─ · invoicing     14 min │
+//! │ s │  ├─ ! invoice-s…  2 min │
+//! │ TERMINALS                   │
+//! │ i · infra            25 min │
 //! ```
 
 use ratatui::buffer::Buffer;
@@ -12,8 +18,10 @@ use ratatui::style::Modifier;
 use ratatui::text::Span;
 use volee_core::time::Elapsed;
 
-use super::{panel, place_label, put_spans, state_glyph, truncated};
-use crate::app::{Model, Pane, RailEntry, RailOrder};
+use super::card::CardContext;
+use super::{panel, put_spans, state_glyph, truncated};
+use crate::app::{Model, Pane, RailEntry, RailOrder, RailRow};
+use crate::text;
 use crate::theme::StyleRole;
 
 /// Draws the list in `area`.
@@ -49,22 +57,34 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
         super::placeholder(model, message, inner, buf);
         return;
     }
-    let height = model.rail_row_height();
-    for (row, entry) in (0u16..).zip(model.rail.iter().skip(model.rail_offset)) {
-        let y = inner.y + row * height;
-        if y >= inner.bottom() {
-            break;
+    let rows = model.rail_rows();
+    let context = CardContext::new(model);
+    for (y, row) in (inner.y..inner.bottom()).zip(rows.iter().skip(model.rail_offset)) {
+        let line = Rect::new(inner.x, y, inner.width, 1);
+        match row {
+            RailRow::Group(title) => {
+                let style = theme.style(StyleRole::TextDim).add_modifier(Modifier::BOLD);
+                put_spans(
+                    buf,
+                    line.x + 1,
+                    y,
+                    &[Span::styled(*title, style)],
+                    line.width.saturating_sub(1),
+                );
+            }
+            RailRow::Entry(index) => {
+                if let Some(entry) = model.rail.get(*index) {
+                    draw_entry(model, entry, line, &context, buf);
+                }
+            }
         }
-        let rows = height.min(inner.bottom() - y);
-        draw_entry(model, entry, Rect::new(inner.x, y, inner.width, rows), buf);
     }
     // Arrows on the border tell that the list goes on.
     let arrow = theme.style(StyleRole::TextDim);
     if model.rail_offset > 0 {
         buf.set_string(area.right().saturating_sub(3), area.y, "▲", arrow);
     }
-    let shown = usize::from(inner.height / height.max(1));
-    if model.rail_offset + shown < model.rail.len() {
+    if model.rail_offset + usize::from(inner.height) < rows.len() {
         buf.set_string(
             area.right().saturating_sub(3),
             area.bottom().saturating_sub(1),
@@ -74,9 +94,15 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
     }
 }
 
-/// One entry: letter, state, name and time in state, then (when there are
-/// two rows) the state's word and where the agent works.
-fn draw_entry(model: &Model, entry: &RailEntry, area: Rect, buf: &mut Buffer) {
+/// One agent: its jump letter, its place in its tree, its state, its name in
+/// its color, and how long it has been in its state.
+fn draw_entry(
+    model: &Model,
+    entry: &RailEntry,
+    area: Rect,
+    context: &CardContext<'_>,
+    buf: &mut Buffer,
+) {
     let theme = &model.theme;
     let dim = theme.style(StyleRole::TextDim);
     let Some(agent) = model.registry.agent(entry.agent) else {
@@ -100,30 +126,82 @@ fn draw_entry(model: &Model, entry: &RailEntry, area: Rect, buf: &mut Buffer) {
         .map_or_else(|| " ".to_owned(), |letter| letter.to_string());
     let elapsed = Elapsed::between(agent.state_since, model.now).to_string();
     let elapsed_width = u16::try_from(elapsed.len()).unwrap_or(0);
-    let mut name_style = theme.role(agent.role);
+    let mut name_style = context.accent(agent);
     if selected {
         name_style = name_style.add_modifier(Modifier::BOLD);
     }
     let line = [
         Span::styled(letter, letter_style),
         Span::raw(" "),
-        Span::styled(entry.guides.as_str(), theme.style(StyleRole::Edge)),
+        Span::styled(compact_guides(&entry.guides), theme.style(StyleRole::Edge)),
         Span::styled(state_glyph(&agent.state), theme.state(&agent.state)),
         Span::raw(" "),
         Span::styled(agent.name.as_str(), name_style),
     ];
-    let room = area.width.saturating_sub(2 + elapsed_width + 1);
-    let used = put_spans(buf, area.x + 1, area.y, &truncated(&line, room), room);
-    if area.width > used + elapsed_width + 2 {
+    let width: usize = line.iter().map(|span| text::width(&span.content)).sum();
+    let width = u16::try_from(width).unwrap_or(u16::MAX);
+    // The time in its state when the whole name fits with it; the name
+    // first when both do not.
+    if width + 2 + elapsed_width < area.width {
+        put_spans(buf, area.x + 1, area.y, &line, width);
         buf.set_string(area.right() - elapsed_width - 1, area.y, &elapsed, dim);
+    } else {
+        // The name to the edge: it matters more than the margin.
+        let room = area.width.saturating_sub(1);
+        put_spans(buf, area.x + 1, area.y, &truncated(&line, room), room);
     }
-    if area.height > 1 {
-        let second = [
-            Span::styled(agent.state.label(), theme.state(&agent.state)),
-            Span::styled(" · ", dim),
-            Span::styled(place_label(model, agent), dim),
-        ];
-        let room = area.width.saturating_sub(5);
-        put_spans(buf, area.x + 4, area.y + 1, &truncated(&second, room), room);
+}
+
+/// Tree guides two cells a level instead of three: the list is narrow.
+fn compact_guides(guides: &str) -> String {
+    guides
+        .replace("├─ ", "├ ")
+        .replace("└─ ", "└ ")
+        .replace("│  ", "│ ")
+        .replace("   ", "  ")
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::buffer::Buffer;
+    use volee_core::event::{Event, EventKind};
+
+    use super::*;
+    use crate::app::{Msg, update};
+    use crate::demo::INFRA;
+    use crate::test_support::{id, model, start};
+
+    fn row_of(buffer: &Buffer, area: Rect, name_start: &str) -> String {
+        (area.y..area.bottom())
+            .map(|y| {
+                (area.x..area.right())
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .find(|row| row.contains(name_start))
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_long_name_shows_whole_when_the_time_gives_way() {
+        // A list as narrow as next to the right column, 160 columns wide.
+        let mut model = model(160, 45);
+        let name = "journey-terminal-430872";
+        let renamed = Event::new(
+            start(),
+            EventKind::AgentRenamed {
+                agent: id(INFRA),
+                name: name.to_owned(),
+            },
+        );
+        update(&mut model, Msg::Events(vec![renamed]));
+        let area = model.layout.rail;
+        let mut buffer = Buffer::empty(area);
+        render(&model, area, &mut buffer);
+        let row = row_of(&buffer, area, "journey-terminal");
+        assert!(row.contains(name), "{row}");
+        // A name that leaves room keeps its time in state.
+        let tower = row_of(&buffer, area, "tower");
+        assert!(tower.contains("min"), "{tower}");
     }
 }

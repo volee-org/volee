@@ -40,7 +40,7 @@ border = "surface1"
 "border.focused" = "lavender"
 selection = { fg = "text", bg = "surface0", modifiers = ["bold"] }
 "card.selected" = { fg = "lavender", bg = "surface0", modifiers = ["bold"] }
-topbar = { fg = "subtext0", bg = "mantle" }
+topbar = "subtext0"
 "topbar.brand" = { fg = "crust", bg = "mauve", modifiers = ["bold"] }
 tab = "overlay1"
 "tab.active" = { fg = "text", bg = "surface0", modifiers = ["bold"] }
@@ -72,7 +72,16 @@ edge = "surface2"
 "checks.failing" = "red"
 "checks.pending" = "yellow"
 sparkline = "sapphire"
-"hint.key" = { fg = "lavender", modifiers = ["bold"] }
+"agent.1" = "blue"
+"agent.2" = "sapphire"
+"agent.3" = "teal"
+"agent.4" = "lavender"
+"agent.5" = "pink"
+"agent.6" = "flamingo"
+"agent.7" = "maroon"
+"agent.8" = "sky"
+"agent.9" = "green"
+"hint.key" = { fg = "text", bg = "surface1", modifiers = ["bold"] }
 "hint.text" = "overlay1"
 notice = { fg = "text", bg = "surface0" }
 "notice.error" = { fg = "crust", bg = "red", modifiers = ["bold"] }

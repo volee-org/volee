@@ -36,7 +36,7 @@ use crate::source::{
 use crate::text;
 use crate::theme::Theme;
 use crate::tools::{Tool, ToolMenu};
-use crate::views::hierarchy::{self, Direction, Scene, SceneKey, ZoomChoice};
+use crate::views::hierarchy::{self, Direction, Scene, SceneKey, Show, ZoomChoice};
 use crate::views::network::{self, NetworkState};
 use crate::views::repos::ReposState;
 use crate::views::timeline::TimelineState;
@@ -62,7 +62,7 @@ impl Tab {
     /// The tab's name.
     pub(crate) const fn title(self) -> &'static str {
         match self {
-            Self::Hierarchy => "Hierarchy",
+            Self::Hierarchy => "Tree",
             Self::Network => "Network",
             Self::Repos => "Repos",
             Self::Timeline => "Timeline",
@@ -295,23 +295,49 @@ pub(crate) struct PreviewState {
     pub(crate) scroll: u16,
 }
 
-/// One row of the agents list.
+/// One agent of the agents list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RailEntry {
     /// The agent.
     pub(crate) agent: AgentId,
     /// Tree guides in front of the name, in tree order (`├─ `).
     pub(crate) guides: String,
+    /// The title of the group this agent opens, on a row of its own above
+    /// it.
+    pub(crate) group: Option<&'static str>,
+}
+
+/// One row of the agents list: the title of a group, or an agent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RailRow {
+    /// The title of a group.
+    Group(&'static str),
+    /// The agent at this index of the list.
+    Entry(usize),
 }
 
 /// How the agents list is sorted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum RailOrder {
-    /// Who needs you first (the domain's urgency order).
+    /// Each tree under its root, the roots grouped by kind (leads,
+    /// missions, sessions in a terminal, sessions in the background), the
+    /// most urgent first in each group.
     #[default]
-    Urgency,
-    /// As a tree, when there is no room for the hierarchy view.
+    Groups,
+    /// The subtree the person entered, as a tree, when there is no room for
+    /// the tree view.
     Tree,
+}
+
+/// The group of the agents list a tree goes in, by its root: its order
+/// and its title.
+fn rail_group(root: &Agent) -> (u8, &'static str) {
+    match root.role {
+        Role::Lead => (0, "LEADS"),
+        Role::Coordinator | Role::Worker | Role::Subagent => (1, "MISSIONS"),
+        Role::Independent if root.location == Location::Background => (3, "BACKGROUND"),
+        Role::Independent => (2, "TERMINALS"),
+    }
 }
 
 /// Something the mouse can hit.
@@ -680,8 +706,13 @@ pub(crate) struct Model {
     pub(crate) rail_order: RailOrder,
     /// The first visible row of the list.
     pub(crate) rail_offset: usize,
+    /// What happened lately, for the journal.
+    pub(crate) journal: crate::journal::Journal,
     /// The hierarchy, placed.
     pub(crate) scene: Scene,
+    /// What the tree view shows: the selected agent's tree, or the agents
+    /// on their own.
+    pub(crate) show: Show,
     /// What the scene was built from.
     scene_key: Option<SceneKey>,
     /// The top left of the hierarchy's visible window, in scene cells.
@@ -754,7 +785,9 @@ impl Model {
             rail: Vec::new(),
             rail_order: RailOrder::default(),
             rail_offset: 0,
+            journal: crate::journal::Journal::default(),
             scene: Scene::default(),
+            show: Show::default(),
             scene_key: None,
             scene_offset: (0, 0),
             reveal_selection: true,
@@ -966,6 +999,7 @@ impl Model {
                 continue;
             }
             self.history.record(&event);
+            self.journal.record(&event);
             if let EventKind::MessagePosted { message } = &event.kind {
                 self.pulses.record(message, self.now);
             }
@@ -999,10 +1033,13 @@ impl Model {
     fn relayout(&mut self) {
         let area = Rect::new(0, 0, self.size.0, self.size.1);
         self.layout = ScreenLayout::compute(area, self.tab == Tab::Hierarchy);
-        self.rail_order = if self.layout.mode == Mode::Narrow && self.tab == Tab::Hierarchy {
+        self.rail_order = if self.layout.mode == Mode::Narrow
+            && self.tab == Tab::Hierarchy
+            && !self.subtree.is_empty()
+        {
             RailOrder::Tree
         } else {
-            RailOrder::Urgency
+            RailOrder::Groups
         };
         if self.layout.view.is_none() && self.focus == Pane::View {
             self.focus = Pane::Rail;
@@ -1014,7 +1051,14 @@ impl Model {
             .selected
             .is_some_and(|id| self.rail.iter().any(|entry| entry.agent == id));
         if !selected_visible {
-            let first = self.rail.first().map(|entry| entry.agent);
+            // The most urgent agent of the list: who needs you, first.
+            let listed = |id: &AgentId| self.rail.iter().any(|entry| entry.agent == *id);
+            let first = self
+                .registry
+                .agents_by_urgency()
+                .into_iter()
+                .map(|agent| agent.id)
+                .find(|id| listed(id));
             if first.is_some() && first != self.selected {
                 self.selected = first;
                 self.reveal_selection = true;
@@ -1022,20 +1066,21 @@ impl Model {
                 self.selected = None;
             }
         }
+        self.show = Show::of(&self.registry, self.subtree.last().copied(), self.selected);
         if let Some(view) = self.layout.view
             && self.tab == Tab::Hierarchy
         {
             let inner = inner(view);
             let key = hierarchy::scene_key(
                 &self.registry,
-                self.subtree.last().copied(),
+                self.show,
                 self.zoom,
                 (inner.width, inner.height),
             );
             if self.scene_key.as_ref() != Some(&key) {
                 self.scene = Scene::build(
                     &self.registry,
-                    self.subtree.last().copied(),
+                    self.show,
                     self.zoom,
                     (inner.width, inner.height),
                 );
@@ -1076,53 +1121,100 @@ impl Model {
         }
     }
 
-    /// Rows of the agents list, filtered.
+    /// The agents of the list, filtered: each tree under its root, the
+    /// roots grouped by kind and the most urgent first in each group.
     fn rail_entries(&self) -> Vec<RailEntry> {
-        match self.rail_order {
-            RailOrder::Urgency => self
-                .registry
-                .agents_by_urgency()
+        let registry = &self.registry;
+        let shown = |id: &AgentId| registry.agent(*id).is_some_and(|a| self.matches(a));
+        if self.rail_order == RailOrder::Tree {
+            return hierarchy::outline(registry, self.subtree.last().copied())
                 .into_iter()
-                .filter(|agent| self.matches(agent))
-                .map(|agent| RailEntry {
+                .filter(|(id, _)| shown(id))
+                .map(|(agent, guides)| RailEntry {
+                    agent,
+                    guides,
+                    group: None,
+                })
+                .collect();
+        }
+        let rank: std::collections::HashMap<AgentId, usize> = registry
+            .agents_by_urgency()
+            .iter()
+            .enumerate()
+            .map(|(index, agent)| (agent.id, index))
+            .collect();
+        let urgency = |agent: &Agent| rank.get(&agent.id).copied().unwrap_or(usize::MAX);
+        let mut roots = registry.roots();
+        roots.sort_by_key(|root| (rail_group(root).0, urgency(root)));
+        let mut entries: Vec<RailEntry> = Vec::new();
+        let mut placed = std::collections::BTreeSet::new();
+        let mut current = None;
+        for root in roots {
+            let (order, title) = rail_group(root);
+            for (agent, guides) in hierarchy::outline(registry, Some(root.id)) {
+                if !placed.insert(agent) || !shown(&agent) {
+                    continue;
+                }
+                let group = (current != Some(order)).then_some(title);
+                current = Some(order);
+                entries.push(RailEntry {
+                    agent,
+                    guides,
+                    group,
+                });
+            }
+        }
+        // An agent no tree reaches (its parents launched each other) still
+        // has its row, at the end.
+        for agent in registry.agents_by_urgency() {
+            if placed.insert(agent.id) && self.matches(agent) {
+                entries.push(RailEntry {
                     agent: agent.id,
                     guides: String::new(),
-                })
-                .collect(),
-            RailOrder::Tree => hierarchy::outline(&self.registry, self.subtree.last().copied())
-                .into_iter()
-                .filter(|(id, _)| self.registry.agent(*id).is_some_and(|a| self.matches(a)))
-                .map(|(agent, guides)| RailEntry { agent, guides })
-                .collect(),
+                    group: None,
+                });
+            }
         }
+        entries
     }
 
-    /// Rows per entry of the list.
-    pub(crate) fn rail_row_height(&self) -> u16 {
-        let rows = inner(self.layout.rail).height;
-        let entries = u16::try_from(self.rail.len()).unwrap_or(u16::MAX);
-        if self.rail_order == RailOrder::Urgency && entries.saturating_mul(2) <= rows {
-            2
-        } else {
-            1
+    /// The rows of the agents list: each group's title, then its agents.
+    pub(crate) fn rail_rows(&self) -> Vec<RailRow> {
+        let mut rows = Vec::with_capacity(self.rail.len() + 4);
+        for (index, entry) in self.rail.iter().enumerate() {
+            if let Some(group) = entry.group {
+                rows.push(RailRow::Group(group));
+            }
+            rows.push(RailRow::Entry(index));
         }
+        rows
     }
 
+    /// The first row of the list on screen: the selected agent stays in
+    /// sight, with its group's title when it opens the group.
     fn fit_rail_offset(&self) -> usize {
-        let visible = usize::from(inner(self.layout.rail).height / self.rail_row_height().max(1));
+        let rows = self.rail_rows();
+        let visible = usize::from(inner(self.layout.rail).height);
         let Some(index) = self
             .selected
             .and_then(|id| self.rail.iter().position(|entry| entry.agent == id))
         else {
             return 0;
         };
+        let Some(row) = rows.iter().position(|row| *row == RailRow::Entry(index)) else {
+            return 0;
+        };
+        let top = match row.checked_sub(1).map(|above| rows[above]) {
+            Some(RailRow::Group(_)) => row - 1,
+            _ => row,
+        };
         let mut offset = self
             .rail_offset
-            .min(self.rail.len().saturating_sub(visible.max(1)));
-        if index < offset {
-            offset = index;
-        } else if visible > 0 && index >= offset + visible {
-            offset = index + 1 - visible;
+            .min(rows.len().saturating_sub(visible.max(1)));
+        if top < offset {
+            offset = top;
+        } else if visible > 0 && row >= offset + visible {
+            offset = row + 1 - visible;
         }
         offset
     }
@@ -1182,20 +1274,24 @@ impl Model {
             hits.push((area, Hit::Tab(tab)));
         }
         let rail = inner(layout.rail);
-        let height = self.rail_row_height();
-        for (row, entry) in self.rail.iter().skip(self.rail_offset).enumerate() {
-            let y = rail.y
-                + u16::try_from(row)
-                    .unwrap_or(u16::MAX)
-                    .saturating_mul(height);
-            if y >= rail.bottom() {
-                break;
+        for (y, row) in
+            (rail.y..rail.bottom()).zip(self.rail_rows().into_iter().skip(self.rail_offset))
+        {
+            if let RailRow::Entry(index) = row {
+                hits.push((
+                    Rect::new(rail.x, y, rail.width, 1),
+                    Hit::Agent(self.rail[index].agent, Pane::Rail),
+                ));
             }
-            let rows = height.min(rail.bottom() - y);
-            hits.push((
-                Rect::new(rail.x, y, rail.width, rows),
-                Hit::Agent(entry.agent, Pane::Rail),
-            ));
+        }
+        if let Some(area) = layout.for_you {
+            hits.push((area, Hit::Pane(Pane::Rail)));
+            for (rect, agent) in crate::widgets::for_you::targets(self, area) {
+                hits.push((rect, Hit::Agent(agent, Pane::Rail)));
+            }
+        }
+        if let Some(area) = layout.journal {
+            hits.push((area, Hit::Pane(Pane::Rail)));
         }
         if let Some(view) = layout.view {
             let area = inner(view);

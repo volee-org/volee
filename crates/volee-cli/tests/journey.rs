@@ -435,7 +435,7 @@ fn a_program_run_under_volee_is_an_agent_here_and_in_the_interface() {
     // The leave key takes the keys back: the screen of an agent in a host
     // stays, live, and `z` goes back to the list.
     terminal.key("q", true);
-    terminal.sees("z back");
+    terminal.sees("z  back");
     assert!(
         !terminal.screen().contains("your keys go to ledger"),
         "the keys are still the program's:\n{}",

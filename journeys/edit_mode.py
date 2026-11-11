@@ -30,7 +30,9 @@ def by_keyboard(j, name):
     j.keys("z")
     j.check("z shows the agent's screen live",
             j.sees("Screen · " + name + " · live") and j.said("ready", timeout=15))
-    j.check("the full-screen view offers to open the agent", "enter open" in j.screen())
+    # The hint draws the key as a key: room around its name.
+    j.check("the full-screen view offers to open the agent",
+            " ".join(j.screen().split()).count("enter open") > 0)
 
     j.keys("i")
     editing = "your keys go to " + name

@@ -147,7 +147,10 @@ fn render_row(model: &Model, row: Row, area: Rect, buf: &mut Buffer) {
         && contexts.contains(&Context::Global)
         && let Some(esc) = model.keymap.first_key(Context::Global, Action::Back)
     {
-        let back = vec![Span::styled(esc.short(), key), Span::styled(" back", words)];
+        let back = vec![
+            Span::styled(format!(" {} ", esc.short()), key),
+            Span::styled(" back", words),
+        ];
         groups.insert(0, (Some(Action::Back), back));
     }
     match row {
@@ -160,15 +163,13 @@ fn render_row(model: &Model, row: Row, area: Rect, buf: &mut Buffer) {
         .iter()
         .position(|(action, _)| *action == Some(Action::Help))
         .map(|index| groups.remove(index).1);
-    let help_width = help.as_ref().map_or(0, |group| {
-        u16::try_from(
-            group
-                .iter()
-                .map(|span| text::width(&span.content))
-                .sum::<usize>(),
-        )
-        .unwrap_or(0)
-    });
+    let help_width = help.as_deref().map_or(0, spans_width);
+    let (x, width) =
+        if row != Row::Actions && model.overlay.is_none() && contexts.contains(&Context::Global) {
+            view_badge(model, x, area.y, width, buf)
+        } else {
+            (x, width)
+        };
     let room = width.saturating_sub(help_width + 2);
     let rest = groups.into_iter().map(|(_, group)| group);
     put_spans(buf, x, area.y, &join(rest, usize::from(room)), room);
@@ -183,6 +184,34 @@ fn render_row(model: &Model, row: Row, area: Rect, buf: &mut Buffer) {
             help_width,
         );
     }
+}
+
+/// The cells some spans take.
+fn spans_width(spans: &[Span<'_>]) -> u16 {
+    u16::try_from(
+        spans
+            .iter()
+            .map(|span| text::width(&span.content))
+            .sum::<usize>(),
+    )
+    .unwrap_or(u16::MAX)
+}
+
+/// The view on screen, as a badge at the start of the main screen's first
+/// row of hints. Returns where the hints start after it, and their room.
+fn view_badge(model: &Model, x: u16, y: u16, width: u16, buf: &mut Buffer) -> (u16, u16) {
+    let badge = format!(" {} ", model.tab.title().to_uppercase());
+    let used = put_spans(
+        buf,
+        x,
+        y,
+        &[Span::styled(
+            badge,
+            model.theme.style(StyleRole::TopbarBrand),
+        )],
+        width,
+    );
+    (x + used + 2, width.saturating_sub(used + 2))
 }
 
 /// Edit mode: where the keys go, and the key that gives them back.
@@ -342,8 +371,9 @@ fn groups(model: &Model, contexts: &[Context]) -> Vec<(Option<Action>, Vec<Span<
         .hints(contexts)
         .into_iter()
         .map(|hint| {
+            // A key drawn as a key: a cap with room around its name.
             let spans = vec![
-                Span::styled(hint.keys, theme.style(StyleRole::HintKey)),
+                Span::styled(format!(" {} ", hint.keys), theme.style(StyleRole::HintKey)),
                 Span::styled(format!(" {}", hint.text), theme.style(StyleRole::HintText)),
             ];
             (hint.action, spans)
