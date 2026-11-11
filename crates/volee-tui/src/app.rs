@@ -2554,6 +2554,9 @@ fn on_overlay_mouse(model: &mut Model, mouse: MouseEvent, effects: &mut Vec<Effe
     let context = match model.overlay {
         Some(Overlay::Help { .. }) => Context::Help,
         Some(Overlay::Diff(_)) => Context::Diff,
+        // The full-screen view reads back through what the agent wrote, as
+        // the wheel does in edit mode for a program without the mouse.
+        Some(Overlay::Screen) => Context::Screen,
         Some(Overlay::Inbox(_)) => {
             for _ in 0..2 {
                 crate::inbox::perform(model, action, effects);

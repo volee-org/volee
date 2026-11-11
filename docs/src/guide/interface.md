@@ -483,8 +483,9 @@ reaches the agent; to use another key, set `leave` in
 
 The mouse goes to the agent too, when its program asked for it (Claude Code
 does): clicks, drags and the wheel land on the agent's own cells. For a
-program that did not ask, the wheel scrolls back through what it wrote.
-A click on the frame around the screen does nothing.
+program that did not ask, the wheel scrolls back through what it wrote,
+as it does in the full-screen view outside edit mode. A click on the frame
+around the screen does nothing.
 
 In edit mode the agent's terminal takes the size of the panel, so that
 its screen is drawn cell for cell, cursor included, and follows when your

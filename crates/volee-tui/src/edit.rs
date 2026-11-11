@@ -897,6 +897,40 @@ mod tests {
     }
 
     #[test]
+    fn the_wheel_reads_back_in_the_full_screen_view() {
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "z");
+        answer(&mut model, 1, true);
+        // More lines than the screen holds: the first ones leave it.
+        let lines = "one more line\r\n".repeat(80);
+        update(
+            &mut model,
+            Msg::LiveUpdate {
+                link: 1,
+                update: Update::Output(lines.into_bytes()),
+            },
+        );
+        let wheel = |model: &mut Model, kind| {
+            update(
+                model,
+                Msg::Mouse(MouseEvent {
+                    kind,
+                    column: 20,
+                    row: 10,
+                    modifiers: KeyModifiers::NONE,
+                }),
+            )
+        };
+        wheel(&mut model, MouseEventKind::ScrollUp);
+        assert_eq!(model.live.as_ref().unwrap().scroll, 2);
+        wheel(&mut model, MouseEventKind::ScrollUp);
+        assert_eq!(model.live.as_ref().unwrap().scroll, 4);
+        wheel(&mut model, MouseEventKind::ScrollDown);
+        wheel(&mut model, MouseEventKind::ScrollDown);
+        assert_eq!(model.live.as_ref().unwrap().scroll, 0);
+    }
+
+    #[test]
     fn a_host_that_does_not_answer_is_said_plainly() {
         let (mut model, agent) = hosted_model(120, 40);
         press(&mut model, "i");
