@@ -561,13 +561,29 @@ shows Claude Code's own agents view there, as in any terminal.
 A Claude Code session typed in a terminal of its own, in a tab of your
 terminal application with no multiplexer around it, is held by that
 terminal: nothing else can show it or type in it. `enter` on it does not
-fail. The bottom line says what to do, and volee waits:
+fail. A window says what to do, and volee waits:
 
 ```text
-dashboard runs in its own terminal: press ← on its empty prompt there, and volee opens it here.   esc cancel
+╭ Open dashboard ────────────────────────────────────────────────╮
+│ It runs in a terminal of its own: only that terminal can show  │
+│ it. Claude Code hands it over at one key, and nothing stops:   │
+│                                                                │
+│  1  Go to the terminal where it runs:                          │
+│     claude, in /home/you/code/dashboard                        │
+│  2  Press the left arrow key there, with nothing typed in its  │
+│     input box. Claude Code shows ← for agents under it.        │
+│  3  Come back here: volee opens it by itself.                  │
+│                                                                │
+│ The conversation moves to Claude Code's background, where its  │
+│ work goes on. Its terminal still shows it: Escape twice there. │
+│                                                                │
+│ volee is waiting for that key.                      esc cancel │
+╰────────────────────────────────────────────────────────────────╯
 ```
 
-Press the left arrow there, while the session rests or while it works:
+A terminal too small for the window has the same on its bottom line, in one
+sentence. Press the left arrow there, while the session rests or while it
+works:
 Claude Code moves the conversation to the background, where a turn under
 way goes on, and volee opens it by itself, on the same row. `esc` gives
 the wait up, and it ends with the session if you quit it there. From then

@@ -9,8 +9,8 @@ use crate::app::{Model, Overlay, Pane, Tab};
 use crate::theme::StyleRole;
 use crate::views::{hierarchy, network, repos, timeline};
 use crate::widgets::{
-    composer, detail, diff, help, hints, inbox, keys, launch, palette, panel, rail, theme_picker,
-    tiles, tools, top_bar,
+    composer, detail, diff, handover, help, hints, inbox, keys, launch, palette, panel, rail,
+    theme_picker, tiles, tools, top_bar,
 };
 
 /// Draws the whole screen from the model.
@@ -96,7 +96,9 @@ pub(crate) fn view(model: &Model, frame: &mut Frame<'_>) {
         Some(Overlay::Launch(dialog)) => launch::render(model, dialog, area, buf),
         Some(Overlay::Screen) => cursor = detail::render_full_screen(model, area, buf),
         Some(Overlay::Wall) => tiles::render(model, area, buf),
-        None => {}
+        // While volee waits for a session to leave its terminal, what the
+        // person must do there is spelled out (ADR 0034).
+        None => handover::render(model, area, buf),
     }
     if !model.pending_keys.is_empty() {
         keys::render_pending(model, area, buf);
