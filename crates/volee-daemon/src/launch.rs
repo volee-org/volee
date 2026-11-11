@@ -715,10 +715,14 @@ fn coordinator_prompt(mission: &Mission) -> String {
 pub(crate) fn coordinator_instructions(mission: &Mission) -> String {
     let delivery = match mission.kind {
         MissionKind::Change => {
-            "This is a change mission: each worker commits on its own branch. In a repository \
-             with a remote, it pushes the branch and opens a draft pull request, and volee \
-             counts it as delivered once its commits are pushed and its pull request is open. \
-             In a repository without a remote, work committed on a clean worktree is delivered."
+            "This is a change mission: each worker commits on its own branch. How work is \
+             delivered is volee's rule, whatever the goal says of pushes and pull requests. In \
+             a repository with a remote, a worker pushes its branch and opens a draft pull \
+             request, and volee counts it as delivered once its commits are pushed and its \
+             pull request is open. In a repository without a remote, work committed on a clean \
+             worktree is delivered, and volee merges it there once the human approved: a \
+             missing remote is not a blocker and not a question for the human. Never have a \
+             remote added."
         }
         MissionKind::Analysis => {
             "This is an analysis mission: workers must not change code. Each one investigates \
@@ -1366,13 +1370,15 @@ pub(crate) fn worker_instructions(
     };
     let delivery = match mission.kind {
         MissionKind::Change => {
-            "When your work is done, commit it. If the repository has a remote (`git remote` \
-             prints one): push the branch, open a draft pull request (for example `gh pr create \
-             --draft --fill`), then call `report` with the pull request's link. If it has none: \
-             call `report` once everything is committed. volee checks your commits, and with a \
-             remote that they are pushed and the pull request is open, before it counts your \
-             work as delivered. Never merge your own work: volee does, once the human \
-             approved."
+            "When your work is done, commit it. How to deliver it is volee's rule, whatever \
+             your task says of pushes and pull requests. If the repository has a remote (`git \
+             remote` prints one): push the branch, open a draft pull request (for example `gh \
+             pr create --draft --fill`), then call `report` with the pull request's link. If it \
+             has none: do not push and add no remote; your committed work is your delivery \
+             there, and a missing remote is not a blocker: call `report` once everything is \
+             committed. volee checks your commits, and with a remote that they are pushed and \
+             the pull request is open, before it counts your work as delivered. Never merge \
+             your own work: volee does, once the human approved."
         }
         MissionKind::Analysis => {
             "This mission delivers a report, not code: do not change files. When you are done, \

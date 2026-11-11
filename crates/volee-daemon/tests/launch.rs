@@ -654,6 +654,10 @@ async fn a_new_mission_gets_a_coordinator_that_cannot_edit() {
         assert!(!instructions.contains(gone), "{gone}");
     }
     assert!(instructions.contains("In a repository without a remote"));
+    assert!(
+        instructions.contains("a missing remote is not a blocker and not a question for the human")
+    );
+    assert!(instructions.contains("whatever the goal says of pushes and pull requests"));
 }
 
 #[tokio::test]
@@ -697,6 +701,11 @@ async fn a_mission_worker_reports_to_its_coordinator() {
     let instructions = spec.append_system_prompt.unwrap();
     assert!(instructions.contains("worker of the volee mission \"Invoicing\""));
     assert!(instructions.contains("pull request"));
+    // Without a remote it commits and reports: that is not a blocker,
+    // whatever its task says of pushes.
+    assert!(instructions.contains("whatever your task says of pushes and pull requests"));
+    assert!(instructions.contains("do not push and add no remote"));
+    assert!(instructions.contains("a missing remote is not a blocker"));
     // The mission now runs: it has a worker.
     assert_eq!(
         registry.mission(created.mission).unwrap().status,

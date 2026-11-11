@@ -107,6 +107,23 @@ class Repo:
         return problem
 
 
+def select_report(j, title):
+    """In the messages window, moves the selection to the report of the mission
+    `title`, among the questions that wait for the person (they are listed oldest
+    first, as `volee msg questions` prints them), and says whether it is selected."""
+    asked = [block for block in j.volee_run("msg", "questions").stdout.split("\nmsg_")]
+    ready = 'Mission "{}" is ready to merge.'.format(title)
+    index = next((n for n, block in enumerate(asked) if ready in block), None)
+    if index is None:
+        return False
+    for _ in range(index):
+        j.keys("j", 0.3)
+    lines = j.screen().splitlines()
+    chosen = next((n for n, text in enumerate(lines) if "▌?" in text), None)
+    return (chosen is not None and chosen + 1 < len(lines)
+            and "is ready to merge" in lines[chosen + 1])
+
+
 def missions(j):
     try:
         return json.loads(j.volee_run("mission", "ls", "--all", "--json").stdout or "[]")
@@ -226,15 +243,27 @@ def main():
 
         # ---- the person says ok merge, with two keys -----------------------------
         j.keys("I", 1.5)
-        j.check("the messages open on the report, with its answers numbered",
-                j.sees("1 question for you", "is ready to merge", "1 ok merge", "2 no",
-                       timeout=15))
+        j.check("the messages open with the report, its answers numbered",
+                j.sees("for you", "is ready to merge", "1 ok merge", "2 no", timeout=15))
+        j.check("the report is the only question the mission asks the person",
+                j.sees("1 question for you", timeout=2),
+                next((text.strip(" │╭╮─") for text in j.screen().splitlines()
+                      if "Messages ·" in text), ""))
+        # Whatever else waits, the answer goes to the report: the journey selects it,
+        # and reads the confirmation before it sends anything.
+        j.check("the report is selected", select_report(j, title))
         j.show("the report, waiting for the person")
         j.keys("1", 1.0)
         prompt = 'Answer "ok merge" to ' + coordinator + "?"
-        j.check("1 asks before anything is sent", j.sees(prompt, timeout=5))
+        asks = j.sees(prompt, timeout=5)
+        j.check("1 asks before anything is sent", asks)
         j.check("still nothing is merged",
                 all(repo.head() == repo.start for repo in repos))
+        if not asks:
+            # What is offered is not the approval: nothing is sent.
+            j.keys("n", 0.5)
+            j.show("not the approval")
+            return
         approved_at = time.time()
         j.keys("y", 0.3)
         j.check("y sends the approval", j.sees("Message sent to " + coordinator, timeout=10))
