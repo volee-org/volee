@@ -436,13 +436,7 @@ impl PreviewScreen {
                 Line::Fold(rows) => {
                     // The one line that is volee's own, in its own style.
                     let style = theme.style(StyleRole::TextDim);
-                    buf.set_stringn(
-                        area.x,
-                        y,
-                        fold_text(*rows),
-                        usize::from(area.width),
-                        style,
-                    );
+                    buf.set_stringn(area.x, y, fold_text(*rows), usize::from(area.width), style);
                     continue;
                 }
             };
