@@ -11,7 +11,8 @@ its two answers; `1` then `y` says "ok merge". Only then is each worker's branch
 merged into the main branch of its repository, with a merge commit, by volee itself:
 no agent merges. volee then closes the mission, tidies the workers' worktrees, keeps
 their branches, stops the coordinator, and says so in one message, which the lead
-hears too.
+hears too. Last, a task in one repository: the lead gives it to one agent itself,
+which commits and reports to it; nobody merges it.
 
 Real agents do the work, on a small model: the goal is a file of one line in each
 repository.
@@ -165,6 +166,9 @@ def main():
     other = args.other_sandbox or os.path.join(os.path.dirname(j.sandbox), "beta")
     repos = [Repo(j, j.sandbox), Repo(j, other)]
     j.branches.append(branch)
+    # The branch of the one agent the lead launches itself, at the end.
+    solo = "journey-solo-" + j.stamp
+    j.branches.append(solo)
     try:
         if not j.check("both repositories are git checkouts with nothing uncommitted",
                        all(repo.start and repo.clean() for repo in repos),
@@ -408,6 +412,47 @@ def main():
         j.check("the lead is still there, for the next request",
                 ((j.agent(lead) or {}).get("state") or {}).get("state")
                 in ("idle", "done", "working"), str((j.agent(lead) or {}).get("state")))
+
+        # ---- one task in one repository: the lead gives it to one agent ------------
+        merged = repos[0].head()
+        if j.select(lead):
+            j.keys("Enter", 2.0)
+            j.check("the lead opens again for another request",
+                    j.sees("your keys go to " + lead, timeout=30))
+            j.type(("Now launch one agent in the repository {a}, on a branch named "
+                    "`{solo}`, to add a file named `{solo}.txt` at the root of the "
+                    "repository, containing exactly the line `solo {stamp}`, and to "
+                    "commit it with the message `test: add {solo}.txt`. Nothing "
+                    "else.").format(a=repos[0].name, solo=solo, stamp=j.stamp))
+            j.keys("Enter")
+
+            def launched():
+                return next((agent for agent in j.agents_listed()
+                             if agent.get("workspace", {}).get("branch") == solo), None)
+            agent = j.wait(launched, PLANNING, 2) or {}
+            if agent.get("name"):
+                j.agents.append(agent["name"])
+            j.check("the lead launches one agent on that branch, outside any mission",
+                    agent.get("role") == "worker" and not agent.get("mission")
+                    and agent.get("workspace", {}).get("repo") == repos[0].name,
+                    str((agent.get("name"), agent.get("role"), agent.get("mission")))[:200])
+            j.check("the agent answers to the lead", agent.get("parent") == row.get("id"),
+                    "{} / {}".format(agent.get("parent"), row.get("id")))
+            j.check("the agent commits its work on its branch",
+                    j.wait(lambda: repos[0].git("rev-list", "--count", merged + ".." + solo)
+                           == "1", WORKING, 3),
+                    repos[0].git("log", "--oneline", merged + ".." + solo))
+            j.check("nobody merges it: the main branch has not moved",
+                    repos[0].head() == merged)
+            j.check("the lead tells the person what came back",
+                    j.wait(lambda: answered_with(j.screen(), solo)
+                           and ((j.agent(lead) or {}).get("state") or {}).get("state")
+                           in ("idle", "done"), 180, 2),
+                    "it said: " + j.last_answer())
+            j.show("the lead, after one agent's work")
+            j.keys("ctrl+q", 1.5)
+            j.keys("Escape", 1.0)
+            j.keys("Escape", 1.0)
         j.keys("q", 1.0)
     finally:
         if j.keep:
@@ -424,6 +469,11 @@ def main():
             j.check("{} is back where it started".format(repo.name),
                     not problem and repo.head() == repo.start and repo.clean()
                     and not repo.worktrees(branch), problem)
+        # The lone agent's worktree and branch, which nobody merged.
+        repos[0].restore(solo)
+        j.check("the lone agent's branch and worktree are gone",
+                not repos[0].worktrees(solo)
+                and not repos[0].ok("rev-parse", "--verify", "--quiet", "refs/heads/" + solo))
         j.finish()
 
 
