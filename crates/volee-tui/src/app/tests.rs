@@ -1554,6 +1554,63 @@ fn ticks_animate_expire_notices_and_refresh_busy_previews() {
 }
 
 #[test]
+fn the_preview_of_an_agent_at_rest_is_read_again_and_not_once_it_ended() {
+    let mut model = model(120, 40);
+    let resting = model
+        .rail
+        .iter()
+        .map(|entry| entry.agent)
+        .find(|agent| {
+            let state = &model.registry.agent(*agent).unwrap().state;
+            state.is_live() && !state.is_busy()
+        })
+        .expect("the demo has an agent at rest");
+    let mut effects = Vec::new();
+    model.select(resting, &mut effects);
+    let read = |model: &mut Model| {
+        update(
+            model,
+            Msg::PreviewLoaded {
+                agent: resting,
+                result: Ok(String::new()),
+            },
+        );
+    };
+    let asked = |effects: &[Effect]| effects.contains(&Effect::LoadPreview(resting));
+    let tick =
+        |model: &mut Model, millis: i64| update(model, Msg::Tick(start().plus_millis(millis)));
+    read(&mut model);
+    // The agent does nothing, yet its screen may change: a person types in
+    // its pane, the last lines of its turn land after the last reading.
+    assert!(!asked(&tick(&mut model, 4_000)), "too early");
+    assert!(asked(&tick(&mut model, 5_000)));
+    // A request under way is not doubled, and the pace starts again from it.
+    assert!(!asked(&tick(&mut model, 6_000)));
+    read(&mut model);
+    assert!(!asked(&tick(&mut model, 9_000)));
+    assert!(asked(&tick(&mut model, 10_000)));
+    read(&mut model);
+
+    // Once the agent ended, its screen is the one it left: never read again.
+    let at = model.now;
+    update(
+        &mut model,
+        Msg::Events(vec![Event::new(
+            at,
+            EventKind::StateChanged {
+                agent: resting,
+                state: volee_core::state::AgentState::Stopped,
+                detail: None,
+            },
+        )]),
+    );
+    assert_eq!(model.selected, Some(resting), "it stays selected");
+    for millis in [15_000, 30_000, 120_000] {
+        assert!(!asked(&tick(&mut model, millis)));
+    }
+}
+
+#[test]
 fn forgotten_agents_leave_the_list_and_free_their_letter() {
     let mut model = model(120, 40);
     press(&mut model, "'p");

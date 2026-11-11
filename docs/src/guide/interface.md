@@ -96,9 +96,13 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   such as `tuios · work`, or `a terminal`) and with which model, whether it
   is held (you stopped it, or its mission is over: volee will not resume it
   on its own), delivery evidence, last activity and session.
-- **Preview.** The selected agent's terminal screen, kept up to date while
-  it works. For an agent in a volee host, it is the exact screen the host
-  holds, status line and prompt frame included, drawn at the agent's own
+- **Preview.** The selected agent's terminal screen, kept up to date. For
+  an agent volee does not host, volee reads it again every two seconds
+  while the agent works and every five seconds while it rests: a screen
+  changes at rest too, when you type in its pane or when the last lines of
+  a turn land late. An agent that ended keeps the screen it left. For an
+  agent in a volee host, it is the exact screen the host holds, followed
+  live, status line and prompt frame included, drawn at the agent's own
   size: looking at an agent never resizes it. The preview, the full-screen
   view and the agent's tile on the wall show the same cells of that screen,
   its cursor and its blank rows included. The bottom of the screen,
@@ -325,8 +329,8 @@ Every agent that runs has its tile, wherever it runs:
 - an agent in a volee host is followed **live** (its title says so);
 - any other agent (a Claude Code background session, a session in a tuios
   or tmux pane) shows the screen volee reads for its preview, read again
-  every five seconds while the agent works and once when its state
-  changes.
+  every five seconds while the agent works, every fifteen seconds while it
+  rests, and at once when its state changes.
 
 A tile shows the bottom of its agent's screen, where the prompt and the
 questions are, cut on the right when the tile is narrower, under the

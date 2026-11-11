@@ -96,6 +96,7 @@ keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
 | The wall, inside | `5` shows the screen of every agent of the list that runs, in a volee host or not, as many to a page as the terminal shows at a readable size; what is opened from the wall comes back to it | Done |
 | Release | v0.12.0 | Done: v0.12.0 |
 | The same screen in every view | The proof the plan asked for, run after the release: the preview and the wall dropped an agent's cursor block and showed a run of blank rows as one. Fixed, and a test and a journey now compare the three views cell by cell ([ADR 0028](../adr/0028-one-emulator-and-the-wall-inside-the-interface.md#the-proof-and-what-it-found)) | Done: v0.12.1 |
+| A screen at rest stays current | The screen of an agent volee does not host was read again only while the agent worked: at rest it went stale, as after a command typed in its pane. The preview now reads it again every five seconds and a tile of the wall every fifteen ([ADR 0028](../adr/0028-one-emulator-and-the-wall-inside-the-interface.md#a-screen-at-rest)) | Done |
 | An exact preview everywhere | Not met for two sources, and for both the reason is in volee, not in what it reads. A multiplexer pane's capture is exact and is read with a replay's repairs. The replay of a Claude Code background session is its screen (measured: 50 rows of 50), but the preview counts a run of blank rows as one, which keeps the end of the conversation in view and is not the screen: which of the two it should show is open | Open |
 
 ## Next

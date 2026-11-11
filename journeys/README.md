@@ -44,7 +44,7 @@ you can look (`tuios attach volee-journey-...`).
 | Journey | What it does | Whose daemon |
 | --- | --- | --- |
 | `open.py` | Starts a Claude Code background session by hand, compares volee's list with what Claude Code lists (every session one row, no row without a session), opens the session by Enter, types into it, checks that it is the same session in the same process, leaves, opens it again once stopped, and removes it. | Its own, isolated |
-| `pane.py` | Starts Claude Code by hand in a tuios pane: it shows in the list after ten seconds, Enter opens the pane inside volee, typing reaches it, `/clear` keeps its row, and quitting it takes it off the list. | Its own, isolated |
+| `pane.py` | Starts Claude Code by hand in a tuios pane: it shows in the list after ten seconds, Enter opens the pane inside volee, typing reaches it, text typed in the pane while the agent rests shows in the preview and on the wall, `/clear` keeps its row, and quitting it takes it off the list. | Its own, isolated |
 | `edit_mode.py` | Launches an agent, shows it full screen, types into it in edit mode, sends Esc, Ctrl+Z and a two-line paste, leaves with Ctrl+Q, then checks in a pseudo-terminal that the agent follows the panel's size. | Its own, isolated |
 | `wall.py` | Launches an agent and starts a background session by hand, in a window the size of a large terminal: the preview of the first is its live screen, `5` shows both screens side by side, each opens from the wall with Enter or `i`, takes what is typed and comes back to the wall, `z` shows one full size, and the wall opens no terminal and resizes nothing. Last, the same screen is compared cell by cell between the preview, the full-screen view and the wall, for both. | Its own, isolated |
 | `old_host.py` | The same typing on an agent whose host an older release started (hosts outlive upgrades). | Its own, started by the older binary |
@@ -79,6 +79,9 @@ agent's.
 - Never tell the agent, in one message, how to answer the next ones: "reply
   only OK" in a first message once made a small model answer OK to the
   question that followed.
+- To change an agent's screen without asking the model for anything, type
+  in its pane and leave the text in the input box. What a model writes
+  changes from run to run, and so does how long it takes.
 - A window of a headless tuios session has 80 columns and 24 rows.
   `resize()` gives the interface the size of the terminal the trip needs.
 - Add every new thing the journey starts to `agents`, `branches`,
