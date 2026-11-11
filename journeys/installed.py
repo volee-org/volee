@@ -66,7 +66,7 @@ def the_wall(j, name):
 
 def session_by_hand(j, name):
     """A background session started outside volee: opened where it runs."""
-    session = j.background_session(name, "Remember the number 7341. Reply only OK.")
+    session = j.background_session(name, "Remember the number 7341. For this message only, reply with the word READY.")
     if not j.check("a background session started by hand ran its first turn", session,
                    str(j.claude_session(name))[:200]):
         return
@@ -80,9 +80,13 @@ def session_by_hand(j, name):
     j.check("Enter opens it inside volee, with no question about adopting it",
             j.sees("your keys go to " + name, "7341", timeout=20)
             and "Move " + name not in j.screen())
-    j.type("Reply only with that number plus one")
+    asked = "Add one to the number you remembered. Reply with the result in digits only."
+    j.type(asked)
     j.keys("Enter")
-    j.check("typed text reaches the session and it answers", j.sees("7342", timeout=90, every=1))
+    j.check("typed text reaches the session and it answers", j.answered(asked),
+            "it answered: " + j.last_answer())
+    j.check("in the conversation it had: it remembers the number",
+            j.sees("7342", timeout=30, every=1), "it answered: " + j.last_answer())
     j.show("a background session opened on the installed volee")
     now = j.claude_session(name) or {}
     j.check("it is the same session in the same process",

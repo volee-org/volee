@@ -26,7 +26,8 @@ def main():
     try:
         if not j.check("the daemon starts", j.start_daemon()):
             return
-        session = j.background_session(name, "Remember the number 7341. Reply only OK.")
+        session = j.background_session(
+            name, "Remember the number 7341. For this message only, reply with the word READY.")
         if not j.check("a background session started by hand ran its first turn", session,
                        str(j.claude_session(name))[:200]):
             return
@@ -57,10 +58,13 @@ def main():
                 j.sees("your keys go to " + name, "7341", timeout=20))
         j.show("a background session opened where it runs")
         j.check("no prompt asked to adopt it", "Move " + name not in j.screen())
-        j.type("Reply only with that number plus one")
+        asked = "Add one to the number you remembered. Reply with the result in digits only."
+        j.type(asked)
         j.keys("Enter")
-        j.check("typed text reaches the session and it answers",
-                j.sees("7342", timeout=90, every=1))
+        j.check("typed text reaches the session and it answers", j.answered(asked),
+                "it answered: " + j.last_answer())
+        j.check("in the conversation it had: it remembers the number",
+                j.sees("7342", timeout=30, every=1), "it answered: " + j.last_answer())
         now = j.claude_session(name) or {}
         j.check("it is the same session in the same process: nothing stopped or forked",
                 now.get("sessionId") == session_id and now.get("pid") == pid
@@ -93,9 +97,13 @@ def main():
             j.keys("Enter", 2.0)
             j.check("Enter opens a stopped session too",
                     j.sees("your keys go to " + name, timeout=30))
-            j.type("Reply only with that number plus two")
+            asked = "Add two to the number you remembered. Reply with the result in digits only."
+            j.type(asked)
             j.keys("Enter")
-            j.check("it answers again", j.sees("7343", timeout=120, every=1))
+            j.check("it answers again", j.answered(asked, timeout=120),
+                    "it answered: " + j.last_answer())
+            j.check("and still remembers the number", j.sees("7343", timeout=30, every=1),
+                    "it answered: " + j.last_answer())
             now = j.claude_session(name) or {}
             j.check("under the same session id", now.get("sessionId") == session_id,
                     str(now.get("sessionId")))

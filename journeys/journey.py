@@ -458,6 +458,25 @@ class Journey:
                 rows.append(below[left + 1 + margin:right])
         return None, 0
 
+    def answered(self, text, timeout=90):
+        """Whether the agent on screen took `text` as a turn and answered it: the text
+        shows in the conversation, after a prompt mark, and the agent wrote below it.
+        Text that only sits in the input box has no answer under it."""
+        start = text[:40]
+
+        def taken():
+            lines = self.screen().splitlines()
+            asked = next((index for index in range(len(lines) - 1, -1, -1)
+                          if start in lines[index] and "❯" in lines[index]), None)
+            return asked is not None and any("⏺" in line for line in lines[asked + 1:])
+        return bool(self.wait(taken, timeout, 1))
+
+    def last_answer(self):
+        """The last line the agent wrote on the screen, to say what it answered when it
+        is not what a check expected."""
+        lines = [line for line in self.screen().splitlines() if "⏺" in line]
+        return lines[-1].split("⏺", 1)[1].strip(" │┃") if lines else "nothing"
+
     def sees(self, *needles, timeout=15, every=0.5):
         """Whether every needle shows on the interface's screen within `timeout`."""
         return bool(self.wait(lambda: all(needle in self.screen() for needle in needles),
