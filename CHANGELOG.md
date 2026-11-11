@@ -20,6 +20,7 @@ see [RELEASING.md](RELEASING.md).
 - **tui**: Say in a window where to go and which key to press to open a session in a terminal ([#161](https://github.com/volee-org/volee/pull/161))
 - **mcp**: Tell an agent which row of the agent list is itself ([#163](https://github.com/volee-org/volee/pull/163))
 - **tui**: Keep a coordinator's whole name in the list next to the right column ([#166](https://github.com/volee-org/volee/pull/166))
+- **core**: Judge a mission's worker only on evidence read since it stopped ([#168](https://github.com/volee-org/volee/pull/168))
 
 ### Documentation
 
