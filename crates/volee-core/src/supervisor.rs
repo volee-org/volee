@@ -4,7 +4,7 @@
 //! checks delivery evidence when they stop, tells the coordinator agent what
 //! happened, asks it to present its report to the person once every worker
 //! delivered, and reads the person's answer: only their approval lets the
-//! coordinator merge (ADR 0032). It never waits in a loop and never costs
+//! daemon merge the work (ADR 0032). It never waits in a loop and never costs
 //! tokens: the daemon calls [`supervise`] after events that concern a
 //! mission, and applies the returned [`Decision`].
 //!
@@ -152,8 +152,8 @@ fn conclude(
             body: format!(
                 "All {} workers of \"{}\" delivered. Coordinator: check their work, then \
                  present your report to the human with `request_approval` (what is done, the \
-                 proof, what is left). Merge nothing and close nothing before the human \
-                 answers.",
+                 proof, what is left). You merge nothing and close nothing: volee does, once \
+                 the human approved.",
                 workers, record.title
             ),
         });
@@ -219,17 +219,14 @@ fn answered(
     decision.events.push(status_update(mission.id, status));
     let body = match (answer.approves, mission.kind) {
         (true, MissionKind::Change) => format!(
-            "The human approved \"{}\": merge each worker's work into its base branch now, \
-             then call `close_mission`. A pull request: `gh pr ready <url>`, then `gh pr merge \
-             <url>` with the method the repository allows. A repository without a remote: from \
-             its main checkout, on the base branch with a clean tree, `git merge --no-ff \
-             <branch>` (a plain merge, never a squash: volee proves a local merge by the \
-             branch's commits being part of the base branch). Never force, never delete a \
-             branch. If a merge fails, stop and tell the human what blocks.",
+            "The human approved \"{}\". volee merges every worker's work itself, then closes \
+             the mission and stops you: merge nothing, and do nothing more. If a merge does \
+             not go through, volee tells you why and the mission is open again.",
             mission.title
         ),
         (true, MissionKind::Analysis) => format!(
-            "The human approved \"{}\": call `close_mission`.",
+            "The human approved \"{}\". volee closes the mission and stops you: do nothing \
+             more.",
             mission.title
         ),
         (false, _) => format!(

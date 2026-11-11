@@ -15,21 +15,26 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
+use volee_core::delivery::{PrState, PullRequest};
 use volee_core::message::{Message, MessageKind, Party, Receipt};
+use volee_core::mission::{MissionKind, MissionStatus};
 use volee_core::role::Role;
 use volee_core::supervisor::{Notice, supervise};
 use volee_core::{AgentId, Event, EventKind, MissionId, Registry};
+use volee_git::MergeMethod;
 use volee_proto::methods::{AgentParams, SeqEvent, TidyOutcome, TidyParams};
 
 use crate::error::DaemonError;
 use crate::server::Shared;
 use crate::state::State;
 
-/// How long the wind-down waits for the delivery evidence of the workers.
+/// How long the merge and the wind-down wait for the delivery evidence of
+/// the workers to be read again: a few git commands and one forge lookup
+/// each.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// How long the wind-down lets the coordinator finish the turn in which it
-/// closed its mission.
+/// How long the wind-down lets the coordinator finish the turn the person's
+/// approval woke.
 const LAST_TURN: Duration = Duration::from_secs(90);
 
 /// How long a stopped coordinator has to be seen stopped.
@@ -155,15 +160,303 @@ fn link_coordinator(registry: &Registry, mission: MissionId) -> Option<EventKind
     })
 }
 
+/// One worker's work, as the merge needs it.
+struct Work {
+    agent: AgentId,
+    name: String,
+    /// The main checkout of its repository.
+    repo: std::path::PathBuf,
+    /// Its repository's name in the configuration, if it has one.
+    configured: Option<String>,
+    branch: String,
+    base: String,
+    /// Its repository has no remote: the merge is a local one.
+    no_remote: bool,
+    /// The pull request at the tip of its branch, when it is open.
+    pull_request: Option<PullRequest>,
+}
+
+/// A merge that did not go through.
+struct Failure {
+    worker: AgentId,
+    /// The worker's name and the reason, as the person reads them.
+    why: String,
+}
+
+/// Carries out the person's approval of a mission (ADR 0032): merges the
+/// work of every worker of a change mission, closes the mission, and winds
+/// it down. volee does this itself, as a program does what a person agreed
+/// to: an agent's merge depends on what its harness lets it run, and the
+/// person's word given here is not a word its harness heard.
+///
+/// A branch in a repository without a remote is merged into its base branch
+/// in the main checkout; a pull request is merged on the forge. Nothing is
+/// forced. When a merge does not go through, what was merged stays merged,
+/// the mission is open again (`reporting`), and the person, the coordinator
+/// and the lead are told why.
+pub(crate) async fn carry_out(shared: Arc<Shared>, mission: MissionId) {
+    // One answer is carried out once, whoever notices it.
+    if !lock_concluding(&shared).insert(mission) {
+        return;
+    }
+    let failures = merge_all(&shared, mission).await;
+    let closed = match failures {
+        Some(failures) => conclude(&shared, mission, &failures).await,
+        None => false,
+    };
+    lock_concluding(&shared).remove(&mission);
+    if closed {
+        // The person's answer woke the coordinator: its turn is its own.
+        wind_down(shared, mission, true).await;
+    }
+}
+
+fn lock_concluding(
+    shared: &Shared,
+) -> std::sync::MutexGuard<'_, std::collections::HashSet<MissionId>> {
+    // A set of identifiers stays consistent whatever a panic interrupted.
+    shared
+        .concluding
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Carries out the missions that are approved when the daemon starts: the
+/// person's answer came while it was stopping, or a merge was cut short.
+pub(crate) async fn resume_approved(shared: &Arc<Shared>) {
+    let approved: Vec<MissionId> = {
+        let state = shared.state.lock().await;
+        state
+            .registry()
+            .missions()
+            .filter(|mission| mission.status == MissionStatus::Approved)
+            .map(|mission| mission.id)
+            .collect()
+    };
+    for mission in approved {
+        tokio::spawn(carry_out(Arc::clone(shared), mission));
+    }
+}
+
+/// Merges what is left to merge of an approved mission, and returns why
+/// each merge that failed did; `None` when the mission is not approved any
+/// more.
+async fn merge_all(shared: &Arc<Shared>, mission: MissionId) -> Option<Vec<Failure>> {
+    // What git and the forge say now decides what is left to merge and how:
+    // the evidence in the registry may be as old as the worker's last stop,
+    // and the person may have merged a pull request themselves since.
+    let workers: Vec<AgentId> = {
+        let state = shared.state.lock().await;
+        let registry = state.registry();
+        if registry.mission(mission)?.status != MissionStatus::Approved {
+            return None;
+        }
+        registry
+            .mission_agents(mission)
+            .into_iter()
+            .filter(|agent| agent.role == Role::Worker)
+            .map(|agent| agent.id)
+            .collect()
+    };
+    crate::evidence::check_now(shared, &workers, CHECK_TIMEOUT).await;
+    let (kind, work) = {
+        let state = shared.state.lock().await;
+        let registry = state.registry();
+        let record = registry.mission(mission)?;
+        if record.status != MissionStatus::Approved {
+            return None;
+        }
+        let work: Vec<Work> = registry
+            .mission_agents(mission)
+            .into_iter()
+            .filter(|agent| agent.role == Role::Worker && !agent.delivery.is_delivered())
+            .map(|agent| Work {
+                agent: agent.id,
+                name: agent.name.clone(),
+                repo: agent
+                    .workspace
+                    .repo_root
+                    .clone()
+                    .unwrap_or_else(|| agent.workspace.cwd.clone()),
+                configured: agent.workspace.repo.clone(),
+                branch: agent.workspace.branch.clone().unwrap_or_default(),
+                base: agent.workspace.base.clone().unwrap_or_default(),
+                no_remote: agent.delivery.no_remote(),
+                pull_request: agent
+                    .delivery
+                    .pull_request_at_tip()
+                    .filter(|pr| matches!(pr.state, PrState::Open | PrState::Draft))
+                    .cloned(),
+            })
+            .collect();
+        (record.kind, work)
+    };
+    let mut failures = Vec::new();
+    if kind == MissionKind::Change {
+        for work in &work {
+            if let Err(reason) = merge(shared, work).await {
+                tracing::warn!(%mission, worker = %work.name, %reason, "cannot merge");
+                failures.push(Failure {
+                    worker: work.agent,
+                    why: format!("{}: {reason}", work.name),
+                });
+            }
+        }
+        // The same again, the merges included.
+        let ids: Vec<AgentId> = work.iter().map(|work| work.agent).collect();
+        crate::evidence::check_now(shared, &ids, CHECK_TIMEOUT).await;
+    }
+    Some(failures)
+}
+
+/// Merges one worker's work: its branch into its base branch in a
+/// repository without a remote, its pull request on the forge otherwise.
+async fn merge(shared: &Arc<Shared>, work: &Work) -> Result<(), String> {
+    if work.no_remote {
+        if work.branch.is_empty() || work.base.is_empty() {
+            return Err("volee does not know its branch or its base branch".to_owned());
+        }
+        let git = crate::launch::git(shared).map_err(|error| error.to_string())?;
+        let (repo, branch, base) = (work.repo.clone(), work.branch.clone(), work.base.clone());
+        return crate::launch::blocking(move || git.merge(&repo, &branch, &base))
+            .await
+            .map_err(|error| error.to_string())?
+            .map(drop)
+            .map_err(|error| error.to_string());
+    }
+    let Some(pull_request) = work.pull_request.clone() else {
+        return Err("it has no open pull request at the tip of its branch".to_owned());
+    };
+    let Some(forge) = shared.forge_client.clone() else {
+        return Err(format!(
+            "volee has no forge client to merge {} with (the GitHub CLI, signed in)",
+            pull_request.url
+        ));
+    };
+    // The method the person set for this repository, else the first one it
+    // allows.
+    let method = work
+        .configured
+        .as_deref()
+        .and_then(|name| shared.settings.repos.get(name))
+        .and_then(|repo| repo.merge)
+        .map(|method| match method {
+            volee_config::MergeMethod::Merge => MergeMethod::Merge,
+            volee_config::MergeMethod::Squash => MergeMethod::Squash,
+            volee_config::MergeMethod::Rebase => MergeMethod::Rebase,
+        });
+    let repo = work.repo.clone();
+    crate::launch::blocking(move || forge.merge(&repo, &pull_request, method))
+        .await
+        .map_err(|error| error.to_string())?
+        .map(drop)
+        .map_err(|error| error.to_string())
+}
+
+/// Closes an approved mission whose work is all merged; else opens it again
+/// and says which merges failed. Returns whether it closed.
+async fn conclude(shared: &Arc<Shared>, mission: MissionId, failures: &[Failure]) -> bool {
+    let mut state = shared.state.lock().await;
+    let registry = state.registry();
+    let Some(record) = registry.mission(mission) else {
+        return false;
+    };
+    if record.status != MissionStatus::Approved {
+        return false;
+    }
+    let mut left: Vec<String> = failures.iter().map(|failure| failure.why.clone()).collect();
+    if record.kind == MissionKind::Change {
+        // A merge that reported no failure and that the evidence does not
+        // show is not a merge.
+        left.extend(
+            registry
+                .mission_agents(mission)
+                .into_iter()
+                .filter(|agent| agent.role == Role::Worker && !agent.delivery.is_delivered())
+                .filter(|agent| !failures.iter().any(|failure| failure.worker == agent.id))
+                .map(|agent| format!("{}: volee sees no merge of its branch", agent.name)),
+        );
+    }
+    let now = state.now();
+    if left.is_empty() {
+        let closed = state.commit(vec![Event::new(
+            now,
+            EventKind::MissionUpdated {
+                mission,
+                status: MissionStatus::Closed,
+                coordinator: None,
+                report: None,
+            },
+        )]);
+        return match closed {
+            Ok(_) => true,
+            Err(error) => {
+                tracing::error!(%error, %mission, "cannot close the approved mission");
+                false
+            }
+        };
+    }
+    let mut to = vec![Party::Human];
+    to.extend(
+        [record.coordinator, record.requested_by]
+            .into_iter()
+            .flatten()
+            .filter(|agent| registry.agent(*agent).is_some())
+            .map(Party::Agent),
+    );
+    let message = Message {
+        id: state.new_message_id(),
+        thread: record.thread,
+        from: Party::System,
+        kind: MessageKind::Alert,
+        body: format!(
+            "volee could not merge all the work of \"{}\". {}. What was merged stays merged, \
+             and nothing was forced. The mission is open again: once what blocks is fixed, \
+             the coordinator presents its report again with `request_approval`.",
+            record.title,
+            left.join(". ")
+        ),
+        refs: Vec::new(),
+        in_reply_to: None,
+        options: Vec::new(),
+        at: now,
+        receipts: to
+            .into_iter()
+            .map(|to| Receipt {
+                to,
+                delivered_at: None,
+                read_at: None,
+            })
+            .collect(),
+    };
+    let reopened = state.commit(vec![
+        Event::new(
+            now,
+            EventKind::MissionUpdated {
+                mission,
+                status: MissionStatus::Reporting,
+                coordinator: None,
+                report: None,
+            },
+        ),
+        Event::new(now, EventKind::MessagePosted { message }),
+    ]);
+    if let Err(error) = reopened {
+        tracing::error!(%error, %mission, "cannot say that the merge failed");
+    }
+    false
+}
+
 /// What closing a mission leaves to do, in one gesture: every worker whose
 /// work landed is tidied (its worktree removed, its branch kept, the agent
 /// forgotten), the coordinator is stopped once its turn ended and forgotten,
 /// and the person is told what was tidied and what was kept, with the
 /// reason. Nothing is forced: a worker that is kept stays as it is.
 ///
-/// `by_coordinator` says that the coordinator itself closed the mission: it
-/// is in the middle of the turn that did, and is left to end it.
-pub(crate) async fn wind_down(shared: Arc<Shared>, mission: MissionId, by_coordinator: bool) {
+/// `last_turn` says that the coordinator may be in the turn the person's
+/// approval woke: it is left to end it. A mission the person closes by hand
+/// stops its coordinator at once.
+pub(crate) async fn wind_down(shared: Arc<Shared>, mission: MissionId, last_turn: bool) {
     let (workers, coordinator) = {
         let state = shared.state.lock().await;
         let registry = state.registry();
@@ -200,7 +493,7 @@ pub(crate) async fn wind_down(shared: Arc<Shared>, mission: MissionId, by_coordi
         }
     }
     if let Some((agent, name)) = coordinator
-        && !retire(&shared, agent, by_coordinator).await
+        && !retire(&shared, agent, last_turn).await
     {
         kept.push(format!(
             "{name}: it still runs; stop it with `volee stop {name}`"
@@ -212,10 +505,11 @@ pub(crate) async fn wind_down(shared: Arc<Shared>, mission: MissionId, by_coordi
 }
 
 /// Stops the coordinator of a closed mission, then forgets it. Returns
-/// whether it is gone. When it closed the mission itself (`finishing`), the
-/// turn in which it did is left to end first: its last words are its own.
-async fn retire(shared: &Arc<Shared>, agent: AgentId, finishing: bool) -> bool {
-    if finishing {
+/// whether it is gone. With `last_turn`, a turn it is in the middle of (it
+/// was just told that the person approved) is left to end first: its last
+/// words are its own.
+async fn retire(shared: &Arc<Shared>, agent: AgentId, last_turn: bool) -> bool {
+    if last_turn {
         settled(shared, agent, |state| !state.is_busy(), LAST_TURN).await;
     }
     match crate::control::stop(shared, AgentParams { agent }).await {

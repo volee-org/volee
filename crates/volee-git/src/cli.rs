@@ -13,8 +13,8 @@ use volee_core::delivery::{Delivery, DiffStat, PushState};
 use crate::command::{Completed, Request, Runner};
 use crate::parse::{self, StatusSummary};
 use crate::{
-    DeliveryQuery, DeliveryReport, DiffFormat, DiffOutput, Git, GitError, Head, NewWorktree,
-    RemovalRefusal, RepoInfo, RepoSlug, WorktreeInfo,
+    DeliveryQuery, DeliveryReport, DiffFormat, DiffOutput, Git, GitError, Head, MergeRefusal,
+    NewWorktree, RemovalRefusal, RepoInfo, RepoSlug, WorktreeInfo,
 };
 
 /// The most untracked files [`Git::diff`] lists or shows. The others are
@@ -901,6 +901,62 @@ impl Git for GitCli {
             }
         }
         Ok(out.finish())
+    }
+
+    fn merge(&self, repo: &Path, branch: &str, base: &str) -> Result<String, GitError> {
+        self.check_branch_name(repo, branch)?;
+        let info = self
+            .repo_info(repo)?
+            .ok_or_else(|| GitError::UnknownRevision {
+                revision: branch.to_owned(),
+            })?;
+        let checkout = info.main_checkout;
+        let refused = |reason| GitError::MergeRefused {
+            branch: branch.to_owned(),
+            checkout: checkout.clone(),
+            reason,
+        };
+        let tip = self
+            .commit_of(&checkout, &format!("refs/heads/{branch}"))?
+            .ok_or_else(|| GitError::UnknownRevision {
+                revision: branch.to_owned(),
+            })?;
+        let status = self.status(&checkout)?;
+        if status.branch.as_deref() != Some(base) {
+            return Err(refused(MergeRefusal::NotOnBase {
+                base: base.to_owned(),
+                checked_out: status.branch,
+            }));
+        }
+        if status.changed > 0 {
+            return Err(refused(MergeRefusal::UncommittedChanges {
+                changed: status.changed,
+            }));
+        }
+        let merged = self
+            .write(&checkout)
+            .args(["merge", "--no-ff", "--no-edit", "--quiet", "--message"])
+            .arg(format!("Merge branch '{branch}'"))
+            .arg("--end-of-options")
+            .arg(&tip)
+            .run()
+            .and_then(Completed::success);
+        if let Err(error) = merged {
+            // Leave the checkout as it was: an unfinished merge is not the
+            // person's to clean up.
+            let _ = self.write(&checkout).args(["merge", "--abort"]).run();
+            let detail = match &error {
+                GitError::Failed { stderr, .. } if !stderr.is_empty() => {
+                    stderr.lines().next().unwrap_or_default().to_owned()
+                }
+                other => other.to_string(),
+            };
+            return Err(refused(MergeRefusal::Abandoned { detail }));
+        }
+        self.commit_of(&checkout, "HEAD")?
+            .ok_or_else(|| GitError::UnknownRevision {
+                revision: "HEAD".to_owned(),
+            })
     }
 
     fn fetch(&self, repo: &Path) -> Result<(), GitError> {

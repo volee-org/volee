@@ -62,7 +62,7 @@ pub enum MissionStatus {
     /// to merge (to close, for an analysis mission). Nothing is merged or
     /// closed until they answer.
     AwaitingApproval,
-    /// The person approved: the coordinator merges, then closes.
+    /// The person approved: volee merges the work, then closes the mission.
     Approved,
     /// Closed with a report.
     Closed,

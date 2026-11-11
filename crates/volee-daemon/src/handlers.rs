@@ -10,6 +10,7 @@ use serde_json::Value;
 use volee_core::harness::{SessionKey, SessionOrigin};
 use volee_core::ids::ThreadId;
 use volee_core::message::{Message, MessageKind, Party, Receipt, Thread};
+use volee_core::mission::MissionStatus;
 use volee_core::state::AgentState;
 use volee_core::time::Timestamp;
 use volee_core::{Agent, AgentId, Event, EventKind, Registry};
@@ -254,6 +255,20 @@ async fn send_message(shared: &Arc<Shared>, params: SendParams) -> Result<Sent, 
     };
     events.push(Event::new(now, EventKind::MessagePosted { message }));
     state.commit(events)?;
+    // The person's approval of a mission's report: volee carries it out.
+    let approved = (params.from == Party::Human)
+        .then_some(params.in_reply_to)
+        .flatten()
+        .and_then(|question| {
+            state.registry().missions().find(|mission| {
+                mission.report == Some(question) && mission.status == MissionStatus::Approved
+            })
+        })
+        .map(|mission| mission.id);
+    drop(state);
+    if let Some(mission) = approved {
+        tokio::spawn(crate::missions::carry_out(Arc::clone(shared), mission));
+    }
     Ok(sent)
 }
 

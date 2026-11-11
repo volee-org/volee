@@ -77,8 +77,8 @@ mod parse;
 mod remote;
 
 pub use cli::GitCli;
-pub use error::{GitError, RemovalRefusal};
-pub use forge::{BranchHead, Forge, ForgeStatus, GhCli};
+pub use error::{GitError, MergeRefusal, RemovalRefusal};
+pub use forge::{BranchHead, Forge, ForgeStatus, GhCli, MergeMethod};
 pub use remote::RepoSlug;
 
 /// Everything volee asks of git.
@@ -243,6 +243,23 @@ pub trait Git: Send + Sync {
         format: DiffFormat,
         max_bytes: usize,
     ) -> Result<DiffOutput, GitError>;
+
+    /// Merges `branch` into `base` in the main checkout of the repository
+    /// that contains `repo`, with a merge commit (`git merge --no-ff`), and
+    /// returns that commit. A branch that is already part of `base` is left
+    /// as it is, and the tip of `base` is returned.
+    ///
+    /// This is what a person does by hand in a repository without a remote,
+    /// once they agreed to the work: it is called only on their word.
+    ///
+    /// Refuses, with [`GitError::MergeRefused`] and before touching
+    /// anything, a main checkout that does not have `base` checked out or
+    /// that has uncommitted changes to tracked files: volee does not switch
+    /// a person's branch or merge over their changes. A merge git cannot
+    /// make (a conflict, an untracked file in the way) is abandoned with
+    /// `git merge --abort`, so the checkout is as it was, and reported the
+    /// same way. Never forces, never deletes a branch.
+    fn merge(&self, repo: &Path, branch: &str, base: &str) -> Result<String, GitError>;
 
     /// Fetches `origin` quietly and without prompting, and forgets the
     /// remote-tracking branches deleted on the remote, so a push state never

@@ -5,9 +5,10 @@ it and launches one worker per repository; each worker commits its work on a bra
 of its own, which is all a repository without a remote can ask of it. The coordinator
 merges nothing: it presents its report, and the mission waits for the person. In the
 interface the question sits on top of the messages with its two answers; `1` then `y`
-says "ok merge". Only then does the coordinator merge each worker's branch into the
-main branch of its repository and close the mission; volee tidies the workers'
-worktrees, keeps their branches, stops the coordinator, and says so in one message.
+says "ok merge". Only then is each worker's branch merged into the main branch of its
+repository, with a merge commit, by volee itself: no agent merges. volee then closes
+the mission, tidies the workers' worktrees, keeps their branches, stops the
+coordinator, and says so in one message.
 
 Real agents do the work, on a small model: the goal is a file of one line in each
 repository.
@@ -27,7 +28,9 @@ from journey import Journey, arguments
 # How long real agents get for each leg of the trip (seconds).
 PLANNING = 300
 WORKING = 600
-MERGING = 420
+# volee merges: no model is waited for.
+MERGING = 60
+# The coordinator ends the turn the person's answer woke, then is stopped.
 TIDYING = 180
 
 
@@ -232,24 +235,42 @@ def main():
         j.check("1 asks before anything is sent", j.sees(prompt, timeout=5))
         j.check("still nothing is merged",
                 all(repo.head() == repo.start for repo in repos))
-        j.keys("y", 1.5)
+        approved_at = time.time()
+        j.keys("y", 0.3)
         j.check("y sends the approval", j.sees("Message sent to " + coordinator, timeout=10))
-        j.check("the mission is approved",
-                j.wait(lambda: status() in ("approved", "closed"), 20, 1), status())
 
-        # ---- the coordinator merges, then closes ----------------------------------
-        closed = j.wait(lambda: status() == "closed", MERGING, 3)
-        if not j.check("the coordinator merged and closed the mission", closed,
-                       "status: " + status()):
+        # ---- volee merges, then closes: no agent does -----------------------------
+        closed = j.wait(lambda: status() == "closed", MERGING, 0.25)
+        took = time.time() - approved_at
+        if not j.check("volee merged and closed the mission", closed,
+                       "status: {} after {:.1f} s".format(status(), took)):
             j.say(j.volee_run("mission", "show", title).stdout)
+        j.say("closed within {:.1f} s of the approval".format(took))
         for repo in repos:
             j.check("{}: the worker's branch is merged into {}".format(repo.name, repo.base),
                     repo.head() != repo.start
                     and repo.ok("merge-base", "--is-ancestor", branch, repo.base),
                     repo.git("log", "--oneline", "-3", repo.base))
+            parents = repo.git("rev-list", "--parents", "-n", "1", repo.base).split()[1:]
+            j.check("{}: with a merge commit on top of where {} was, that keeps the "
+                    "worker's commit".format(repo.name, repo.base),
+                    parents == [repo.start, repo.git("rev-parse", branch)]
+                    and repo.git("log", "-1", "--format=%s", repo.base)
+                    == "Merge branch '{}'".format(branch),
+                    repo.git("log", "-1", "--format=%s %p", repo.base))
             j.check("{}: the file is in the main checkout, with its line".format(repo.name),
-                    repo.git("show", repo.base + ":" + file) == line,
+                    repo.git("show", repo.base + ":" + file) == line
+                    and os.path.isfile(os.path.join(repo.path, file)),
                     repr(repo.git("show", repo.base + ":" + file)))
+            j.check("{}: the main checkout is on {} and has nothing uncommitted".format(
+                        repo.name, repo.base),
+                    repo.git("symbolic-ref", "--short", "HEAD") == repo.base
+                    and repo.clean(), repo.git("status", "--short", "--branch"))
+        shown = j.volee_run("mission", "show", title).stdout
+        j.check("the coordinator was told that the merge is volee's",
+                "volee merges every worker's work itself" in " ".join(shown.split()),
+                shown[-600:])
+        j.check("no merge failed", "could not merge" not in shown)
 
         # ---- closing tidied everything, in one gesture ------------------------------
         gone = j.wait(lambda: not members("worker") and not members("coordinator"),

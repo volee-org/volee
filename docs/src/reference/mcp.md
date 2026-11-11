@@ -39,7 +39,8 @@ configurations for Codex CLI and Gemini CLI.
 Agents volee launches may call every tool below without a permission
 prompt: their settings allow `mcp__volee`, so that a background agent never
 stalls on asking to send a message. Only a mission's coordinator may call
-`spawn_worker`, `request_approval` and `close_mission`.
+`spawn_worker` and `request_approval`. No tool merges or closes a mission:
+volee does both, once the human approved.
 
 ## Tools
 
@@ -159,25 +160,14 @@ the mission's thread, with the answers `ok merge` and `no` (`ok close` and
 `no` for an analysis mission); the lead that asked for the mission reads it
 too. The mission waits: nothing is merged or closed before the human
 answers. The tool returns at once, and the coordinator ends its turn. volee
-then tells it what the answer allows: on the approving answer, to merge each
-worker's work and call `close_mission`; on any other, that nothing is merged
-and the mission stays open.
+then tells it what the answer was. On the approving answer, volee merges
+each worker's work itself, closes the mission, tidies its workers and stops
+the coordinator, which has nothing more to do; if a merge does not go
+through, volee tells it why, and it presents its report again once what
+blocks is settled. On any other answer, nothing is merged and the mission
+stays open.
 
 Refused, with the reason, when the caller is not the coordinator, while a
 worker has not delivered (a report presented for approval says the work is
 ready), while the human has not answered the report already presented, and
 once they approved.
-
-### `close_mission`
-
-For a mission's coordinator: closes the mission once the human approved the
-report presented with `request_approval` and, for a change mission, the
-work of every worker is merged. It takes no argument. volee reads the
-workers' evidence again from git and the forge before it answers, and
-refuses, with the reason, when the caller is not the coordinator, when the
-human has not approved, or while volee sees no merge of a worker's branch.
-An agent can never force a mission closed: only the human can.
-
-Closing then tidies the mission: the worktree of every worker whose work
-landed is removed, its branch kept, and the coordinator is stopped once its
-turn ended.

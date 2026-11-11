@@ -308,6 +308,11 @@ class Journey:
         except json.JSONDecodeError:
             return []
 
+    def programs_running(self):
+        """The hosts of this journey whose program has not ended."""
+        return [row for row in self.hosts()
+                if row["live"] and not row["record"].get("exit")]
+
     def host_size(self, name):
         """Columns and rows of the running host of the agent called `name`."""
         for row in self.hosts():
@@ -562,6 +567,10 @@ class Journey:
                         self.claude("stop", session["id"])
                     self.claude("rm", session["id"])
         if self.isolated:
+            # A session that ends runs its last hooks. Let them reach the daemon:
+            # with none left to hear it, a hook leaves a spool file behind, in a
+            # directory removed below.
+            self.wait(lambda: not self.programs_running(), 20, 0.5)
             # A host lingers a few minutes after its program ends, to show its last
             # screen. The journey's own hosts have nobody left to show it to.
             for row in self.hosts():
@@ -582,6 +591,11 @@ class Journey:
         if self.isolated:
             self.forget_in_own_volee()
         shutil.rmtree(self.workdir, ignore_errors=True)
+        # A hook that ran after all that would have written there again.
+        time.sleep(1)
+        if os.path.exists(self.workdir):
+            self.say("a late hook wrote to " + self.workdir + ": removed again")
+            shutil.rmtree(self.workdir, ignore_errors=True)
 
     def forget_in_own_volee(self):
         """The person's own daemon, when one runs, sees the journey's agents as

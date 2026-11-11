@@ -80,6 +80,17 @@ pub enum GitError {
         /// Why it stays.
         reason: RemovalRefusal,
     },
+    /// A branch was not merged: the checkout it would be merged in is not
+    /// ready for it, or the merge did not go through. Nothing was changed.
+    #[error("cannot merge `{branch}` in `{}`: {reason}", .checkout.display())]
+    MergeRefused {
+        /// The branch.
+        branch: String,
+        /// The checkout the merge was to be made in.
+        checkout: PathBuf,
+        /// Why not.
+        reason: MergeRefusal,
+    },
     /// Creating a worktree failed after git had created it: the worktree is
     /// still there, but the operation did not complete (no branch, a failing
     /// hook, or a checkout stopped at its timeout).
@@ -102,6 +113,58 @@ pub enum GitError {
         #[source]
         source: io::Error,
     },
+}
+
+/// Why [`Git::merge`](crate::Git::merge) did not merge a branch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MergeRefusal {
+    /// The checkout does not have the base branch checked out.
+    NotOnBase {
+        /// The base branch the merge goes into.
+        base: String,
+        /// What is checked out instead; `None` when `HEAD` is detached.
+        checked_out: Option<String>,
+    },
+    /// The checkout has changes to tracked files that are not committed.
+    UncommittedChanges {
+        /// How many tracked files changed.
+        changed: usize,
+    },
+    /// git could not make the merge, typically because of a conflict. The
+    /// merge was abandoned and the checkout is as it was.
+    Abandoned {
+        /// What git said.
+        detail: String,
+    },
+}
+
+impl fmt::Display for MergeRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotOnBase {
+                base,
+                checked_out: Some(branch),
+            } => write!(
+                f,
+                "it has `{branch}` checked out, not `{base}`: check `{base}` out there first"
+            ),
+            Self::NotOnBase {
+                base,
+                checked_out: None,
+            } => write!(f, "its HEAD is detached: check `{base}` out there first"),
+            Self::UncommittedChanges { changed } => write!(
+                f,
+                "it has uncommitted changes ({changed} file{}): commit or stash them first",
+                if *changed == 1 { "" } else { "s" }
+            ),
+            Self::Abandoned { detail } => write!(
+                f,
+                "git could not make the merge and it was abandoned, the checkout is as it was \
+                 ({detail})"
+            ),
+        }
+    }
 }
 
 /// Why [`Git::remove_worktree`](crate::Git::remove_worktree) keeps a

@@ -503,7 +503,6 @@ async fn a_real_mcp_client_sees_every_tool() {
         names,
         [
             "ask_human",
-            "close_mission",
             "list_agents",
             "read_messages",
             "report",
@@ -640,23 +639,33 @@ async fn person_answers(fixture: &Fixture, words: &str) {
     settle().await;
 }
 
+/// Waits until the mission has `status`, for at most ten seconds: what
+/// follows the person's answer runs after the request that carried it.
+async fn mission_becomes(fixture: &Fixture, status: MissionStatus) -> Registry {
+    for _ in 0..500 {
+        let registry = registry(fixture).await;
+        if registry.missions().next().unwrap().status == status {
+            return registry;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the mission never became {status:?}");
+}
+
 #[tokio::test]
-async fn the_coordinator_presents_its_report_and_closes_only_after_ok_merge() {
+async fn the_coordinator_presents_its_report_and_volee_ends_the_mission_on_ok_merge() {
+    // The person merged the pull request on the forge themselves.
     let fixture = mission_whose_pull_request_is(PrState::Merged);
     let worker = server_for(&fixture, agent(11)).await;
     let coordinator = server_for(&fixture, agent(10)).await;
 
-    for not_mine in [
-        worker.close_mission().await.unwrap(),
-        worker.request_approval(Parameters(report())).await.unwrap(),
-    ] {
-        assert!(failed(&not_mine));
-        assert!(
-            body(&not_mine).contains("only the mission's coordinator"),
-            "{}",
-            body(&not_mine)
-        );
-    }
+    let not_mine = worker.request_approval(Parameters(report())).await.unwrap();
+    assert!(failed(&not_mine));
+    assert!(
+        body(&not_mine).contains("only the mission's coordinator"),
+        "{}",
+        body(&not_mine)
+    );
 
     // Before the worker delivered, there is nothing to approve.
     let early = coordinator
@@ -672,22 +681,14 @@ async fn the_coordinator_presents_its_report_and_closes_only_after_ok_merge() {
 
     worker_stops(&fixture).await;
     settle().await;
-    // Closing without the person's approval is refused, with what to do.
-    let unasked = coordinator.close_mission().await.unwrap();
-    assert!(failed(&unasked));
-    assert!(
-        body(&unasked).contains("`request_approval` first"),
-        "{}",
-        body(&unasked)
-    );
-
     let presented = coordinator
         .request_approval(Parameters(report()))
         .await
         .unwrap();
     assert!(!failed(&presented), "{}", body(&presented));
+    // What it reads next says whose the merge is.
     assert!(
-        body(&presented).contains("Merge nothing and close nothing"),
+        body(&presented).contains("Merge nothing: on their approval volee merges and closes"),
         "{}",
         body(&presented)
     );
@@ -698,7 +699,10 @@ async fn the_coordinator_presents_its_report_and_closes_only_after_ok_merge() {
     let question = snapshot.message(mission.report.unwrap()).unwrap();
     assert_eq!(question.options, ["ok merge", "no"]);
     assert!(question.body.contains("Left: nothing"), "{}", question.body);
-    let waiting = coordinator.close_mission().await.unwrap();
+    let waiting = coordinator
+        .request_approval(Parameters(report()))
+        .await
+        .unwrap();
     assert!(failed(&waiting));
     assert!(
         body(&waiting).contains("has not answered your report yet"),
@@ -706,23 +710,18 @@ async fn the_coordinator_presents_its_report_and_closes_only_after_ok_merge() {
         body(&waiting)
     );
 
+    // The person's answer ends the mission: no tool of the coordinator's
+    // does, and none is needed.
     person_answers(&fixture, "ok merge").await;
-    let closed = coordinator.close_mission().await.unwrap();
-    assert!(!failed(&closed), "{}", body(&closed));
-    assert!(
-        body(&closed).contains("volee tidies its workers and stops you"),
-        "{}",
-        body(&closed)
-    );
-    let registry = registry(&fixture).await;
+    let registry = mission_becomes(&fixture, MissionStatus::Closed).await;
     let mission = registry.missions().next().unwrap();
-    assert_eq!(mission.status, MissionStatus::Closed);
     let report = registry.message(mission.report.unwrap()).unwrap();
     assert!(report.body.contains("billing#7"));
 }
 
 #[tokio::test]
-async fn an_approved_mission_whose_work_is_not_merged_does_not_close() {
+async fn an_approval_that_cannot_be_carried_out_is_said_to_the_coordinator() {
+    // The pull request is open, and this daemon has no forge client.
     let fixture = mission_fixture();
     let coordinator = server_for(&fixture, agent(10)).await;
     worker_stops(&fixture).await;
@@ -734,18 +733,26 @@ async fn an_approved_mission_whose_work_is_not_merged_does_not_close() {
     assert!(!failed(&presented), "{}", body(&presented));
     settle().await;
     person_answers(&fixture, "ok merge").await;
-    let unmerged = coordinator.close_mission().await.unwrap();
-    assert!(failed(&unmerged));
+    mission_becomes(&fixture, MissionStatus::Reporting).await;
+    // It reads why, as any message sent to it.
+    let read = coordinator
+        .read_messages(Parameters(
+            serde_json::from_value(serde_json::json!({})).unwrap(),
+        ))
+        .await
+        .unwrap();
     assert!(
-        body(&unmerged).contains("merge the work of these workers first")
-            && body(&unmerged).contains("billing"),
+        body(&read).contains("volee could not merge all the work of")
+            && body(&read).contains("billing: volee has no forge client to merge"),
         "{}",
-        body(&unmerged)
+        body(&read)
     );
-    assert_eq!(
-        registry(&fixture).await.missions().next().unwrap().status,
-        MissionStatus::Approved
-    );
+    // And presents its report again.
+    let again = coordinator
+        .request_approval(Parameters(report()))
+        .await
+        .unwrap();
+    assert!(!failed(&again), "{}", body(&again));
 }
 
 #[tokio::test]

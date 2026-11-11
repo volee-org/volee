@@ -161,7 +161,7 @@ The end of a mission is the human's decision
 | --- | --- | --- |
 | `reporting` | Every worker delivered; the coordinator checks the work. | The coordinator presents its report (`missions.request_approval`). |
 | `awaiting-approval` | The report is a question to the human, recorded as the mission's `report`. Nothing is merged or closed. | The human's answer to that question. |
-| `approved` | The human chose the approving answer (`MissionKind::approval`): the coordinator merges. | `missions.close`, once every merge is seen. |
+| `approved` | The human chose the approving answer (`MissionKind::approval`): the daemon merges the work of every worker. | The daemon: `closed` once every merge is seen in the evidence, else back to `reporting`, with the reason. |
 
 `supervise` reads the human's answer with `Registry::answer_to` and
 `Message::chosen`: only the approving option, chosen exactly, approves;

@@ -428,12 +428,28 @@ volee msg questions
 volee msg answer coordinator-invoicing 1     # ok merge
 ```
 
-Only that answer lets the coordinator merge: pull requests with `gh`, and
-in a repository without a remote a plain merge of each worker's branch in
-the main checkout. volee merges nothing itself; it checks each merge, and
-lets the coordinator close the mission only once every one is seen. On any
-other answer the mission stays open, and the coordinator is told what you
-said.
+Only that answer merges the work, and volee makes the merges itself, one
+worker after the other: no agent merges
+([ADR 0032](../adr/0032-a-mission-is-merged-only-after-the-person-approved.md)).
+
+- With a remote, it merges the worker's pull request on GitHub with your
+  `gh`: a draft is marked ready first, and the method is the repository's
+  [`merge` setting](configuration.md#reposname), or the first one the
+  repository allows among a merge commit, a squash and a rebase. GitHub's
+  rules still apply: volee does not bypass a required review or a failing
+  check, and does not wait for them.
+- Without a remote, it merges the worker's branch into its base branch in
+  the main checkout, as a merge commit. The main checkout must have the base
+  branch checked out, and no uncommitted change to a tracked file: volee
+  does not switch branches or stash for you.
+
+It then closes the mission. When a merge cannot go through, nothing is
+forced and a conflict is abandoned: what was already merged stays merged,
+the mission is open again, and a message tells you, the coordinator and the
+lead which work was not merged and why. Once that is settled, the
+coordinator presents its report again and you answer again. On any answer
+other than `ok merge` the mission stays open, and the coordinator is told
+what you said.
 
 A closed mission is tidied in one gesture: volee removes the worktree of
 every worker whose work landed, keeps its branch, forgets the agent, stops
@@ -442,8 +458,9 @@ kept, with the reason (uncommitted changes, work that did not land). It
 never forces and never deletes a branch.
 
 `volee mission close` is you closing a mission yourself, without the
-coordinator: it refuses a mission whose workers have not all delivered and
-says which; `--force` closes it anyway. It tidies the same way. Aborting
+coordinator and without a merge: it refuses a mission whose workers have
+not all delivered and says which; `--force` closes it anyway. It tidies the
+same way, so a worker whose work you did not merge is kept. Aborting
 tells every agent of the mission to stop and deletes nothing: branches,
 worktrees and pull requests stay where they are.
 

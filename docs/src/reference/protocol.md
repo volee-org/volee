@@ -41,7 +41,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `missions.create` | `title`, `kind` (`change` or `analysis`), `goal`, `repos`, optional `requested_by` | `mission`, `thread`, `coordinator` |
 | `missions.abort` | `mission`, optional `reason` | none |
 | `missions.request_approval` | `mission`, `by` (its coordinator), `done`, `proof`, `left` | `question`: the report, posted as a question to the human that offers the approving answer and `no` |
-| `missions.close` | `mission`, optional `report`, `force`, `by` | none; the daemon then tidies the mission's workers and stops its coordinator |
+| `missions.close` | `mission`, optional `report`, `force` | none; the daemon then tidies the mission's workers and stops its coordinator. The human's own gesture: a request with `by` (an agent) is refused |
 
 ### Running a program
 
@@ -211,15 +211,25 @@ human's answer is an ordinary message in reply to that question
 (`messages.send`); the supervisor reads it and moves the mission to
 `approved`, or back to `reporting`.
 
-`missions.close` refuses (`-32002`) while a worker has not delivered, unless
-`force` is set. Without `report`, the report the coordinator presented is
-kept, else its latest report in the mission's thread. When `by` names an
-agent, it must be the mission's coordinator, the mission must be `approved`,
-the work of every worker of a change mission must be merged (the daemon
-reads their evidence again first), and it cannot force. After a close, the
-daemon tidies the workers whose work landed, stops the coordinator, and
-posts one message in the mission's thread that says what it tidied and what
-it kept.
+No request merges: the daemon does, when a mission becomes `approved`
+([ADR 0032](../adr/0032-a-mission-is-merged-only-after-the-person-approved.md)).
+It reads the workers' evidence from git and the forge, merges the work that
+has not landed (a pull request on the forge, a branch into its base branch
+in the main checkout of a repository without a remote), reads the evidence
+again, and closes the mission once every merge shows in it. Otherwise it
+moves the mission back to `reporting` and posts an alert in the mission's
+thread, to the human, the coordinator and the lead, that names each worker
+whose work was not merged, with the reason. A mission that is `approved`
+when the daemon starts is carried out then.
+
+`missions.close` is the human closing a mission themselves, without a
+merge. It refuses (`-32002`) while a worker has not delivered, unless
+`force` is set, and it refuses a request made in an agent's name (`by`): no
+agent closes a mission. Without `report`, the report the coordinator
+presented is kept, else its latest report in the mission's thread. After a
+close, by the human or by the daemon, the daemon tidies the workers whose
+work landed, stops the coordinator, and posts one message in the mission's
+thread that says what it tidied and what it kept.
 
 ## Events and replicas
 

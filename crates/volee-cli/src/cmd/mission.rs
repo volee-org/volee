@@ -176,9 +176,7 @@ pub(crate) async fn abort(input: &str, reason: Option<String>) -> Result<()> {
 /// Closes a mission, with the report its coordinator presented. volee then
 /// tidies its workers and stops its coordinator.
 pub(crate) async fn close(input: &str, force: bool) -> Result<()> {
-    resolve::as_the_person(
-        "closes a mission from the command line (its coordinator calls close_mission)",
-    )?;
+    resolve::as_the_person("closes a mission from the command line")?;
     let client = connect_or_start().await?;
     let registry = resolve::registry(&client).await?;
     let id = resolve::mission(&registry, input)?;

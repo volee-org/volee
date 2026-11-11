@@ -2,16 +2,17 @@
 //! `missions.close` (ADR 0007, ADR 0032).
 //!
 //! The supervisor runs after each commit (see `crate::missions`); these
-//! handlers only change a mission's lifecycle on request.
+//! handlers only change a mission's lifecycle on request. What follows the
+//! person's approval (the merges, the close, the tidying) is in
+//! `crate::missions`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use volee_core::message::{Message, MessageKind, Party, Receipt, Thread};
 use volee_core::mission::{Mission, MissionKind, MissionStatus, Verdict};
 use volee_core::role::Role;
-use volee_core::{AgentId, Event, EventKind, MessageId, MissionId, Registry, ThreadId};
+use volee_core::{Event, EventKind, MessageId, MissionId, Registry, ThreadId};
 use volee_proto::methods::{
     AbortParams, ApprovalAsked, ApprovalParams, CloseParams, CreateMissionParams, CreatedMission,
     Empty,
@@ -224,12 +225,34 @@ pub(super) async fn abort(shared: &Arc<Shared>, params: AbortParams) -> Result<E
     Ok(Empty {})
 }
 
-/// How long a request waits for the delivery evidence of a mission's
-/// workers to be read again: a few git commands and one forge lookup each.
-const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// The longest line of a report presented to the person, in characters.
 const REPORT_LINE: usize = 300;
+
+/// Whether the coordinator of `record` may present its report now: every
+/// worker delivered, and no report waits for the human's answer or was
+/// approved.
+fn presentable(registry: &Registry, record: &Mission) -> Result<(), DaemonError> {
+    match record.status {
+        MissionStatus::Reporting => Ok(()),
+        MissionStatus::AwaitingApproval => Err(DaemonError::Refused(
+            "the human has not answered your report yet: end your turn, volee wakes you with \
+             their answer"
+                .into(),
+        )),
+        MissionStatus::Approved => Err(DaemonError::Refused(
+            "the human already approved: volee merges and closes the mission, you have \
+             nothing more to do"
+                .into(),
+        )),
+        _ => Err(DaemonError::Refused(format!(
+            "mission \"{}\" is not ready to be approved: {}. Ask them to finish, or tell your \
+             lead and the human what is left: a report presented for approval says the work \
+             is ready.",
+            record.title,
+            undelivered(registry, record)
+        ))),
+    }
+}
 
 /// `missions.request_approval`: the coordinator presents its report, as a
 /// question to the person that offers the approving answer and "no". The
@@ -261,30 +284,7 @@ pub(super) async fn request_approval(
             record.title
         )));
     }
-    match record.status {
-        MissionStatus::Reporting => {}
-        MissionStatus::AwaitingApproval => {
-            return Err(DaemonError::Refused(
-                "the human has not answered your report yet: end your turn, volee wakes you \
-                 with their answer"
-                    .into(),
-            ));
-        }
-        MissionStatus::Approved => {
-            return Err(DaemonError::Refused(
-                "the human already approved: merge, then call `close_mission`".into(),
-            ));
-        }
-        _ => {
-            return Err(DaemonError::Refused(format!(
-                "mission \"{}\" is not ready to be approved: {}. Ask them to finish, or tell \
-                 your lead and the human what is left: a report presented for approval says \
-                 the work is ready.",
-                record.title,
-                undelivered(registry, record)
-            )));
-        }
-    }
+    presentable(registry, record)?;
     let act = match record.kind {
         MissionKind::Change => "merge",
         MissionKind::Analysis => "close",
@@ -358,39 +358,36 @@ fn report_line(text: &str) -> String {
     }
 }
 
-/// `missions.close`. The coordinator closes only a mission the person
-/// approved and, for a change mission, whose work is merged; the person
-/// closes a mission whose workers all delivered, or any mission with
-/// `force`. Closing then tidies the mission's workers and stops its
-/// coordinator (see [`crate::missions::wind_down`]).
+/// `missions.close`: the person closes a mission themselves, without its
+/// coordinator. A mission whose workers all delivered closes; any other
+/// needs `force`. An agent never closes a mission: a mission ends on the
+/// person's approval of its report, which volee carries out (see
+/// [`crate::missions::carry_out`]), or by the person's own hand, here.
+/// Closing then tidies the mission's workers and stops its coordinator (see
+/// [`crate::missions::wind_down`]).
 pub(super) async fn close(shared: &Arc<Shared>, params: CloseParams) -> Result<Empty, DaemonError> {
-    if params.by.is_some() {
-        // The coordinator just merged: read what git and the forge say now,
-        // whatever the state of the workers.
-        let workers = {
-            let state = shared.state.lock().await;
-            workers_of(state.registry(), params.mission)
-        };
-        crate::evidence::check_now(shared, &workers, CHECK_TIMEOUT).await;
-    }
     {
         let mut state = shared.state.lock().await;
         let record = open_mission(&state, params.mission)?;
+        if params.by.is_some() {
+            return Err(DaemonError::Refused(format!(
+                "an agent does not close a mission: \"{}\" closes once the human approved \
+                 the report its coordinator presents with `request_approval`, or by the \
+                 human's own hand",
+                record.title
+            )));
+        }
         let registry = state.registry();
         let report = match params.report {
             Some(report) => Some(report_in_thread(registry, record, report)?),
             None => record.report.or_else(|| latest_report(registry, record)),
         };
-        match params.by {
-            Some(agent) => may_close(registry, record, agent, params.force)?,
-            None if params.force || record.status.is_ready() => {}
-            None => {
-                return Err(DaemonError::Refused(format!(
-                    "mission \"{}\" cannot close yet: {}.",
-                    record.title,
-                    undelivered(registry, record)
-                )));
-            }
+        if !params.force && !record.status.is_ready() {
+            return Err(DaemonError::Refused(format!(
+                "mission \"{}\" cannot close yet: {}.",
+                record.title,
+                undelivered(registry, record)
+            )));
         }
         let now = state.now();
         state.commit(vec![Event::new(
@@ -406,82 +403,9 @@ pub(super) async fn close(shared: &Arc<Shared>, params: CloseParams) -> Result<E
     tokio::spawn(crate::missions::wind_down(
         Arc::clone(shared),
         params.mission,
-        params.by.is_some(),
+        false,
     ));
     Ok(Empty {})
-}
-
-/// Whether `agent` may close `mission` now: it is its coordinator, the
-/// person approved the report it presented, and the work of a change
-/// mission is merged.
-fn may_close(
-    registry: &Registry,
-    mission: &Mission,
-    agent: AgentId,
-    force: bool,
-) -> Result<(), DaemonError> {
-    if mission.coordinator != Some(agent) {
-        return Err(DaemonError::Refused(format!(
-            "only the coordinator of mission \"{}\" can close it",
-            mission.title
-        )));
-    }
-    if force {
-        return Err(DaemonError::Refused(
-            "only the human can force a mission closed".into(),
-        ));
-    }
-    match mission.status {
-        MissionStatus::Approved => {}
-        MissionStatus::AwaitingApproval => {
-            return Err(DaemonError::Refused(
-                "the human has not answered your report yet: nothing is merged or closed before \
-                 they do. End your turn, volee wakes you with their answer"
-                    .into(),
-            ));
-        }
-        MissionStatus::Reporting => {
-            return Err(DaemonError::Refused(
-                "present your report to the human with `request_approval` first: only their \
-                 approval lets you merge and close"
-                    .into(),
-            ));
-        }
-        _ => {
-            return Err(DaemonError::Refused(format!(
-                "mission \"{}\" cannot close yet: {}. Ask them to finish, or tell the human \
-                 why they cannot.",
-                mission.title,
-                undelivered(registry, mission)
-            )));
-        }
-    }
-    if mission.kind == MissionKind::Change {
-        let unmerged: Vec<&str> = registry
-            .mission_agents(mission.id)
-            .into_iter()
-            .filter(|agent| agent.role == Role::Worker && !agent.delivery.is_delivered())
-            .map(|agent| agent.name.as_str())
-            .collect();
-        if !unmerged.is_empty() {
-            return Err(DaemonError::Refused(format!(
-                "merge the work of these workers first, volee sees no merge of their branch: \
-                 {}. If a merge fails, tell the human what blocks instead of closing.",
-                unmerged.join(", ")
-            )));
-        }
-    }
-    Ok(())
-}
-
-/// The workers of a mission.
-fn workers_of(registry: &Registry, mission: MissionId) -> Vec<AgentId> {
-    registry
-        .mission_agents(mission)
-        .into_iter()
-        .filter(|agent| agent.role == Role::Worker)
-        .map(|agent| agent.id)
-        .collect()
 }
 
 /// A mission that is neither closed nor aborted.

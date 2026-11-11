@@ -423,11 +423,10 @@ fn the_coordinator_is_asked_to_present_its_report_and_to_merge_nothing() {
     assert!(last.body.contains("`request_approval`"), "{}", last.body);
     assert!(
         last.body
-            .contains("Merge nothing and close nothing before the human answers"),
+            .contains("You merge nothing and close nothing: volee does, once the human approved"),
         "{}",
         last.body
     );
-    assert!(!last.body.contains("close_mission"), "{}", last.body);
 }
 
 #[test]
@@ -439,7 +438,7 @@ fn waiting_for_the_person_s_answer_says_nothing() {
 }
 
 #[test]
-fn ok_merge_approves_and_tells_the_coordinator_to_merge_then_close() {
+fn ok_merge_approves_and_tells_the_coordinator_that_volee_merges() {
     let mut world = ready(MissionKind::Change);
     let question = present(&mut world, 1);
     answer(&mut world, 2, question, "ok merge");
@@ -454,10 +453,18 @@ fn ok_merge_approves_and_tells_the_coordinator_to_merge_then_close() {
         "{}",
         notice.body
     );
-    assert!(notice.body.contains("`gh pr merge"), "{}", notice.body);
-    assert!(notice.body.contains("git merge --no-ff"), "{}", notice.body);
-    assert!(notice.body.contains("never a squash"), "{}", notice.body);
-    assert!(notice.body.contains("`close_mission`"), "{}", notice.body);
+    assert!(
+        notice
+            .body
+            .contains("volee merges every worker's work itself"),
+        "{}",
+        notice.body
+    );
+    assert!(notice.body.contains("merge nothing"), "{}", notice.body);
+    // No command to run: the merge is not the coordinator's.
+    for command in ["gh pr", "git merge", "`"] {
+        assert!(!notice.body.contains(command), "{}", notice.body);
+    }
     // Said once.
     assert_eq!(world.step(), Decision::default());
     assert_eq!(world.status(), MissionStatus::Approved);
@@ -572,7 +579,10 @@ fn an_analysis_mission_is_approved_with_ok_close_and_has_nothing_to_merge() {
     let decision = world.step();
     assert_eq!(world.status(), MissionStatus::Approved);
     let body = &decision.notices[0].body;
-    assert!(body.contains("call `close_mission`"), "{body}");
+    assert!(
+        body.contains("volee closes the mission and stops you"),
+        "{body}"
+    );
     assert!(!body.contains("merge"), "{body}");
 }
 

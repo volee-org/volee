@@ -675,25 +675,7 @@ fn close_by(by: u128, force: bool) -> CloseParams {
     }
 }
 
-async fn coordinator_reports(client: &Client, body: &str) -> volee_core::MessageId {
-    client
-        .call::<SendMessage>(SendParams {
-            from: Party::Agent(agent(COORDINATOR)),
-            to: vec![Party::Human],
-            kind: MessageKind::Report,
-            body: body.into(),
-            refs: vec![],
-            in_reply_to: None,
-            options: Vec::new(),
-            thread: None,
-        })
-        .await
-        .unwrap()
-        .message
-}
-
-/// A merged pull request at the branch's tip: what the coordinator's merge
-/// leaves, as the forge says it.
+/// A merged pull request at the branch's tip, as the forge says it.
 fn merged(n: u128) -> Event {
     let mut event = shipped(n);
     if let EventKind::DeliveryUpdated { delivery, .. } = &mut event.kind {
@@ -746,6 +728,20 @@ async fn refusal<M: volee_proto::methods::Method>(client: &Client, params: M::Pa
     error.message
 }
 
+/// Waits until the registry satisfies `ready`, for at most ten seconds:
+/// what follows the person's approval runs after the request that carried
+/// their answer returned.
+async fn until(client: &Client, ready: impl Fn(&Registry) -> bool) -> Registry {
+    for _ in 0..500 {
+        let registry = registry(client).await;
+        if ready(&registry) {
+            return registry;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("the registry never reached the expected state");
+}
+
 #[tokio::test]
 async fn the_report_is_presented_as_a_question_that_offers_ok_merge_and_no() {
     let mut events = mission_with_workers();
@@ -784,16 +780,11 @@ async fn the_report_is_presented_as_a_question_that_offers_ok_merge_and_no() {
     // It waits on top of the person's messages.
     assert_eq!(registry.unanswered_questions(), [question]);
 
-    // Asking twice, or closing, before the person answered: refused.
+    // Asking twice before the person answered: refused.
     let twice = refusal::<RequestApproval>(&client, present(COORDINATOR)).await;
     assert!(
         twice.contains("has not answered your report yet"),
         "{twice}"
-    );
-    let close = refusal::<CloseMission>(&client, close_by(COORDINATOR, false)).await;
-    assert!(
-        close.contains("nothing is merged or closed before"),
-        "{close}"
     );
     assert_eq!(status(&client).await, MissionStatus::AwaitingApproval);
 }
@@ -825,20 +816,38 @@ async fn a_report_says_what_is_done_and_gives_the_proof_on_single_lines() {
 }
 
 #[tokio::test]
-async fn before_its_report_the_coordinator_cannot_close() {
+async fn an_agent_never_closes_a_mission() {
     let mut events = mission_with_workers();
-    events.push(shipped(API));
+    events.extend([merged(BILLING), merged(API)]);
     let daemon = start(events);
     let client = connect(&daemon).await;
     reporting(&client).await;
-    // A report sent the old way is not an approval.
-    coordinator_reports(&client, "Invoices are in billing#11 and api#12.").await;
+    // Neither its coordinator nor a worker, by force or not: even with
+    // every pull request merged, a mission ends on the person's word.
+    for params in [
+        close_by(COORDINATOR, false),
+        close_by(COORDINATOR, true),
+        close_by(BILLING, false),
+    ] {
+        let refused = refusal::<CloseMission>(&client, params).await;
+        assert!(
+            refused.contains("an agent does not close a mission")
+                && refused.contains("`request_approval`"),
+            "{refused}"
+        );
+    }
+    assert_eq!(status(&client).await, MissionStatus::Reporting);
+    // Nor while the person reads its report.
+    client
+        .call::<RequestApproval>(present(COORDINATOR))
+        .await
+        .unwrap();
     let refused = refusal::<CloseMission>(&client, close_by(COORDINATOR, false)).await;
     assert!(
-        refused.contains("`request_approval` first") && refused.contains("only their approval"),
+        refused.contains("an agent does not close a mission"),
         "{refused}"
     );
-    assert_eq!(status(&client).await, MissionStatus::Reporting);
+    assert_eq!(status(&client).await, MissionStatus::AwaitingApproval);
 }
 
 #[tokio::test]
@@ -865,8 +874,6 @@ async fn no_keeps_the_mission_open_and_the_coordinator_is_told() {
             .any(|text| text.contains("did not approve") && text.contains("Nothing is merged")),
         "{told:?}"
     );
-    let close = refusal::<CloseMission>(&client, close_by(COORDINATOR, false)).await;
-    assert!(close.contains("`request_approval` first"), "{close}");
 
     // A second report is a new question; an answer to the first one, late,
     // approves nothing.
@@ -877,12 +884,26 @@ async fn no_keeps_the_mission_open_and_the_coordinator_is_told() {
     assert_ne!(again.question, asked.question);
     answers(&client, asked.question, "ok merge").await;
     assert_eq!(status(&client).await, MissionStatus::AwaitingApproval);
-    answers(&client, again.question, "ok merge").await;
-    assert_eq!(status(&client).await, MissionStatus::Approved);
+    // Nothing was attempted: nobody hears of a merge.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let late = crate::registry(&client).await;
+    assert_eq!(
+        late.mission(mission_id()).unwrap().status,
+        MissionStatus::AwaitingApproval
+    );
+    assert!(
+        !texts(&late, Party::Human)
+            .iter()
+            .any(|text| text.contains("could not merge")),
+        "{:?}",
+        texts(&late, Party::Human)
+    );
 }
 
 #[tokio::test]
-async fn approved_work_must_be_merged_before_the_coordinator_closes() {
+async fn an_approval_volee_cannot_carry_out_opens_the_mission_again_and_says_why() {
+    // Two open pull requests, and a daemon that has no forge client to
+    // merge them with.
     let mut events = mission_with_workers();
     events.push(shipped(API));
     let daemon = start(events);
@@ -892,34 +913,71 @@ async fn approved_work_must_be_merged_before_the_coordinator_closes() {
         .call::<RequestApproval>(present(COORDINATOR))
         .await
         .unwrap();
+    // Their spelling of the approval does not matter.
     answers(&client, asked.question, "OK merge").await;
 
-    let registry = registry(&client).await;
-    assert_eq!(
-        registry.mission(mission_id()).unwrap().status,
-        MissionStatus::Approved
-    );
-    let told = texts(&registry, Party::Agent(agent(COORDINATOR)));
+    let failed = |registry: &Registry| {
+        registry
+            .thread_messages(thread_id())
+            .into_iter()
+            .filter(|message| message.body.contains("could not merge"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let reopened = until(&client, |registry| !failed(registry).is_empty()).await;
+    // The coordinator was told that the person approved, and that the
+    // merge is not its own to make.
+    let told = texts(&reopened, Party::Agent(agent(COORDINATOR)));
     assert!(
-        told.iter()
-            .any(|text| text.contains("The human approved") && text.contains("`close_mission`")),
+        told.iter().any(|text| text.contains("The human approved")
+            && text.contains("volee merges every worker's work itself")
+            && text.contains("merge nothing")),
         "{told:?}"
     );
-    // The pull requests are open, not merged: the coordinator has work left.
-    let unmerged = refusal::<CloseMission>(&client, close_by(COORDINATOR, false)).await;
-    assert!(
-        unmerged.contains("merge the work of these workers first")
-            && unmerged.contains("billing, api"),
-        "{unmerged}"
+    // Why, worker by worker, to the person and to the coordinator; once.
+    let [alert] = &failed(&reopened)[..] else {
+        panic!("one alert: {:?}", failed(&reopened));
+    };
+    assert_eq!(alert.kind, MessageKind::Alert);
+    assert_eq!(alert.from, Party::System);
+    assert_eq!(
+        alert.recipients().collect::<Vec<_>>(),
+        [Party::Human, Party::Agent(agent(COORDINATOR))]
     );
-    assert_eq!(status(&client).await, MissionStatus::Approved);
-    // Presenting again is refused too: the answer was given.
-    let again = refusal::<RequestApproval>(&client, present(COORDINATOR)).await;
-    assert!(again.contains("already approved"), "{again}");
+    assert!(
+        alert
+            .body
+            .starts_with("volee could not merge all the work of \"Invoicing\". "),
+        "{}",
+        alert.body
+    );
+    for why in [
+        "billing: volee has no forge client to merge https://example.com/pull/11 with",
+        "api: volee has no forge client to merge https://example.com/pull/12 with",
+        "What was merged stays merged, and nothing was forced.",
+        "presents its report again with `request_approval`",
+    ] {
+        assert!(alert.body.contains(why), "{why}: {}", alert.body);
+    }
+    // The mission is open again, and waits for a new report: the answer
+    // that was given approved a merge that did not happen.
+    assert_eq!(
+        reopened.mission(mission_id()).unwrap().status,
+        MissionStatus::Reporting
+    );
+    let again = client
+        .call::<RequestApproval>(present(COORDINATOR))
+        .await
+        .unwrap();
+    assert_ne!(again.question, asked.question);
+    assert_eq!(status(&client).await, MissionStatus::AwaitingApproval);
+    assert_eq!(failed(&registry(&client).await).len(), 1, "said once");
 }
 
 #[tokio::test]
-async fn the_coordinator_closes_once_the_person_approved_and_the_work_is_merged() {
+async fn a_mission_whose_work_is_already_merged_closes_on_the_person_s_approval() {
+    // The person merged both pull requests on the forge themselves, then
+    // answered the report.
     let mut events = mission_with_workers();
     events.extend([merged(BILLING), merged(API)]);
     let daemon = start(events);
@@ -929,38 +987,28 @@ async fn the_coordinator_closes_once_the_person_approved_and_the_work_is_merged(
         .call::<RequestApproval>(present(COORDINATOR))
         .await
         .unwrap();
+    // Until they answer, nothing ends.
+    assert_eq!(status(&client).await, MissionStatus::AwaitingApproval);
     answers(&client, asked.question, "ok merge").await;
-    client
-        .call::<CloseMission>(close_by(COORDINATOR, false))
-        .await
-        .unwrap();
-    let registry = registry(&client).await;
-    let mission = registry.mission(mission_id()).unwrap();
-    assert_eq!(mission.status, MissionStatus::Closed);
+    let closed = until(&client, |registry| {
+        registry.mission(mission_id()).unwrap().status == MissionStatus::Closed
+    })
+    .await;
+    let mission = closed.mission(mission_id()).unwrap();
     assert_eq!(
         mission.report,
         Some(asked.question),
         "the report the person approved"
     );
-}
-
-#[tokio::test]
-async fn only_the_coordinator_closes_and_never_by_force() {
-    let mut events = mission_with_workers();
-    events.extend([merged(BILLING), merged(API)]);
-    let daemon = start(events);
-    let client = connect(&daemon).await;
-    reporting(&client).await;
-    let asked = client
-        .call::<RequestApproval>(present(COORDINATOR))
-        .await
-        .unwrap();
-    answers(&client, asked.question, "ok merge").await;
-
-    for params in [close_by(BILLING, false), close_by(COORDINATOR, true)] {
-        refusal::<CloseMission>(&client, params).await;
-    }
-    assert_eq!(status(&client).await, MissionStatus::Approved);
+    assert!(
+        !texts(&closed, Party::Human)
+            .iter()
+            .any(|text| text.contains("could not merge")),
+        "{:?}",
+        texts(&closed, Party::Human)
+    );
+    // Presenting again is refused: the mission is over.
+    refusal::<RequestApproval>(&client, present(COORDINATOR)).await;
 }
 
 #[tokio::test]
@@ -989,18 +1037,16 @@ async fn the_person_closes_a_mission_whose_report_waits_and_is_told_what_was_kep
     // The wind-down says what it kept: here nothing can be tidied (no
     // worktree of volee's, no evidence read from git) or stopped (no
     // harness), and each is kept with its reason.
-    let mut said = None;
-    for _ in 0..200 {
-        let registry = registry(&client).await;
-        said = texts(&registry, Party::Human)
-            .into_iter()
-            .find(|text| text.starts_with("Mission \"Invoicing\" is closed."));
-        if said.is_some() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    let said = said.expect("the wind-down says what it did");
+    let done = until(&client, |registry| {
+        texts(registry, Party::Human)
+            .iter()
+            .any(|text| text.starts_with("Mission \"Invoicing\" is closed."))
+    })
+    .await;
+    let said = texts(&done, Party::Human)
+        .into_iter()
+        .find(|text| text.starts_with("Mission \"Invoicing\" is closed."))
+        .unwrap();
     assert!(said.contains("Kept: billing: "), "{said}");
     assert!(said.contains("api: "), "{said}");
     assert!(
@@ -1008,8 +1054,7 @@ async fn the_person_closes_a_mission_whose_report_waits_and_is_told_what_was_kep
         "{said}"
     );
     assert!(!said.contains("Tidied"), "{said}");
-    let registry = registry(&client).await;
     for n in [COORDINATOR, BILLING, API] {
-        assert!(registry.agent(agent(n)).is_some(), "agent {n} is kept");
+        assert!(done.agent(agent(n)).is_some(), "agent {n} is kept");
     }
 }

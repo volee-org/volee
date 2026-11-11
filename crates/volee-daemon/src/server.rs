@@ -94,6 +94,12 @@ pub(crate) struct Shared {
     pub(crate) harnesses: Vec<HarnessStatus>,
     pub(crate) harness: Option<Arc<dyn Harness>>,
     pub(crate) git: Option<Arc<dyn Git>>,
+    /// The forge client, to merge the pull requests of a mission the person
+    /// approved.
+    pub(crate) forge_client: Option<Arc<dyn volee_git::Forge>>,
+    /// The missions being merged and closed now, so that one answer is
+    /// carried out once.
+    pub(crate) concluding: std::sync::Mutex<std::collections::HashSet<volee_core::MissionId>>,
     pub(crate) settings: volee_config::Config,
     pub(crate) volee_bin: Option<PathBuf>,
     pub(crate) hosts: bool,
@@ -254,6 +260,8 @@ impl Daemon {
             harnesses: config.harnesses,
             harness: config.harness.clone(),
             git: config.evidence.git.clone(),
+            forge_client: config.evidence.forge.clone(),
+            concluding: std::sync::Mutex::default(),
             settings: config.evidence.settings.clone(),
             volee_bin: config.volee_bin,
             hosts: config.hosts,
@@ -304,6 +312,9 @@ impl Daemon {
             });
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
+        // A mission the person approved while the daemon was stopping, or
+        // whose merge it could not finish, is carried out now.
+        crate::missions::resume_approved(&shared).await;
         let resumer = crate::resume::spawn(&shared);
         let files = crate::files::spawn(&shared, removals);
         // Agents a reboot interrupted come back in new hosts (ADR 0024).

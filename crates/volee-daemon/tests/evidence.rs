@@ -210,6 +210,18 @@ impl FakeForge {
 }
 
 impl Forge for FakeForge {
+    fn merge(
+        &self,
+        _repo: &Path,
+        _pull_request: &PullRequest,
+        method: Option<volee_git::MergeMethod>,
+    ) -> Result<volee_git::MergeMethod, GitError> {
+        if let Some(pr) = self.pull_request.lock().unwrap().as_mut() {
+            pr.state = PrState::Merged;
+        }
+        Ok(method.unwrap_or(volee_git::MergeMethod::Merge))
+    }
+
     fn status(&self) -> ForgeStatus {
         ForgeStatus {
             program: "fake-gh".into(),

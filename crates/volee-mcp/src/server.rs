@@ -13,8 +13,8 @@ use volee_core::role::Role;
 use volee_core::{AgentId, AgentState, Registry};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    ActivityParams, ApprovalParams, CloseMission, CloseParams, Join, JoinParams, MarkRead,
-    MarkReadParams, RecordActivity, RequestApproval, SendMessage, SendParams, Spawn, SpawnParams,
+    ActivityParams, ApprovalParams, Join, JoinParams, MarkRead, MarkReadParams, RecordActivity,
+    RequestApproval, SendMessage, SendParams, Spawn, SpawnParams,
 };
 use volee_proto::replica::{Replica, ReplicaError};
 
@@ -27,8 +27,8 @@ write to an agent or to the human (by id, by name, or \"human\"), read_messages 
 sent to you, and report when your task is done, blocked or failed. When only the human can \
 decide, ask_human puts the question on top of their messages with the answers they choose from. \
 A mission's coordinator presents its report to the human with request_approval once every \
-worker delivered, merges only after their approval, then calls close_mission. Messages sent to \
-you also arrive on their own at the end of your turn.";
+worker delivered: on their approval volee merges the work and closes the mission itself, no \
+agent merges. Messages sent to you also arrive on their own at the end of your turn.";
 
 /// The same for an agent of another harness that joined (ADR 0014): no
 /// hooks hand it messages, so it must read them.
@@ -669,8 +669,9 @@ impl VoleeMcp {
                        and you checked their work: present your report to the human (what is \
                        done, the proof, what is left; one line each) and ask for their approval. \
                        volee puts it on top of their messages with the answers to choose from. \
-                       Merge nothing and close nothing before their answer: end your turn, volee \
-                       wakes you with it."
+                       You never merge and never close: on their approval volee merges the work \
+                       itself and closes the mission. End your turn, volee wakes you with their \
+                       answer."
     )]
     pub async fn request_approval(
         &self,
@@ -694,43 +695,11 @@ impl VoleeMcp {
             .await;
         match asked {
             Ok(asked) => Ok(text(&format!(
-                "Your report is before the human (message {}). Merge nothing and close nothing: \
-                 end your turn, volee wakes you with their answer.",
+                "Your report is before the human (message {}). Merge nothing: on their \
+                 approval volee merges and closes the mission itself. End your turn, volee \
+                 wakes you with their answer.",
                 asked.question
             ))),
-            Err(ClientError::Rpc(error)) => Ok(refuse(&error.message)),
-            Err(error) => Err(ErrorData::internal_error(error.to_string(), None)),
-        }
-    }
-
-    /// Closes the mission this agent coordinates.
-    #[tool(
-        description = "Close the mission you coordinate, once the human approved the report you \
-                       presented with request_approval and, for a change mission, you merged \
-                       every worker's work. volee refuses otherwise and says what is missing. It \
-                       then tidies the workers and stops you."
-    )]
-    pub async fn close_mission(&self) -> Result<CallToolResult, ErrorData> {
-        self.note("asked to close its mission").await;
-        let mission = match self.coordinated("closes it").await? {
-            Ok(mission) => mission,
-            Err(refusal) => return Ok(refusal),
-        };
-        let closed = self
-            .inner
-            .client
-            .call::<CloseMission>(CloseParams {
-                mission,
-                report: None,
-                force: false,
-                by: Some(self.inner.me),
-            })
-            .await;
-        match closed {
-            Ok(_) => Ok(text(
-                "The mission is closed. volee tidies its workers and stops you once this turn \
-                 ends: say nothing more.",
-            )),
             Err(ClientError::Rpc(error)) => Ok(refuse(&error.message)),
             Err(error) => Err(ErrorData::internal_error(error.to_string(), None)),
         }
