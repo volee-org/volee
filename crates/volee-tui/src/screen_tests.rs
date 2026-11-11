@@ -188,6 +188,35 @@ fn the_wall_follows_an_agent_in_a_volee_host_live() {
 }
 
 #[test]
+fn a_tile_without_a_screen_says_why_and_what_volee_knows() {
+    let (mut model, demo) = demo_model(160, 48, Theme::default());
+    let effects = update(
+        &mut model,
+        Msg::Key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE)),
+    );
+    // The source reads every screen but the first it is asked for, whose
+    // session runs in a terminal volee cannot reach.
+    let mut refused = None;
+    for effect in effects {
+        if let Effect::LoadPreview(agent) = effect {
+            let result = if refused.is_none() {
+                refused = Some(agent);
+                Err(crate::source::SourceError::Unsupported(
+                    "it runs in a terminal of its own: switch to that terminal to see or \
+                     control it"
+                        .into(),
+                ))
+            } else {
+                demo.screen_at(agent, model.now)
+            };
+            update(&mut model, Msg::PreviewLoaded { agent, result });
+        }
+    }
+    assert!(refused.is_some());
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
 fn the_wall_on_its_last_page() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     type_text(&demo, &mut model, "5G");

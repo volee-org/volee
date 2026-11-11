@@ -67,17 +67,7 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
             theme.state(&agent.state).remove_modifier(Modifier::BOLD),
         )]);
     }
-    for (label, value) in facts(model, agent) {
-        let value = if matches!(label, "worktree" | "folder") {
-            text::truncate_start(&value, usize::from(width.saturating_sub(LABEL))).into_owned()
-        } else {
-            value
-        };
-        lines.push(vec![
-            Span::styled(format!("{label:<width$}", width = usize::from(LABEL)), dim),
-            Span::styled(value, theme.style(StyleRole::Text)),
-        ]);
-    }
+    lines.extend(fact_rows(model, agent, width));
     for (row, line) in (0u16..).zip(&lines) {
         if row >= inner.height {
             break;
@@ -90,6 +80,27 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
             width,
         );
     }
+}
+
+/// The facts about an agent as rows of a label and a value, for a panel
+/// `width` cells wide: a long path keeps its end.
+pub(crate) fn fact_rows(model: &Model, agent: &Agent, width: u16) -> Vec<Vec<Span<'static>>> {
+    let theme = &model.theme;
+    let dim = theme.style(StyleRole::TextDim);
+    facts(model, agent)
+        .into_iter()
+        .map(|(label, value)| {
+            let value = if matches!(label, "worktree" | "folder") {
+                text::truncate_start(&value, usize::from(width.saturating_sub(LABEL))).into_owned()
+            } else {
+                value
+            };
+            vec![
+                Span::styled(format!("{label:<width$}", width = usize::from(LABEL)), dim),
+                Span::styled(value, theme.style(StyleRole::Text)),
+            ]
+        })
+        .collect()
 }
 
 /// The labelled facts, the most useful first.

@@ -113,20 +113,42 @@ fn draw_tile(model: &Model, tile: &Tile, area: Rect, buf: &mut Buffer) {
             (None, Phase::Closed(reason)) => {
                 let reason = text::clause(reason);
                 let message = format!("No screen: its volee host does not answer ({reason}).");
-                placeholder(model, &message, inner, buf);
+                without_screen(model, tile, &message, inner, buf);
             }
             (None, _) => placeholder(model, "Connecting to the agent's volee host…", inner, buf),
         },
         TileScreen::Read(reading) => match (&reading.screen, &reading.error) {
             (Some(screen), _) => screen.render(inner, buf, 0, Fit::Crop, theme),
             (None, Some(error)) => {
-                placeholder(model, &format!("No screen: {error}"), inner, buf);
+                without_screen(model, tile, &format!("No screen: {error}"), inner, buf);
             }
             // The source is gone: nothing more will be read.
             (None, None) if model.offline.is_some() => {
-                placeholder(model, "No screen: nothing is read any more.", inner, buf);
+                without_screen(
+                    model,
+                    tile,
+                    "No screen: nothing is read any more.",
+                    inner,
+                    buf,
+                );
             }
             (None, None) => placeholder(model, "Reading the agent's screen…", inner, buf),
         },
+    }
+}
+
+/// A tile with no screen says why, then what volee knows of its agent:
+/// where it works, where it runs, what it did last.
+fn without_screen(model: &Model, tile: &Tile, reason: &str, area: Rect, buf: &mut Buffer) {
+    placeholder(model, reason, area, buf);
+    let Some(agent) = model.registry.agent(tile.agent) else {
+        return;
+    };
+    let width = area.width.saturating_sub(2);
+    let used = u16::try_from(text::wrap(reason, usize::from(width)).len()).unwrap_or(u16::MAX);
+    let top = area.y.saturating_add(used).saturating_add(1);
+    let rows = super::detail::fact_rows(model, agent, width);
+    for (y, row) in (top..area.bottom()).zip(&rows) {
+        put_spans(buf, area.x + 1, y, &truncated(row, width), width);
     }
 }
