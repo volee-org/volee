@@ -126,6 +126,17 @@ keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
 | A session in a terminal of its own | `enter` on a Claude Code session typed in a terminal tab no longer fails. It says which key to press there (the left arrow on its empty prompt, which has Claude Code move the conversation to the background), waits, and opens the conversation by itself, on the same row. It is the same in every terminal application: none is asked for anything ([ADR 0034](../adr/0034-a-session-in-its-own-terminal-opens-once-it-left-it.md)) | Done |
 | Release | v0.15.0 | Done: v0.15.0 |
 
+## 0.16: the cockpit's main screen
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| The tree | The tree of the selected agent, children side by side, and the sessions started on their own in rows. Cards in the agent's own color, with its state as a filled badge, its model, its activity over five minutes, the lines it changed and its delivery | Done |
+| The frame | The list grouped by kind (leads, missions, terminals, background) with the detail under it; from 160 columns, what waits for you and a journal at the right; the selected agent's actions on its screen's border; agents counted by role; keys drawn as keys | Done |
+| The context an agent uses | On its card, the share of its context window an agent's conversation uses, read from its status line, which still shows the person's own ([ADR 0035](../adr/0035-the-context-an-agent-uses-comes-from-its-status-line.md)) | Done |
+| The terminal's background | Every theme draws on the terminal's own background, unless `[tui] background = "theme"` | Done |
+| Found on the way to the release | A lead no longer takes its own row of `list_agents` for a duplicate of the mission it is asked to start (the row is marked `you`). A coordinator's name shows whole in the list. A mission's worker is judged only on evidence read after it stopped: one that committed and stopped within seconds was once said to have no commits. What is typed in edit mode before the agent's host answers is sent once it does, instead of being dropped | Done |
+| Release | v0.16.0 | Done: v0.16.0 |
+
 ## Next
 
 Nothing is scheduled: the plan that ran from 0.11 to 0.14 is complete. What
@@ -143,6 +154,9 @@ comes next is chosen among the items below.
 - Finding agents of harnesses other than OpenCode in the process table, so
   that they show outside tuios too.
 - Messaging sessions started outside volee.
+- The context of sessions volee did not launch: Claude Code gives it only to
+  a session's status line, which volee sets for the agents it launches
+  ([ADR 0035](../adr/0035-the-context-an-agent-uses-comes-from-its-status-line.md)).
 - Pressing the left arrow for the person where a terminal application has a
   door for it (Ghostty 1.4 on macOS was measured to have one), and waiting
   from `volee attach` as the interface does
