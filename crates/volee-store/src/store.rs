@@ -212,6 +212,7 @@ fn agent_of(kind: &EventKind) -> Option<AgentId> {
         | EventKind::WorkspaceUpdated { agent, .. }
         | EventKind::LocationChanged { agent, .. }
         | EventKind::ModelChanged { agent, .. }
+        | EventKind::ContextUsed { agent, .. }
         | EventKind::DeliveryUpdated { agent, .. }
         | EventKind::AgentForgotten { agent }
         | EventKind::AgentRenamed { agent, .. }

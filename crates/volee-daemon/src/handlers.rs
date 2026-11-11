@@ -17,11 +17,11 @@ use volee_core::{Agent, AgentId, Event, EventKind, Registry};
 use volee_harness::hooks::{HookPayload, HookSignal, SessionSource, interpret, stop_block_output};
 use volee_proto::PROTOCOL_VERSION;
 use volee_proto::methods::{
-    AbortMission, Adopt, AgentParams, Attach, CloseMission, CreateMission, Diff, Empty, EventBatch,
-    EventsSince, Forget, HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams,
-    Method, Open, Preview, RecordActivity, RefreshDiscovery, RequestApproval, Run, SendMessage,
-    SendParams, Sent, Shutdown, SinceParams, Spawn, StartLead, Status, StatusInfo, StatusParams,
-    Stop, Summarize, Tidy, WaitParams, WaitReply,
+    AbortMission, Adopt, AgentParams, Attach, CloseMission, ContextParams, CreateMission, Diff,
+    Empty, EventBatch, EventsSince, Forget, HookIngest, HookParams, HookReply, HookWait, MarkRead,
+    MarkReadParams, Method, Open, Preview, RecordActivity, RefreshDiscovery, ReportContext,
+    RequestApproval, Run, SendMessage, SendParams, Sent, Shutdown, SinceParams, Spawn, StartLead,
+    Status, StatusInfo, StatusParams, Stop, Summarize, Tidy, WaitParams, WaitReply,
 };
 use volee_proto::rpc::{self, RpcError};
 
@@ -57,6 +57,9 @@ pub(crate) async fn dispatch(
             respond(hook_ingest(shared, parse::<HookIngest>(params)?, Delivery::Live).await)
         }
         HookWait::NAME => respond(hook_wait(shared, parse::<HookWait>(params)?).await),
+        ReportContext::NAME => {
+            respond(report_context(shared, parse::<ReportContext>(params)?).await)
+        }
         Spawn::NAME => respond(crate::launch::spawn(shared, parse::<Spawn>(params)?).await),
         StartLead::NAME => respond(crate::launch::lead(shared, parse::<StartLead>(params)?).await),
         Run::NAME => respond(crate::launch::run(shared, parse::<Run>(params)?).await),
@@ -339,6 +342,30 @@ fn pick_thread(state: &State, params: &SendParams, events: &mut Vec<Event>) -> T
     let id = thread.id;
     events.push(Event::new(state.now(), EventKind::ThreadOpened { thread }));
     id
+}
+
+/// `agents.context`: what an agent's status line says of its context
+/// (ADR 0035). The status line runs often; an event is recorded only when
+/// the share changes.
+async fn report_context(shared: &Arc<Shared>, params: ContextParams) -> Result<Empty, DaemonError> {
+    let mut state = shared.state.lock().await;
+    let agent = state
+        .registry()
+        .agent(params.agent)
+        .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {}", params.agent)))?;
+    let percent = params.percent.min(100);
+    if agent.context == Some(percent) {
+        return Ok(Empty {});
+    }
+    let now = state.now();
+    state.commit(vec![Event::new(
+        now,
+        EventKind::ContextUsed {
+            agent: params.agent,
+            percent,
+        },
+    )])?;
+    Ok(Empty {})
 }
 
 async fn mark_read(shared: &Arc<Shared>, params: MarkReadParams) -> Result<Empty, DaemonError> {

@@ -71,7 +71,10 @@ sessions ([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md)):
 a host holds the whole screen from the start.
 
 Every launch passes the agent's settings file (`--settings`: volee's hooks,
-and a rule that allows volee's own MCP tools) and its MCP configuration
+a rule that allows volee's own MCP tools, and a status line that tells volee
+how much of its context the agent uses, then shows the person's own,
+[ADR 0035](../adr/0035-the-context-an-agent-uses-comes-from-its-status-line.md))
+and its MCP configuration
 (`--mcp-config` with `--strict-mcp-config`, so the agent loads volee's tools
 and nothing else). The permission mode and tool rules come from volee's
 configuration only, never from an agent's request, and there is no way to

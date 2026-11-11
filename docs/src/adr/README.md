@@ -41,6 +41,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0032](0032-a-mission-is-merged-only-after-the-person-approved.md) | A mission is merged only after the person approved its report (amends 0007 and 0011) | Accepted |
 | [0033](0033-a-lead-makes-others-work.md) | A lead is the agent you talk to, and it makes others work (amends 0007) | Accepted |
 | [0034](0034-a-session-in-its-own-terminal-opens-once-it-left-it.md) | A session in a terminal of its own opens once it left it, on the same row (amends 0027) | Accepted |
+| [0035](0035-the-context-an-agent-uses-comes-from-its-status-line.md) | The context an agent uses comes from its status line | Accepted |
 
 ## Not built yet
 

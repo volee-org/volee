@@ -101,6 +101,14 @@ pub enum EventKind {
         /// The model's name.
         model: String,
     },
+    /// The agent's conversation uses another share of its context window
+    /// (ADR 0035).
+    ContextUsed {
+        /// The agent.
+        agent: AgentId,
+        /// The share used, in percent, from 0 to 100.
+        percent: u8,
+    },
     /// New delivery evidence.
     DeliveryUpdated {
         /// The agent.

@@ -20,7 +20,7 @@ expression: draw(&model)
 "│ BACKGROUND                     ││    │ billing › feat/invo… │  │ mcp-server › feat/i… │  │ dashboard › feat/in… │    │"
 "╰──────────────────────────────▼─╯│    │ sonnet               │  │ sonnet               │  │ sonnet               │    │"
 "╭ Detail ────────────────────────╮│    │ ▃▃▁▁▃▃▁▃▁▃▃▃▁▁▁▁▁▁▁▁ │  │ ▁▁▃▁▁▁▃▁▁▁▃▁▁▁▁▃▁▁▁▁ │  │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │    │"
-"│ invoicing · coordinator        ││    │ ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ? │  │ ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ? │  │ ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ? │    │"
+"│ invoicing · coordinator        ││    │ ctx ▰▰▰▰▰▰▰▰▰▱▱ 73%  │  │ ctx ▰▰▰▰▰▰▰▱▱▱▱ 63%  │  │ ctx ▰▰▰▰▰▰▱▱▱▱▱ 52%  │    │"
 "│ · idle · for 14 min            ││    │ ! Bash: bun run db:… │  │ ! Should create_inv… │  │ PR #42 is ready for… │    │"
 "│ Waiting for 3 workers          ││    │ +214 −12   2 commits │  │ +88 −4      1 commit │  │ +163 −43    PR #42 ✓ │    │"
 "│ mission  Invoicing (change)    ││    │  NEEDS YOU  2 min    │  │  NEEDS YOU  1 min    │  │  DONE  6 min         │    │"

@@ -16,5 +16,6 @@ pub(crate) mod mission;
 pub(crate) mod msg;
 pub(crate) mod run;
 pub(crate) mod spawn;
+pub(crate) mod status_line;
 pub(crate) mod summary;
 pub(crate) mod tidy;
