@@ -56,6 +56,9 @@ of the person's configuration, which it can name when it launches.
 Every agent volee knows, those that need attention first. Each entry has an
 id, a name, a role, a state, the repository and branch, the mission, the
 parent, the harness, and `can_message`: whether the caller may write to it.
+The caller's own entry is in the list too, with `you: true` in place of
+`can_message`: a lead that reads the list before it launches does not take
+itself for a duplicate.
 
 | Argument | Type | Default | Meaning |
 | --- | --- | --- | --- |

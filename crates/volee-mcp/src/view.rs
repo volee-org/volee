@@ -25,6 +25,10 @@ pub(crate) struct AgentView {
     /// Whether the calling agent may write to this one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) can_message: Option<bool>,
+    /// Whether this entry is the calling agent itself: a lead that reads the
+    /// list before it launches must not take its own row for a duplicate.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) you: bool,
 }
 
 impl AgentView {
@@ -54,6 +58,7 @@ impl AgentView {
                     .check_route(Party::Agent(me), Party::Agent(agent.id))
                     .is_ok()
             }),
+            you: viewer == Some(agent.id),
         }
     }
 }

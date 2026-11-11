@@ -316,7 +316,9 @@ pub(crate) fn lead_instructions() -> String {
      `from agent`, and one from volee itself says `from volee`.\n\n\
      Before you launch anything, call `list_agents`: never launch a duplicate. When an agent \
      already works on the repository and branch, or a mission already covers the subject, \
-     write to it with `send_message` instead (for a mission, to its coordinator).\n\n\
+     write to it with `send_message` instead (for a mission, to its coordinator). The list \
+     holds you too, marked `you: true`: you are never a duplicate of what you are asked to \
+     launch.\n\n\
      To make work happen:\n\
      - One task in one repository: `spawn_agent` (the repository, a new branch, the task).\n\
      - Several repositories, or several tasks to coordinate: `start_mission` (a short title, \
