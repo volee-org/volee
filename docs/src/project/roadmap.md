@@ -95,8 +95,8 @@ keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
 | The mouse | In edit mode, clicks, drags and the wheel reach a program that asked for them, on its own cells | Done |
 | The wall, inside | `5` shows the screen of every agent of the list that runs, in a volee host or not, as many to a page as the terminal shows at a readable size; what is opened from the wall comes back to it | Done |
 | Release | v0.12.0 | Done: v0.12.0 |
-| The same screen in every view | The proof the plan asked for, run after the release: the preview and the wall dropped an agent's cursor block and showed a run of blank rows as one. Fixed, and a test and a journey now compare the three views cell by cell ([ADR 0028](../adr/0028-one-emulator-and-the-wall-inside-the-interface.md#the-proof-and-what-it-found)) | Next: v0.12.1 |
-| An exact preview everywhere | Not met for two sources: a multiplexer pane's capture is read with a replay's repairs, and a Claude Code background session that is not open shows its replay, which an exact screen would replace only with a client on the session | Open |
+| The same screen in every view | The proof the plan asked for, run after the release: the preview and the wall dropped an agent's cursor block and showed a run of blank rows as one. Fixed, and a test and a journey now compare the three views cell by cell ([ADR 0028](../adr/0028-one-emulator-and-the-wall-inside-the-interface.md#the-proof-and-what-it-found)) | Done: v0.12.1 |
+| An exact preview everywhere | Not met for two sources, and for both the reason is in volee, not in what it reads. A multiplexer pane's capture is exact and is read with a replay's repairs. The replay of a Claude Code background session is its screen (measured: 50 rows of 50), but the preview counts a run of blank rows as one, which keeps the end of the conversation in view and is not the screen: which of the two it should show is open | Open |
 
 ## Next
 

@@ -128,8 +128,10 @@ adopts.
 - A session started by hand shows ten seconds after it starts. A run of a
   few seconds never shows, whoever started it.
 - The full-screen view (`z`) of a background session is still the replay
-  of `claude logs`: an exact screen needs a client, which resizes the
-  session.
+  of `claude logs`. This decision said that an exact screen needs a
+  client, which resizes the session: measured since, the replay is the
+  session's screen, and what differs is volee's own reading of it
+  ([ADR 0028](0028-one-emulator-and-the-wall-inside-the-interface.md#the-proof-and-what-it-found)).
 - The mouse is not forwarded to an opened agent yet
   ([ADR 0028](0028-one-emulator-and-the-wall-inside-the-interface.md)
   forwards it).
