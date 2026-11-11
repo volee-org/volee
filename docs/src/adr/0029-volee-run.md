@@ -107,8 +107,8 @@ command ends the program it started: nothing runs unseen.
 - States are the coarsest volee has. A program that redraws while it waits
   looks working, and one that waits for an answer looks idle.
 - `volee run -- claude` gives less than Claude Code elsewhere: one row, of
-  the generic kind, where a session volee finds by itself has exact states,
-  a name and a summary, and one volee launches has hooks and messages too.
+  the generic kind, where a session volee finds by itself has exact states
+  and its own name, and one volee launches has hooks and messages too.
   It is worth it for the door, in a plain terminal; in a tuios pane the
   session is found and opened without it.
 - Typing into the program makes its screen change, so the agent shows as

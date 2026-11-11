@@ -88,9 +88,9 @@ What volee knows of such a program is its screen, and nothing else:
 
 For Claude Code, prefer what volee finds by itself when you can: a session
 in a tuios or tmux pane, or a background session, is listed with its exact
-state, its name and its summary, and opens where it runs. `volee run --
-claude` is for a plain terminal, which has no door otherwise: you get the
-door, with the screen-read state above.
+state and its own name, and opens where it runs. `volee run -- claude` is
+for a plain terminal, which has no door otherwise: you get the door, with
+the screen-read state above.
 
 ## OpenCode
 
