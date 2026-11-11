@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 It is generated from the commit history with [git-cliff](https://git-cliff.org):
 see [RELEASING.md](RELEASING.md).
 
+## [0.14.1] - 2026-11-11
+
+### Fixed
+
+- **daemon**: Have a lead act on what you write to it through volee ([#155](https://github.com/volee-org/volee/pull/155))
+
+### Documentation
+
+- **roadmap**: Record what 0.14 delivered ([#153](https://github.com/volee-org/volee/pull/153))
+
 ## [0.14.0] - 2026-11-11
 
 ### Added
@@ -271,6 +281,7 @@ see [RELEASING.md](RELEASING.md).
 - Mark the interface, messaging and views milestones done ([#52](https://github.com/volee-org/volee/pull/52))
 - Start the daemon in the first step of the guide, and say what tidy removes ([#56](https://github.com/volee-org/volee/pull/56))
 
+[0.14.1]: https://github.com/volee-org/volee/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/volee-org/volee/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/volee-org/volee/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/volee-org/volee/compare/v0.12.2...v0.12.3
