@@ -25,6 +25,14 @@ def main():
     name = "journey-old-" + j.stamp
     try:
         j.check("the older daemon answers", j.start_daemon(binary=old))
+        # The whole trip rests on this: a daemon of the version under test would
+        # launch the agent in a host of that version, which encodes keys itself.
+        version = (j.run([old, "--version"]).stdout.split() or [""])[-1]
+        if not j.check("it is the older version, not the one under test",
+                       bool(version) and j.daemon_version() == version
+                       and version not in j.run([j.volee, "--version"]).stdout,
+                       "daemon {} / older binary {}".format(j.daemon_version(), version)):
+            return
         launched = j.launch(name, "Reply only READY, then wait for my next message.", binary=old)
         j.check("the older volee launches an agent", launched.returncode == 0,
                 (launched.stdout + launched.stderr).strip()[:160])

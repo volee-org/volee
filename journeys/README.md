@@ -71,3 +71,10 @@ agent's.
   uppercase), and check the answer, not the prompt.
 - Add every new thing the journey starts to `agents`, `branches`,
   `background` or `by_hand`, so that `cleanup()` removes it.
+- Check what the trip rests on before you make it. A journey that needs an
+  older daemon, a session in a pane or an agent in a host says so with a
+  check of its own, and stops when it does not hold: a check that fails
+  later for that reason reads as a defect of volee, and is not one.
+- Run no `volee` command before the daemon you started listens: any command
+  starts a daemon when none answers, and it would be the binary under test.
+  `start_daemon()` waits on the socket for that reason.
