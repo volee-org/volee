@@ -1,7 +1,7 @@
 # 0028. One emulator for every screen, and the wall inside the interface
 
 - Status: Accepted (completes [0020](0020-libghostty-vt-emulates-terminals.md); amends [0021](0021-take-over-watch-and-the-wall-of-screens.md), [0026](0026-edit-mode-types-into-an-agent-inside-volee.md) and [0027](0027-open-without-owning.md))
-- Date: 2026-11-11
+- Date: 2026-11-11; corrected the same day by [its proof](#the-proof-and-what-it-found)
 
 ## Context
 
@@ -56,6 +56,13 @@ cropped to its bottom where it is glanced at (the preview, a tile of the
 wall). The cells for the last two are read from the emulator once per
 change of the screen, not once per frame.
 
+Fitting never changes a cell. A view that crops shows the last rows of the
+screen as they are, down to the last one that shows something, and each
+row down to its last cell that shows something. A cell shows nothing only
+when it is a blank with no background and no attribute that draws on a
+blank: reverse video, an underline and a strike do, and a blank in reverse
+video is how an agent's interface draws its cursor.
+
 **The preview of an agent in a volee host is its live screen.** The
 interface follows the selected agent's host with a connection that only
 watches, opened on the tick after the selection settles, so that moving
@@ -108,8 +115,9 @@ machine, whatever they run, from a shell, without the daemon.
 
 ## Consequences
 
-- A screen reads the same in the preview, full size, on the wall and in
-  the host: the same emulator, fed the same bytes.
+- A screen volee holds reads the same in the preview, full size, on the
+  wall and in the host, cell for cell: [the proof](#the-proof-and-what-it-found)
+  says how far that goes, and where a screen is only a replay.
 - The wall is useful on a machine where volee hosts nothing: it shows the
   sessions that run in the background and in multiplexer panes.
 - A tile of an agent volee does not host is up to five seconds late, and a
@@ -129,6 +137,56 @@ machine, whatever they run, from a shell, without the daemon.
 - Building volee needs Zig for every crate that draws a screen, the
   interface included: there is no emulator in pure Rust left to fall back
   on.
+
+## The proof, and what it found
+
+The plan that set this component asked for one proof before any release:
+the same screen, compared cell by cell between the preview, the full-screen
+view and the wall. Version 0.12.0 was released without it. Run the same
+day, it found two differences, both older than this decision and both kept
+by it:
+
+- A blank in reverse video at the end of a row was not drawn by the views
+  that crop: they left out whatever a row ended with that was blank and
+  had no background. The preview and the wall lost an agent's cursor. For
+  a session volee does not host, all three views lost it, which a
+  comparison of the views with one another cannot see: each view is also
+  compared with the emulator's own cell.
+- A run of blank rows was shown as one row by the preview and the wall,
+  for every screen. That repairs a replay, which leaves blank what it never
+  redrew. On a screen volee holds, it moved rows.
+
+Both are fixed in 0.12.1, and the proof stays in the repository:
+
+- `crates/volee-tui/src/same_screen.rs` draws the three views of one
+  screen, for an agent in a volee host and for a session read through the
+  source, and compares every cell a view shows (character, colors,
+  attributes) with the emulator's cell and with the same cell of the two
+  other views. Its screen holds what made the views differ and what could:
+  wide characters on a view's edge, a background to the end of a row, a gap
+  of blank rows, a cursor block.
+- `journeys/wall.py` makes the comparison by keyboard on real agents, as
+  far as a capture of the screen tells (the characters, not the colors),
+  and counts it only when the screen did not change meanwhile.
+
+What the proof establishes depends on where a screen comes from:
+
+| Where the agent runs | What the three views show | Is it the agent's screen? |
+| --- | --- | --- |
+| A volee host | the host's screen, row for row | yes, and live |
+| A view open on the session | the view's screen, row for row | yes, while the view is open |
+| A multiplexer pane | what the multiplexer captured, read as a replay | its cells, yes; a run of blank rows shows as one |
+| A Claude Code background session, not open | the replay of `claude logs` | not always: a long session shows gaps, and its size is told by what the replay writes |
+
+The plan's words were "an exact preview everywhere", with the size
+guessing and the blank-row repair gone. The last two rows do not meet
+them. A pane's capture is exact and is still read with a replay's repairs:
+the daemon does not yet say which kind of reading it returns. An exact
+screen of a background session needs a client on it (`claude attach`): the
+session takes the client's size, a client costs about 139 MB, and
+attaching to a finished session starts it again. This decision keeps
+"looking changes nothing", so that source stays a replay until someone
+decides that looking may do that.
 
 ## Alternatives considered
 

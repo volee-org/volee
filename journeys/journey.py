@@ -22,6 +22,7 @@ import tempfile
 import termios
 import threading
 import time
+import unicodedata
 
 # What a Claude Code session leaves in the environment of its children. A journey
 # started from inside one must not pass them on: a nested session would not save its
@@ -51,6 +52,70 @@ def arguments(description, more=None):
     if more:
         more(parser)
     return parser.parse_args()
+
+
+def cells(line):
+    """A line of a screen as display cells: a wide character takes two of them, and
+    the second one is None. What takes no cell (a combining mark, a variation
+    selector) goes with the character before it."""
+    out = []
+    for character in line:
+        if unicodedata.combining(character) or character in "\ufe0f\u200d":
+            last = next((i for i in range(len(out) - 1, -1, -1) if out[i] is not None), None)
+            if last is not None:
+                out[last] += character
+            continue
+        out.append(character)
+        if unicodedata.east_asian_width(character) in ("W", "F"):
+            out.append(None)
+    return out
+
+
+def cut(row, width):
+    """The first `width` cells of a row, as text without its trailing blanks. A wide
+    character the edge would cut in two is left out, as the interface leaves it out."""
+    row = list(row)
+    if len(row) > width and row[width] is None and width > 0:
+        row[width - 1] = " "
+    return "".join(cell for cell in row[:width] if cell is not None).rstrip()
+
+
+def same_tail(view, reference, width):
+    """Whether a view that crops a screen shows its last rows, each cut at `width`:
+    cell for cell, as far as text tells. `view` and `reference` are rows of cells.
+    Returns whether it does, how many cells were compared, and the first difference."""
+    shown = [cut(row, width) for row in view]
+    while shown and not shown[-1]:
+        shown.pop()
+    wanted = [cut(row, width) for row in reference]
+    while wanted and not wanted[-1]:
+        wanted.pop()
+    if not shown or len(shown) > len(wanted):
+        return False, 0, "the view shows {} rows, the screen holds {}".format(
+            len(shown), len(wanted))
+    wanted = wanted[-len(shown):]
+    for index, (seen, held) in enumerate(zip(shown, wanted)):
+        if seen != held:
+            return False, 0, "row {} of {}: the view shows {!r}, the screen holds {!r}".format(
+                index + 1, len(shown), seen[:70], held[:70])
+    return True, sum(len(row) for row in shown), ""
+
+
+def in_order(view, reference, width):
+    """Whether a view that wraps long rows shows, in order, every row of the screen
+    that fits in `width` cells. Returns the same three things as `same_tail`."""
+    shown = [cut(row, width) for row in view]
+    position, compared = 0, 0
+    for row in reference:
+        wanted = cut(row, len(row))
+        if not wanted or len(row) > width:
+            continue
+        try:
+            position = shown.index(wanted, position) + 1
+        except ValueError:
+            return False, compared, "the view lacks the row {!r}".format(wanted[:70])
+        compared += len(wanted)
+    return compared > 0, compared, "" if compared else "no row to compare"
 
 
 def resolve(program):
@@ -369,6 +434,29 @@ class Journey:
 
     def screen(self):
         return self.tuios("capture-pane", "-s", self.session, "-w", self.window).stdout
+
+    def frame(self, needle, margin=0):
+        """The rows inside the frame whose top border carries `needle`, as rows of
+        cells, starting `margin` columns in from its left border, and their width.
+        (None, 0) when no such frame shows."""
+        lines = [cells(line) for line in self.screen().splitlines()]
+        target = cells(needle)
+        for top, row in enumerate(lines):
+            at = next((i for i in range(len(row) - len(target) + 1)
+                       if row[i:i + len(target)] == target), None)
+            if at is None:
+                continue
+            left = next((i for i in range(at - 1, -1, -1) if row[i] in ("╭", "┏")), None)
+            right = next((i for i in range(at + len(target), len(row))
+                          if row[i] in ("╮", "┓")), None)
+            if left is None or right is None:
+                continue
+            rows = []
+            for below in lines[top + 1:]:
+                if len(below) > left and below[left] in ("╰", "┗"):
+                    return rows, right - left - 1 - margin
+                rows.append(below[left + 1 + margin:right])
+        return None, 0
 
     def sees(self, *needles, timeout=15, every=0.5):
         """Whether every needle shows on the interface's screen within `timeout`."""
