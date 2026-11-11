@@ -3,6 +3,10 @@
 //! to a Claude Code session in another pane. A real daemon, a fake process
 //! table and a fake multiplexer.
 //!
+//! And an agent of a harness volee has no listing for, which the multiplexer
+//! recognizes in one of its panes (ADR 0030): it is an agent in that pane,
+//! for as long as the multiplexer names it.
+//!
 //! Both agents are placed in their panes and stay there round after round:
 //! the panes are searched once for every session, whatever its harness. The
 //! OpenCode agent is then shown and brought forward as any agent in a pane
@@ -27,7 +31,7 @@ use volee_core::workspace::Location;
 use volee_core::{Agent, Event, Registry};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_harness::{CommandRunner, Harness, Invocation, Output, RunError};
-use volee_mux::{Hosted, Located, Multiplexer, MultiplexerStatus, MuxError};
+use volee_mux::{Hosted, Located, Multiplexer, MultiplexerStatus, MuxError, PaneAgent};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{AgentParams, Attach, EventsSince, Preview, SinceParams};
 use volee_proto::paths::Paths;
@@ -71,10 +75,28 @@ fn opencode(pid: u32) -> SessionKey {
     }
 }
 
-/// A multiplexer whose panes the test sets.
+/// A multiplexer whose panes the test sets, and the agents it recognizes
+/// in them.
 #[derive(Debug, Default)]
 struct FakeMux {
     panes: Mutex<Vec<(SessionKey, String)>>,
+    agents: Mutex<Vec<PaneAgent>>,
+    /// How it answers when asked which panes run an agent.
+    telling: Mutex<Telling>,
+    /// The harnesses it was last told the daemon finds by itself.
+    known: Mutex<Vec<String>>,
+}
+
+/// How a multiplexer answers when asked which of its panes run an agent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Telling {
+    /// It names them.
+    #[default]
+    Names,
+    /// It fails, this time: a timeout, an answer nobody can read.
+    Fails,
+    /// Its server does not run: it has no pane at all.
+    NoServer,
 }
 
 impl Multiplexer for FakeMux {
@@ -107,6 +129,17 @@ impl Multiplexer for FakeMux {
             .collect())
     }
 
+    fn agents(&self, known: &[&str]) -> Result<Vec<PaneAgent>, MuxError> {
+        *self.known.lock().unwrap() = known.iter().map(|name| (*name).to_owned()).collect();
+        match *self.telling.lock().unwrap() {
+            Telling::Names => Ok(self.agents.lock().unwrap().clone()),
+            Telling::Fails => Err(MuxError::Unexpected {
+                command: "tuios call list-agents".into(),
+            }),
+            Telling::NoServer => Err(MuxError::Unavailable("no server runs".into())),
+        }
+    }
+
     fn capture(&self, target: &str) -> Result<String, MuxError> {
         Ok(format!("\x1b[1;1H> screen of {target}"))
     }
@@ -119,6 +152,8 @@ impl Multiplexer for FakeMux {
 struct Running {
     socket: PathBuf,
     table: Arc<Table>,
+    mux: Arc<FakeMux>,
+    clock: Arc<ManualClock>,
     _harness: Arc<FakeHarness>,
     _dir: tempfile::TempDir,
 }
@@ -148,10 +183,11 @@ fn start(ps: &str) -> Running {
     let table = Arc::new(Table {
         ps: Mutex::new(ps.to_owned()),
     });
+    let clock = Arc::new(ManualClock::at(10_000));
     let config = Config {
         paths,
         log: Box::new(MemoryLog::with(vec![])),
-        clock: Arc::new(ManualClock::at(10_000)),
+        clock: Arc::clone(&clock) as Arc<dyn volee_daemon::Clock>,
         harnesses: vec![],
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
@@ -160,7 +196,7 @@ fn start(ps: &str) -> Running {
         idle_discovery_interval: Duration::from_millis(10),
         evidence: EvidenceSources::default(),
         volee_bin: None,
-        multiplexers: vec![mux as Arc<dyn Multiplexer>],
+        multiplexers: vec![Arc::clone(&mux) as Arc<dyn Multiplexer>],
         // The process table is read along with the hosts.
         hosts: true,
         processes: Some(Arc::clone(&table) as Arc<dyn CommandRunner>),
@@ -169,6 +205,8 @@ fn start(ps: &str) -> Running {
     Running {
         socket,
         table,
+        mux,
+        clock,
         _harness: harness,
         _dir: dir,
     }
@@ -193,6 +231,24 @@ async fn until(socket: &Path, ready: impl Fn(&Registry) -> bool) -> Registry {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     panic!("the registry never got there");
+}
+
+/// The agent of a harness volee has no listing for, keyed by its process.
+fn in_a_pane(harness: &str, pid: u32) -> SessionKey {
+    SessionKey {
+        harness: HarnessKind::Other(harness.into()),
+        id: format!("pid-{pid}"),
+    }
+}
+
+/// What a multiplexer says of a pane that runs an agent.
+fn recognized(harness: &str, pid: u32, cwd: &str, target: &str) -> PaneAgent {
+    PaneAgent {
+        harness: harness.into(),
+        pid,
+        cwd: cwd.into(),
+        target: target.into(),
+    }
 }
 
 fn pane(target: &str) -> Location {
@@ -305,4 +361,116 @@ async fn an_agent_of_another_harness_is_placed_in_its_pane_and_stays_there() {
             .agent(elsewhere.id)
             .is_some_and(|agent| agent.state.is_live())
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pane_that_runs_a_harness_volee_cannot_list_is_an_agent_in_that_pane() {
+    let daemon = start("");
+    let state_of =
+        |registry: &Registry, key: &SessionKey| at(registry, key).map(|agent| agent.state.clone());
+    // The multiplexer recognizes Codex in one of its panes, and Gemini in
+    // another: neither has a listing volee reads.
+    let codex = in_a_pane("codex", 5151);
+    let gemini = in_a_pane("gemini-cli", 6262);
+    *daemon.mux.agents.lock().unwrap() = vec![
+        recognized("codex", 5151, "/work/api", "work:x1"),
+        recognized("gemini-cli", 6262, "/work/docs", "work:g1"),
+    ];
+    daemon.mux.panes.lock().unwrap().extend([
+        (codex.clone(), "work:x1".to_owned()),
+        (gemini.clone(), "work:g1".to_owned()),
+    ]);
+
+    let registry = until(&daemon.socket, |registry| {
+        at(registry, &codex).is_some_and(|agent| agent.location == pane("work:x1"))
+            && at(registry, &gemini).is_some_and(|agent| agent.location == pane("work:g1"))
+    })
+    .await;
+    let agent = at(&registry, &codex).unwrap().clone();
+    // An agent of the harness the multiplexer names, in the pane's
+    // directory, which volee only watches.
+    assert_eq!(agent.harness, HarnessKind::Other("codex".into()));
+    assert_eq!(agent.name, "api");
+    assert_eq!(agent.workspace.cwd, Path::new("/work/api"));
+    assert_eq!(agent.state, AgentState::Idle);
+    assert!(agent.watched() && !agent.joined() && !agent.generic());
+    // The harnesses volee finds by itself are not asked of the multiplexer.
+    assert_eq!(
+        *daemon.mux.known.lock().unwrap(),
+        ["claude-code", "opencode"]
+    );
+
+    // It is shown and brought forward as any agent in a pane.
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let preview = client
+        .call::<Preview>(AgentParams { agent: agent.id })
+        .await
+        .unwrap();
+    assert_eq!(preview.screen, "\x1b[1;1H> screen of work:x1");
+    assert!(preview.exact);
+    let attach = client
+        .call::<Attach>(AgentParams { agent: agent.id })
+        .await
+        .unwrap();
+    assert_eq!(
+        attach.focus.map(|focus| focus.steps),
+        Some(vec![vec![
+            "tuios".to_owned(),
+            "focus".to_owned(),
+            "work:x1".to_owned()
+        ]])
+    );
+
+    // A multiplexer that fails to tell, this time, says nothing of the
+    // agents it named before: they stay as they are.
+    *daemon.mux.telling.lock().unwrap() = Telling::Fails;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let registry = Registry::from_events(&events(&daemon.socket).await).unwrap();
+    assert_eq!(state_of(&registry, &codex), Some(AgentState::Idle));
+    assert_eq!(state_of(&registry, &gemini), Some(AgentState::Idle));
+
+    // It answers again. In the Codex pane another process is now in the
+    // foreground: the person quit the program and started it again. The
+    // agent is the process, not the pane: the first one has ended, and the
+    // second is a new agent in the same pane.
+    let again = in_a_pane("codex", 7373);
+    *daemon.mux.agents.lock().unwrap() = vec![
+        recognized("codex", 7373, "/work/api", "work:x1"),
+        recognized("gemini-cli", 6262, "/work/docs", "work:g1"),
+    ];
+    {
+        let mut panes = daemon.mux.panes.lock().unwrap();
+        panes.retain(|(key, _)| *key != codex);
+        panes.push((again.clone(), "work:x1".to_owned()));
+    }
+    *daemon.mux.telling.lock().unwrap() = Telling::Names;
+    let registry = until(&daemon.socket, |registry| {
+        registry
+            .agent(agent.id)
+            .is_some_and(|agent| agent.state == AgentState::Stopped)
+            && at(registry, &again).is_some_and(|agent| agent.location == pane("work:x1"))
+    })
+    .await;
+    assert_eq!(
+        registry.agent(agent.id).unwrap().detail.as_deref(),
+        Some("its process ended")
+    );
+    assert_ne!(at(&registry, &again).unwrap().id, agent.id);
+    assert_eq!(state_of(&registry, &gemini), Some(AgentState::Idle));
+
+    // A minute later the one that ended has left the list.
+    daemon.clock.advance(61_000);
+    until(&daemon.socket, |registry| {
+        registry.agent(agent.id).is_none()
+    })
+    .await;
+
+    // A multiplexer whose server no longer runs has no pane, and so no
+    // agent: the ones it named have ended.
+    *daemon.mux.telling.lock().unwrap() = Telling::NoServer;
+    until(&daemon.socket, |registry| {
+        state_of(registry, &again) == Some(AgentState::Stopped)
+            && state_of(registry, &gemini) == Some(AgentState::Stopped)
+    })
+    .await;
 }

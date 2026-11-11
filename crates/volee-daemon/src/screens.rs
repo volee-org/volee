@@ -1,5 +1,7 @@
-//! Agents of harnesses that report no state (ADR 0022), and the OpenCode
-//! agents started elsewhere (ADR 0023).
+//! Agents of harnesses that report no state (ADR 0022), and the agents
+//! started elsewhere that no harness lists: OpenCode in the process table
+//! (ADR 0023), and the panes a multiplexer says run another harness
+//! (ADR 0030).
 //!
 //! An agent in a host whose harness has no hooks gets its state from its
 //! screen, the last resort of ADR 0022: a screen that changed since the last
@@ -8,17 +10,20 @@
 //!
 //! OpenCode agents that volee does not host are found in the process table
 //! and reconciled like any listing. A process that is gone stops its agent.
+//! So are the agents a multiplexer recognizes in its panes, each keyed by
+//! the process in the foreground of its pane.
 
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use volee_core::harness::HarnessKind;
-use volee_core::reconcile::{gone, reconcile};
+use volee_core::harness::{HarnessKind, SessionKey};
+use volee_core::reconcile::{ListedSession, Listing, gone, reconcile};
 use volee_core::state::AgentState;
-use volee_core::{AgentId, Event, EventKind};
+use volee_core::time::Timestamp;
+use volee_core::{AgentId, Event, EventKind, Registry};
 
 use crate::server::Shared;
 
@@ -75,12 +80,13 @@ impl Screens {
 }
 
 /// One round: the screens of hosted agents without hooks, then the agents
-/// of the process table. Returns the live sessions the table gave, for the
-/// search of the panes they may run in; `None` when the table could not be
-/// read, in which case nothing can be said of where they run.
+/// of the process table and of the multiplexers' panes. Returns the live
+/// sessions they gave, for the search of the panes they may run in; `None`
+/// when the table could not be read, in which case nothing can be said of
+/// where they run.
 pub(crate) async fn round(shared: &Arc<Shared>) -> Option<Vec<volee_mux::Hosted>> {
     hosted_states(shared).await;
-    opencode_processes(shared).await
+    found_elsewhere(shared).await
 }
 
 /// One hosted agent, as a round sees it.
@@ -265,41 +271,160 @@ fn last_line(size: volee_host::Size, screen: &[u8]) -> Option<String> {
     Some(line.chars().take(300).collect())
 }
 
-async fn opencode_processes(shared: &Arc<Shared>) -> Option<Vec<volee_mux::Hosted>> {
-    let Some(runner) = shared.processes.clone() else {
-        return Some(Vec::new());
-    };
-    let listed =
-        tokio::task::spawn_blocking(move || volee_harness::opencode::list_processes(&*runner))
+/// The agents started elsewhere that no harness lists for volee: OpenCode
+/// in the process table (ADR 0023), and the panes a multiplexer says run a
+/// harness volee has no listing for (ADR 0030). Each source is a listing of
+/// its own harness, never complete; an agent whose process a source that
+/// answered no longer names has ended.
+async fn found_elsewhere(shared: &Arc<Shared>) -> Option<Vec<volee_mux::Hosted>> {
+    // The process table. Without one (a test), nothing is said of OpenCode.
+    let table = match shared.processes.clone() {
+        None => None,
+        Some(runner) => {
+            let listed = tokio::task::spawn_blocking(move || {
+                volee_harness::opencode::list_processes(&*runner)
+            })
             .await;
-    let Ok(Ok(mut listing)) = listed else {
-        return None;
+            let Ok(Ok(listing)) = listed else {
+                return None;
+            };
+            Some(listing)
+        }
     };
+    let table_read = table.is_some();
+    // The panes. A multiplexer that could not tell says nothing of the
+    // agents it named before: they stay as they are.
+    let in_panes = crate::panes::agents(shared).await;
+    let mut listings: Vec<Listing> = table.into_iter().collect();
+    listings.extend(pane_listings(in_panes.as_deref().unwrap_or_default()));
     // A process that runs in the host of an agent started with `volee run`
     // is that agent (ADR 0029), whatever the name of the volee program that
     // started the host.
     let in_hosts = crate::launch::run_programs(shared).await;
     if !in_hosts.is_empty() {
-        listing
-            .sessions
-            .retain(|session| session.pid.is_none_or(|pid| !in_hosts.contains(&pid)));
+        for listing in &mut listings {
+            listing
+                .sessions
+                .retain(|session| session.pid.is_none_or(|pid| !in_hosts.contains(&pid)));
+        }
     }
-    let live = crate::panes::hosted(&listing.sessions);
+    let live: Vec<volee_mux::Hosted> = listings
+        .iter()
+        .flat_map(|listing| crate::panes::hosted(&listing.sessions))
+        .collect();
     let mut state = shared.state.lock().await;
     let now = state.now();
-    state.sessions_mut().record(&listing);
-    let mut events = reconcile(state.registry(), &listing, now, || state.new_agent_id());
-    // The listing is never complete: an agent started elsewhere whose
-    // process is gone stops here, then leaves the list like any agent volee
-    // only watches (ADR 0027).
-    let running: HashSet<_> = listing
-        .sessions
+    if in_panes.is_some() {
+        listings.extend(emptied(state.registry(), &listings));
+    }
+    let mut events = Vec::new();
+    for listing in &listings {
+        state.sessions_mut().record(listing);
+        events.extend(reconcile(state.registry(), listing, now, || {
+            state.new_agent_id()
+        }));
+    }
+    events.extend(no_longer_named(
+        state.registry(),
+        &listings,
+        table_read,
+        in_panes.is_some(),
+        now,
+    ));
+    if !events.is_empty()
+        && let Err(error) = state.commit(events)
+    {
+        tracing::error!(%error, "cannot apply the agents found elsewhere");
+    }
+    Some(live)
+}
+
+/// The agents multiplexers recognize in their panes, as listings: one per
+/// harness, each agent keyed by its process, like an OpenCode agent found
+/// without a session id. volee reads no state for them: they are idle while
+/// they run.
+fn pane_listings(agents: &[volee_mux::PaneAgent]) -> Vec<Listing> {
+    let mut by_harness: BTreeMap<&str, Vec<ListedSession>> = BTreeMap::new();
+    for agent in agents {
+        let key = SessionKey {
+            harness: HarnessKind::Other(agent.harness.clone()),
+            id: format!("pid-{}", agent.pid),
+        };
+        by_harness
+            .entry(agent.harness.as_str())
+            .or_default()
+            .push(ListedSession {
+                alive: true,
+                pid: Some(agent.pid),
+                ..ListedSession::new(key, agent.cwd.clone(), AgentState::Idle)
+            });
+    }
+    by_harness
+        .into_iter()
+        .map(|(harness, sessions)| Listing {
+            harness: HarnessKind::Other(harness.to_owned()),
+            sessions,
+            complete: false,
+        })
+        .collect()
+}
+
+/// An empty listing for each harness whose agents multiplexers named, and
+/// name no more: a harness whose last agent is gone has no listing this
+/// round, and its empty one replaces what the last round recorded.
+fn emptied(registry: &Registry, listings: &[Listing]) -> Vec<Listing> {
+    let opencode = volee_harness::opencode::kind();
+    let named: BTreeSet<&str> = registry
+        .agents()
+        .filter(|agent| agent.watched() && agent.harness != opencode)
+        .filter(|agent| {
+            !listings
+                .iter()
+                .any(|listing| listing.harness == agent.harness)
+        })
+        .filter_map(|agent| match &agent.harness {
+            HarnessKind::Other(harness) => Some(harness.as_str()),
+            HarnessKind::ClaudeCode => None,
+        })
+        .collect();
+    named
+        .into_iter()
+        .map(|harness| Listing {
+            harness: HarnessKind::Other(harness.to_owned()),
+            sessions: Vec::new(),
+            complete: false,
+        })
+        .collect()
+}
+
+/// What happens to the agents started elsewhere whose process no listing
+/// names any more. The listings are never complete: such an agent stops
+/// here, then leaves the list like any agent volee only watches (ADR 0027).
+/// A source that did not answer says nothing of its agents: the process
+/// table for OpenCode (`table_read`), the multiplexers for the harnesses
+/// they recognize in their panes (`panes_read`).
+fn no_longer_named(
+    registry: &Registry,
+    listings: &[Listing],
+    table_read: bool,
+    panes_read: bool,
+    now: Timestamp,
+) -> Vec<Event> {
+    let opencode = volee_harness::opencode::kind();
+    let running: HashSet<&SessionKey> = listings
         .iter()
+        .flat_map(|listing| &listing.sessions)
         .map(|session| &session.key)
         .collect();
-    let kind = volee_harness::opencode::kind();
-    for agent in state.registry().agents() {
-        let absent = agent.harness == kind
+    let mut events = Vec::new();
+    for agent in registry.agents() {
+        // What names the agents of this harness, and whether it answered.
+        let asked = match &agent.harness {
+            HarnessKind::ClaudeCode => false,
+            harness if *harness == opencode => table_read,
+            HarnessKind::Other(_) => panes_read,
+        };
+        let absent = asked
             && agent.watched()
             && agent
                 .current_session()
@@ -320,12 +445,7 @@ async fn opencode_processes(shared: &Arc<Shared>) -> Option<Vec<volee_mux::Hoste
             events.extend(gone(agent, now));
         }
     }
-    if !events.is_empty()
-        && let Err(error) = state.commit(events)
-    {
-        tracing::error!(%error, "cannot apply OpenCode's processes");
-    }
-    Some(live)
+    events
 }
 
 #[cfg(test)]

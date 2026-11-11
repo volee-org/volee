@@ -109,9 +109,10 @@ In this order, one release per step:
   far: an OpenCode agent started by hand in a tuios or tmux pane is placed
   in its pane, and opens there like any agent in a pane; `volee run --
   <command>` runs any program as an agent of the list, in a host, from the
-  terminal it is typed in ([ADR 0029](../adr/0029-volee-run.md)). Still to
-  do: finding, through tuios, the agents of harnesses volee has no listing
-  for.
+  terminal it is typed in ([ADR 0029](../adr/0029-volee-run.md)); an agent
+  of a harness volee has no listing for (Codex CLI, Gemini CLI, Aider...)
+  is found through tuios when it runs in one of its panes
+  ([ADR 0030](../adr/0030-a-multiplexer-may-say-which-panes-run-an-agent.md)).
 - Missions as a lead agent runs them, with the rules that make a lead a
   good one.
 
@@ -124,7 +125,8 @@ In this order, one release per step:
   then, `volee run` runs any of them as an agent, with a state read on its
   screen, and agents of any MCP-capable harness can
   [join](../guide/other-harnesses.md) through `volee mcp --join`.
-- Finding agents of harnesses other than OpenCode in the process table.
+- Finding agents of harnesses other than OpenCode in the process table, so
+  that they show outside tuios too.
 - Leads that start missions and workers themselves.
 - Messaging sessions started outside volee.
 - A Homebrew tap and a crates.io release.

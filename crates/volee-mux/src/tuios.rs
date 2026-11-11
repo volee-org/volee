@@ -6,6 +6,11 @@
 //!   (`tuios integration install claude-code`). A session they do not
 //!   cover is looked for by its process: its pid and ancestors go to
 //!   `resolve-pane`, which names the pane that runs one of them.
+//! - **Agents**: `list-agents` also names the harness tuios detects in a
+//!   pane from the program in its foreground (`source: detect`), for the
+//!   harnesses of its manifest. The pane's own process comes from
+//!   `list-windows`, and the process in the foreground of its terminal from
+//!   `ps` (`tpgid`): that one is the agent (ADR 0030).
 //! - **Capture**: `capture-pane`, with colors.
 //! - **Focus**: `tuios focus-window -s <session> <window>` (which also shows
 //!   the pane's workspace), then `tuios switch-session <session>`, which,
@@ -20,7 +25,7 @@
 //! Only reads and focus: nothing is typed into a pane, and no pane is
 //! created, closed or moved.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -31,8 +36,8 @@ use volee_core::harness::SessionKey;
 use volee_harness::{CommandRunner, Invocation, Output, RunError, SystemRunner};
 
 use crate::{
-    Hosted, Located, Multiplexer, MultiplexerStatus, MuxError, process, screen, split_target,
-    target,
+    Hosted, Located, Multiplexer, MultiplexerStatus, MuxError, PaneAgent, process, screen,
+    split_target, target,
 };
 
 /// How long one command may take. A call answers in about 11 ms on an idle
@@ -87,6 +92,38 @@ struct AgentPane {
     harness_id: String,
     #[serde(default)]
     agent_session_id: String,
+    /// What named the harness: `detect` when tuios recognized the program
+    /// in the pane's foreground, `report` when a hook said so.
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    confidence: String,
+    #[serde(default)]
+    cwd: String,
+}
+
+impl AgentPane {
+    /// Whether tuios recognizes, now, the program in this pane's foreground
+    /// as a harness: by its name, which it calls strong evidence. A hook's
+    /// report says what ran there once, not what runs there now.
+    fn runs_a_harness(&self) -> bool {
+        !self.harness_id.is_empty() && self.source == "detect" && self.confidence == "strong"
+    }
+}
+
+/// One window of `list-windows`: a pane and the process it started.
+#[derive(Debug, Deserialize)]
+struct Window {
+    window_id: String,
+    #[serde(default)]
+    pid: u32,
+}
+
+/// The answer of `list-windows`.
+#[derive(Debug, Deserialize)]
+struct WindowList {
+    #[serde(default)]
+    windows: Vec<Window>,
 }
 
 /// The answer of `list-agents`.
@@ -177,7 +214,7 @@ impl<R: CommandRunner> Tuios<R> {
     }
 
     /// Every process's parent.
-    fn parents(&self) -> Result<std::collections::HashMap<u32, u32>, MuxError> {
+    fn parents(&self) -> Result<HashMap<u32, u32>, MuxError> {
         let invocation = Invocation::new("ps", TIMEOUT).args(["-axo", "pid=,ppid="]);
         let output = self
             .runner
@@ -190,6 +227,26 @@ impl<R: CommandRunner> Tuios<R> {
             )));
         }
         Ok(process::parents(&String::from_utf8_lossy(&output.stdout)))
+    }
+
+    /// For every process, the process group in the foreground of its
+    /// terminal, whose leader is the program a person sees there.
+    ///
+    /// A table that cannot be read is not a multiplexer that cannot be
+    /// used: tuios answered, and its panes are there. The error says that
+    /// nothing is known this time, not that there is no pane.
+    fn foregrounds(&self) -> Result<HashMap<u32, u32>, MuxError> {
+        let unreadable = || MuxError::Unexpected {
+            command: "ps -axo pid=,tpgid=".to_owned(),
+        };
+        let invocation = Invocation::new("ps", TIMEOUT).args(["-axo", "pid=,tpgid="]);
+        let output = self.runner.run(&invocation).map_err(|_| unreadable())?;
+        if !output.is_success() {
+            return Err(unreadable());
+        }
+        Ok(process::foregrounds(&String::from_utf8_lossy(
+            &output.stdout,
+        )))
     }
 
     /// The pane that runs `pid` or one of its ancestors, if any.
@@ -264,6 +321,53 @@ impl<R: CommandRunner> Multiplexer for Tuios<R> {
             }
         }
         Ok(located)
+    }
+
+    fn agents(&self, known: &[&str]) -> Result<Vec<PaneAgent>, MuxError> {
+        let panes: Vec<AgentPane> = self
+            .call::<AgentList>("list-agents", &json!({ "all_sessions": true }))?
+            .agents
+            .into_iter()
+            .filter(|pane| pane.runs_a_harness() && !known.contains(&pane.harness_id.as_str()))
+            // Without a directory there is nothing to list it under.
+            .filter(|pane| !pane.cwd.is_empty())
+            .collect();
+        if panes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let foregrounds = self.foregrounds()?;
+        // The windows of each session, asked once.
+        let mut windows: HashMap<&str, Vec<Window>> = HashMap::new();
+        let mut found = Vec::new();
+        for pane in &panes {
+            if !windows.contains_key(pane.session.as_str()) {
+                let listed = self
+                    .call::<WindowList>("list-windows", &json!({ "session": pane.session }))?
+                    .windows;
+                windows.insert(pane.session.as_str(), listed);
+            }
+            let started = windows
+                .get(pane.session.as_str())
+                .and_then(|listed| {
+                    listed
+                        .iter()
+                        .find(|window| window.window_id == pane.window_id)
+                })
+                .map(|window| window.pid);
+            // The agent is the process in the foreground of the terminal
+            // the pane's own process holds. A pane whose process is gone,
+            // or holds no terminal, makes no agent this time.
+            let Some(pid) = started.and_then(|started| foregrounds.get(&started).copied()) else {
+                continue;
+            };
+            found.push(PaneAgent {
+                harness: pane.harness_id.clone(),
+                pid,
+                cwd: PathBuf::from(&pane.cwd),
+                target: target(&pane.session, &pane.window_id),
+            });
+        }
+        Ok(found)
     }
 
     fn capture(&self, target: &str) -> Result<String, MuxError> {
@@ -456,6 +560,129 @@ mod tests {
         assert_eq!(tuios.locate(&sessions).unwrap().len(), 1);
         assert_eq!(args(&tuios.runner).len(), 7, "{:?}", args(&tuios.runner));
         assert_eq!(tuios.runner.pending_replies(), 0);
+    }
+
+    /// `list-agents` as tuios 0.12.1 answers it for panes whose programs it
+    /// recognizes by their names, with no hook installed (measured with
+    /// programs named `codex` and `gemini`), next to a pane a hook reported
+    /// and a pane nothing claimed.
+    const DETECTED: &str = r#"{"agents":[
+        {"session":"work","window_id":"w-codex","harness_id":"codex","agent_session_id":"",
+         "source":"detect","confidence":"strong","identity":"manifest","foreground":"codex",
+         "cwd":"/work/api","state":"working"},
+        {"session":"side","window_id":"w-gemini","harness_id":"gemini-cli","agent_session_id":"",
+         "source":"detect","confidence":"strong","foreground":"gemini","cwd":"/work/docs"},
+        {"session":"work","window_id":"w-claude","harness_id":"claude-code",
+         "agent_session_id":"e41ffe96-d588-4d61-b6a0-b75bdcebe52c","source":"report",
+         "confidence":"certain","foreground":"claude","cwd":"/work/api"},
+        {"session":"work","window_id":"w-opencode","harness_id":"opencode","agent_session_id":"",
+         "source":"detect","confidence":"strong","foreground":"opencode","cwd":"/work/web"},
+        {"session":"work","window_id":"w-stale","harness_id":"codex","agent_session_id":"s1",
+         "source":"report","confidence":"certain","foreground":"fish","cwd":"/work/old"},
+        {"session":"work","window_id":"w-shell","harness_id":"","agent_session_id":"",
+         "source":"","confidence":"none","foreground":"fish","cwd":"/work"}
+    ],"all_sessions":true,"type":"agent_list"}"#;
+
+    /// `ps -axo pid=,tpgid=`: the pane `w-codex` was started with the program
+    /// itself; in `w-gemini` a shell runs it as its foreground job.
+    const FOREGROUNDS: &str = "  1     0\n 500   500\n 510   510\n 520   520\n 530   530\n 600   640\n 640   640\n 700     0\n";
+
+    #[test]
+    fn panes_whose_program_tuios_recognizes_are_agents_of_that_harness() {
+        let runner = FakeRunner::new()
+            .with_reply(Ok(reply(DETECTED)))
+            .with_reply(Ok(reply(FOREGROUNDS)))
+            .with_reply(Ok(reply(
+                r#"{"windows":[{"window_id":"w-codex","pid":500},{"window_id":"w-claude","pid":510},
+                    {"window_id":"w-stale","pid":520},{"window_id":"w-opencode","pid":530}]}"#,
+            )))
+            .with_reply(Ok(reply(
+                r#"{"windows":[{"window_id":"w-gemini","pid":600}]}"#,
+            )));
+        let tuios = Tuios::with_runner(runner);
+        let found = tuios.agents(&["claude-code", "opencode"]).unwrap();
+        assert_eq!(
+            found,
+            [
+                // The pane's own process is the agent.
+                PaneAgent {
+                    harness: "codex".into(),
+                    pid: 500,
+                    cwd: "/work/api".into(),
+                    target: "work:w-codex".into(),
+                },
+                // The agent is the foreground job of the pane's shell.
+                PaneAgent {
+                    harness: "gemini-cli".into(),
+                    pid: 640,
+                    cwd: "/work/docs".into(),
+                    target: "side:w-gemini".into(),
+                },
+            ],
+            "not the harnesses the caller finds itself, nor a pane a hook once reported"
+        );
+        let calls = args(&tuios.runner);
+        assert_eq!(calls[1], ["ps", "-axo", "pid=,tpgid="]);
+        assert_eq!(calls[2][4..], ["list-windows", r#"{"session":"work"}"#]);
+        assert_eq!(calls[3][4..], ["list-windows", r#"{"session":"side"}"#]);
+        assert_eq!(calls.len(), 4, "one list of windows per session");
+    }
+
+    #[test]
+    fn a_pane_whose_process_is_gone_or_holds_no_terminal_is_no_agent() {
+        let agents = r#"{"agents":[
+            {"session":"work","window_id":"gone","harness_id":"codex","source":"detect",
+             "confidence":"strong","cwd":"/work/a"},
+            {"session":"work","window_id":"no-tty","harness_id":"codex","source":"detect",
+             "confidence":"strong","cwd":"/work/b"},
+            {"session":"work","window_id":"closed","harness_id":"codex","source":"detect",
+             "confidence":"strong","cwd":"/work/c"},
+            {"session":"work","window_id":"weak","harness_id":"codex","source":"detect",
+             "confidence":"weak","cwd":"/work/d"},
+            {"session":"work","window_id":"nowhere","harness_id":"codex","source":"detect",
+             "confidence":"strong","cwd":""}
+        ]}"#;
+        let runner = FakeRunner::new()
+            .with_reply(Ok(reply(agents)))
+            .with_reply(Ok(reply(FOREGROUNDS)))
+            .with_reply(Ok(reply(
+                r#"{"windows":[{"window_id":"gone","pid":999},{"window_id":"no-tty","pid":700}]}"#,
+            )));
+        let tuios = Tuios::with_runner(runner);
+        assert_eq!(tuios.agents(&[]).unwrap(), []);
+    }
+
+    #[test]
+    fn a_process_table_that_cannot_be_read_is_not_a_missing_server() {
+        // tuios answered: its panes are there. Without the process table
+        // nothing can be said of them this time, which is not the same as
+        // having none.
+        let failed = Output {
+            code: Some(1),
+            stdout: Vec::new(),
+            stderr: b"ps: cannot list".to_vec(),
+        };
+        let tuios = Tuios::with_runner(
+            FakeRunner::new()
+                .with_reply(Ok(reply(DETECTED)))
+                .with_reply(Ok(failed)),
+        );
+        let error = tuios.agents(&["claude-code", "opencode"]).unwrap_err();
+        assert!(
+            !matches!(error, MuxError::Unavailable(_)),
+            "an unreadable table must not read as a multiplexer without a server: {error}"
+        );
+    }
+
+    #[test]
+    fn nothing_more_is_asked_when_no_pane_runs_another_harness() {
+        let tuios = Tuios::with_runner(FakeRunner::new().with_reply(Ok(reply(AGENTS))));
+        assert_eq!(tuios.agents(&["claude-code", "opencode"]).unwrap(), []);
+        assert_eq!(
+            tuios.runner.calls().len(),
+            1,
+            "list-agents, and nothing else"
+        );
     }
 
     #[test]

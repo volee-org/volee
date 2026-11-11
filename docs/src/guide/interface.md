@@ -595,6 +595,13 @@ The session shows in volee ten seconds after it starts, like any session
 started outside volee. `/clear` in the pane starts a new session in the
 same process: its row stays the same row.
 
+An agent of another AI in a tuios pane is shown and opened the same way.
+OpenCode is found in the process table, then in its pane. For a harness
+volee has no list of its own for (Codex CLI, Gemini CLI, Aider), tuios
+itself tells volee: it recognizes the program in the foreground of the
+pane, and volee lists that pane as an agent
+([Agents of other harnesses](other-harnesses.md#in-a-tuios-pane)).
+
 volee uses the default tuios server, or the one `TUIOS_SERVER` names when
 you run `volee daemon run` yourself. The commands that bring a pane forward
 name that server, so they reach the pane even when volee runs in a pane of

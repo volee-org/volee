@@ -30,9 +30,11 @@ Press `?` for the keys; `q` quits without stopping anything. `volee ls`
 prints the same list without the interface.
 
 Nothing here depends on how you started the sessions: volee reads Claude
-Code's own list of sessions and looks for OpenCode in the process table (at
-once when the interface opens, then every two to ten seconds while it is
-open, more often while sessions change, and every thirty seconds otherwise),
+Code's own list of sessions, looks for OpenCode in the process table and
+asks tuios which of its panes run another AI, such as Codex CLI or Gemini
+CLI (at once when the interface opens, then every two to ten seconds while
+it is open, more often while sessions change, and every thirty seconds
+otherwise),
 and it hears the hooks of the agents it launches itself, which report at
 once. The list is what runs now: a session you close leaves it after a
 minute, a background session stays for as long as Claude Code keeps it, and

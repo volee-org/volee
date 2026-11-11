@@ -1,9 +1,12 @@
 # Agents of other harnesses
 
 volee finds Claude Code sessions by itself, and launches, finds and resumes
-[OpenCode](#opencode) agents too. For any other AI, there are two ways in,
+[OpenCode](#opencode) agents too. For any other AI, there are three ways in,
 and they add up:
 
+- **[In a tuios pane](#in-a-tuios-pane)**, nothing to do: tuios recognizes
+  Codex CLI, Gemini CLI, Aider and the other programs of its list, and
+  volee shows each as an agent in its pane, opened by `enter`.
 - **[`volee run`](#any-program-volee-run)** starts it under volee from your
   terminal: it is in the list, you see its screen and you open it from the
   interface, like any agent. This works for any program, today.
@@ -11,6 +14,39 @@ and they add up:
   your answers and, inside a mission, talk with the mission's other agents,
   whatever AI runs them
   ([ADR 0014](../adr/0014-agents-of-other-harnesses-join-through-mcp.md)).
+
+## In a tuios pane
+
+Start the AI in a pane of [tuios](https://github.com/Gaurav-Gosain/tuios),
+as you always do:
+
+```sh
+cd ~/code/billing
+codex
+```
+
+tuios recognizes the program in the foreground of each pane, by its name,
+for the harnesses of its own list (Codex CLI, Gemini CLI, Aider, OpenCode
+and others). volee asks it at each round, and lists each of those panes as
+an agent, named after the pane's directory, with the harness tuios names
+([ADR 0030](../adr/0030-a-multiplexer-may-say-which-panes-run-an-agent.md)).
+From there it is an agent in a pane like any other
+([panes](interface.md#agents-in-tuios-panes)): its preview and its tile on
+the wall are the pane's screen, row for row, and `enter` opens the pane
+inside volee, where you type into it; `ctrl-q` comes back and it goes on as
+before. Nothing is stopped, restarted or configured for it.
+
+- **State.** It shows as idle while it runs: volee reads no state for it.
+  When you quit the program, the agent stops, then leaves the list a minute
+  later.
+- **Messages.** Nothing hands it a message; [join](#join) it to give it
+  volee's tools. The agent that joined is then a second row, the one its
+  messages go through.
+- **Only in tuios.** tmux does not tell what its panes run, and a plain
+  terminal has no door: there, use [`volee run`](#any-program-volee-run).
+- **What it was checked with.** Stand-in programs carrying the names
+  `codex` and `gemini`: what tuios and volee do with a program of that name
+  is measured, what the real programs draw in a pane is not.
 
 ## Any program: `volee run`
 
@@ -52,9 +88,9 @@ What volee knows of such a program is its screen, and nothing else:
 
 For Claude Code, prefer what volee finds by itself when you can: a session
 in a tuios or tmux pane, or a background session, is listed with its exact
-state, its name and its summary, and opens where it runs. `volee run --
-claude` is for a plain terminal, which has no door otherwise: you get the
-door, with the screen-read state above.
+state and its own name, and opens where it runs. `volee run -- claude` is
+for a plain terminal, which has no door otherwise: you get the door, with
+the screen-read state above.
 
 ## OpenCode
 

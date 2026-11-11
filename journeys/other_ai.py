@@ -11,6 +11,14 @@ there, then erased. The program runs in a directory of its own, whose name is th
 agent's: no key can go to another agent.
 
     python3 journeys/other_ai.py --volee target/release/volee --sandbox ~/code/sandbox
+
+With `--stand-in codex`, the same trip is made for a harness volee has no listing
+for (ADR 0030): tuios recognizes the program in the pane by its name, and volee
+finds the agent through tuios. The program is then a stand-in, a copy of `cat`
+under that name: it shows what tuios and volee do with a program of that name, and
+nothing of what the real program draws.
+
+    python3 journeys/other_ai.py --stand-in codex --volee target/release/volee --sandbox ~/code/sandbox
 """
 import os
 import shlex
@@ -29,6 +37,10 @@ def more(parser):
     parser.add_argument("--program", default="opencode",
                         help="the other AI's program (default: opencode, the one volee "
                              "finds in the process table)")
+    parser.add_argument("--stand-in", metavar="NAME",
+                        help="instead of a real program, run a copy of `cat` named NAME "
+                             "(codex, gemini, aider...), which tuios takes for that "
+                             "harness by its name")
 
 
 def main():
@@ -36,6 +48,12 @@ def main():
     j = Journey("other-ai", args)
     name = "journey-ai-" + j.stamp
     j.by_hand.append(name)
+    if args.stand_in:
+        # A program that carries the harness's name, and nothing of the harness.
+        args.program = os.path.join(j.workdir, "bin", args.stand_in)
+        os.makedirs(os.path.dirname(args.program))
+        shutil.copyfile("/bin/cat", args.program)
+        os.chmod(args.program, 0o755)
     program = os.path.basename(args.program)
 
     def pane_screen():
@@ -50,8 +68,12 @@ def main():
 
     try:
         # What the trip rests on.
-        if not j.check("{} is installed".format(program), shutil.which(args.program),
-                       "this trip needs it on PATH"):
+        if args.stand_in:
+            if not j.check("a stand-in named {} is in place".format(program),
+                           shutil.which(args.program), "a copy of cat under that name"):
+                return
+        elif not j.check("{} is installed".format(program), shutil.which(args.program),
+                         "this trip needs it on PATH"):
             return
         if not j.check("the daemon starts", j.start_daemon()):
             return
@@ -67,6 +89,11 @@ def main():
         home = os.path.join(j.workdir, name)
         os.makedirs(home)
         command = "cd {} && exec {}".format(shlex.quote(home), shlex.quote(args.program))
+        if args.stand_in:
+            # A stand-in draws nothing by itself: one line first, for a screen to
+            # compare.
+            command = "cd {} && echo 'a stand-in for {}' && exec {}".format(
+                shlex.quote(home), program, shlex.quote(args.program))
         started = j.tuios("new-window", "-s", j.session, PANE, "--", "sh", "-c", command)
         j.check("{} starts in a tuios pane".format(program), started.returncode == 0,
                 (started.stdout + started.stderr).strip()[:160])
@@ -82,6 +109,12 @@ def main():
         j.check("as an agent of another harness, which volee only watches",
                 row.get("harness") != "claude-code" and row.get("role") == "independent",
                 "{} · {}".format(row.get("harness"), row.get("role")))
+        if args.stand_in:
+            harness = row.get("harness")
+            named = harness.get("other", "") if isinstance(harness, dict) else str(harness)
+            j.check("of the harness tuios recognizes the program as",
+                    named.startswith(args.stand_in), "{} for a program named {}".format(
+                        named, args.stand_in))
         session = j.session_of(row)
         j.check("in the pane the person started it in",
                 j.session in row["location"].get("target", ""), str(row["location"]))
