@@ -124,6 +124,27 @@ def select_report(j, title):
             and "is ready to merge" in lines[chosen + 1])
 
 
+def thread_shown(j, title):
+    """The text of the thread pane of the messages window, on the thread of the
+    mission `title`, its lines joined: a long message wraps there."""
+    marker = "◆ " + title
+    lines = j.screen().splitlines()
+    at = next((line.rindex(marker) for line in lines if marker in line), None)
+    if at is None:
+        return ""
+    return " ".join(" ".join(line[at:].strip(" │─╭╮╰╯▲▼").split())
+                    for line in lines if len(line) > at)
+
+
+def closing(text, title):
+    """The sentence that closes the mission `title`, in the text of its thread."""
+    start = text.find('Mission "{}" is closed.'.format(title))
+    end = text.find("branches kept).", start)
+    if start < 0:
+        return ""
+    return text[start:end + len("branches kept).")] if end >= 0 else text[start:]
+
+
 def missions(j):
     try:
         return json.loads(j.volee_run("mission", "ls", "--all", "--json").stdout or "[]")
@@ -313,9 +334,11 @@ def main():
                     str(repo.worktrees(branch)))
         j.keys("Escape", 0.5)
         j.keys("I", 1.5)
+        said = j.wait(lambda: closing(thread_shown(j, title), title), 20, 0.5) or ""
         j.check("one message says what is merged and what was tidied",
-                j.sees("is closed.", "Merged:", branch + " into " + repos[0].base,
-                       "Tidied:", "worktrees removed", "branches kept", timeout=20))
+                "Merged: " in said and "({} into {})".format(branch, repos[0].base) in said
+                and "Tidied: " in said and said.endswith("(worktrees removed, branches kept)."),
+                said or thread_shown(j, title)[-400:])
         j.check("no question is left waiting", "question for you" not in j.screen())
         j.check("the thread still names the coordinator, which left the list",
                 coordinator + " → you" in j.screen()
