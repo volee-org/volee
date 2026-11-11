@@ -219,7 +219,8 @@ fn decorative(symbol: &str) -> bool {
 /// A parsed screen.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PreviewScreen {
-    /// Rows of cells, without trailing blanks; a run of blank rows is one.
+    /// Rows of cells, without trailing blanks: the screen's own rows, or,
+    /// read from a replay, its rows with a run of blank rows kept as one.
     rows: Vec<Vec<PreviewCell>>,
     /// The last row worth showing: the cursor's or the last with text.
     anchor: u16,
