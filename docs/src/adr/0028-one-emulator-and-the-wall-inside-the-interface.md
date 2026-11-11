@@ -86,6 +86,10 @@ the agents of the list that run (the filter applies), wherever they run:
   agent's name and state. It never takes an agent's input and never
   resizes its terminal: no view ([ADR 0027](0027-open-without-owning.md))
   is opened for a tile.
+- An agent whose screen the daemon cannot read (a session in a terminal
+  that is neither a multiplexer pane nor a background session) keeps its
+  tile, which says why and shows the facts of the detail panel. It is
+  asked for again when the agent's state or place changes.
 - A page holds as many tiles as the terminal shows at a readable size, at
   least 40 columns by 14 rows each: two in an 80 by 24 terminal, nine in a
   large one, and a fourth row or column only where each tile keeps 72

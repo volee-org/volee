@@ -327,6 +327,11 @@ questions are, cut on the right when the tile is narrower, under the
 agent's name and state. The wall only looks: it never takes an agent's
 input and never resizes its terminal.
 
+A session in a terminal volee cannot read (Claude Code started by hand in
+a terminal window, outside tuios and tmux) has no screen to show. Its tile
+says so, then what volee knows of the agent: where it works, where it
+runs, what it did last. Opening it says how to make it reachable.
+
 A page holds as many tiles as your terminal shows at a readable size (at
 least 40 columns by 14 rows each): two in an 80 by 24 terminal, nine in a
 large one, up to sixteen in a very large one. Moving past the last tile of
