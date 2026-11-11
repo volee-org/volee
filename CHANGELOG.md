@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 It is generated from the commit history with [git-cliff](https://git-cliff.org):
 see [RELEASING.md](RELEASING.md).
 
+## [0.16.0] - 2026-11-11
+
+### Added
+
+- **tui**: Show the terminal's own background under every theme ([#162](https://github.com/volee-org/volee/pull/162))
+- **tui**: Rebuild the main screen after the cockpit: the selected agent's tree, colored cards, For you and a journal ([#164](https://github.com/volee-org/volee/pull/164))
+- **daemon**: Show how much of its context an agent uses, from its status line ([#165](https://github.com/volee-org/volee/pull/165))
+
+### Fixed
+
+- **tui**: Say in a window where to go and which key to press to open a session in a terminal ([#161](https://github.com/volee-org/volee/pull/161))
+- **mcp**: Tell an agent which row of the agent list is itself ([#163](https://github.com/volee-org/volee/pull/163))
+- **tui**: Keep a coordinator's whole name in the list next to the right column ([#166](https://github.com/volee-org/volee/pull/166))
+
+### Documentation
+
+- **roadmap**: Record 0.15, a session typed in any terminal ([#160](https://github.com/volee-org/volee/pull/160))
+
 ## [0.15.0] - 2026-11-11
 
 ### Added
@@ -291,6 +309,7 @@ see [RELEASING.md](RELEASING.md).
 - Mark the interface, messaging and views milestones done ([#52](https://github.com/volee-org/volee/pull/52))
 - Start the daemon in the first step of the guide, and say what tidy removes ([#56](https://github.com/volee-org/volee/pull/56))
 
+[0.16.0]: https://github.com/volee-org/volee/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/volee-org/volee/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/volee-org/volee/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/volee-org/volee/compare/v0.13.0...v0.14.0
