@@ -12,15 +12,20 @@
 //! process ancestry, never by its title ([ADR 0023]). Agents in a volee host
 //! run in no pane.
 //!
+//! A multiplexer that recognizes the programs in its panes is also asked
+//! which panes run an agent of a harness volee cannot list by itself
+//! ([ADR 0030]): [`agents`].
+//!
 //! [ADR 0015]: https://volee-org.github.io/volee/adr/0015-tuios-location-adapter.html
 //! [ADR 0023]: https://volee-org.github.io/volee/adr/0023-every-agent-on-the-machine.html
+//! [ADR 0030]: https://volee-org.github.io/volee/adr/0030-a-multiplexer-may-say-which-panes-run-an-agent.html
 
 use std::sync::{Arc, PoisonError};
 
-use volee_core::harness::SessionKey;
+use volee_core::harness::{HarnessKind, SessionKey};
 use volee_core::reconcile::{ListedSession, relocate};
 use volee_core::workspace::Location;
-use volee_mux::{Hosted, Multiplexer};
+use volee_mux::{Hosted, Multiplexer, MuxError, PaneAgent};
 use volee_proto::methods::MultiplexerStatus;
 
 use crate::server::Shared;
@@ -110,6 +115,37 @@ pub(crate) async fn check(shared: &Arc<Shared>) {
             };
         }
     }
+}
+
+/// The agents the multiplexers recognize in their panes, of the harnesses
+/// volee does not find by itself (ADR 0030). `None` when one of them could
+/// not tell this time: nothing can then be said of the agents it named
+/// before. A multiplexer that is not installed, or whose server does not
+/// run, has no pane, and so no agent.
+pub(crate) async fn agents(shared: &Arc<Shared>) -> Option<Vec<PaneAgent>> {
+    let mut found = Vec::new();
+    for adapter in shared.panes.adapters.clone() {
+        let name = adapter.name();
+        let asked = tokio::task::spawn_blocking(move || {
+            // The harnesses volee lists itself, as multiplexers name them.
+            let claude = HarnessKind::ClaudeCode.to_string();
+            adapter.agents(&[claude.as_str(), volee_harness::opencode::PROFILE])
+        })
+        .await;
+        match asked {
+            Ok(Ok(agents)) => found.extend(agents),
+            Ok(Err(MuxError::Unavailable(_))) => {}
+            Ok(Err(error)) => {
+                tracing::debug!(multiplexer = name, %error, "cannot ask which panes run an agent");
+                return None;
+            }
+            Err(error) => {
+                tracing::debug!(multiplexer = name, %error, "the search for agents in panes failed");
+                return None;
+            }
+        }
+    }
+    Some(found)
 }
 
 /// The live interactive sessions of a listing: the ones that may run in a

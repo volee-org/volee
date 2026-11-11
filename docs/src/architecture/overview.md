@@ -113,7 +113,8 @@ for one kind of fact:
 | Hooks of agents volee launched | Fine-grained state, tools in use, last message, files touched | Per-agent `--settings` file whose hooks call `volee hook`. User settings are never edited. |
 | `claude agents --json --all` | Every Claude Code session on the machine, including the ones volee did not launch | Polled and reconciled. Documented by Claude Code as the supported way to read session state. |
 | The process table | OpenCode agents started elsewhere, with their directory | `ps`, then `lsof` for the directories, once per discovery round ([ADR 0023](../adr/0023-every-agent-on-the-machine.md)). |
-| tuios and tmux (optional) | Which pane shows a Claude Code session started by hand in it, and that pane's screen | Matched by the session id the multiplexer recorded or by process ancestry, never by title ([ADR 0015](../adr/0015-tuios-location-adapter.md)). |
+| tuios and tmux (optional) | Which pane shows a session started by hand in it, and that pane's screen | Matched by the session id the multiplexer recorded or by process ancestry, never by title ([ADR 0015](../adr/0015-tuios-location-adapter.md)). |
+| tuios (optional) | The agents of harnesses volee has no listing for (Codex CLI, Gemini CLI, Aider...), while they run in a tuios pane | `list-agents` names the harness tuios recognizes in each pane; the agent is the process in the foreground of the pane's terminal ([ADR 0030](../adr/0030-a-multiplexer-may-say-which-panes-run-an-agent.md)). |
 | git | Worktrees, branches, commits, diffs, push state | `git` CLI behind a trait, triggered by events and a slow timer. |
 | GitHub CLI (`gh`, optional) | Pull requests and checks | Polled slowly, only for branches with agents. |
 

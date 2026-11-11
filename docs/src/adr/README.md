@@ -21,7 +21,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0012](0012-language-license-and-scope.md) | Rust, dual MIT/Apache-2.0, Unix first | Accepted |
 | [0013](0013-worktrees-live-in-their-repository.md) | Agent worktrees live in their repository | Accepted |
 | [0014](0014-agents-of-other-harnesses-join-through-mcp.md) | Agents of other harnesses join through MCP | Accepted |
-| [0015](0015-tuios-location-adapter.md) | tuios is the first location adapter | Accepted |
+| [0015](0015-tuios-location-adapter.md) | tuios is the first location adapter (amended by 0030) | Accepted |
 | [0016](0016-what-a-failed-launch-left-untouched.md) | Reuse or tidy what a failed launch left untouched (refines 0011) | Accepted |
 | [0017](0017-setup-commands-for-new-worktrees.md) | Setup commands prepare a new worktree before its agent starts | Accepted |
 | [0018](0018-panes-that-show-background-sessions.md) | A pane that shows a background session is its preview | Superseded by 0023 |
@@ -29,13 +29,14 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0020](0020-libghostty-vt-emulates-terminals.md) | libghostty-vt emulates every terminal volee reads | Accepted |
 | [0021](0021-take-over-watch-and-the-wall-of-screens.md) | Take over with `a` or `volee attach`, leave with Ctrl+Q, watch on a wall | Accepted |
 | [0022](0022-harness-profiles.md) | A profile per harness says how to launch, resume, find and read it (amended by 0029) | Accepted |
-| [0023](0023-every-agent-on-the-machine.md) | volee shows every agent on the machine, and adopts the ones it did not start (supersedes 0018; amended by 0027 and 0029) | Accepted |
+| [0023](0023-every-agent-on-the-machine.md) | volee shows every agent on the machine, and adopts the ones it did not start (supersedes 0018; amended by 0027, 0029 and 0030) | Accepted |
 | [0024](0024-agents-come-back-after-a-reboot.md) | Agents interrupted by a reboot come back in new hosts | Accepted |
 | [0025](0025-key-sequences-a-leader-and-which-key-popups.md) | Key sequences, a leader key and which-key popups; every key configurable | Proposed |
 | [0026](0026-edit-mode-types-into-an-agent-inside-volee.md) | Edit mode types into an agent inside volee; the host encodes keys | Proposed |
 | [0027](0027-open-without-owning.md) | volee opens every agent where it runs, and its list shows what runs (amends 0023, 0026, 0021 and 0004) | Accepted |
 | [0028](0028-one-emulator-and-the-wall-inside-the-interface.md) | One emulator for every screen, and the wall inside the interface (completes 0020; amends 0021, 0026 and 0027) | Accepted |
 | [0029](0029-volee-run.md) | `volee run` makes any program an agent, in the terminal it is typed in (amends 0022 and 0023) | Accepted |
+| [0030](0030-a-multiplexer-may-say-which-panes-run-an-agent.md) | A multiplexer may say which of its panes run an agent (amends 0023 and 0015) | Accepted |
 
 ## Not built yet
 
@@ -69,7 +70,14 @@ to come:
 - [0023](0023-every-agent-on-the-machine.md): finding agents in the process
   table for harnesses other than OpenCode (Claude Code sessions are still
   found through `claude agents --json`), and adopting them (`codex resume`,
-  `gemini --resume`), which needs their profiles.
+  `gemini --resume`), which needs their profiles. In a tuios pane they are
+  found through tuios ([0030](0030-a-multiplexer-may-say-which-panes-run-an-agent.md));
+  in tmux or in a plain terminal they are not.
+- [0030](0030-a-multiplexer-may-say-which-panes-run-an-agent.md): the states
+  a multiplexer's hooks report for such an agent, and the panes whose
+  harness a hook reported rather than the program in the foreground. Built
+  on stand-in programs: Codex CLI and Gemini CLI themselves were not
+  available where it was made.
 - [0027](0027-open-without-owning.md): a door for a session in a tmux pane
   (the pane is brought forward instead) and for an agent started in a plain
   terminal (in a tuios pane, it opens like any agent in a pane; started

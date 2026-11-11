@@ -56,6 +56,7 @@
   - [0027. Open without owning](adr/0027-open-without-owning.md)
   - [0028. One emulator, and the wall inside the interface](adr/0028-one-emulator-and-the-wall-inside-the-interface.md)
   - [0029. volee run makes any program an agent](adr/0029-volee-run.md)
+  - [0030. A multiplexer may say which panes run an agent](adr/0030-a-multiplexer-may-say-which-panes-run-an-agent.md)
   - [Template](adr/template.md)
 
 # Project

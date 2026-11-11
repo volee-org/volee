@@ -8,12 +8,17 @@
 //! creates, closes or moves one. [`Tuios`] was the first adapter; [`Tmux`] is
 //! the second.
 //!
+//! A multiplexer that recognizes the programs in its panes may also say
+//! which panes run an agent, and of which harness ([ADR 0030]): that is how
+//! volee finds the agents of a harness it has no listing for.
+//!
 //! Pane addresses are written `<session>:<pane>`, in the multiplexer's own
 //! terms, so that a person can be told which session holds the pane
 //! ([`volee_core::workspace::Location::label`]).
 //!
 //! [ADR 0008]: https://volee-org.github.io/volee/adr/0008-multiplexers-are-optional.html
 //! [ADR 0015]: https://volee-org.github.io/volee/adr/0015-tuios-location-adapter.html
+//! [ADR 0030]: https://volee-org.github.io/volee/adr/0030-a-multiplexer-may-say-which-panes-run-an-agent.html
 #![warn(missing_docs)]
 
 mod process;
@@ -22,6 +27,7 @@ mod tmux;
 mod tuios;
 
 use std::fmt;
+use std::path::PathBuf;
 
 use volee_core::harness::SessionKey;
 
@@ -43,6 +49,20 @@ pub struct Hosted {
 pub struct Located {
     /// The session.
     pub key: SessionKey,
+    /// The pane, as `<session>:<pane>`.
+    pub target: String,
+}
+
+/// An agent a multiplexer recognizes in one of its panes, by the program in
+/// the foreground of the pane's terminal (ADR 0030).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaneAgent {
+    /// Its harness, as the multiplexer names it, such as `codex`.
+    pub harness: String,
+    /// The process in the foreground of the pane's terminal: the agent.
+    pub pid: u32,
+    /// The pane's directory.
+    pub cwd: PathBuf,
     /// The pane, as `<session>:<pane>`.
     pub target: String,
 }
@@ -112,6 +132,13 @@ pub trait Multiplexer: fmt::Debug + Send + Sync {
     /// they name the multiplexer server the adapter reads, so they reach the
     /// pane even when that environment names another server.
     fn focus_steps(&self, target: &str) -> Result<Vec<Vec<String>>, MuxError>;
+
+    /// The agents this multiplexer recognizes in its panes, leaving out the
+    /// harnesses named in `known`, which the caller finds by itself. None
+    /// for a multiplexer that does not tell what its panes run (ADR 0030).
+    fn agents(&self, _known: &[&str]) -> Result<Vec<PaneAgent>, MuxError> {
+        Ok(Vec::new())
+    }
 
     /// The command a person runs in a new terminal to see the session that
     /// holds the pane at `target`, when no client of the multiplexer shows
