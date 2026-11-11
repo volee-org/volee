@@ -43,8 +43,13 @@ size of the panel, and the screen is drawn cell for cell with the
 program's cursor. The frame takes the input colour, and the title and the
 bottom line say `EDIT` and whose keys these are. Every key goes to the
 agent but the leave key (`leave` of the `attached` context, Ctrl+Q by
-default); pastes go too, the mouse does nothing. The leave key reconnects
-as a watcher: the screen stays, and the size stays as the owner left it.
+default); pastes go too, the mouse does nothing. What is typed or pasted
+before the host answers the new connection waits for it and goes, in
+order, once it does: the screen stays meanwhile, so nothing tells the person
+to wait (until 0.16 those keys were dropped, and a first letter typed right
+away on a busy machine was lost). The leave key reconnects as a watcher:
+the screen stays, the size stays as the owner left it, and what was typed
+ahead and not sent yet is dropped.
 On the main screen, `i` and `a` open the full-screen view in edit mode at
 once. The messages move from `i` to `I` and `Space i`.
 

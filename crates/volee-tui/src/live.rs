@@ -37,6 +37,21 @@ pub(crate) enum LiveInput {
     Resize(Size),
 }
 
+/// What the person typed in edit mode before the host answered: it goes to
+/// the agent, in order, once the host does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TypedAhead {
+    /// A key.
+    Key(KeyEvent),
+    /// Pasted text.
+    Paste(String),
+}
+
+/// The most keys and pastes kept while a host has not answered: past them,
+/// the person is typing into nothing for a long time, and what follows is
+/// dropped.
+pub(crate) const TYPED_AHEAD_MAX: usize = 1_000;
+
 /// Where a live screen stands.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
@@ -88,6 +103,11 @@ pub(crate) struct Live {
     cells: RefCell<Option<(ColorDepth, PreviewScreen)>>,
     /// Lines scrolled back into the history.
     pub(crate) scroll: usize,
+    /// What the person typed in edit mode while the connection was being
+    /// opened. Entering edit mode on a screen the interface follows opens a
+    /// new connection, and the screen stays meanwhile: nothing tells the
+    /// person to wait, so nothing they type is lost.
+    pub(crate) typed_ahead: Vec<TypedAhead>,
 }
 
 impl std::fmt::Debug for Live {
@@ -101,6 +121,7 @@ impl std::fmt::Debug for Live {
             .field("exited", &self.exited)
             .field("size", &self.size)
             .field("screen", &self.screen.is_some())
+            .field("typed_ahead", &self.typed_ahead.len())
             .finish_non_exhaustive()
     }
 }
@@ -119,6 +140,7 @@ impl Live {
             screen: None,
             cells: RefCell::new(None),
             scroll: 0,
+            typed_ahead: Vec::new(),
         }
     }
 
@@ -129,6 +151,11 @@ impl Live {
         self.editing = editing;
         self.phase = Phase::Connecting;
         self.scroll = 0;
+        // What was typed for edit mode never reaches an agent the person
+        // stopped typing into.
+        if !editing {
+            self.typed_ahead.clear();
+        }
     }
 
     /// The host welcomed the connection.
@@ -191,6 +218,7 @@ impl Live {
     pub(crate) fn closed(&mut self, reason: String) {
         self.phase = Phase::Closed(reason);
         self.editing = false;
+        self.typed_ahead.clear();
     }
 
     /// Whether there is a screen to draw.
