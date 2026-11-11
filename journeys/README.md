@@ -91,8 +91,11 @@ agent's.
   read once, right after the screen, was compared with a screen it had read
   two seconds earlier, and failed one run in several.
 - To change an agent's screen without asking the model for anything, type
-  in its pane and leave the text in the input box. What a model writes
-  changes from run to run, and so does how long it takes.
+  in its pane and leave the text in the input box; a line feed (`ctrl+j`)
+  inside the text leaves a blank row on the screen. What a model writes
+  changes from run to run, and so does how long it takes: Claude Code
+  follows a shell command typed with `!` with a turn of the model, which
+  comments its output in words of its own.
 - A window of a headless tuios session has 80 columns and 24 rows.
   `resize()` gives the interface the size of the terminal the trip needs.
 - Add every new thing the journey starts to `agents`, `branches`,

@@ -11,7 +11,8 @@ the row stays the same row. Quit, the session leaves the list.
 In between, the proof asked of the one terminal component (ADR 0028), for a pane:
 what tuios captures of the pane is the pane's screen, and the preview, the tile of
 the wall, the full-screen view and `volee logs` must show it row for row, blank
-rows included. The reference is the pane's screen as tuios itself gives it, which
+rows included: the pane's input box is left holding two marks with four blank rows
+between them. The reference is the pane's screen as tuios itself gives it, which
 volee has no part in. A capture tells the characters, not the colors (a test
 compares those).
 
@@ -27,19 +28,16 @@ PANE = "agent"
 # nothing, and nothing is asked of the model.
 LEFT = "left-here-42"
 
-# A shell command for Claude Code's `!` mode, which runs it and shows its output: two
-# marks with four blank rows between them. The marks are computed, so that they show
-# in the output and not in the command as typed. The gap is the command's, whatever
-# the model then says of it.
-GAP = "! printf 'top-%s\\n\\n\\n\\n\\nend-%s\\n' $((40+2)) $((40+2))"
+# Two marks typed in the pane's input box and left there, with five line feeds
+# between them: the box then holds four blank rows. As for LEFT, the screen changes,
+# the agent does nothing, and nothing is asked of the model.
 TOP, END = "top-42", "end-42"
+FEEDS = 5
 
 
 def gap(rows):
-    """How many blank rows lie between the two marks of the command's output on a
-    screen, given as rows of cells; -1 when the marks do not show, or when something
-    shows between them. A mark ends its row: what the model says of the output may
-    name the marks, never at the end of a row of its own."""
+    """How many blank rows lie between the two marks on a screen, given as rows of
+    cells; -1 when the marks do not show, or when something shows between them."""
     texts = [cut(row, len(row)) for row in rows]
     top = next((i for i, text in enumerate(texts) if text.endswith(TOP)), None)
     end = next((i for i, text in enumerate(texts) if text.strip() == END), None)
@@ -81,6 +79,13 @@ def same_screen(j, name, pane_rows):
             break
     else:
         j.check("the pane's screen stays still while its views are compared", False)
+        return
+    j.say("----- the pane's own screen, at rest")
+    j.say("\n".join(cut(row, len(row)) for row in before))
+    # What the comparison rests on: without the gap on the screen that was compared,
+    # a view that counts a run of blank rows as one would show the same rows.
+    if not j.check("at rest, the pane's screen still holds the gap", gap(before) == FEEDS - 1,
+                   "{} blank rows between the marks".format(gap(before))):
         return
     width = max(len(row) for row in before)
     for what, shown, shown_width in (("the preview", preview, preview_width),
@@ -189,12 +194,18 @@ def main():
                                           and LEFT not in j.screen(), 20, 1))
 
         # ---- the same screen in the three views -------------------------------------
-        in_pane(GAP)
+        j.tuios("send-text", "-s", j.session, "-w", PANE, TOP)
+        j.tuios("send-keys", "-s", j.session, "-w", PANE, "ctrl+j", "--repeat", str(FEEDS))
+        j.tuios("send-text", "-s", j.session, "-w", PANE, END)
         j.check("the pane's screen holds a gap of blank rows",
-                j.wait(lambda: gap(pane_rows()) >= 3, 30, 1),
+                j.wait(lambda: gap(pane_rows()) == FEEDS - 1, 15, 1),
                 "{} blank rows between the marks".format(gap(pane_rows())))
         if j.select(name):
             same_screen(j, name, pane_rows)
+        j.tuios("send-keys", "-s", j.session, "-w", PANE, "Backspace", "--repeat",
+                str(len(TOP) + FEEDS + len(END)))
+        j.check("the input box is empty again",
+                j.wait(lambda: TOP not in pane_screen() and END not in pane_screen(), 10))
 
         # ---- /clear: a new session in the same process is the same row -----------
         in_pane("/clear")
