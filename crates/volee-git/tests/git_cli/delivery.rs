@@ -427,7 +427,7 @@ fn a_repository_without_commits_reports_its_staged_files() {
                 insertions: 1,
                 deletions: 0,
             },
-            no_remote: true,
+            push: PushState::NoRemote,
             ..Delivery::default()
         }
     );
@@ -454,9 +454,9 @@ fn a_repository_without_a_remote_says_so_and_proves_a_local_merge() {
     };
     let tip = sandbox.commit(&worktree, "a.rs", "a\n", "Add a.rs");
     let first = check(None);
-    assert!(first.delivery.no_remote);
+    assert!(first.delivery.no_remote());
     assert_eq!(first.delivery.commits, 1);
-    assert_eq!(first.delivery.push, PushState::NoUpstream);
+    assert_eq!(first.delivery.push, PushState::NoRemote);
     assert_eq!(first.base.as_deref(), Some("main"));
     assert_eq!(first.upstream, None);
     assert!(!first.delivery.is_delivered());
@@ -466,10 +466,17 @@ fn a_repository_without_a_remote_says_so_and_proves_a_local_merge() {
     // branch's commits are part of the base branch.
     sandbox.git(
         &repo,
-        &["merge", "--quiet", "--no-ff", "--message", "Merge feat", "feat"],
+        &[
+            "merge",
+            "--quiet",
+            "--no-ff",
+            "--message",
+            "Merge feat",
+            "feat",
+        ],
     );
     let second = check(first.delivery.unmerged_tip.as_deref());
-    assert!(second.delivery.no_remote);
+    assert!(second.delivery.no_remote());
     assert_eq!(second.delivery.commits, 0);
     assert!(second.delivery.merged_into_base);
     assert!(second.delivery.is_delivered());
@@ -510,7 +517,8 @@ fn a_clone_has_a_remote() {
     let agent = Agent::new();
     agent.commit("a.rs", "a\n");
     let delivery = agent.report(None).delivery;
-    assert!(!delivery.no_remote);
+    assert!(!delivery.no_remote());
+    assert_eq!(delivery.push, PushState::NoUpstream);
     assert_eq!(delivery.summary(), "1 commit \u{b7} not pushed");
 }
 

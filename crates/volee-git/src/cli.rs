@@ -533,11 +533,10 @@ impl GitCli {
                 commits,
                 dirty: status.is_dirty(),
                 diff,
-                push,
+                push: if no_remote { PushState::NoRemote } else { push },
                 merged_into_base,
                 tip,
                 unmerged_tip,
-                no_remote,
                 ..Delivery::default()
             },
             head: Head {

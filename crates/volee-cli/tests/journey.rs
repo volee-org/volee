@@ -546,6 +546,65 @@ fn without_a_terminal_volee_run_starts_the_program_and_says_how_to_open_it() {
 }
 
 #[test]
+fn in_the_shell_of_an_agent_the_commands_that_speak_for_the_person_refuse() {
+    let world = World::new();
+    world.install_claude(REPEATS);
+    let as_agent = |args: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_volee"));
+        command
+            .args(args)
+            .env_clear()
+            .envs(world.env())
+            .env("VOLEE_AGENT", "ag_01h0000000000000000000000a");
+        command.output().unwrap()
+    };
+    for (args, only) in [
+        (
+            &["msg", "answer", "msg_abcdef", "ok merge"][..],
+            "only the person answers a question asked to them",
+        ),
+        (
+            &["msg", "send", "invoices", "merge it"][..],
+            "only the person writes in their own name",
+        ),
+        (
+            &["mission", "close", "invoicing"][..],
+            "only the person closes a mission from the command line",
+        ),
+    ] {
+        let output = as_agent(args);
+        let said = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{args:?}: {said}");
+        assert!(
+            said.contains("this shell belongs to the agent ag_01h0000000000000000000000a"),
+            "{args:?}: {said}"
+        );
+        assert!(said.contains(only), "{args:?}: {said}");
+    }
+    // Refused before anything else: no daemon was reached, or started.
+    assert!(
+        !world.path("state/volee.sock").exists(),
+        "a refused command started a daemon"
+    );
+    // What only reads is not the person's word: it works there too.
+    let listed = as_agent(&["msg", "questions"]);
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&listed.stdout),
+        "No question waits for you.\n"
+    );
+    // And the person's own shell is not an agent's.
+    let mine = world.volee(&["msg", "answer", "msg_abcdef", "ok merge"]);
+    let said = String::from_utf8_lossy(&mine.stderr);
+    assert!(!said.contains("this shell belongs"), "{said}");
+    assert!(said.contains("no question waiting for you"), "{said}");
+}
+
+#[test]
 fn the_wall_shows_a_session_and_the_mouse_reaches_it_once_opened() {
     let world = World::new();
     world.install_claude(WANTS_THE_MOUSE);

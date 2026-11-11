@@ -13,11 +13,11 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0004](0004-sources-and-reconciliation.md) | Hooks, harness listing, git and forge are reconciled into one model | Accepted |
 | [0005](0005-harness-neutral-agent-protocol.md) | Agents talk to volee through MCP and the CLI | Accepted |
 | [0006](0006-messaging.md) | Typed, threaded messages delivered through documented hooks (amended by 0031) | Accepted |
-| [0007](0007-missions.md) | Missions are run by a supervisor program and a coordinator agent | Accepted |
+| [0007](0007-missions.md) | Missions are run by a supervisor program and a coordinator agent (amended by 0032) | Accepted |
 | [0008](0008-multiplexers-are-optional.md) | Multiplexers are optional location adapters | Accepted |
 | [0009](0009-tui-architecture.md) | The TUI follows the Elm architecture with one keymap table | Accepted |
 | [0010](0010-git-access.md) | Git is read through the git CLI behind a trait | Accepted |
-| [0011](0011-safety-and-delivery-evidence.md) | Destructive actions require delivery evidence | Accepted |
+| [0011](0011-safety-and-delivery-evidence.md) | Destructive actions require delivery evidence (amended by 0032) | Accepted |
 | [0012](0012-language-license-and-scope.md) | Rust, dual MIT/Apache-2.0, Unix first | Accepted |
 | [0013](0013-worktrees-live-in-their-repository.md) | Agent worktrees live in their repository | Accepted |
 | [0014](0014-agents-of-other-harnesses-join-through-mcp.md) | Agents of other harnesses join through MCP | Accepted |
@@ -38,6 +38,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0029](0029-volee-run.md) | `volee run` makes any program an agent, in the terminal it is typed in (amends 0022 and 0023) | Accepted |
 | [0030](0030-a-multiplexer-may-say-which-panes-run-an-agent.md) | A multiplexer may say which of its panes run an agent (amends 0023 and 0015) | Accepted |
 | [0031](0031-a-question-may-offer-its-answers.md) | A question to the person may offer its answers (amends 0006) | Accepted |
+| [0032](0032-a-mission-is-merged-only-after-the-person-approved.md) | A mission is merged only after the person approved its report (amends 0007 and 0011) | Accepted |
 
 ## Not built yet
 

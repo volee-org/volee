@@ -173,10 +173,7 @@ pub(crate) async fn check_now(shared: &Shared, agents: &[AgentId], timeout: Dura
         }
     };
     if tokio::time::timeout(timeout, read).await.is_err() {
-        tracing::warn!(
-            ?agents,
-            "the delivery evidence was not read again in time"
-        );
+        tracing::warn!(?agents, "the delivery evidence was not read again in time");
     }
 }
 
@@ -323,7 +320,10 @@ impl Refresher {
     fn check(self: &Arc<Self>, check: Check) {
         let start = {
             let mut book = self.book();
-            book.waiters.entry(check.agent).or_default().push(check.done);
+            book.waiters
+                .entry(check.agent)
+                .or_default()
+                .push(check.done);
             book.queue
                 .entry(check.agent)
                 .or_default()

@@ -1,6 +1,9 @@
 # 0011. Destructive actions require delivery evidence
 
-- Status: Accepted
+- Status: Accepted (amended by [0032](0032-a-mission-is-merged-only-after-the-person-approved.md):
+  the evidence says when a repository has no remote, where committed work is
+  ready and a merge into the base branch is what lands it; closing a mission
+  tidies its workers under the same rule)
 - Date: 2026-11-06
 
 ## Context

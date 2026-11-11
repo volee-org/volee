@@ -117,6 +117,30 @@ pub fn supervise(registry: &Registry, mission: MissionId) -> Decision {
         }
     }
 
+    conclude(
+        &mut decision,
+        registry,
+        record,
+        workers.len(),
+        coordinator,
+        all_delivered,
+    );
+    decision
+}
+
+/// The end of a mission: once every worker delivered, the coordinator is
+/// asked to present its report; the person's answer to that report approves
+/// the mission or keeps it open; and work that changes meanwhile takes the
+/// mission back to running.
+fn conclude(
+    decision: &mut Decision,
+    registry: &Registry,
+    record: &Mission,
+    workers: usize,
+    coordinator: Option<Party>,
+    all_delivered: bool,
+) {
+    let mission = record.id;
     let ready = record.status.is_ready();
     if all_delivered && !ready {
         decision
@@ -130,8 +154,7 @@ pub fn supervise(registry: &Registry, mission: MissionId) -> Decision {
                  present your report to the human with `request_approval` (what is done, the \
                  proof, what is left). Merge nothing and close nothing before the human \
                  answers.",
-                workers.len(),
-                record.title
+                workers, record.title
             ),
         });
     } else if !all_delivered && ready {
@@ -157,9 +180,8 @@ pub fn supervise(registry: &Registry, mission: MissionId) -> Decision {
         && record.status == MissionStatus::AwaitingApproval
         && let Some(answer) = answer_to_report(registry, record)
     {
-        answered(&mut decision, record, coordinator, &answer);
+        answered(decision, record, coordinator, &answer);
     }
-    decision
 }
 
 /// What the person answered to the report the coordinator presented: whether
@@ -316,12 +338,12 @@ fn delivery_verdict(registry: &Registry, kind: MissionKind, worker: &Agent) -> (
             // to open: committed work is all a worker can deliver.
             if delivery.commits == 0 {
                 missing.push("no commits");
-            } else if !delivery.no_remote && delivery.push != PushState::UpToDate {
+            } else if !matches!(delivery.push, PushState::UpToDate | PushState::NoRemote) {
                 missing.push("commits not pushed");
             }
             let open_pr =
                 pull_request.is_some_and(|pr| matches!(pr.state, PrState::Open | PrState::Draft));
-            if !delivery.no_remote && !open_pr {
+            if !delivery.no_remote() && !open_pr {
                 missing.push("no open pull request");
             }
             if delivery.dirty {

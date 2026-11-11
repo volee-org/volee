@@ -15,6 +15,7 @@ use crate::{resolve, text};
 
 /// Sends a message from the human to an agent, named as a person types it.
 pub(crate) async fn send(to: &str, body: String, kind: MessageKind) -> Result<()> {
+    resolve::as_the_person("writes in their own name")?;
     let client = connect_or_start().await?;
     let batch = client.call::<EventsSince>(SinceParams::default()).await?;
     let events: Vec<Event> = batch.events.into_iter().map(|e| e.event).collect();
@@ -102,6 +103,7 @@ fn waiting(registry: &Registry, now: Timestamp) -> String {
 /// Answers a question an agent asked the human: with one of the answers it
 /// offers, named by its number or its words, or in the human's own words.
 pub(crate) async fn answer(question: &str, typed: &str) -> Result<()> {
+    resolve::as_the_person("answers a question asked to them")?;
     let client = connect_or_start().await?;
     let registry = resolve::registry(&client).await?;
     let question = resolve::question(&registry, question)?;

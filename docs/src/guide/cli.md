@@ -397,7 +397,7 @@ volee mission new "Slow queries" "Find the ten slowest queries" --repo . --kind 
 volee mission ls                      # open missions; --all adds closed ones, --json for scripts
 volee mission show invoicing          # agents, verdicts on workers, the mission's thread
 volee mission abort invoicing --reason "wrong approach"
-volee mission close invoicing         # once every worker delivered
+volee mission close invoicing         # yourself, once every worker delivered
 ```
 
 A repository is a name from the [configuration](configuration.md) or a
@@ -412,15 +412,44 @@ or too old), `volee mission new` refuses before recording anything, and
 `volee daemon status` says why.
 
 volee checks each worker when it stops. A change worker has delivered when
-its commits are pushed with an open pull request, or merged; an analysis
-worker has delivered when it sent its report. The coordinator hears about
-every verdict, and once every worker delivered it is asked for the final
-report, which it sends before calling `close_mission`.
+its commits are pushed with an open pull request, or merged; in a repository
+without a remote, when its work is committed on a clean worktree. An
+analysis worker has delivered when it sent its report. The coordinator hears
+about every verdict.
 
-`volee mission close` refuses a mission whose workers have not all delivered
-and says which; `--force` closes it anyway. Aborting tells every agent of the
-mission to stop. Neither deletes anything: branches, worktrees and pull
-requests stay where they are.
+Once every worker delivered, the coordinator presents its report (what is
+done, the proof, what is left) as a [question](#questions) to you, with the
+answers `ok merge` and `no` (`ok close` and `no` for an analysis mission).
+Nothing is merged or closed before you answer, and `volee mission ls` shows
+the mission as `waiting for you`:
+
+```sh
+volee msg questions
+volee msg answer coordinator-invoicing 1     # ok merge
+```
+
+Only that answer lets the coordinator merge: pull requests with `gh`, and
+in a repository without a remote a plain merge of each worker's branch in
+the main checkout. volee merges nothing itself; it checks each merge, and
+lets the coordinator close the mission only once every one is seen. On any
+other answer the mission stays open, and the coordinator is told what you
+said.
+
+A closed mission is tidied in one gesture: volee removes the worktree of
+every worker whose work landed, keeps its branch, forgets the agent, stops
+the coordinator, and tells you in your messages what it tidied and what it
+kept, with the reason (uncommitted changes, work that did not land). It
+never forces and never deletes a branch.
+
+`volee mission close` is you closing a mission yourself, without the
+coordinator: it refuses a mission whose workers have not all delivered and
+says which; `--force` closes it anyway. It tidies the same way. Aborting
+tells every agent of the mission to stop and deletes nothing: branches,
+worktrees and pull requests stay where they are.
+
+The commands that speak for you, `volee msg send`, `volee msg answer` and
+`volee mission close`, refuse to run in the shell of an agent volee
+launched: an agent asks you, it does not answer for you.
 
 ## The interface
 

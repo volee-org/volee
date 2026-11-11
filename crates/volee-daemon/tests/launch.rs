@@ -240,6 +240,11 @@ async fn a_worker_gets_its_own_worktree_and_session() {
     let socket = daemon.paths.socket.display().to_string();
     let settings: serde_json::Value = serde_json::from_str(&settings).unwrap();
     assert_eq!(settings["env"]["VOLEE_SOCKET"], socket.as_str());
+    // Its shells know which agent they belong to.
+    assert_eq!(
+        settings["env"]["VOLEE_AGENT"],
+        spawned.agent.to_string().as_str()
+    );
     let mcp: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&spec.mcp_config_file).unwrap()).unwrap();
     assert_eq!(
@@ -634,7 +639,12 @@ async fn a_new_mission_gets_a_coordinator_that_cannot_edit() {
     let instructions = spec.append_system_prompt.unwrap();
     assert!(instructions.contains("coordinator"));
     assert!(instructions.contains("spawn_worker"));
+    // It asks the person before it merges, and closes only after.
+    assert!(instructions.contains("`request_approval`"));
+    assert!(instructions.contains("Merge nothing and close nothing before the human answers"));
+    assert!(instructions.contains("Only the human's answer \"ok merge\" lets you go on"));
     assert!(instructions.contains("close_mission"));
+    assert!(instructions.contains("In a repository without a remote"));
 }
 
 #[tokio::test]

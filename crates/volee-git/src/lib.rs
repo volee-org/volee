@@ -189,9 +189,8 @@ pub trait Git: Send + Sync {
     ///   `origin/<branch>` when it was pushed without setting an upstream.
     ///   An upstream that is a local branch does not count.
     ///   [`PushState::NoUpstream`] when no such remote-tracking branch
-    ///   exists.
-    /// - `no_remote`: the repository has no remote at all, so there is
-    ///   nowhere to push and no pull request to open.
+    ///   exists, [`PushState::NoRemote`] when the repository has no remote
+    ///   at all: there is nowhere to push and no pull request to open.
     /// - `unmerged_tip` and `merged_into_base`: proving a merge needs memory
     ///   (see [`Delivery`]). Pass the `unmerged_tip` of the agent's previous
     ///   evidence in `query`. When the branch has commits of its own, the
@@ -215,6 +214,7 @@ pub trait Git: Send + Sync {
     /// commit is a [`GitError::UnknownRevision`].
     ///
     /// [`PushState::NoUpstream`]: volee_core::delivery::PushState::NoUpstream
+    /// [`PushState::NoRemote`]: volee_core::delivery::PushState::NoRemote
     fn delivery(
         &self,
         worktree: &Path,

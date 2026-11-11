@@ -39,7 +39,7 @@ configurations for Codex CLI and Gemini CLI.
 Agents volee launches may call every tool below without a permission
 prompt: their settings allow `mcp__volee`, so that a background agent never
 stalls on asking to send a message. Only a mission's coordinator may call
-`spawn_worker` and `close_mission`.
+`spawn_worker`, `request_approval` and `close_mission`.
 
 ## Tools
 
@@ -142,11 +142,42 @@ returns an error that tells the coordinator to ask the human.
 | `name` | string, optional | A short display name. |
 | `base` | string, optional | The branch to start from; the repository's default branch otherwise. |
 
+### `request_approval`
+
+For a mission's coordinator, once volee told it that every worker delivered:
+presents its report to the human and asks for their approval
+([ADR 0032](../adr/0032-a-mission-is-merged-only-after-the-person-approved.md)).
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `done` | string | What is done, in one line. |
+| `proof` | string | The proof, in one line: pull requests, branches, test results. |
+| `left` | string, optional | What is left, in one line; "nothing" when left out. |
+
+volee posts the report as a question from the coordinator to the human, in
+the mission's thread, with the answers `ok merge` and `no` (`ok close` and
+`no` for an analysis mission); the lead that asked for the mission reads it
+too. The mission waits: nothing is merged or closed before the human
+answers. The tool returns at once, and the coordinator ends its turn. volee
+then tells it what the answer allows: on the approving answer, to merge each
+worker's work and call `close_mission`; on any other, that nothing is merged
+and the mission stays open.
+
+Refused, with the reason, when the caller is not the coordinator, while a
+worker has not delivered (a report presented for approval says the work is
+ready), while the human has not answered the report already presented, and
+once they approved.
+
 ### `close_mission`
 
-For a mission's coordinator: closes the mission once every worker delivered
-and the final report went to the human with `report`. It takes no argument;
-the coordinator's latest report becomes the mission's report. volee refuses,
-with the reason, when the caller is not the coordinator, when no report was
-sent, or while a worker has not delivered. An agent can never force a
-mission closed: only the human can.
+For a mission's coordinator: closes the mission once the human approved the
+report presented with `request_approval` and, for a change mission, the
+work of every worker is merged. It takes no argument. volee reads the
+workers' evidence again from git and the forge before it answers, and
+refuses, with the reason, when the caller is not the coordinator, when the
+human has not approved, or while volee sees no merge of a worker's branch.
+An agent can never force a mission closed: only the human can.
+
+Closing then tidies the mission: the worktree of every worker whose work
+landed is removed, its branch kept, and the coordinator is stopped once its
+turn ended.

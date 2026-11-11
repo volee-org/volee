@@ -377,7 +377,11 @@ fn ok_merge_approves_and_tells_the_coordinator_to_merge_then_close() {
         panic!("one notice: {:?}", decision.notices);
     };
     assert_eq!(notice.to, [Party::Agent(agent(COORDINATOR))]);
-    assert!(notice.body.contains("The human approved"), "{}", notice.body);
+    assert!(
+        notice.body.contains("The human approved"),
+        "{}",
+        notice.body
+    );
     assert!(notice.body.contains("`gh pr merge"), "{}", notice.body);
     assert!(notice.body.contains("git merge --no-ff"), "{}", notice.body);
     assert!(notice.body.contains("never a squash"), "{}", notice.body);
@@ -530,7 +534,12 @@ fn work_that_changes_under_a_presented_report_voids_it() {
     let again = world.step();
     assert_eq!(world.status(), MissionStatus::Reporting);
     assert!(
-        again.notices.last().unwrap().body.contains("`request_approval`"),
+        again
+            .notices
+            .last()
+            .unwrap()
+            .body
+            .contains("`request_approval`"),
         "{:?}",
         again.notices
     );
@@ -566,7 +575,7 @@ fn in_a_repository_without_a_remote_committed_work_is_delivered() {
     let local = |commits, dirty| Delivery {
         commits,
         dirty,
-        no_remote: true,
+        push: PushState::NoRemote,
         tip: Some(TIP.into()),
         ..Delivery::default()
     };
@@ -574,12 +583,18 @@ fn in_a_repository_without_a_remote_committed_work_is_delivered() {
     world.set_delivery(1, local(0, false));
     world.set_state(1, AgentState::Idle);
     world.step();
-    assert_eq!(world.assessments()[&agent(1)].verdict, Verdict::NotDelivered);
+    assert_eq!(
+        world.assessments()[&agent(1)].verdict,
+        Verdict::NotDelivered
+    );
     assert_eq!(world.assessments()[&agent(1)].evidence, "no commits");
     // Committed, with changes left.
     world.set_delivery(1, local(2, true));
     world.step();
-    assert_eq!(world.assessments()[&agent(1)].evidence, "uncommitted changes");
+    assert_eq!(
+        world.assessments()[&agent(1)].evidence,
+        "uncommitted changes"
+    );
     // Committed and clean: no push and no pull request are asked for.
     world.set_delivery(1, local(2, false));
     world.step();
@@ -591,7 +606,7 @@ fn in_a_repository_without_a_remote_committed_work_is_delivered() {
     assert_eq!(world.status(), MissionStatus::Reporting);
     // The same evidence with a remote is not delivered.
     let mut with_remote = local(2, false);
-    with_remote.no_remote = false;
+    with_remote.push = PushState::NoUpstream;
     world.set_delivery(1, with_remote);
     world.step();
     assert_eq!(

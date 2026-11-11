@@ -40,7 +40,8 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `threads.summarize` | `thread` | `summary`, `messages`, `model`; refused unless `[messages] summaries` is on |
 | `missions.create` | `title`, `kind` (`change` or `analysis`), `goal`, `repos`, optional `requested_by` | `mission`, `thread`, `coordinator` |
 | `missions.abort` | `mission`, optional `reason` | none |
-| `missions.close` | `mission`, optional `report`, `force`, `by` | none |
+| `missions.request_approval` | `mission`, `by` (its coordinator), `done`, `proof`, `left` | `question`: the report, posted as a question to the human that offers the approving answer and `no` |
+| `missions.close` | `mission`, optional `report`, `force`, `by` | none; the daemon then tidies the mission's workers and stops its coordinator |
 
 ### Running a program
 
@@ -202,10 +203,23 @@ batch of events that concerns the mission, and once when it starts. Its
 decisions are ordinary events (`worker-assessed`, `mission-updated`) and
 messages from volee in the mission's thread, so every client sees them.
 
+`missions.request_approval` is refused (`-32002`) unless `by` is the
+mission's coordinator and the mission is `reporting`: every worker
+delivered, and no report waits for an answer. It posts the report as a
+question to the human and moves the mission to `awaiting-approval`. The
+human's answer is an ordinary message in reply to that question
+(`messages.send`); the supervisor reads it and moves the mission to
+`approved`, or back to `reporting`.
+
 `missions.close` refuses (`-32002`) while a worker has not delivered, unless
-`force` is set. Without `report`, the coordinator's latest report in the
-mission's thread is recorded. When `by` names an agent, it must be the
-mission's coordinator, it must have sent a report, and it cannot force.
+`force` is set. Without `report`, the report the coordinator presented is
+kept, else its latest report in the mission's thread. When `by` names an
+agent, it must be the mission's coordinator, the mission must be `approved`,
+the work of every worker of a change mission must be merged (the daemon
+reads their evidence again first), and it cannot force. After a close, the
+daemon tidies the workers whose work landed, stops the coordinator, and
+posts one message in the mission's thread that says what it tidied and what
+it kept.
 
 ## Events and replicas
 

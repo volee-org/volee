@@ -610,6 +610,7 @@ pub(crate) fn delivery_spans(delivery: &Delivery, context: &CardContext<'_>) -> 
     } else if delivery.commits > 0 {
         parts.push(vec![match delivery.push {
             PushState::NoUpstream => Span::styled("not pushed", dim),
+            PushState::NoRemote => Span::styled("no remote", dim),
             PushState::UpToDate => Span::styled("pushed", plain),
             PushState::Ahead { commits } => Span::styled(
                 format!("{commits} to push"),

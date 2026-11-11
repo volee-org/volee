@@ -18,9 +18,9 @@ use volee_proto::PROTOCOL_VERSION;
 use volee_proto::methods::{
     AbortMission, Adopt, AgentParams, Attach, CloseMission, CreateMission, Diff, Empty, EventBatch,
     EventsSince, Forget, HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams,
-    Method, Open, Preview, RecordActivity, RefreshDiscovery, Run, SendMessage, SendParams, Sent,
-    Shutdown, SinceParams, Spawn, Status, StatusInfo, StatusParams, Stop, Summarize, Tidy,
-    WaitParams, WaitReply,
+    Method, Open, Preview, RecordActivity, RefreshDiscovery, RequestApproval, Run, SendMessage,
+    SendParams, Sent, Shutdown, SinceParams, Spawn, Status, StatusInfo, StatusParams, Stop,
+    Summarize, Tidy, WaitParams, WaitReply,
 };
 use volee_proto::rpc::{self, RpcError};
 
@@ -81,6 +81,9 @@ pub(crate) async fn dispatch(
         }
         AbortMission::NAME => {
             respond(missions::abort(shared, parse::<AbortMission>(params)?).await)
+        }
+        RequestApproval::NAME => {
+            respond(missions::request_approval(shared, parse::<RequestApproval>(params)?).await)
         }
         CloseMission::NAME => {
             respond(missions::close(shared, parse::<CloseMission>(params)?).await)

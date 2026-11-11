@@ -18,6 +18,12 @@ pub struct Paths {
     pub socket: PathBuf,
 }
 
+/// The environment variable that names the agent a shell belongs to: volee
+/// sets it, to the agent's identifier, in the sessions of the agents it
+/// launches. The commands that speak for the person (answering a question,
+/// closing a mission) refuse to run where it is set.
+pub const AGENT_ENV: &str = "VOLEE_AGENT";
+
 /// The home directory could not be determined.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("cannot find the home directory: set HOME, or VOLEE_CONFIG_DIR and VOLEE_STATE_DIR")]

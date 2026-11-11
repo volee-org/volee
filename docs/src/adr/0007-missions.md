@@ -1,6 +1,9 @@
 # 0007. Missions are run by a supervisor program and a coordinator agent
 
-- Status: Accepted
+- Status: Accepted (amended by [0032](0032-a-mission-is-merged-only-after-the-person-approved.md):
+  the coordinator presents its report and merges only after the person
+  approved; it no longer closes on its own word, and closing tidies the
+  mission)
 - Date: 2026-11-06
 
 ## Context

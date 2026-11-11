@@ -150,6 +150,32 @@ pub(crate) fn question(registry: &Registry, input: &str) -> Result<MessageId> {
     }
 }
 
+/// Refuses to go on in the shell of an agent volee launched, for a command
+/// that speaks for the person; `only` says what only the person does, such
+/// as "answers a question asked to them".
+///
+/// An agent has a shell, and what the person types there the agent can
+/// type too. This is a guard against a helpful model answering its own
+/// question, not a lock: volee marks the shells of its agents, and an agent
+/// that removes the mark has decided to.
+pub(crate) fn as_the_person(only: &str) -> Result<()> {
+    refuse_agent(
+        std::env::var(volee_proto::paths::AGENT_ENV).ok().as_deref(),
+        only,
+    )
+}
+
+fn refuse_agent(agent: Option<&str>, only: &str) -> Result<()> {
+    match agent.map(str::trim).filter(|agent| !agent.is_empty()) {
+        None => Ok(()),
+        Some(agent) => bail!(
+            "this shell belongs to the agent {agent}, which volee launched: only the person \
+             {only}. An agent writes with volee's MCP tools (send_message, ask_human, \
+             request_approval), and waits for the person's answer."
+        ),
+    }
+}
+
 /// The configuration file, or the defaults when there is none.
 pub(crate) fn load_config() -> Result<Config> {
     let file = paths()?.config_file();
@@ -209,6 +235,21 @@ mod tests {
     use volee_core::{Event, EventKind, ThreadId};
 
     use super::*;
+
+    #[test]
+    fn the_person_s_commands_refuse_the_shell_of_an_agent() {
+        assert!(refuse_agent(None, "answers a question asked to them").is_ok());
+        assert!(refuse_agent(Some("  "), "answers a question asked to them").is_ok());
+        let refusal = refuse_agent(Some("ag_01abc"), "answers a question asked to them")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refusal.contains("belongs to the agent ag_01abc")
+                && refusal.contains("only the person answers a question asked to them")
+                && refusal.contains("request_approval"),
+            "{refusal}"
+        );
+    }
 
     fn agent_id(n: u128) -> AgentId {
         AgentId::from_ulid(Ulid::from_parts(1_000, n))

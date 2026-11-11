@@ -164,8 +164,10 @@ two on purpose (see [ADR 0007](../adr/0007-missions.md)):
 - a **supervisor program** inside the daemon waits, retries and checks delivery
   evidence. It costs no tokens while it waits.
 - a **coordinator agent** (an LLM) splits the goal, spawns workers through MCP,
-  answers their questions and writes the final report. It is woken by
-  messages; it never polls.
+  answers their questions, presents its report to the person and merges
+  only after they approved
+  ([ADR 0032](../adr/0032-a-mission-is-merged-only-after-the-person-approved.md)).
+  It is woken by messages; it never polls.
 
 Missions are of two kinds: **change** missions deliver branches and pull
 requests; **analysis** missions deliver reports.

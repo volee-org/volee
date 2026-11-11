@@ -28,7 +28,7 @@ agent has one current session and keeps the lineage of the previous ones.
 | Role | Who | Typical work |
 | --- | --- | --- |
 | **Lead** | An agent you launch yourself, with `volee spawn` | Works on your request in its own worktree and reports back to you. Leads that start missions and workers come later. |
-| **Coordinator** | The agent of a mission | Splits the goal, writes tasks for workers, answers their questions, writes the final report |
+| **Coordinator** | The agent of a mission | Splits the goal, writes tasks for workers, answers their questions, presents its report and asks you before it merges anything |
 | **Worker** | An agent working in one repository, in its own worktree | Codes, tests, opens a pull request, or writes an analysis |
 | **Subagent** | A helper an agent starts by itself (for example a search) | Short tasks inside its parent's session |
 | **Independent** | A session volee did not launch, or a program you run under volee with `volee run` | Anything you started by hand; volee shows it, with a coarser state |

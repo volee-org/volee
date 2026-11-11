@@ -128,10 +128,32 @@ it, and launches one worker per task, each in its own worktree of one of the
 mission's repositories (eight at most, unless you raise
 `[missions] max_workers`). When a worker
 stops, volee checks its work itself: commits pushed and a pull request open
-for a change, a report sent for an analysis. The coordinator hears every
-verdict, asks workers to finish what is missing, and once every worker
-delivered, sends you the final report with links to every pull request and
-closes the mission.
+for a change (commits alone in a repository without a remote), a report sent
+for an analysis. The coordinator hears every verdict and asks workers to
+finish what is missing.
+
+Once every worker delivered, the coordinator merges nothing and closes
+nothing: it presents its report, and asks you. The question waits on top of
+your [messages](interface.md#messages) (`I`), and the mission shows as
+`waiting for you`:
+
+```text
+coordinator-invoicing → you · question
+Mission "Invoicing" is ready to merge.
+Done: invoices in billing, exposed in the API.
+Proof: billing#42 and api#17, tests green.
+Left: nothing
+  1 ok merge
+  2 no
+```
+
+Press `1` then `y` (or run `volee msg answer coordinator-invoicing 1`): the
+coordinator merges each worker's work, volee checks that every merge
+happened, and the mission closes. Closing tidies it in one gesture: the
+workers' worktrees are removed, their branches kept, the coordinator
+stopped, and one message tells you what was tidied and what was kept, with
+the reason. On `no`, or on an answer in your own words, nothing is merged
+and the mission stays open.
 
 ```sh
 volee mission ls --all
