@@ -131,6 +131,12 @@ async fn target(shared: &Arc<Shared>, agent: AgentId) -> Result<Target, DaemonEr
         .agent(agent)
         .ok_or_else(|| DaemonError::NotFound(format!("unknown agent {agent}")))?;
     if record.harness != harness.kind() {
+        // An agent of another harness in a host or in a pane is shown and
+        // opened there, before anything asks for its session. Found in a
+        // plain terminal, it is the person's to use there.
+        if record.location == Location::Terminal {
+            return Err(in_a_terminal(&record.name, &record.harness));
+        }
         return Err(DaemonError::Unavailable(format!(
             "{} runs on {}, which this daemon cannot drive",
             record.name, record.harness

@@ -74,11 +74,13 @@ impl Screens {
     }
 }
 
-/// One round: the screens of hosted agents without hooks, then OpenCode's
-/// processes.
-pub(crate) async fn round(shared: &Arc<Shared>) {
+/// One round: the screens of hosted agents without hooks, then the agents
+/// of the process table. Returns the live sessions the table gave, for the
+/// search of the panes they may run in; `None` when the table could not be
+/// read, in which case nothing can be said of where they run.
+pub(crate) async fn round(shared: &Arc<Shared>) -> Option<Vec<volee_mux::Hosted>> {
     hosted_states(shared).await;
-    opencode_processes(shared).await;
+    opencode_processes(shared).await
 }
 
 /// One hosted agent, as a round sees it.
@@ -212,14 +214,17 @@ fn last_line(size: volee_host::Size, screen: &[u8]) -> Option<String> {
     Some(line.chars().take(300).collect())
 }
 
-async fn opencode_processes(shared: &Arc<Shared>) {
-    let listed = tokio::task::spawn_blocking(|| {
-        volee_harness::opencode::list_processes(&volee_harness::SystemRunner)
-    })
-    .await;
-    let Ok(Ok(listing)) = listed else {
-        return;
+async fn opencode_processes(shared: &Arc<Shared>) -> Option<Vec<volee_mux::Hosted>> {
+    let Some(runner) = shared.processes.clone() else {
+        return Some(Vec::new());
     };
+    let listed =
+        tokio::task::spawn_blocking(move || volee_harness::opencode::list_processes(&*runner))
+            .await;
+    let Ok(Ok(listing)) = listed else {
+        return None;
+    };
+    let live = crate::panes::hosted(&listing.sessions);
     let mut state = shared.state.lock().await;
     let now = state.now();
     state.sessions_mut().record(&listing);
@@ -260,6 +265,7 @@ async fn opencode_processes(shared: &Arc<Shared>) {
     {
         tracing::error!(%error, "cannot apply OpenCode's processes");
     }
+    Some(live)
 }
 
 #[cfg(test)]

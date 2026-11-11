@@ -111,6 +111,7 @@ async fn the_screen_of_an_agent_in_a_host_comes_with_the_size_of_its_terminal() 
         volee_bin: None,
         multiplexers: Vec::new(),
         hosts: true,
+        processes: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
 

@@ -56,6 +56,7 @@ pub(crate) async fn run() -> Result<()> {
         volee_bin,
         multiplexers: multiplexers(),
         hosts: true,
+        processes: Some(Arc::new(volee_harness::SystemRunner)),
     };
     Daemon::run(config)
         .await

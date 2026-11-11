@@ -121,6 +121,7 @@ fn start(log: Vec<Event>) -> Running {
         volee_bin: None,
         multiplexers: Vec::new(),
         hosts: false,
+        processes: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running { socket, _dir: dir }

@@ -72,6 +72,10 @@ pub struct Config {
     /// spawn`. Off, agents run as background sessions of their harness, as
     /// before hosts; tests with a fake harness turn it off.
     pub hosts: bool,
+    /// What reads the process table (`ps`, then `lsof`) to find the agents
+    /// of other harnesses that run outside volee's hosts (ADR 0023). `None`:
+    /// the table is not read, and such agents are not found.
+    pub processes: Option<Arc<dyn volee_harness::CommandRunner>>,
 }
 
 impl std::fmt::Debug for Config {
@@ -93,6 +97,8 @@ pub(crate) struct Shared {
     pub(crate) settings: volee_config::Config,
     pub(crate) volee_bin: Option<PathBuf>,
     pub(crate) hosts: bool,
+    /// What reads the process table, when it is read.
+    pub(crate) processes: Option<Arc<dyn volee_harness::CommandRunner>>,
     pub(crate) screens: crate::screens::Screens,
     pub(crate) paths: Paths,
     /// The interactive subscriptions open now, which set discovery's pace.
@@ -249,6 +255,7 @@ impl Daemon {
             settings: config.evidence.settings.clone(),
             volee_bin: config.volee_bin,
             hosts: config.hosts,
+            processes: config.processes,
             screens: crate::screens::Screens::default(),
             paths: config.paths,
             watchers: Watchers::new(),
@@ -281,11 +288,14 @@ impl Daemon {
                 stop.clone(),
             ));
         } else if shared.hosts {
-            // Without Claude Code, hosts and OpenCode still need following.
+            // Without Claude Code, hosts and the agents of the process
+            // table still need following, and placing in their panes.
             let shared = Arc::clone(&shared);
             tokio::spawn(async move {
                 loop {
-                    crate::screens::round(&shared).await;
+                    if let Some(live) = crate::screens::round(&shared).await {
+                        crate::panes::locate(&shared, &live).await;
+                    }
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 }
             });

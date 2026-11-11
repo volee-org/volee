@@ -83,6 +83,7 @@ fn start_cadence(watched: Duration, longest: Duration, idle: Duration) -> Runnin
         volee_bin: None,
         multiplexers: Vec::new(),
         hosts: false,
+        processes: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -553,6 +554,7 @@ async fn without_a_harness_a_refresh_answers_at_once() {
         volee_bin: None,
         multiplexers: Vec::new(),
         hosts: false,
+        processes: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     let asked = tokio::time::Instant::now();

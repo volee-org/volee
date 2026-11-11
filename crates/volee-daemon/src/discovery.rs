@@ -235,12 +235,24 @@ pub(crate) async fn run(
             .progress
             .send_modify(|progress| progress.started += 1);
         let listed = list(&shared, &harness, &mut failing).await;
-        if listed.succeeded {
-            crate::panes::locate(&shared, &listed.hosted).await;
-        }
-        // Hosts and OpenCode do not depend on Claude Code's listing.
-        if shared.hosts {
-            crate::screens::round(&shared).await;
+        // Hosts and the process table do not depend on Claude Code's
+        // listing.
+        let others = if shared.hosts {
+            crate::screens::round(&shared).await
+        } else {
+            Some(Vec::new())
+        };
+        // One search of the panes, with every session that may run in one,
+        // whatever its harness. Asked apart, each listing would take the
+        // other's agents for sessions that ended, and move them out of
+        // their panes at every round. A listing that failed says nothing of
+        // its sessions: the search waits for the next round.
+        if listed.succeeded
+            && let Some(others) = others
+        {
+            let mut live = listed.hosted.clone();
+            live.extend(others);
+            crate::panes::locate(&shared, &live).await;
         }
         shared.refreshes.progress.send_modify(|progress| {
             progress.finished = progress.started;
