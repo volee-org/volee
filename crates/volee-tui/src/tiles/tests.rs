@@ -107,7 +107,7 @@ fn screen(model: &mut Model, agent: AgentId, text: &str) {
         model,
         Msg::PreviewLoaded {
             agent,
-            result: Ok(text.to_owned()),
+            result: Ok(text.into()),
         },
     );
 }

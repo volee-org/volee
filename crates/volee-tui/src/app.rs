@@ -28,8 +28,8 @@ use crate::live::{Live, LiveInput};
 use crate::preview::{Fit, PreviewScreen};
 use crate::pulses::Pulses;
 use crate::source::{
-    Changes, Door, MissionRequest, NewMission, Outgoing, PaneFocus, SourceError, SpawnRequest,
-    Summary, TakeOver,
+    Changes, Door, MissionRequest, NewMission, Outgoing, PaneFocus, Reading, SourceError,
+    SpawnRequest, Summary, TakeOver,
 };
 use crate::text;
 use crate::theme::Theme;
@@ -331,7 +331,7 @@ pub(crate) enum Msg {
         /// Whose.
         agent: AgentId,
         /// The raw screen, or why it failed.
-        result: Result<String, SourceError>,
+        result: Result<Reading, SourceError>,
     },
     /// Changes arrived.
     DiffLoaded {
@@ -1431,9 +1431,9 @@ fn on_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -> bool 
             if model.preview.agent == Some(agent) {
                 model.preview.loading = false;
                 match result {
-                    Ok(text) => {
+                    Ok(reading) => {
                         model.preview.screen =
-                            Some(PreviewScreen::parse(&text, model.theme.color_depth()));
+                            Some(PreviewScreen::of(&reading, model.theme.color_depth()));
                         model.preview.error = None;
                         model.preview.unsupported = false;
                     }

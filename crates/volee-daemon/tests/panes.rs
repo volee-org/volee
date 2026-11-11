@@ -236,6 +236,10 @@ async fn an_agent_in_a_pane_is_shown_and_brought_forward() {
     let client = Client::connect(&daemon.socket).await.unwrap();
     let preview = client.call::<Preview>(AgentParams { agent }).await.unwrap();
     assert_eq!(preview.screen, "\x1b[1;1H> screen of work:c434b5b6");
+    // What the multiplexer captured is the pane's screen itself; its rows
+    // are placed with cursor moves, so no size comes with it.
+    assert!(preview.exact);
+    assert_eq!(preview.size, None);
     let attach = client.call::<Attach>(AgentParams { agent }).await.unwrap();
     assert_eq!(attach.program, "", "nothing takes the terminal over");
     assert_eq!(

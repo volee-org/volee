@@ -16,6 +16,7 @@ use ratatui::style::{Color, Style};
 use unicode_width::UnicodeWidthChar;
 use volee_term::Screen;
 
+use crate::source::Reading;
 use crate::theme::{ColorDepth, StyleRole, Theme};
 
 /// The smallest emulated terminal.
@@ -225,17 +226,29 @@ pub(crate) struct PreviewScreen {
 }
 
 impl PreviewScreen {
-    /// Runs the replay of a session's output through the emulator
-    /// (libghostty-vt, as everywhere in volee: ADR 0020). A replay is not
-    /// the session's screen: its size is told by what it writes, and it
-    /// leaves blank what it never redrew.
-    pub(crate) fn parse(output: &str, depth: ColorDepth) -> Self {
-        let (height, width) = screen_size(output);
+    /// What a source read of an agent's screen, run through the emulator
+    /// (libghostty-vt, as everywhere in volee: ADR 0020). A screen itself,
+    /// such as the capture of a multiplexer's pane, is kept row for row, as
+    /// a screen volee holds is. A replay is not the session's screen: it
+    /// leaves blank what it never redrew, and gets the repair of
+    /// [`Self::read`] (ADR 0028).
+    ///
+    /// The emulator has the size of the terminal the output was drawn in
+    /// when the source says it: the snapshot of a volee host redraws its
+    /// screen in a terminal of that size only (a shorter one scrolls its
+    /// first rows away). Otherwise the size is what the output tells, which
+    /// is enough for a capture, whose rows are each placed with a cursor
+    /// move, and all there is for a replay.
+    pub(crate) fn of(reading: &Reading, depth: ColorDepth) -> Self {
+        let (height, width) = match reading.size {
+            Some((columns, rows)) if columns > 0 && rows > 0 => (rows, columns),
+            _ => screen_size(&reading.text),
+        };
         let Ok(mut screen) = Screen::new(width, height, 0) else {
             return Self::default();
         };
-        screen.feed(output.as_bytes());
-        Self::read(&mut screen, depth, true).unwrap_or_default()
+        screen.feed(reading.text.as_bytes());
+        Self::read(&mut screen, depth, !reading.exact).unwrap_or_default()
     }
 
     /// The cells of a screen volee holds exactly (an agent in a volee host,
@@ -424,13 +437,14 @@ impl PreviewScreen {
     }
 }
 
-/// The screen that raw terminal output leaves, as plain text: what was
+/// The screen that what a source read leaves, as plain text: what was
 /// visible last, one line per row, without colors, escape sequences or
 /// trailing blanks. `volee logs` prints it: the raw output replays every
 /// frame of the agent's interface, and carries sequences that should not
-/// reach a terminal unread.
-pub fn screen_text(output: &str) -> String {
-    let screen = PreviewScreen::parse(output, ColorDepth::TrueColor);
+/// reach a terminal unread. A screen itself is printed row for row; a
+/// replay of a session's output has its runs of blank rows counted as one.
+pub fn screen_text(reading: &Reading) -> String {
+    let screen = PreviewScreen::of(reading, ColorDepth::TrueColor);
     let mut lines: Vec<String> = screen
         .text()
         .into_iter()
@@ -459,13 +473,95 @@ mod tests {
 
     use super::*;
 
+    impl PreviewScreen {
+        /// The replay of a session's output.
+        fn parse(output: &str, depth: ColorDepth) -> Self {
+            Self::of(&Reading::replay(output), depth)
+        }
+    }
+
+    /// A screen of 120 by 60 as a volee host holds it, taller than the
+    /// smallest emulated terminal, and its snapshot read through a source
+    /// that says the size or not.
+    fn held_and_read(
+        says_size: bool,
+        draw: impl Fn(&mut Screen),
+    ) -> (PreviewScreen, PreviewScreen) {
+        let mut held = Screen::new(120, 60, 0).unwrap();
+        draw(&mut held);
+        let snapshot = String::from_utf8(held.snapshot().unwrap()).unwrap();
+        let reading = Reading::screen(snapshot, says_size.then_some((120, 60)));
+        let read = PreviewScreen::of(&reading, ColorDepth::TrueColor);
+        let own = PreviewScreen::from_emulator(&mut held, ColorDepth::TrueColor).unwrap();
+        (own, read)
+    }
+
+    /// Text on each of the 60 rows, colors, a gap, and the cursor above the
+    /// last row, as an agent's prompt sits above its status lines.
+    fn tall(screen: &mut Screen) {
+        for row in 1..=60 {
+            if !(20..=24).contains(&row) {
+                screen.feed(format!("\x1b[{row};1H\x1b[38;5;{row}mrow {row}\x1b[0m").as_bytes());
+            }
+        }
+        screen.feed(b"\x1b[40;7H");
+    }
+
+    #[test]
+    fn a_host_s_snapshot_read_with_its_size_is_the_screen_the_host_holds() {
+        let (own, read) = held_and_read(true, tall);
+        assert_eq!(own.rows.len(), 60);
+        assert_eq!(read.text(), own.text());
+        assert_eq!(read, own, "cells, styles and the last row worth showing");
+        // The gap is kept, as on the screen.
+        assert_eq!(
+            read.text()[18..25],
+            ["row 19", "", "", "", "", "", "row 25"]
+        );
+    }
+
+    #[test]
+    fn without_its_size_a_tall_snapshot_loses_its_first_rows() {
+        // What a daemon that does not say the size leaves the reader with:
+        // the size the output tells, 50 rows here, in which the snapshot
+        // scrolls. The last rows are still the screen's.
+        let (own, read) = held_and_read(false, tall);
+        assert_eq!(read.rows.len(), 50);
+        assert_eq!(read.text()[..], own.text()[10..]);
+    }
+
+    #[test]
+    fn a_reading_that_names_no_usable_size_is_sized_by_what_it_writes() {
+        let reading = Reading::screen("\x1b[3;1Hthird", Some((0, 0)));
+        let screen = PreviewScreen::of(&reading, ColorDepth::TrueColor);
+        assert_eq!(screen.text()[..3], ["", "", "third"]);
+    }
+
+    #[test]
+    fn a_capture_keeps_its_blank_rows_and_a_replay_counts_a_run_as_one() {
+        // Rows placed with cursor moves, as a multiplexer's capture comes.
+        let output = "\x1b[1;1Hfirst\x1b[5;1Hfifth\x1b[6;1Hsixth";
+        let capture = PreviewScreen::of(&Reading::screen(output, None), ColorDepth::TrueColor);
+        assert_eq!(capture.text()[..6], ["first", "", "", "", "fifth", "sixth"]);
+        assert_eq!(capture.anchor, 5);
+        let replay = PreviewScreen::of(&Reading::replay(output), ColorDepth::TrueColor);
+        assert_eq!(replay.text()[..4], ["first", "", "fifth", "sixth"]);
+        assert_eq!(replay.anchor, 3);
+        // `volee logs` prints each as it is read.
+        assert_eq!(
+            screen_text(&Reading::screen(output, None)),
+            "first\n\n\n\nfifth\nsixth"
+        );
+        assert_eq!(screen_text(&output.into()), "first\n\nfifth\nsixth");
+    }
+
     #[test]
     fn the_screen_text_is_the_last_frame_without_escapes() {
         // A spinner redrawn in place, a window title, then the prompt.
         let output = "\x1b[2J\x1b[H\x1b[38;5;208m\u{273b} Ideating\x1b[0m\x1b[H\x1b[38;5;208m\
                       \u{2736} Ideating\x1b[0m\x1b[H\x1b[K\u{273b} Done for 3s\r\n\x1b]0;title\x07> ";
-        assert_eq!(screen_text(output), "\u{273b} Done for 3s\n>");
-        assert_eq!(screen_text(""), "");
+        assert_eq!(screen_text(&output.into()), "\u{273b} Done for 3s\n>");
+        assert_eq!(screen_text(&"".into()), "");
     }
 
     #[test]
@@ -508,7 +604,7 @@ mod tests {
              \x1b[0m\x1b[3;1H> \x1b[0m\x1b[4;1H   \x1b[0m\x1b[3;300H"
         );
         assert_eq!(screen_size(&output), (ROWS, 300));
-        let text = screen_text(&output);
+        let text = screen_text(&output.as_str().into());
         assert_eq!(text, format!("{wide}\nClaude Code\n>"), "no row wraps");
     }
 
@@ -560,7 +656,10 @@ mod tests {
         let output = "\x1b[1;1Hfirst\x1b[3;1Hsecond\x1b[40;1Hlast\x1b[73;1H18%\x1b[69;3H";
         let screen = PreviewScreen::parse(output, ColorDepth::TrueColor);
         assert_eq!(screen.anchor, 6);
-        assert_eq!(screen_text(output), "first\n\nsecond\n\nlast\n\n18%");
+        assert_eq!(
+            screen_text(&output.into()),
+            "first\n\nsecond\n\nlast\n\n18%"
+        );
         let area = Rect::new(0, 0, 6, 3);
         let mut buf = Buffer::empty(area);
         screen.render(area, &mut buf, 0, Fit::Crop, &Theme::default());
@@ -637,7 +736,7 @@ mod tests {
              \x1b]8;;https://example.com/{title}\x1b\\link\x1b]8;;\x1b\\> "
         );
         assert_eq!(screen_size(&output), (ROWS, COLUMNS));
-        assert_eq!(screen_text(&output), "link>");
+        assert_eq!(screen_text(&output.as_str().into()), "link>");
     }
 
     #[test]
@@ -651,7 +750,7 @@ mod tests {
             write!(output, "\x1b[1B\rrow{row}").unwrap();
         }
         assert_eq!(screen_size(&output), (71, COLUMNS));
-        let text = screen_text(&output);
+        let text = screen_text(&output.as_str().into());
         assert!(text.contains("row47\nrow48"), "{text}");
         assert!(text.ends_with("row68\nrow69"), "{text}");
         // The cursor saved at column 250, then restored for 100 more columns.

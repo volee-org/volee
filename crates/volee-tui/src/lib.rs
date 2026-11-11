@@ -68,7 +68,7 @@ pub use demo::DemoSource;
 pub use keymap::{Keymap, KeymapError};
 pub use preview::screen_text;
 pub use source::{
-    Changes, Door, MissionRequest, NewMission, Outgoing, PaneFocus, Source, SourceError,
+    Changes, Door, MissionRequest, NewMission, Outgoing, PaneFocus, Reading, Source, SourceError,
     SpawnRequest, Subscription, Summary, TakeOver,
 };
 pub use theme::{ColorDepth, Theme, ThemeError};

@@ -109,7 +109,7 @@ pub(crate) async fn logs(input: &str) -> Result<()> {
     let (agent, name) = agent(&client, input).await?;
     let preview = client.call::<Preview>(AgentParams { agent }).await?;
     // The screen as it looks now, not the raw output that drew it.
-    let screen = volee_tui::screen_text(&preview.screen);
+    let screen = volee_tui::screen_text(&preview.into());
     if screen.is_empty() {
         println!("{name} has shown nothing yet.");
     } else {

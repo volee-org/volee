@@ -16,19 +16,31 @@ use volee_core::{AgentId, Event, MessageId, ThreadId};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     AgentParams, Attach, CreateMission, CreateMissionParams, Diff, DiffParams, Forget, MarkRead,
-    MarkReadParams, Preview, SendMessage, SendParams, Spawn, SpawnParams, Status, StatusParams,
-    Summarize, SummarizeParams,
+    MarkReadParams, Preview, PreviewText, SendMessage, SendParams, Spawn, SpawnParams, Status,
+    StatusParams, Summarize, SummarizeParams,
 };
 use volee_proto::replica::{self, Feed, FeedEnd, ReplicaError, Updates};
 use volee_proto::rpc;
 
 use crate::source::{
-    Changes, Door, MissionRequest, NewMission, Outgoing, PaneFocus, Source, SourceError,
+    Changes, Door, MissionRequest, NewMission, Outgoing, PaneFocus, Reading, Source, SourceError,
     SpawnRequest, Subscription, Summary, TakeOver,
 };
 
 /// What the interface says once the daemon is gone.
 const LOST: &str = "lost the connection to the volee daemon";
+
+/// What the daemon read of an agent's screen, and what it says of it: a
+/// screen itself or a replay, and the size of its terminal when it knows it.
+impl From<PreviewText> for Reading {
+    fn from(preview: PreviewText) -> Self {
+        Self {
+            text: preview.screen,
+            exact: preview.exact,
+            size: preview.size.map(|size| (size.cols, size.rows)),
+        }
+    }
+}
 
 /// How many events wait for the interface before the feed waits for it.
 const BACKLOG: usize = 1_024;
@@ -121,11 +133,11 @@ impl Source for DaemonSource {
         std::future::ready(self.follow())
     }
 
-    async fn preview(&self, agent: AgentId) -> Result<String, SourceError> {
+    async fn preview(&self, agent: AgentId) -> Result<Reading, SourceError> {
         self.client
             .call::<Preview>(AgentParams { agent })
             .await
-            .map(|preview| preview.screen)
+            .map(Reading::from)
             .map_err(|error| failure(error, "this volee daemon cannot show agent screens yet"))
     }
 
@@ -333,9 +345,41 @@ fn failure(error: ClientError, missing: &str) -> SourceError {
 
 #[cfg(test)]
 mod tests {
+    use volee_proto::methods::ScreenSize;
     use volee_proto::rpc::RpcError;
 
     use super::*;
+
+    #[test]
+    fn what_the_daemon_says_of_a_screen_reaches_the_interface() {
+        // The snapshot of a volee host, with the size of its terminal.
+        let held = PreviewText {
+            screen: "held".into(),
+            exact: true,
+            size: Some(ScreenSize {
+                cols: 120,
+                rows: 60,
+            }),
+        };
+        assert_eq!(
+            Reading::from(held),
+            Reading::screen("held", Some((120, 60)))
+        );
+        // The capture of a multiplexer's pane: a screen, no size.
+        let captured = PreviewText {
+            screen: "captured".into(),
+            exact: true,
+            size: None,
+        };
+        assert_eq!(Reading::from(captured), Reading::screen("captured", None));
+        // The replay of a session's output, and all an older daemon says.
+        let replayed = PreviewText {
+            screen: "replayed".into(),
+            exact: false,
+            size: None,
+        };
+        assert_eq!(Reading::from(replayed), Reading::replay("replayed"));
+    }
 
     #[test]
     fn missing_methods_and_refusals_are_unsupported() {
