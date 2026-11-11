@@ -68,8 +68,12 @@ def main():
 
     try:
         # What the trip rests on.
-        if not j.check("{} is installed".format(program), shutil.which(args.program),
-                       "this trip needs it on PATH"):
+        if args.stand_in:
+            if not j.check("a stand-in named {} is in place".format(program),
+                           shutil.which(args.program), "a copy of cat under that name"):
+                return
+        elif not j.check("{} is installed".format(program), shutil.which(args.program),
+                         "this trip needs it on PATH"):
             return
         if not j.check("the daemon starts", j.start_daemon()):
             return
