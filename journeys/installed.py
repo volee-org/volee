@@ -122,8 +122,8 @@ def session_in_a_terminal(j, name):
         return
     if not j.select(name):
         return
-    # The window has 80 columns: the end of the bottom line is cut.
-    waits = name + " runs in its own terminal"
+    # The window that says what to do in that terminal.
+    waits = "Open " + name
     j.keys("Enter", 0.5)
 
     def answered_enter():
@@ -131,7 +131,8 @@ def session_in_a_terminal(j, name):
         return screen if waits in screen or "Cannot open" in screen else None
     said = j.wait(answered_enter, 10, 0.3) or ""
     j.check("Enter says what to do in that terminal, and reports no failure",
-            waits in said and "Cannot open" not in said)
+            waits in said and "Press the left arrow key there" in said
+            and "Cannot open" not in said)
     j.show("the installed volee waits for the session to leave its terminal")
     terminal.press(Terminal.LEFT)
     moved = j.moved_to_background(known)

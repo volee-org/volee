@@ -91,12 +91,17 @@ the terminal is still listed once the five seconds have passed, they are
 two conversations and it becomes a row.
 
 **Enter waits.** Enter, `i`, `a` or a double click on a live Claude Code
-session in a terminal volee cannot reach no longer fails. The bottom line
-says which key to press, and where: `<name> runs in its own terminal: press
-← on its empty prompt there, and volee opens it here.` While it waits, the
-interface has the daemon list the sessions every two seconds. As soon as
-the agent runs somewhere volee opens, it is opened, in edit mode, without
-being asked again. The wait ends with Escape, with the session if it ends
+session in a terminal volee cannot reach no longer fails. A window says
+what to do, in three steps: go to the terminal where the session runs,
+named by its directory; press the left arrow key there, with nothing typed
+in its input box, where Claude Code itself shows `← for agents`; come
+back. A terminal too small for the window has it on the bottom line, in one
+sentence. The first release said it in that one sentence alone, `<name>
+runs in its own terminal: press ← on its empty prompt there, and volee
+opens it here.`, and the first person to read it did not know where to go
+nor that the arrow was a key. While it waits, the interface has the daemon
+list the sessions every two seconds. As soon as the agent runs somewhere
+volee opens, it is opened, in edit mode, without being asked again. The wait ends with Escape, with the session if it ends
 in its terminal, or when another agent is opened. From then on the session
 is a background session like any other: Enter opens it at once.
 

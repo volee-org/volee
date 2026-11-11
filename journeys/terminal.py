@@ -2,8 +2,8 @@
 
 The trip: someone types `claude` in a terminal tab, with no multiplexer around it.
 volee lists the session, in a terminal it cannot reach: only that terminal shows it.
-Enter on its row does not fail: the bottom line says which key to press in that
-terminal, and waits. The left arrow, pressed there on the empty prompt, has Claude
+Enter on its row does not fail: a window says where to go and which key to press
+there, and volee waits. The left arrow, pressed there on the empty prompt, has Claude
 Code move the conversation to the background, under another session id; volee then
 opens it by itself, on the same row, and what is typed reaches the same
 conversation. From then on Enter opens it at once, like any background session.
@@ -14,6 +14,7 @@ here asks one for anything, and nothing shows on the person's screen.
 
     python3 journeys/terminal.py --volee target/release/volee --sandbox ~/code/sandbox
 """
+import os
 import time
 
 from journey import Journey, Terminal, arguments
@@ -55,7 +56,9 @@ def main():
             return
         if not j.select(name):
             return
-        waits = name + " runs in its own terminal: press ← on its empty prompt there"
+        # The window that says what to do: its title, and its first two steps.
+        waits = "Open " + name
+        steps = ("Go to the terminal where it runs", "Press the left arrow key there")
         j.keys("Enter", 0.5)
 
         def answered_enter():
@@ -64,9 +67,15 @@ def main():
             screen = j.screen()
             return screen if waits in screen or "Cannot open" in screen else None
         said = j.wait(answered_enter, 10, 0.3) or ""
-        j.check("Enter says which key to press in the session's own terminal", waits in said)
+        j.check("Enter opens a window that says where to go and which key to press there",
+                waits in said and all(step in said for step in steps))
+        where = os.sep.join(os.path.realpath(j.sandbox).split(os.sep)[-2:])
+        j.check("with the directory the session runs in, to find its terminal", where in said,
+                where)
         j.show("volee waits for the session to leave its terminal")
         j.check("and says nothing of a failure", bool(said) and "Cannot open" not in said)
+        j.check("Claude Code shows that key under the session's prompt, as the window says",
+                "← for agents" in terminal.wrote(count=6000))
         j.keys("Escape", 1.0)
         j.check("Escape gives the wait up", j.wait(lambda: waits not in j.screen(), 5))
         still = j.claude_session(name) or {}
@@ -75,7 +84,7 @@ def main():
                 and still.get("kind") == "interactive",
                 "{} pid {}".format(still.get("sessionId"), still.get("pid")))
         j.keys("Enter", 1.5)
-        j.check("Enter waits again", j.sees(waits, timeout=10))
+        j.check("Enter waits again", j.sees(waits, *steps, timeout=10))
 
         # ---- the left arrow, pressed in the session's own terminal -----------------
         pressed = time.time()

@@ -6,6 +6,7 @@ pub(crate) mod card;
 pub(crate) mod composer;
 pub(crate) mod detail;
 pub(crate) mod diff;
+pub(crate) mod handover;
 pub(crate) mod help;
 pub(crate) mod hints;
 pub(crate) mod inbox;

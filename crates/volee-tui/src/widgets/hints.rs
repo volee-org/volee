@@ -309,16 +309,18 @@ fn render_prompt(model: &Model, prompt: Prompt, area: Rect, buf: &mut Buffer) {
 }
 
 /// What the bottom line says while volee waits for a session to leave the
-/// terminal that holds it (ADR 0034): the key to press, where, and the key
-/// that gives the wait up. The key to press comes early in the sentence: a
-/// narrow terminal cuts the end of the line.
+/// terminal that holds it (ADR 0034): where to go, the key to press there,
+/// named in words, and the key that gives the wait up. A window says it in
+/// full when the terminal has room for one ([`super::handover`]); what
+/// matters comes early in the sentence, since a narrow terminal cuts its
+/// end.
 fn await_move(model: &Model, agent: volee_core::AgentId) -> Vec<Span<'static>> {
     let theme = &model.theme;
     vec![
         Span::styled(
             format!(
-                "{} runs in its own terminal: press ← on its empty prompt there, and volee \
-                 opens it here.",
+                "To open {}, go to its terminal and press the left arrow key (←) on its \
+                 empty input: volee is waiting.",
                 model.name_of(agent)
             ),
             theme.style(StyleRole::Input),

@@ -279,12 +279,12 @@ fn jump_prompt() {
     assert_snapshot!(draw(&model));
 }
 
-/// The bottom line while volee waits for a session to leave its own
-/// terminal (ADR 0034), in a terminal `width` columns wide.
-fn waiting_for_a_move(width: u16) -> String {
+/// The screen while volee waits for a session to leave its own terminal
+/// (ADR 0034), in a terminal of the given size.
+fn waiting_for_a_move(width: u16, height: u16) -> String {
     use volee_core::event::{Event, EventKind};
     use volee_core::workspace::Location;
-    let (mut model, demo) = demo_model(width, 24, Theme::default());
+    let (mut model, demo) = demo_model(width, height, Theme::default());
     let agent = agent_id(start(), crate::demo::BROKEN_LINKS);
     let location = Location::Terminal;
     let moved = Event::new(start(), EventKind::LocationChanged { agent, location });
@@ -294,19 +294,35 @@ fn waiting_for_a_move(width: u16) -> String {
     model.select(agent, &mut effects);
     serve(&demo, &mut model, effects);
     keys(&demo, &mut model, &[KeyCode::Enter]);
-    let screen = draw(&model);
-    screen.lines().last().unwrap_or_default().to_owned()
+    draw(&model)
 }
 
 #[test]
 fn waiting_for_a_session_to_leave_its_terminal() {
-    assert_snapshot!(waiting_for_a_move(120));
+    // A window says where to go and which key to press there.
+    assert_snapshot!(waiting_for_a_move(120, 40));
 }
 
 #[test]
-fn waiting_for_a_session_to_leave_its_terminal_at_80_columns() {
-    // The key to press there comes before the cut.
-    assert_snapshot!(waiting_for_a_move(80));
+fn waiting_for_a_session_to_leave_its_terminal_at_80x24() {
+    // The window still fits; on the bottom line, the key to press comes
+    // before the cut.
+    assert_snapshot!(waiting_for_a_move(80, 24));
+}
+
+#[test]
+fn a_small_terminal_has_the_bottom_line_alone_while_volee_waits() {
+    let screen = waiting_for_a_move(64, 18);
+    assert!(
+        !screen.contains("Go to the terminal where it runs"),
+        "{screen}"
+    );
+    // Cut at 64 columns, it still says where to go and what to press.
+    let last = screen.lines().last().unwrap_or_default();
+    assert!(
+        last.contains("go to its terminal and press the left arr"),
+        "{last}"
+    );
 }
 
 /// The demo at its start on a view, in a terminal of the given size.
