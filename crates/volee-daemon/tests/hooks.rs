@@ -237,3 +237,48 @@ async fn a_payload_without_its_event_name_takes_it_from_the_command_line() {
     hook(&daemon, "user-prompt-submit", json!({ "prompt": "go" })).await;
     assert_eq!(agent(&daemon).await.state, AgentState::Working);
 }
+
+async fn events(daemon: &Running) -> Vec<Event> {
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    let batch = client
+        .call::<EventsSince>(SinceParams::default())
+        .await
+        .unwrap();
+    batch.events.into_iter().map(|e| e.event).collect()
+}
+
+async fn report(daemon: &Running, agent: AgentId, percent: u8) -> bool {
+    let client = Client::connect(&daemon.socket).await.unwrap();
+    client
+        .call::<volee_proto::methods::ReportContext>(volee_proto::methods::ContextParams {
+            agent,
+            percent,
+        })
+        .await
+        .is_ok()
+}
+
+#[tokio::test]
+async fn the_status_line_reports_the_context_once_per_change() {
+    let daemon = start();
+    assert_eq!(agent(&daemon).await.context, None);
+    let count = |events: &[Event]| {
+        events
+            .iter()
+            .filter(|event| matches!(event.kind, EventKind::ContextUsed { .. }))
+            .count()
+    };
+    assert!(report(&daemon, agent_id(), 14).await);
+    assert_eq!(agent(&daemon).await.context, Some(14));
+    // The status line runs at every refresh: the same share is no event.
+    assert!(report(&daemon, agent_id(), 14).await);
+    assert_eq!(count(&events(&daemon).await), 1);
+    assert!(report(&daemon, agent_id(), 15).await);
+    assert_eq!(agent(&daemon).await.context, Some(15));
+    assert_eq!(count(&events(&daemon).await), 2);
+    // Never past the whole window, and never for an agent volee does not know.
+    assert!(report(&daemon, agent_id(), 200).await);
+    assert_eq!(agent(&daemon).await.context, Some(100));
+    let stranger = AgentId::from_ulid(Ulid::from_parts(9, 9));
+    assert!(!report(&daemon, stranger, 10).await);
+}

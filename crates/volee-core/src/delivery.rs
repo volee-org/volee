@@ -594,6 +594,7 @@ mod tests {
             last_activity: None,
             worked: true,
             model: None,
+            context: None,
             delivery: Delivery {
                 merged_into_base: true,
                 checked_at: Some(Timestamp::from_millis(2_000)),

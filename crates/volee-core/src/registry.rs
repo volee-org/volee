@@ -148,6 +148,7 @@ impl Registry {
                         last_activity: None,
                         worked: false,
                         model: None,
+                        context: None,
                         delivery: crate::delivery::Delivery::default(),
                         hold: None,
                         created_at: at,
@@ -217,6 +218,11 @@ impl Registry {
             EventKind::ModelChanged { agent, model } => {
                 let record = self.agent_mut(*agent)?;
                 record.model = Some(model.clone());
+                record.updated_at = at;
+            }
+            EventKind::ContextUsed { agent, percent } => {
+                let record = self.agent_mut(*agent)?;
+                record.context = Some((*percent).min(100));
                 record.updated_at = at;
             }
             EventKind::DeliveryUpdated { agent, delivery } => {

@@ -26,7 +26,7 @@ expression: draw(&model)
 "╭ Detail ──────────────────────╮│      │ billing › feat/invo… │  ┃ mcp-server › feat/i… ┃  │ dashboard › feat/in… │  │ gateway › audit/p95… │  │ search › audit/p95-… │      ││ 7 min you ✉ broken-li… │"
 "│ invoice-tools · worker       ││      │ sonnet               │  ┃ sonnet               ┃  │ sonnet               │  │ sonnet · ◆ 2         │  │ haiku                │      ││ 7 min volee ✉ you      │"
 "│ ! needs you · for 1 min      ││      │ ▃▃▁▁▃▃▁▃▁▃▃▃▁▁▁▁▁▁▁▁ │  ┃ ▁▁▃▁▁▁▃▁▁▁▃▁▁▁▁▃▁▁▁▁ ┃  │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │  │ ▁▃▁▁▁▃▁▃▁▁▃▁▁▁▃▃▁▁▃▁ │  │ ▃▁▁▃▁▁▁▃▁▃▁▃▁▁▁▃▁▃▁▁ │      ││ 6 min invoice-page ✓ … │"
-"│ Should create_invoice accep… ││      │ ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ? │  ┃ ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ? ┃  │ ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ? │  │ ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ? │  │ ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ? │      ││ 5 min invoice-page ✉ … │"
+"│ Should create_invoice accep… ││      │ ctx ▰▰▰▰▰▰▰▰▰▱▱ 73%  │  ┃ ctx ▰▰▰▰▰▰▰▱▱▱▱ 63%  ┃  │ ctx ▰▰▰▰▰▰▱▱▱▱▱ 52%  │  │ ctx ▰▰▰▱▱▱▱▱▱▱▱ 26%  │  │ ctx ▰▰▰▱▱▱▱▱▱▱▱ 24%  │      ││ 5 min invoice-page ✉ … │"
 "│ mission  Invoicing (change)  ││      │ ! Bash: bun run db:… │  ┃ ! Should create_inv… ┃  │ PR #42 is ready for… │  │ ⠹ Read src/middlewa… │  │ ⠹ Bash cargo bench … │      ││ 5 min volee ✉ invoici… │"
 "│ verdict  needs you           ││      │ +214 −12   2 commits │  ┃ +88 −4      1 commit ┃  │ +163 −43    PR #42 ✓ │  │ no changes           │  │ no changes           │      ││ 2 min invoice-schema … │"
 "│ repo     mcp-server › feat/… ││      │  NEEDS YOU  2 min    │  ┃  NEEDS YOU  1 min    ┃  │  DONE  6 min         │  │  WORKING  11 min     │  │  WORKING  11 min     │      ││ 1 min volee ✉ invoici… │"

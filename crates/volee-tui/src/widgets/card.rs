@@ -641,14 +641,30 @@ pub(crate) fn short_model(model: &str) -> String {
 
 /// `ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱ ?`: how much of its context the agent used, when its
 /// harness says so; a question mark otherwise.
-fn context_spans(_agent: &Agent, inner: u16, context: &CardContext<'_>) -> Vec<Span<'static>> {
+fn context_spans(agent: &Agent, inner: u16, context: &CardContext<'_>) -> Vec<Span<'static>> {
     let theme = &context.model.theme;
     let dim = theme.style(StyleRole::TextDim);
-    let bar = usize::from(inner.saturating_sub(6)).clamp(4, 30);
+    let empty = theme.style(StyleRole::Edge);
+    let bar = usize::from(inner.saturating_sub(9)).clamp(4, 30);
+    let Some(percent) = agent.context else {
+        return vec![
+            Span::styled("ctx ", dim),
+            Span::styled("▱".repeat(bar), empty),
+            Span::styled(" ?", dim),
+        ];
+    };
+    let filled = (usize::from(percent) * bar).div_ceil(100).min(bar);
+    // Over four fifths, the conversation is about to be compacted.
+    let color = if percent > 80 {
+        theme.style(StyleRole::ChecksPending)
+    } else {
+        context.accent(agent)
+    };
     vec![
         Span::styled("ctx ", dim),
-        Span::styled("▱".repeat(bar), theme.style(StyleRole::Edge)),
-        Span::styled(" ?", dim),
+        Span::styled("▰".repeat(filled), color),
+        Span::styled("▱".repeat(bar - filled), empty),
+        Span::styled(format!(" {percent}%"), dim),
     ]
 }
 

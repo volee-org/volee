@@ -111,6 +111,7 @@ for one kind of fact:
 | --- | --- | --- |
 | volee hosts | The screen of every agent volee runs, whether its program still runs and how it ended; the state of hosted agents whose harness has no hooks (OpenCode) | The daemon knows each agent's host from its launch, reads the host's record, and takes screen snapshots through its socket ([Hosts](hosts.md)). |
 | Hooks of agents volee launched | Fine-grained state, tools in use, last message, files touched | Per-agent `--settings` file whose hooks call `volee hook`. User settings are never edited. |
+| The status line of agents volee launched | The share of its context window the agent's conversation uses | The same settings file's status line runs `volee status-line`, which reports it, then runs the person's own status line ([ADR 0035](../adr/0035-the-context-an-agent-uses-comes-from-its-status-line.md)). |
 | `claude agents --json --all` | Every Claude Code session on the machine, including the ones volee did not launch | Polled and reconciled. Documented by Claude Code as the supported way to read session state. |
 | The process table | OpenCode agents started elsewhere, with their directory | `ps`, then `lsof` for the directories, once per discovery round ([ADR 0023](../adr/0023-every-agent-on-the-machine.md)). |
 | tuios and tmux (optional) | Which pane shows a session started by hand in it, and that pane's screen | Matched by the session id the multiplexer recorded or by process ancestry, never by title ([ADR 0015](../adr/0015-tuios-location-adapter.md)). |

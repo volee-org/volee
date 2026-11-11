@@ -698,6 +698,12 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
                 model: member.model.to_owned(),
             },
         );
+        // volee reads the context of the agents it launched from their
+        // status line (ADR 0035); a session started elsewhere keeps it.
+        if !outside {
+            let percent = u8::try_from(5 + (jitter(index as u64 + 7, 3) % 70)).unwrap_or(20);
+            script.at(-member.born + 2, EventKind::ContextUsed { agent, percent });
+        }
         script.state(-member.born + 1, index, AgentState::Working, None);
 
         // A rhythm of activities until the agent went quiet.

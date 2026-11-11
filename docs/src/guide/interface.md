@@ -240,8 +240,12 @@ calls for you takes the color of its state.
 - A **worker's** card, or a session's, shows where it works
   (`repo › branch`), its model and its subagents at work (`◆ 2`), its
   activity over the last five minutes (one column per fifteen seconds,
-  dimmed once it stopped), the context its conversation uses (`ctx ?` when
-  its harness does not say), what it does or waits for, the lines it
+  dimmed once it stopped), the share of its context window its
+  conversation uses (`ctx ▰▰▰▱▱▱ 42%`, in the color of what waits past
+  80 %, `ctx ?` for a session volee did not launch: volee reads it from the
+  status line of the agents it launches, which then shows yours,
+  [ADR 0035](../adr/0035-the-context-an-agent-uses-comes-from-its-status-line.md)),
+  what it does or waits for, the lines it
   changed (`+214 −12`) and how its work is delivered (`2 commits`,
   `PR #42 ✓`), and its state as a badge with how long it has lasted.
 - A **coordinator's** card shows its mission, what it waits for, its
