@@ -71,10 +71,12 @@ const WIDE_MIN: (u16, u16) = (100, 28);
 /// The fewest columns that get the column of what waits for you.
 const RIGHT_COLUMN_MIN: u16 = 160;
 
-/// The width of the agents' column and of the right column, when both show:
-/// at 190 columns, the tree keeps 130, the room of five workers' cards side
-/// by side.
-const SIDE_COLUMN: (u16, u16) = (32, 26);
+/// The width of the agents' column and of the right column, when both show.
+/// The agents' column keeps the width it has without the right column: a
+/// name of 26 letters under its parent, such as the coordinator of a
+/// mission, shows whole there. At 190 columns, the tree keeps 130, the room
+/// of five workers' cards side by side.
+const SIDE_COLUMN: (u16, u16) = (36, 24);
 
 impl ScreenLayout {
     /// The layout of a terminal of the given size. On small screens, the
@@ -250,10 +252,14 @@ mod tests {
     fn the_right_column_leaves_the_tree_the_room_of_five_cards() {
         let layout = ScreenLayout::compute(Rect::new(0, 0, 190, 50), true);
         let view = layout.view.unwrap();
-        // 130 columns inside the border: five cards of 24 and their gaps.
-        assert_eq!(view.width, 132);
-        assert_eq!(layout.for_you, Some(Rect::new(164, 1, 26, 16)));
-        assert_eq!(layout.journal, Some(Rect::new(164, 17, 26, 17)));
+        // 128 columns inside the border: five cards of 24 and their gaps.
+        assert_eq!(view.width, 130);
+        assert_eq!(
+            layout.rail.width, 36,
+            "the width of the list without the right column"
+        );
+        assert_eq!(layout.for_you, Some(Rect::new(166, 1, 24, 16)));
+        assert_eq!(layout.journal, Some(Rect::new(166, 17, 24, 17)));
         assert_eq!(layout.preview, Some(Rect::new(0, 34, 190, 14)));
         assert_eq!(view.height, 33);
     }
