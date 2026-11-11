@@ -119,5 +119,10 @@ expression: settings
     "allow": [
       "mcp__volee"
     ]
+  },
+  "statusLine": {
+    "command": "/opt/volee/bin/volee status-line --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3",
+    "padding": 0,
+    "type": "command"
   }
 }

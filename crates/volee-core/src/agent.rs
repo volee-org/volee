@@ -97,6 +97,10 @@ pub struct Agent {
     pub worked: bool,
     /// The model in use, when known.
     pub model: Option<String>,
+    /// How much of its context window its conversation uses, in percent,
+    /// when its harness says so (ADR 0035).
+    #[serde(default)]
+    pub context: Option<u8>,
     /// What can be proven about its work.
     pub delivery: Delivery,
     /// Why volee will not resume it on its own, if it will not.

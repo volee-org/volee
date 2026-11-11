@@ -35,6 +35,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{"protocol":1}}'
 | `messages.read` | `message`, `by` | none |
 | `hooks.ingest` | `agent`, `event`, `payload` | `stdout`: what the hook prints, if anything |
 | `hooks.wait` | `agent`, `timeout_ms` | `text`: messages that wake the agent, or `null` |
+| `agents.context` | `agent`, `percent` | nothing: the share of its context window the agent's conversation uses, from its status line ([ADR 0035](../adr/0035-the-context-an-agent-uses-comes-from-its-status-line.md)); an event `context-used` when it changed |
 | `agents.spawn` | `repo`, `branch`, `task`, `role`, optional `base`, `parent`, `mission`, `model`, `name`, `harness` (`claude-code` by default, or `opencode`) | `agent`, `worktree` |
 | `agents.lead` | `cwd` (an absolute path), optional `task`, `name`, `model` | `agent`, `name`: a lead, in a volee host, without a worktree |
 | `agents.run` | `host`: the id of a volee host the client started, in the daemon's hosts directory; optional `name` | `agent`, `name`; the program of the host is now an agent |

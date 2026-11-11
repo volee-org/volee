@@ -902,6 +902,24 @@ method!(
     HookReply
 );
 
+/// Parameters of [`ReportContext`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextParams {
+    /// The agent whose status line reported it.
+    pub agent: AgentId,
+    /// The share of its context window its conversation uses, in percent.
+    pub percent: u8,
+}
+
+method!(
+    /// How much of its context an agent volee launched uses, from its status
+    /// line (ADR 0035).
+    ReportContext,
+    "agents.context",
+    ContextParams,
+    Empty
+);
+
 /// Parameters of [`HookWait`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitParams {
@@ -964,6 +982,7 @@ mod tests {
             MarkRead::NAME,
             HookIngest::NAME,
             HookWait::NAME,
+            ReportContext::NAME,
             Summarize::NAME,
             CreateMission::NAME,
             AbortMission::NAME,

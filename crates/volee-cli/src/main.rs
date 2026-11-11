@@ -201,6 +201,14 @@ enum Command {
         #[arg(long, default_value_t = 3_600)]
         timeout: u64,
     },
+    /// The status line of agents volee launched: reports the context the
+    /// agent uses, then prints the person's own status line. Not for people.
+    #[command(hide = true)]
+    StatusLine {
+        /// The agent the status line belongs to.
+        #[arg(long)]
+        agent: AgentId,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -456,6 +464,8 @@ fn main() -> ExitCode {
             agent,
             timeout,
         }) => cmd::hook::run(&event, agent, timeout),
+        // As often as a hook: no async runtime either.
+        Some(Command::StatusLine { agent }) => cmd::status_line::run(agent),
         Some(Command::Config(command)) => report(match command {
             ConfigCommand::Path => cmd::config::path(),
             ConfigCommand::Init => cmd::config::init(),
@@ -565,7 +575,10 @@ fn async_main(command: Command) -> ExitCode {
                 result => result.map_err(Into::into),
             },
             Command::Demo { theme } => cmd::demo::run(theme.as_deref()).await,
-            Command::Hook { .. } | Command::Config(_) | Command::Host(_) => {
+            Command::Hook { .. }
+            | Command::StatusLine { .. }
+            | Command::Config(_)
+            | Command::Host(_) => {
                 unreachable!("these commands run without the async runtime")
             }
         }

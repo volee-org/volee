@@ -89,6 +89,13 @@ pub fn agent_settings(
     Ok(json!({
         "hooks": hooks,
         "permissions": { "allow": [VOLEE_TOOLS_RULE] },
+        // The status line tells volee how much of its context the agent
+        // uses, then shows the person's own status line (ADR 0035).
+        "statusLine": {
+            "type": "command",
+            "command": format!("{bin} status-line --agent {agent}"),
+            "padding": 0,
+        },
     }))
 }
 
@@ -197,6 +204,31 @@ mod tests {
                     .ends_with(" hook wait --agent ag_01jc5x8m3kq7v2c4b9e0f1g2h3 --timeout 60")
             );
         }
+    }
+
+    #[test]
+    fn the_status_line_reports_the_context_then_shows_the_persons_own() {
+        let settings =
+            super::agent_settings(Path::new("/bin/volee"), agent(), Duration::from_secs(60))
+                .unwrap();
+        assert_eq!(
+            settings["statusLine"],
+            json!({
+                "type": "command",
+                "command": format!("/bin/volee status-line --agent {}", agent()),
+                "padding": 0,
+            })
+        );
+        let quoted = super::agent_settings(
+            Path::new("/Users/me/My Tools/volee"),
+            agent(),
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        assert_eq!(
+            quoted["statusLine"]["command"],
+            format!("'/Users/me/My Tools/volee' status-line --agent {}", agent())
+        );
     }
 
     #[test]

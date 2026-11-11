@@ -58,6 +58,7 @@ group.
 | `state-changed` | New state and detail. `state_since` moves only when the state really changes. |
 | `activity-recorded` | The last thing the agent did, in one line. |
 | `workspace-updated`, `location-changed`, `model-changed` | Better knowledge of where and how the agent runs. |
+| `context-used` | The share of its context window the agent's conversation uses, from its status line, when it changed (ADR 0035). |
 | `delivery-updated` | New delivery evidence from git or the forge. |
 | `agent-forgotten` | The agent is removed; its sessions are ignored from then on. Its name stays known (`Registry::name_of`), so that the threads it wrote in still name it. |
 | `agent-renamed` | The harness renamed the session of an agent volee only watches: the agent takes that name (ADR 0027). |
