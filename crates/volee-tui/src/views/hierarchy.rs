@@ -27,6 +27,9 @@ use crate::widgets::{self, canvas::Canvas};
 /// How much each card shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) enum Zoom {
+    /// Large cards, in the tree only: everything a card shows, more of it,
+    /// what the agent did before and the messages it got.
+    Large,
     /// Full cards: state, place, activity, delivery, sparkline.
     #[default]
     Cards,
@@ -37,29 +40,43 @@ pub(crate) enum Zoom {
 }
 
 impl Zoom {
-    /// From the most to the least detailed.
+    /// From the most to the least detailed, in the views other than the
+    /// tree.
     pub(crate) const ALL: [Self; 3] = [Self::Cards, Self::Compact, Self::Dots];
+
+    /// From the most to the least detailed, in the tree.
+    pub(crate) const TREE: [Self; 4] = [Self::Large, Self::Cards, Self::Compact, Self::Dots];
 
     /// The name shown in the view's title.
     pub(crate) const fn label(self) -> &'static str {
         match self {
+            Self::Large => "large",
             Self::Cards => "cards",
             Self::Compact => "compact",
             Self::Dots => "dots",
         }
     }
 
-    /// One level more detailed, if any.
+    /// One level more detailed, if any, in the views other than the tree.
     pub(crate) const fn more_detail(self) -> Self {
         match self {
-            Self::Cards | Self::Compact => Self::Cards,
+            Self::Large | Self::Cards | Self::Compact => Self::Cards,
             Self::Dots => Self::Compact,
+        }
+    }
+
+    /// One level more detailed, if any, in the tree.
+    pub(crate) const fn more_detail_in_tree(self) -> Self {
+        match self {
+            Self::Large | Self::Cards => Self::Large,
+            other => other.more_detail(),
         }
     }
 
     /// One level less detailed, if any.
     pub(crate) const fn less_detail(self) -> Self {
         match self {
+            Self::Large => Self::Cards,
             Self::Cards => Self::Compact,
             Self::Compact | Self::Dots => Self::Dots,
         }
@@ -68,7 +85,7 @@ impl Zoom {
     /// Room between cards at this level.
     pub(crate) const fn spacing(self) -> Spacing {
         match self {
-            Self::Cards => Spacing {
+            Self::Large | Self::Cards => Spacing {
                 gap: 2,
                 level: 2,
                 indent: 3,
@@ -372,7 +389,7 @@ impl Scene {
     ) -> Self {
         let tree = AgentTree::new(registry, show);
         let candidates: &[Zoom] = match &choice {
-            ZoomChoice::Auto => &Zoom::ALL,
+            ZoomChoice::Auto => &Zoom::TREE,
             ZoomChoice::Fixed(zoom) => std::slice::from_ref(zoom),
         };
         let mut chosen = None;
@@ -602,7 +619,7 @@ pub(crate) fn outline(registry: &Registry, focus: Option<AgentId>) -> Vec<(Agent
 }
 
 /// Box-drawing glyph for a cell joined up, down, left and right.
-fn junction(joins: u8) -> &'static str {
+pub(crate) fn junction(joins: u8) -> &'static str {
     const CROSS: u8 = UP | DOWN | LEFT | RIGHT;
     const TEE_LEFT: u8 = UP | DOWN | LEFT;
     const TEE_RIGHT: u8 = UP | DOWN | RIGHT;
@@ -628,15 +645,10 @@ fn junction(joins: u8) -> &'static str {
 }
 
 /// Directions a box-drawing cell joins, as bits for [`junction`].
-const UP: u8 = 0b1000;
-const DOWN: u8 = 0b0100;
-const LEFT: u8 = 0b0010;
-const RIGHT: u8 = 0b0001;
-
-/// The bit of a direction, when `joined`.
-const fn join(joined: bool, direction: u8) -> u8 {
-    if joined { direction } else { 0 }
-}
+pub(crate) const UP: u8 = 0b1000;
+pub(crate) const DOWN: u8 = 0b0100;
+pub(crate) const LEFT: u8 = 0b0010;
+pub(crate) const RIGHT: u8 = 0b0001;
 
 /// Draws the hierarchy in `area`, the inside of the view panel.
 pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
@@ -659,18 +671,12 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
             fg: theme.style(StyleRole::CardSelected).fg,
             ..Style::default()
         },
-        lineage: lineage(model),
+        lineage: super::links::lineage(model),
     };
     let mut canvas = Canvas::new(buf, area, model.scene_offset);
-    for node in &scene.nodes {
-        if node.stacked {
-            draw_spine(&mut canvas, scene, node, &edges);
-        } else {
-            draw_bus(&mut canvas, scene, node, &edges);
-        }
-    }
-
     let context = CardContext::new(model);
+    let links = super::links::links(scene);
+    super::links::draw(&mut canvas, &links, &context);
     for node in &scene.nodes {
         card::draw(&mut canvas, scene.zoom, node, &context);
     }
@@ -740,19 +746,6 @@ impl Edges {
     }
 }
 
-/// The selected agent and its ancestors.
-fn lineage(model: &Model) -> BTreeSet<AgentId> {
-    let mut lineage = BTreeSet::new();
-    let mut current = model.selected;
-    while let Some(id) = current {
-        if !lineage.insert(id) {
-            break;
-        }
-        current = model.registry.agent(id).and_then(|agent| agent.parent);
-    }
-    lineage
-}
-
 #[derive(Clone, Copy)]
 enum Joint {
     /// An edge leaves a bottom border.
@@ -774,86 +767,6 @@ fn joint(canvas: &mut Canvas<'_>, x: i32, y: i32, joint: Joint, style: Style) {
         _ => return,
     };
     canvas.put(x, y, glyph, style);
-}
-
-/// Edges from a parent to children side by side: down to a bus, along the
-/// bus, and down into each child.
-fn draw_bus(canvas: &mut Canvas<'_>, scene: &Scene, node: &SceneNode, edges: &Edges) {
-    let children: Vec<&SceneNode> = node.children.iter().map(|c| &scene.nodes[*c]).collect();
-    let Some(first) = children.first() else {
-        return;
-    };
-    let top = i32::from(node.place.bottom());
-    let bottom = i32::from(first.place.y) - 1;
-    let bus = if bottom > top { bottom - 1 } else { top };
-    let parent_x = i32::from(node.place.center());
-    let anchors: Vec<(i32, bool)> = children
-        .iter()
-        .map(|child| (i32::from(child.place.center()), edges.is_hot(child.agent)))
-        .collect();
-    let any_hot = anchors.iter().any(|(_, hot)| *hot);
-    for row in top..bus {
-        canvas.put(parent_x, row, "│", edges.style(any_hot));
-    }
-    let left = anchors.iter().map(|(x, _)| *x).fold(parent_x, i32::min);
-    let right = anchors.iter().map(|(x, _)| *x).fold(parent_x, i32::max);
-    for x in left..=right {
-        let down = anchors.iter().any(|(ax, _)| *ax == x);
-        let glyph = junction(
-            join(x == parent_x, UP)
-                | join(down, DOWN)
-                | join(x > left, LEFT)
-                | join(x < right, RIGHT),
-        );
-        // Between the parent and a highlighted child, the bus is highlighted.
-        let hot = anchors
-            .iter()
-            .any(|(ax, hot)| *hot && x >= parent_x.min(*ax) && x <= parent_x.max(*ax));
-        canvas.put(x, bus, glyph, edges.style(hot));
-    }
-    for (x, hot) in &anchors {
-        for row in bus + 1..=bottom {
-            canvas.put(*x, row, "│", edges.style(*hot));
-        }
-    }
-}
-
-/// Edges from a parent to stacked children: a spine under its left edge,
-/// and a branch into each child.
-fn draw_spine(canvas: &mut Canvas<'_>, scene: &Scene, node: &SceneNode, edges: &Edges) {
-    let children: Vec<&SceneNode> = node.children.iter().map(|c| &scene.nodes[*c]).collect();
-    let dots = scene.zoom == Zoom::Dots;
-    // Cards connect on their first inner row, dots on their only row.
-    let connection = |child: &SceneNode| i32::from(child.place.y) + i32::from(!dots);
-    let Some(last) = children.last() else {
-        return;
-    };
-    // Under a card's left border, or under a dot's glyph.
-    let spine = i32::from(node.place.x) + i32::from(!dots);
-    let top = i32::from(node.place.bottom());
-    let end = connection(last);
-    for row in top..=end {
-        // The spine is highlighted down to a highlighted child.
-        let hot = children
-            .iter()
-            .any(|child| edges.is_hot(child.agent) && connection(child) >= row);
-        let joins = children.iter().any(|child| connection(child) == row);
-        let glyph = match (joins, row == end) {
-            (_, true) => "└",
-            (true, false) => "├",
-            (false, false) => "│",
-        };
-        canvas.put(spine, row, glyph, edges.style(hot));
-    }
-    for child in &children {
-        let row = connection(child);
-        let style = edges.style(edges.is_hot(child.agent));
-        // Dots keep a blank cell before their label.
-        let stop = i32::from(child.place.x) - i32::from(dots);
-        for x in spine + 1..stop {
-            canvas.put(x, row, "─", style);
-        }
-    }
 }
 
 #[cfg(test)]

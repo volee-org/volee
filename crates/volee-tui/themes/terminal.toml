@@ -10,6 +10,8 @@ border = "dark-gray"
 "border.focused" = "blue"
 selection = { modifiers = ["reversed"] }
 "card.selected" = { fg = "blue", modifiers = ["bold"] }
+"card.flash" = { fg = "white", modifiers = ["bold"] }
+"card.mail" = { fg = "cyan", modifiers = ["bold"] }
 topbar = "reset"
 "topbar.brand" = { fg = "black", bg = "magenta", modifiers = ["bold"] }
 tab = "dark-gray"

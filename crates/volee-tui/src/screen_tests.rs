@@ -245,6 +245,15 @@ fn zoom_cards_with_scrolling() {
 }
 
 #[test]
+fn zoom_large() {
+    // At 200x50 the tree fits as cards: `+` asks for large ones, and the
+    // tree scrolls.
+    let (mut model, demo) = demo_model(200, 50, Theme::default());
+    keys(&demo, &mut model, &[KeyCode::Tab, KeyCode::Char('+')]);
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
 fn zoom_compact() {
     let (mut model, demo) = demo_model(200, 50, Theme::default());
     keys(&demo, &mut model, &[KeyCode::Tab, KeyCode::Char('_')]);

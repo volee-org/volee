@@ -821,6 +821,9 @@ impl Model {
         {
             return true;
         }
+        if self.tree_moves() {
+            return true;
+        }
         self.rail.iter().any(|entry| {
             self.registry.agent(entry.agent).is_some_and(|agent| {
                 matches!(
@@ -828,6 +831,33 @@ impl Model {
                     volee_core::AgentState::Working | volee_core::AgentState::Launching
                 )
             })
+        })
+    }
+
+    /// Whether something moves in the tree on screen: a message on its way,
+    /// a card flashing, a border pulsing because its agent waits for the
+    /// person or just failed.
+    pub(crate) fn tree_moves(&self) -> bool {
+        if self.tab != Tab::Hierarchy
+            || self.layout.view.is_none()
+            || self.motion == Motion::Reduced
+        {
+            return false;
+        }
+        if self.pulses.is_lasting(self.now) {
+            return true;
+        }
+        self.scene.nodes.iter().any(|node| {
+            self.registry
+                .agent(node.agent)
+                .is_some_and(|agent| match agent.state {
+                    volee_core::AgentState::NeedsInput { .. } => true,
+                    volee_core::AgentState::Failed => {
+                        self.now.as_millis() - agent.state_since.as_millis()
+                            < crate::widgets::card::FAILED_PULSE_MILLIS
+                    }
+                    _ => false,
+                })
         })
     }
 
@@ -1010,8 +1040,12 @@ impl Model {
                         self.follow(*agent);
                     }
                 }
-                EventKind::ActivityRecorded { agent, .. } => {
+                EventKind::ActivityRecorded { agent, summary } => {
                     self.activity.record(*agent, event.at);
+                    self.activity.record_summary(*agent, summary);
+                }
+                EventKind::StateChanged { agent, state, .. } => {
+                    self.activity.record_state(*agent, event.at, state);
                 }
                 kind => {
                     // Forgotten by the person, or gone with its session.
@@ -1729,12 +1763,14 @@ fn on_window_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -
 fn on_tick(model: &mut Model, now: Timestamp, effects: &mut Vec<Effect>) -> bool {
     let frame_before = model.spinner();
     let second_before = model.now.as_millis().div_euclid(1_000);
-    let pulses_before = model.tab == Tab::Network && model.pulses.is_moving(model.now);
+    let pulses_before =
+        (model.tab == Tab::Network && model.pulses.is_moving(model.now)) || model.tree_moves();
     model.now = now;
     model.pulses.prune(now);
     let mut changed = model.spinner() != frame_before
         || now.as_millis().div_euclid(1_000) != second_before
-        || pulses_before;
+        || pulses_before
+        || model.tree_moves();
     if model
         .notice
         .as_ref()
@@ -2119,22 +2155,23 @@ fn zoom(model: &mut Model, context: Context, action: Action) {
     } else {
         context
     };
-    let step = |choice: &mut ZoomChoice, current: hierarchy::Zoom| {
+    let step = |choice: &mut ZoomChoice, current: hierarchy::Zoom, tree: bool| {
         *choice = match action {
+            Action::ZoomIn if tree => ZoomChoice::Fixed(current.more_detail_in_tree()),
             Action::ZoomIn => ZoomChoice::Fixed(current.more_detail()),
             Action::ZoomOut => ZoomChoice::Fixed(current.less_detail()),
             _ => ZoomChoice::Auto,
         };
     };
     match context {
-        Context::Network => step(&mut model.network.zoom, model.network.scene.zoom),
-        Context::Repos => step(&mut model.repos.zoom, model.repos.density),
+        Context::Network => step(&mut model.network.zoom, model.network.scene.zoom, false),
+        Context::Repos => step(&mut model.repos.zoom, model.repos.density, false),
         Context::Timeline => match action {
             Action::ZoomIn => model.timeline.zoom(true),
             Action::ZoomOut => model.timeline.zoom(false),
             _ => model.timeline.reset(),
         },
-        _ => step(&mut model.zoom, model.scene.zoom),
+        _ => step(&mut model.zoom, model.scene.zoom, true),
     }
 }
 

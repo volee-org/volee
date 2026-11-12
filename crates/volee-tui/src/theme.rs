@@ -81,6 +81,10 @@ style_roles! {
     Selection => "selection",
     /// The border of the selected card in the hierarchy.
     CardSelected => "card.selected",
+    /// The border of a card the person just wrote to, for an instant.
+    CardFlash => "card.flash",
+    /// The count of messages waiting for an agent, on its card.
+    CardMail => "card.mail",
     /// The top bar.
     Topbar => "topbar",
     /// The volee badge at the left of the top bar.
@@ -371,6 +375,9 @@ pub struct Theme {
     name: String,
     depth: ColorDepth,
     styles: Vec<Style>,
+    /// The theme's own background, kept when the terminal's shows instead:
+    /// what fades and pulses blend toward.
+    base: Option<Color>,
 }
 
 impl Default for Theme {
@@ -455,6 +462,7 @@ impl Theme {
             style.fg = style.fg.map(|color| depth.adapt(color));
             style.bg = style.bg.map(|color| depth.adapt(color));
         }
+        self.base = self.base.map(|color| depth.adapt(color));
         self
     }
 
@@ -473,6 +481,18 @@ impl Theme {
     /// The theme's name.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// The theme's own background color, even when the terminal's shows
+    /// under the text; `None` for a theme that leaves the background to the
+    /// terminal.
+    pub fn base(&self) -> Option<Color> {
+        self.base.filter(|color| *color != Color::Reset)
+    }
+
+    /// The foreground of `role`, or `fallback` when the role sets none.
+    pub fn fg(&self, role: StyleRole, fallback: Color) -> Color {
+        self.style(role).fg.unwrap_or(fallback)
     }
 
     /// The color depth the theme was adapted to.
@@ -545,6 +565,7 @@ impl Theme {
             name: "plain".to_owned(),
             depth: ColorDepth::TrueColor,
             styles: vec![Style::default(); StyleRole::ALL.len()],
+            base: None,
         }
     }
 
@@ -622,12 +643,47 @@ impl Theme {
                 None => Ok(Style::default()),
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let base = styles
+            .get(StyleRole::Background as usize)
+            .and_then(|style| style.bg);
         Ok(Self {
             name: name.to_owned(),
             depth: ColorDepth::TrueColor,
             styles,
+            base,
         })
     }
+}
+
+/// `a` blended toward `b` by `t`, from 0 (`a`) to 1 (`b`). Only RGB colors
+/// blend; others switch from `a` to `b` half way, so a theme of the 16
+/// terminal colors still shows the change.
+pub(crate) fn mix(a: Color, b: Color, t: f64) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    match (a, b) {
+        (Color::Rgb(ar, ag, ab), Color::Rgb(br, bg, bb)) => {
+            let channel = |from: u8, to: u8| {
+                let value = f64::from(from) + (f64::from(to) - f64::from(from)) * t;
+                // Between 0 and 255 by construction.
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let byte = value.round().clamp(0.0, 255.0) as u8;
+                byte
+            };
+            Color::Rgb(channel(ar, br), channel(ag, bg), channel(ab, bb))
+        }
+        _ if t < 0.5 => a,
+        _ => b,
+    }
+}
+
+/// A pulse from 0 to 1 and back over `period_millis`, in six steps: a
+/// pulsing border changes a few times a second, not at every frame.
+pub(crate) fn glow(millis: i64, period_millis: i64) -> f64 {
+    let period = period_millis.max(1);
+    let phase = f64::from(u32::try_from(millis.rem_euclid(period)).unwrap_or(0))
+        / f64::from(u32::try_from(period).unwrap_or(u32::MAX));
+    let pulse = 0.5 - 0.5 * (phase * std::f64::consts::TAU).cos();
+    (pulse * 5.0).round() / 5.0
 }
 
 impl fmt::Display for StyleRole {
@@ -767,6 +823,33 @@ mod tests {
             assert!(role.description().ends_with('.'), "{role}");
             assert!(!role.description().starts_with(' '), "{role}");
         }
+    }
+
+    #[test]
+    fn colors_blend_and_pulse_in_steps() {
+        let (black, white) = (Color::Rgb(0, 0, 0), Color::Rgb(255, 255, 255));
+        assert_eq!(mix(black, white, 0.0), black);
+        assert_eq!(mix(black, white, 1.0), white);
+        assert_eq!(mix(black, white, 0.5), Color::Rgb(128, 128, 128));
+        assert_eq!(mix(black, white, 7.0), white, "kept in range");
+        // Colors without RGB values switch half way.
+        assert_eq!(mix(Color::Red, Color::Blue, 0.4), Color::Red);
+        assert_eq!(mix(Color::Red, Color::Blue, 0.6), Color::Blue);
+        assert!(glow(0, 1_000).abs() < f64::EPSILON);
+        assert!((glow(500, 1_000) - 1.0).abs() < f64::EPSILON);
+        let steps: BTreeSet<String> = (0..1_000)
+            .map(|millis| format!("{:.1}", glow(millis, 1_000)))
+            .collect();
+        assert_eq!(steps.len(), 6, "six steps: {steps:?}");
+    }
+
+    #[test]
+    fn the_theme_keeps_its_own_background_under_the_terminal_s() {
+        let theme = Theme::builtin("catppuccin-mocha")
+            .unwrap()
+            .with_terminal_background();
+        assert_eq!(theme.base(), Some(Color::Rgb(0x1e, 0x1e, 0x2e)));
+        assert_eq!(Theme::builtin("terminal").unwrap().base(), None);
     }
 
     #[test]
