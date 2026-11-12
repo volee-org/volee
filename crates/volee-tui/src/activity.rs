@@ -61,7 +61,12 @@ pub(crate) struct Bar {
 pub(crate) struct ActivityLog {
     by_agent: HashMap<AgentId, VecDeque<(i64, u16)>>,
     phases: HashMap<AgentId, VecDeque<(i64, Phase)>>,
+    summaries: HashMap<AgentId, VecDeque<String>>,
 }
+
+/// How many activity summaries are kept per agent: the current one and the
+/// two before it, which a large card shows.
+const SUMMARIES: usize = 3;
 
 impl ActivityLog {
     /// Counts one activity of `agent` at `at`.
@@ -95,10 +100,32 @@ impl ActivityLog {
         }
     }
 
+    /// Keeps what `agent` just did, after what it did before.
+    pub(crate) fn record_summary(&mut self, agent: AgentId, summary: &str) {
+        let summaries = self.summaries.entry(agent).or_default();
+        if summaries.back().is_some_and(|last| last == summary) {
+            return;
+        }
+        summaries.push_back(summary.to_owned());
+        while summaries.len() > SUMMARIES {
+            summaries.pop_front();
+        }
+    }
+
+    /// What `agent` did before its current activity, the latest first.
+    pub(crate) fn earlier(&self, agent: AgentId) -> impl Iterator<Item = &str> {
+        self.summaries
+            .get(&agent)
+            .into_iter()
+            .flat_map(|summaries| summaries.iter().rev().skip(1))
+            .map(String::as_str)
+    }
+
     /// Forgets an agent.
     pub(crate) fn forget(&mut self, agent: AgentId) {
         self.by_agent.remove(&agent);
         self.phases.remove(&agent);
+        self.summaries.remove(&agent);
     }
 
     /// What `agent` did between `start` and `end`, the most telling first:
@@ -215,6 +242,18 @@ mod tests {
         assert!(log.by_agent[&agent()].len() <= BUCKETS + 1);
         log.forget(agent());
         assert_eq!(log.counts(agent(), at(0)), [0; BUCKETS]);
+    }
+
+    #[test]
+    fn earlier_activities_come_latest_first_without_the_current_one() {
+        let mut log = ActivityLog::default();
+        for summary in ["Read a", "Read a", "Edit b", "Bash c", "Grep d"] {
+            log.record_summary(agent(), summary);
+        }
+        assert_eq!(
+            log.earlier(agent()).collect::<Vec<_>>(),
+            ["Bash c", "Edit b"]
+        );
     }
 
     #[test]

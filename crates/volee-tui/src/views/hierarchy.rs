@@ -27,6 +27,9 @@ use crate::widgets::{self, canvas::Canvas};
 /// How much each card shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) enum Zoom {
+    /// Large cards, in the tree only: everything a card shows, more of it,
+    /// what the agent did before and the messages it got.
+    Large,
     /// Full cards: state, place, activity, delivery, sparkline.
     #[default]
     Cards,
@@ -37,29 +40,43 @@ pub(crate) enum Zoom {
 }
 
 impl Zoom {
-    /// From the most to the least detailed.
+    /// From the most to the least detailed, in the views other than the
+    /// tree.
     pub(crate) const ALL: [Self; 3] = [Self::Cards, Self::Compact, Self::Dots];
+
+    /// From the most to the least detailed, in the tree.
+    pub(crate) const TREE: [Self; 4] = [Self::Large, Self::Cards, Self::Compact, Self::Dots];
 
     /// The name shown in the view's title.
     pub(crate) const fn label(self) -> &'static str {
         match self {
+            Self::Large => "large",
             Self::Cards => "cards",
             Self::Compact => "compact",
             Self::Dots => "dots",
         }
     }
 
-    /// One level more detailed, if any.
+    /// One level more detailed, if any, in the views other than the tree.
     pub(crate) const fn more_detail(self) -> Self {
         match self {
-            Self::Cards | Self::Compact => Self::Cards,
+            Self::Large | Self::Cards | Self::Compact => Self::Cards,
             Self::Dots => Self::Compact,
+        }
+    }
+
+    /// One level more detailed, if any, in the tree.
+    pub(crate) const fn more_detail_in_tree(self) -> Self {
+        match self {
+            Self::Large | Self::Cards => Self::Large,
+            other => other.more_detail(),
         }
     }
 
     /// One level less detailed, if any.
     pub(crate) const fn less_detail(self) -> Self {
         match self {
+            Self::Large => Self::Cards,
             Self::Cards => Self::Compact,
             Self::Compact | Self::Dots => Self::Dots,
         }
@@ -68,7 +85,7 @@ impl Zoom {
     /// Room between cards at this level.
     pub(crate) const fn spacing(self) -> Spacing {
         match self {
-            Self::Cards => Spacing {
+            Self::Large | Self::Cards => Spacing {
                 gap: 2,
                 level: 2,
                 indent: 3,
@@ -372,7 +389,7 @@ impl Scene {
     ) -> Self {
         let tree = AgentTree::new(registry, show);
         let candidates: &[Zoom] = match &choice {
-            ZoomChoice::Auto => &Zoom::ALL,
+            ZoomChoice::Auto => &Zoom::TREE,
             ZoomChoice::Fixed(zoom) => std::slice::from_ref(zoom),
         };
         let mut chosen = None;

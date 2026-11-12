@@ -390,7 +390,7 @@ pub(crate) fn tidy_of(agent: &Agent) -> Option<Result<(), Vec<TidyRefusal>>> {
 /// The name of a detail level in the title.
 pub(crate) const fn density_label(density: Zoom) -> &'static str {
     match density {
-        Zoom::Cards => "full",
+        Zoom::Cards | Zoom::Large => "full",
         Zoom::Compact => "compact",
         Zoom::Dots => "names",
     }

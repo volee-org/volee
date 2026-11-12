@@ -281,10 +281,17 @@ scrolling.
 
 ### Zoom
 
-The tree has three levels of detail: full **cards**, **compact** cards
-with only the state's badge, and **dots** with a glyph and a name. volee
-picks the most detailed level that fits the panel; `+` and `_` move to
-more or less detail and keep it, `0` lets volee choose again. When the tree
+The tree has four levels of detail: **large** cards, full **cards**,
+**compact** cards with only the state's badge, and **dots** with a glyph
+and a name. A large card shows everything a card shows, and more of it:
+the whole place, the model and the harness, a skyline two rows high, a
+wider context bar, what the agent does and the two things it did before,
+the last message it sent or got (`→ you: …`, `← lead: …`), what it
+changed and how it is delivered; a coordinator's large card adds its
+mission's goal, a lead's what it did before and its last message. volee
+picks the most detailed level that fits the panel, so a small tree shows
+large cards; `+` and `_` move to more or less detail and keep it, `0` lets
+volee choose again. When the tree
 is larger than the panel, it scrolls to keep the selection in view, arrows
 on the border tell where it goes on, and the mouse wheel scrolls it (with
 Shift, sideways).

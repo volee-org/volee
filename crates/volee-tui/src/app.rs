@@ -1040,8 +1040,9 @@ impl Model {
                         self.follow(*agent);
                     }
                 }
-                EventKind::ActivityRecorded { agent, .. } => {
+                EventKind::ActivityRecorded { agent, summary } => {
                     self.activity.record(*agent, event.at);
+                    self.activity.record_summary(*agent, summary);
                 }
                 EventKind::StateChanged { agent, state, .. } => {
                     self.activity.record_state(*agent, event.at, state);
@@ -2154,22 +2155,23 @@ fn zoom(model: &mut Model, context: Context, action: Action) {
     } else {
         context
     };
-    let step = |choice: &mut ZoomChoice, current: hierarchy::Zoom| {
+    let step = |choice: &mut ZoomChoice, current: hierarchy::Zoom, tree: bool| {
         *choice = match action {
+            Action::ZoomIn if tree => ZoomChoice::Fixed(current.more_detail_in_tree()),
             Action::ZoomIn => ZoomChoice::Fixed(current.more_detail()),
             Action::ZoomOut => ZoomChoice::Fixed(current.less_detail()),
             _ => ZoomChoice::Auto,
         };
     };
     match context {
-        Context::Network => step(&mut model.network.zoom, model.network.scene.zoom),
-        Context::Repos => step(&mut model.repos.zoom, model.repos.density),
+        Context::Network => step(&mut model.network.zoom, model.network.scene.zoom, false),
+        Context::Repos => step(&mut model.repos.zoom, model.repos.density, false),
         Context::Timeline => match action {
             Action::ZoomIn => model.timeline.zoom(true),
             Action::ZoomOut => model.timeline.zoom(false),
             _ => model.timeline.reset(),
         },
-        _ => step(&mut model.zoom, model.scene.zoom),
+        _ => step(&mut model.zoom, model.scene.zoom, true),
     }
 }
 

@@ -445,7 +445,9 @@ fn party_label(node: NodeId) -> (&'static str, u16) {
 /// the middle of the card or label, so lines stop at its edges.
 fn footprint(node: NodeId, label: u16, zoom: Zoom) -> (u16, u16, (u16, u16)) {
     match (node, zoom) {
-        (NodeId::Agent(_), Zoom::Cards) => (card::COMPACT_WIDTH, 3, (card::COMPACT_WIDTH / 2, 1)),
+        (NodeId::Agent(_), Zoom::Cards | Zoom::Large) => {
+            (card::COMPACT_WIDTH, 3, (card::COMPACT_WIDTH / 2, 1))
+        }
         (NodeId::Agent(_), Zoom::Dots) => (2, 1, (0, 0)),
         _ => (label, 1, (label / 2, 0)),
     }
@@ -871,7 +873,7 @@ fn draw_node(
         return;
     };
     let zoom = model.network.scene.zoom;
-    if zoom == Zoom::Cards {
+    if matches!(zoom, Zoom::Cards | Zoom::Large) {
         card::draw_compact(canvas, x, y, agent, context);
         return;
     }

@@ -36,6 +36,8 @@ use crate::text;
 use crate::theme::{StyleRole, glow, mix};
 use crate::views::hierarchy::{SceneNode, Zoom};
 
+mod large;
+
 /// The width of a compact card, and of every card in the network view.
 pub(crate) const COMPACT_WIDTH: u16 = 24;
 
@@ -48,6 +50,11 @@ pub(crate) const NAME_MAX: usize = 18;
 /// side by side.
 pub(crate) fn size(zoom: Zoom, role: Role, name: &str) -> (u16, u16) {
     match zoom {
+        Zoom::Large => match role {
+            Role::Lead => (44, 10),
+            Role::Coordinator => (38, 11),
+            Role::Worker | Role::Subagent | Role::Independent => (38, 14),
+        },
         Zoom::Cards => match role {
             Role::Lead => (36, 6),
             Role::Coordinator => (28, 7),
@@ -234,6 +241,15 @@ pub(crate) fn draw(
     let (x, y) = (i32::from(node.place.x), i32::from(node.place.y));
     let width = node.place.width;
     match zoom {
+        Zoom::Large => match agent.role {
+            Role::Lead => large::lead(canvas, (x, y), width, agent, &look, context),
+            Role::Coordinator => {
+                large::coordinator(canvas, (x, y), width, agent, &look, context);
+            }
+            Role::Worker | Role::Subagent | Role::Independent => {
+                large::worker(canvas, (x, y), width, agent, &look, context);
+            }
+        },
         Zoom::Cards => match agent.role {
             Role::Lead => lead(canvas, (x, y), width, agent, &look, context),
             Role::Coordinator => coordinator(canvas, (x, y), width, agent, &look, context),
@@ -569,7 +585,7 @@ fn satellites(
         ];
         // What the subagent does, when there is room for a few words of it.
         let used = 2 + text::width(&agent.name).min(NAME_MAX);
-        if zoom == Zoom::Cards && usize::from(room) >= used + 14 {
+        if matches!(zoom, Zoom::Cards | Zoom::Large) && usize::from(room) >= used + 14 {
             let doing = agent
                 .last_activity
                 .as_ref()
@@ -741,6 +757,20 @@ fn activity_bars(
     look: &Look,
     context: &CardContext<'_>,
 ) {
+    skyline(canvas, (x, y), (width, 1), agent, look, context);
+}
+
+/// An agent's skyline, `rows` high: a column per bucket of time, in the
+/// agent's color while it worked, the color of what waits while it waited
+/// for the person, red when it failed, faded once it stopped.
+fn skyline(
+    canvas: &mut Canvas<'_>,
+    (x, y): (i32, i32),
+    (width, rows): (u16, u16),
+    agent: &Agent,
+    look: &Look,
+    context: &CardContext<'_>,
+) {
     let model = context.model;
     let theme = &model.theme;
     let edge = theme.fg(StyleRole::Edge, Color::Reset);
@@ -757,6 +787,7 @@ fn activity_bars(
         (true, Some(base)) => mix(color, base, 0.55),
         _ => color,
     };
+    let rows = rows.max(1);
     for (dx, bar) in (0..).zip(
         model
             .activity
@@ -769,13 +800,33 @@ fn activity_bars(
             activity::Phase::Rest if bar.glyph == '▁' => rest,
             activity::Phase::Rest => Style::default().fg(shade(mix(edge, accent, 0.5))),
         };
-        let mut buffer = [0; 4];
-        canvas.put(
-            x + dx,
-            y,
-            bar.glyph.encode_utf8(&mut buffer),
-            look.or_dim(style, context),
-        );
+        let style = look.or_dim(style, context);
+        // The bar's height in eighths of a cell, spread over the rows from
+        // the bottom one up.
+        let level = activity::BARS
+            .iter()
+            .position(|glyph| *glyph == bar.glyph)
+            .map_or(1, |index| index + 1);
+        // The baseline stays a baseline however tall the skyline.
+        let height = if level == 1 {
+            1
+        } else {
+            level * usize::from(rows)
+        };
+        for row in 0..rows {
+            let below = usize::from(row) * 8;
+            let glyph = match height.saturating_sub(below) {
+                0 => ' ',
+                filled => activity::BARS[filled.min(8) - 1],
+            };
+            let mut buffer = [0; 4];
+            canvas.put(
+                x + dx,
+                y + i32::from(rows - 1 - row),
+                glyph.encode_utf8(&mut buffer),
+                style,
+            );
+        }
     }
 }
 
@@ -789,9 +840,25 @@ fn changes(
     look: &Look,
     context: &CardContext<'_>,
 ) {
+    let left = diff_spans(agent, context);
+    let left = dim_all(&left, look, context);
+    let used = canvas.spans(x, y, &truncated(&left, width), width);
+    let right = dim_all(&delivery_short(&agent.delivery, context), look, context);
+    let right_width: u16 = right
+        .iter()
+        .map(|span| u16::try_from(text::width(&span.content)).unwrap_or(0))
+        .sum();
+    if used + 1 + right_width <= width {
+        canvas.spans(x + i32::from(width - right_width), y, &right, right_width);
+    }
+}
+
+/// The lines an agent changed (`+31 −8`, or `no changes`) and the messages
+/// waiting for it (`✉ 1`).
+fn diff_spans(agent: &Agent, context: &CardContext<'_>) -> Vec<Span<'static>> {
     let theme = &context.model.theme;
     let diff = agent.delivery.diff;
-    let left = if diff.insertions + diff.deletions > 0 {
+    let mut left = if diff.insertions + diff.deletions > 0 {
         vec![
             Span::styled(
                 format!("+{}", diff.insertions),
@@ -806,7 +873,6 @@ fn changes(
     } else {
         vec![Span::styled("no changes", theme.style(StyleRole::TextDim))]
     };
-    let mut left = left;
     let waiting = context.model.registry.pending_for(agent.id).len();
     if waiting > 0 {
         left.push(Span::raw(" "));
@@ -815,16 +881,7 @@ fn changes(
             theme.style(StyleRole::CardMail),
         ));
     }
-    let left = dim_all(&left, look, context);
-    let used = canvas.spans(x, y, &truncated(&left, width), width);
-    let right = dim_all(&delivery_short(&agent.delivery, context), look, context);
-    let right_width: u16 = right
-        .iter()
-        .map(|span| u16::try_from(text::width(&span.content)).unwrap_or(0))
-        .sum();
-    if used + 1 + right_width <= width {
-        canvas.spans(x + i32::from(width - right_width), y, &right, right_width);
-    }
+    left
 }
 
 /// The delivery in a few cells: the pull request, else the commits.
@@ -1050,6 +1107,74 @@ mod tests {
         // with their gaps, fit in a tree 128 columns wide.
         let worker = size(Zoom::Cards, Role::Worker, "w").0;
         assert!(5 * worker + 4 * 2 <= 128);
+    }
+
+    /// The rows of a card drawn alone at the large zoom.
+    fn large_card(model: &Model, member: usize) -> Vec<String> {
+        let agent = model.registry.agent(id(member)).unwrap();
+        let (width, height) = size(Zoom::Large, agent.role, &agent.name);
+        let area = ratatui::layout::Rect::new(0, 0, width + 2, height);
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        let mut canvas = Canvas::new(&mut buffer, area, (-1, 0));
+        let node = SceneNode {
+            agent: agent.id,
+            place: crate::views::tree_layout::Placement {
+                x: 0,
+                y: 0,
+                width,
+                height,
+                anchor: width / 2,
+            },
+            card_height: height,
+            satellites: Vec::new(),
+            children: Vec::new(),
+            stacked: false,
+        };
+        draw(&mut canvas, Zoom::Large, &node, &CardContext::new(model));
+        (0..height)
+            .map(|y| {
+                (1..=width)
+                    .map(|x| buffer[(x, y)].symbol().to_owned())
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn large_cards_show_more_and_fit_their_frames() {
+        let model = model(200, 50);
+        for member in [
+            crate::demo::TOWER,
+            crate::demo::INVOICING,
+            crate::demo::TRACE_GATEWAY,
+        ] {
+            let rows = large_card(&model, member);
+            let last = rows.len() - 1;
+            assert!(
+                rows[0].starts_with('╭') || rows[0].starts_with('┏'),
+                "{rows:#?}"
+            );
+            assert!(
+                rows[last].starts_with('╰') || rows[last].starts_with('┗'),
+                "{rows:#?}"
+            );
+            assert!(
+                ["WORKING", "IDLE", "NEEDS YOU"]
+                    .iter()
+                    .any(|badge| rows[last - 1].contains(badge)),
+                "the badge closes the card: {rows:#?}"
+            );
+        }
+        let gateway = large_card(&model, crate::demo::TRACE_GATEWAY);
+        let text = gateway.join("\n");
+        assert!(text.contains("claude-code"), "the harness: {text}");
+        assert!(text.contains("audit/p95"), "the whole place: {text}");
+        // Two rows of skyline, and the activities before the current one.
+        let bars = |row: &String| row.chars().filter(|c| activity::BARS.contains(c)).count();
+        assert!(bars(&gateway[3]) > 0 && bars(&gateway[4]) > 0, "{text}");
+        assert!(text.contains("Grep") || text.contains("Read"), "{text}");
+        let coordinator = large_card(&model, crate::demo::INVOICING).join("\n");
+        assert!(coordinator.contains("Invoicing"), "{coordinator}");
     }
 
     #[test]
