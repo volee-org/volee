@@ -41,4 +41,4 @@ expression: draw(&model)
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯"
-"  k/j  scroll    r  refresh    enter  open    z  back                                                                   "
+"  VIEW    k/j  scroll    r  refresh    enter  open    z  back                                                           "

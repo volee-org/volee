@@ -77,8 +77,7 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
 │ ⏺ Before I go on, one question:                                                                                       │
 │   Should create_invoice accept a draft flag?                                                                          │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-  TREE    h/j/k/l  move    gg/G  first/last    s  subtree    '  jump    /  filter    n/N  match    1-4  views
-  m  message    d  diff    enter  open    z  full screen    I  messages    ␣  more    q  quit                    ?  help
+  VOLEE    I  messages    /  filter    ␣  more    :  commands    q  quit                                          ?  help
 ```
 
 - **Top bar.** The views, numbered (press the number to switch; `5` opens
@@ -154,14 +153,18 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   for (`⋯ 12 blank rows ⋯`). `z` shows every row of the screen, and
   [opening](#edit-mode-typing-into-an-agent) the session (`enter`) shows
   it live.
-- **Hints.** The keys that apply to the panel that has the keyboard, drawn
-  as keys, on two rows from 20 rows up: the top one starts with the view
-  on screen (`TREE`) and says how to move around (moves, first and last,
-  the filter and its matches, panels and views), the bottom one what to do
-  (message, diff, open, the leader, commands, quit), with `? help` at the
-  right. Smaller terminals and the windows keep one
-  row. They come from the same table as the help (`?`), so they are always
-  right.
+- **Status line.** One line at the bottom, in the manner of vim's. At its
+  left, the mode the keyboard is in: `VOLEE` while your keys drive volee,
+  `EDIT` in the agent's color while they go to an agent (with its name and
+  the key that gives them back), and `FILTER`, `MESSAGE`, `COMMAND`,
+  `MESSAGES`, `WALL`, `VIEW` or `HELP` while a field or a window has them.
+  Then the few keys of the moment, drawn as keys, and `? help` at the
+  right. On the main screen it shows only the keys that are nowhere else on
+  screen: the messages, the filter, the leader (`␣ more`), the commands and
+  quitting; opening the selected agent and writing to it sit on its
+  preview's border, or on this line when the layout has no preview border.
+  Every other key is a `?` away. The keys come from the same table as the
+  help, so they are always right.
 
 Panel sizes depend only on the size of the terminal and on the view: moving
 around never makes anything jump. Under 160 columns, the For you column and

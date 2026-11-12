@@ -1,10 +1,14 @@
-//! The bottom lines: key hints for the focused panel, generated from the
-//! keymap, or the prompt or the notice of the moment. On the main screen,
-//! with room for two rows, the top one says how to move around and the
-//! bottom one what to do.
+//! The status line, at the bottom, in the manner of vim's: the mode the
+//! keyboard is in at the left (`VOLEE` while the keys drive volee, `EDIT`
+//! and the agent's name while they go to an agent, `FILTER`, `MESSAGE`...),
+//! then the few keys of the moment, generated from the keymap, and the way
+//! to every key (`? help`) at the right; or the prompt or the notice of the
+//! moment. On the main screen it shows only the keys that are not on screen
+//! elsewhere: opening and writing to an agent sit on its preview's border.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 
 use super::put_spans;
@@ -16,90 +20,116 @@ use crate::theme::StyleRole;
 /// Columns between two hints.
 const SEPARATOR: &str = "   ";
 
-/// Which hints a row shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Row {
-    /// Every hint, on one row.
-    All,
-    /// How to move around: moves, views, panels, the filter and its matches.
-    Moves,
-    /// What to do with the selected agent and the rest.
-    Actions,
-}
-
-/// Whether a hint moves around rather than acts.
-fn moves(action: Option<Action>) -> bool {
-    matches!(
-        action,
-        Some(
-            Action::Left
-                | Action::Down
-                | Action::Up
-                | Action::Right
-                | Action::First
-                | Action::Last
-                | Action::HalfPageDown
-                | Action::HalfPageUp
-                | Action::Filter
-                | Action::NextMatch
-                | Action::PreviousMatch
-                | Action::Jump
-                | Action::JumpBack
-                | Action::ShowHierarchy
-                | Action::ShowNetwork
-                | Action::ShowRepos
-                | Action::ShowTimeline
-                | Action::PreviousView
-                | Action::NextView
-                | Action::NextPane
-                | Action::PreviousPane
-                | Action::FocusSubtree
-                | Action::ZoomIn
-                | Action::ZoomOut
-                | Action::ZoomAuto
-                | Action::PreviousEvent
-                | Action::NextEvent
-                | Action::Back
-        )
-    )
-}
-
-/// Draws the hints: two rows on the main screen when there is room, else
-/// one, at the bottom.
+/// Draws the status line, on the last row of `area`.
 pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
-    let bottom = Rect::new(area.x, area.bottom() - 1, area.width, 1);
-    let main_screen = model.contexts().contains(&Context::Global);
-    if area.height >= 2 && main_screen {
-        render_row(
-            model,
-            Row::Moves,
-            Rect::new(area.x, area.y, area.width, 1),
-            buf,
-        );
-        render_row(model, Row::Actions, bottom, buf);
-    } else {
-        render_row(model, Row::All, bottom, buf);
+    let row = Rect::new(area.x, area.bottom() - 1, area.width, 1);
+    render_row(model, row, buf);
+}
+
+/// The mode the keyboard is in, vim style, and how its badge looks: the
+/// main screen is `VOLEE`, a window or a field says what it is, and edit
+/// mode stands out in the agent's color.
+fn mode(model: &Model, contexts: &[Context]) -> (&'static str, Style) {
+    let theme = &model.theme;
+    let window = theme.style(StyleRole::TabActive);
+    let typing = theme.style(StyleRole::Notice).add_modifier(Modifier::BOLD);
+    let found = [
+        (Context::Attached, "EDIT", typing),
+        (Context::Filter, "FILTER", typing),
+        (Context::Composer, "MESSAGE", typing),
+        (Context::Dialog, "LAUNCH", typing),
+        (Context::Commands, "COMMAND", typing),
+        (Context::Themes, "THEME", window),
+        (Context::Help, "HELP", window),
+        (Context::Keys, "KEYS", window),
+        (Context::Inbox, "MESSAGES", window),
+        (Context::Diff, "CHANGES", window),
+        (Context::Tools, "OPEN", window),
+        (Context::Wall, "WALL", window),
+        (Context::Screen, "VIEW", window),
+    ]
+    .into_iter()
+    .find(|(context, _, _)| contexts.contains(context));
+    match found {
+        Some((_, name, style)) => (name, style),
+        None => ("VOLEE", theme.style(StyleRole::TopbarBrand)),
     }
 }
 
-/// Draws one row of hints, or the prompt, the filter or the notice.
-fn render_row(model: &Model, row: Row, area: Rect, buf: &mut Buffer) {
+/// Draws the mode's badge at `x` and returns the cells it took, with the
+/// gap after it.
+fn put_mode(
+    model: &Model,
+    contexts: &[Context],
+    x: u16,
+    y: u16,
+    width: u16,
+    buf: &mut Buffer,
+) -> u16 {
+    let (name, style) = mode(model, contexts);
+    let used = put_spans(
+        buf,
+        x,
+        y,
+        &[Span::styled(format!(" {name} "), style)],
+        width,
+    );
+    (used + 2).min(width)
+}
+
+/// The order of the keys on the main screen's status line.
+fn importance(action: Option<Action>) -> u8 {
+    match action {
+        Some(Action::Back) => 0,
+        Some(Action::TakeOver) => 1,
+        Some(Action::Message) => 2,
+        Some(Action::Messages) => 3,
+        Some(Action::Filter) => 4,
+        None => 5,
+        Some(Action::Commands) => 6,
+        Some(Action::Quit) => 7,
+        Some(_) => 8,
+    }
+}
+
+/// Whether a key shows on the main screen's status line. The others are a
+/// `?` away; opening an agent and writing to it are on its preview's border
+/// when the layout draws its action bar.
+fn featured(action: Option<Action>, action_bar: bool) -> bool {
+    match action {
+        // `None` is the leader: `␣ more`.
+        None
+        | Some(
+            Action::Filter
+            | Action::Messages
+            | Action::Commands
+            | Action::Quit
+            | Action::Help
+            | Action::Back,
+        ) => true,
+        Some(Action::TakeOver | Action::Message) => !action_bar,
+        Some(_) => false,
+    }
+}
+
+/// Draws the status line, or the prompt, the filter or the notice.
+fn render_row(model: &Model, area: Rect, buf: &mut Buffer) {
     let theme = &model.theme;
     let key = theme.style(StyleRole::HintKey);
     let words = theme.style(StyleRole::HintText);
     let width = area.width.saturating_sub(1);
     let x = area.x + 1;
 
-    if row != Row::Moves
-        && let Some(prompt) = model.prompt
-    {
+    if let Some(prompt) = model.prompt {
         render_prompt(model, prompt, Rect::new(x, area.y, width, 1), buf);
         return;
     }
-    if row != Row::Moves && model.filter.editing {
+    if model.filter.editing {
+        let skip = put_mode(model, &[Context::Filter], x, area.y, width, buf);
+        let (x, width) = (x + skip, width.saturating_sub(skip));
         let mut spans = vec![
             Span::styled("/", key),
             Span::styled(model.filter.text.clone(), theme.style(StyleRole::Input)),
@@ -113,13 +143,11 @@ fn render_row(model: &Model, row: Row, area: Rect, buf: &mut Buffer) {
         put_spans(buf, x, area.y, &spans, width);
         return;
     }
-    if row != Row::Moves && model.notice.is_none() && crate::edit::editing(model) {
+    if model.notice.is_none() && crate::edit::editing(model) {
         render_editing(model, Rect::new(x, area.y, width, 1), buf);
         return;
     }
-    if row != Row::Moves
-        && let Some(notice) = &model.notice
-    {
+    if let Some(notice) = &model.notice {
         let style = theme.style(if notice.error {
             StyleRole::NoticeError
         } else {
@@ -153,10 +181,14 @@ fn render_row(model: &Model, row: Row, area: Rect, buf: &mut Buffer) {
         ];
         groups.insert(0, (Some(Action::Back), back));
     }
-    match row {
-        Row::All => {}
-        Row::Moves => groups.retain(|(action, _)| moves(*action)),
-        Row::Actions => groups.retain(|(action, _)| !moves(*action)),
+    let main_screen = model.overlay.is_none() && contexts.contains(&Context::Global);
+    if main_screen {
+        // Opening and writing sit on the preview's border in a wide layout.
+        let action_bar =
+            model.layout.mode == crate::layout::Mode::Wide && model.layout.preview.is_some();
+        groups.retain(|(action, _)| featured(*action, action_bar));
+        // The most useful first: a narrow terminal cuts the end of the line.
+        groups.sort_by_key(|(action, _)| importance(*action));
     }
     // The way to the help stays visible, at the right, whatever the width.
     let help = groups
@@ -164,12 +196,8 @@ fn render_row(model: &Model, row: Row, area: Rect, buf: &mut Buffer) {
         .position(|(action, _)| *action == Some(Action::Help))
         .map(|index| groups.remove(index).1);
     let help_width = help.as_deref().map_or(0, spans_width);
-    let (x, width) =
-        if row != Row::Actions && model.overlay.is_none() && contexts.contains(&Context::Global) {
-            view_badge(model, x, area.y, width, buf)
-        } else {
-            (x, width)
-        };
+    let skip = put_mode(model, &contexts, x, area.y, width, buf);
+    let (x, width) = (x + skip, width.saturating_sub(skip));
     let room = width.saturating_sub(help_width + 2);
     let rest = groups.into_iter().map(|(_, group)| group);
     put_spans(buf, x, area.y, &join(rest, usize::from(room)), room);
@@ -197,23 +225,6 @@ fn spans_width(spans: &[Span<'_>]) -> u16 {
     .unwrap_or(u16::MAX)
 }
 
-/// The view on screen, as a badge at the start of the main screen's first
-/// row of hints. Returns where the hints start after it, and their room.
-fn view_badge(model: &Model, x: u16, y: u16, width: u16, buf: &mut Buffer) -> (u16, u16) {
-    let badge = format!(" {} ", model.tab.title().to_uppercase());
-    let used = put_spans(
-        buf,
-        x,
-        y,
-        &[Span::styled(
-            badge,
-            model.theme.style(StyleRole::TopbarBrand),
-        )],
-        width,
-    );
-    (x + used + 2, width.saturating_sub(used + 2))
-}
-
 /// Edit mode: where the keys go, and the key that gives them back.
 fn render_editing(model: &Model, area: Rect, buf: &mut Buffer) {
     let theme = &model.theme;
@@ -223,13 +234,23 @@ fn render_editing(model: &Model, area: Rect, buf: &mut Buffer) {
         .map(|live| model.name_of(live.agent))
         .unwrap_or_default();
     let leave = model.keymap.leave_key().short();
+    // The badge in the agent's color: whose keys these are shows from afar.
+    let accent = model
+        .live
+        .as_ref()
+        .and_then(|live| model.registry.agent(live.agent))
+        .map(|agent| crate::widgets::card::CardContext::new(model).accent(agent));
+    let badge = match accent.and_then(|style| style.fg) {
+        Some(color) => Style {
+            fg: theme.style(StyleRole::TopbarBrand).fg,
+            bg: Some(color),
+            ..Style::default()
+        }
+        .add_modifier(Modifier::BOLD),
+        None => theme.style(StyleRole::Notice).add_modifier(Modifier::BOLD),
+    };
     let spans = vec![
-        Span::styled(
-            " EDIT ",
-            theme
-                .style(StyleRole::Notice)
-                .add_modifier(ratatui::style::Modifier::BOLD),
-        ),
+        Span::styled(" EDIT ", badge),
         Span::styled(
             format!("  your keys go to {name}"),
             theme.style(StyleRole::Input),
