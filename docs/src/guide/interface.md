@@ -200,8 +200,25 @@ satellites. Its title names the agent at the top. Select an agent of
 another tree, in the list or with its jump letter, and the view shows that
 tree. The sessions that nobody launched and that launched nobody, such as
 the Claude Code sessions you start yourself, show side by side, in rows, as
-`Tree · on their own`. The path from the selected card up to its root is
-highlighted.
+`Tree · on their own`.
+
+The links between cards are light and dotted, in a tint of the child's
+color, with a dot where they meet. The selected card has heavy lines, a `▶`
+at its left, and its path up to its root is drawn in solid lines. The tree
+moves with the agents:
+
+- dots flow down the link of each agent at work;
+- each message travels from its sender's card to its recipient's, along
+  the links up to their common ancestor and down again, as a small comet
+  `●•·` in the color of what it is (a question yellow, a report green, an
+  alert red), and rests a moment on the card it reached; a message you
+  write comes down the recipient's own link, and its card's border flashes;
+- the border of a card that waits for you pulses, in heavy lines, and the
+  border of one that failed pulses red for a minute.
+
+With `reduced_motion` ([configuration](configuration.md#tui)), nothing
+moves: a message lights its route for a moment, and borders keep their
+color.
 
 ```text
                      ╭─ tower ───────────────── opus ⠹ ─╮
@@ -210,7 +227,7 @@ highlighted.
                      │ platform › main                  │
                      │  WORKING  24 min                 │
                      ╰─────────────────┬────────────────╯
-            ┌──────────────────────────┴───────────────────────┐
+            •┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈•┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈•
 ╭─ invoicing ─┴────────────╮                    ╭─ latency-audit ┴─────────╮
 │ ◆ Invoicing · change     │                    │ ◆ Latency audit · analy… │
 │ Waiting for 3 workers    │                    │ Waiting for 2 workers    │
@@ -218,16 +235,16 @@ highlighted.
 │ ! 2 need you             │                    │ sonnet                   │
 │  IDLE  14 min            │                    │  IDLE  12 min            │
 ╰─────────────┬────────────╯                    ╰─────────────┬────────────╯
-  ┌───────────┴─ ···                                ┌─────────┴─ ···
-╭─ invoice-schema ─────╮                     ╭─ trace-gateway ── ⠹ ─╮
-│ billing › feat/invo… │                     │ gateway › audit/p95… │
-│ sonnet               │                     │ sonnet · ◆ 2         │
-│ ▃▃▁▁▃▃▁▃▁▃▃▃▁▁▁▁▁▁▁▁ │                     │ ▁▃▁▁▁▃▁▃▁▁▃▁▁▁▃▃▁▁▃▁ │
-│ ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ? │                     │ ctx ▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ? │
-│ ! Bash: bun run db:… │                     │ ⠹ Read src/middlewa… │
-│ +214 −12   2 commits │                     │ no changes           │
-│  NEEDS YOU  2 min    │                     │  WORKING  11 min     │
-╰──────────────────────╯                     ╰─┬────────────────────╯
+  •┈┈┈┈┈┈┈┈┈┈┈•┈ ···                                •┈┈┈┈┈┈┈┈┈•┈ ···
+┏━ invoice-schema ━━━━━┓                     ╭─ trace-gateway ── ⠹ ─╮
+┃ billing › feat/invo… ┃                     │ gateway › audit/p95… │
+┃ sonnet               ┃                     │ sonnet · ◆ 2         │
+┃ ▂▂▂▃▄▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ ┃                     │ ▂▃▅▄▂▆▃▂▄▅▃▂▄▃▅▆▄▃▂▄ │
+┃ ctx ▰▰▰▰▰▰▰▰▱▱▱ 73%  ┃                     │ ctx ▰▰▰▱▱▱▱▱▱▱▱ 26%  │
+┃ ! Bash: bun run db:… ┃                     │ ⠹ Read src/middlewa… │
+┃ +214 −12   2 commits ┃                     │ no changes ✉ 1       │
+┃  NEEDS YOU  2 min    ┃                     │  WORKING  11 min     │
+┗━━━━━━━━━━━━━━━━━━━━━━┛                     ╰─┬────────────────────╯
                                                ├─ ▸ explore-handlers
                                                └─ ▸ explore-traces
 ```
@@ -239,15 +256,18 @@ calls for you takes the color of its state.
 
 - A **worker's** card, or a session's, shows where it works
   (`repo › branch`), its model and its subagents at work (`◆ 2`), its
-  activity over the last five minutes (one column per fifteen seconds,
-  dimmed once it stopped), the share of its context window its
+  activity as a skyline (one column per five seconds: a low bar while it
+  worked, a step taller for each tool call, a yellow one while it waited
+  for you, a red one when it failed, faded once it stopped), the share of
+  its context window its
   conversation uses (`ctx ▰▰▰▱▱▱ 42%`, in the color of what waits past
   80 %, `ctx ?` for a session volee did not launch: volee reads it from the
   status line of the agents it launches, which then shows yours,
   [ADR 0035](../adr/0035-the-context-an-agent-uses-comes-from-its-status-line.md)),
   what it does or waits for, the lines it
-  changed (`+214 −12`) and how its work is delivered (`2 commits`,
-  `PR #42 ✓`), and its state as a badge with how long it has lasted.
+  changed (`+214 −12`), the messages waiting for it (`✉ 1`), how its work
+  is delivered (`2 commits`, `PR #42 ✓`), and its state as a badge with how
+  long it has lasted.
 - A **coordinator's** card shows its mission, what it waits for, its
   workers' progress (one square each: delivered, waiting for you, or still
   at work), how many need you, and its state.

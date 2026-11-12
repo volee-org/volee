@@ -134,6 +134,8 @@ edge = "#3b4261"
 | `border.focused` | The border and the title of the focused panel. |
 | `selection` | The selected row of a list. |
 | `card.selected` | The border of the selected card in the hierarchy. |
+| `card.flash` | The border of a card the person just wrote to, for an instant. |
+| `card.mail` | The count of messages waiting for an agent, on its card. |
 | `topbar` | The top bar. |
 | `topbar.brand` | The volee badge at the left of the top bar. |
 | `tab` | Tabs that are not shown. |

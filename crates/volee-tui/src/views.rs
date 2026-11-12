@@ -3,6 +3,7 @@
 
 pub(crate) mod force;
 pub(crate) mod hierarchy;
+pub(crate) mod links;
 pub(crate) mod network;
 pub(crate) mod repos;
 pub(crate) mod spatial;

@@ -40,6 +40,8 @@ border = "surface1"
 "border.focused" = "lavender"
 selection = { fg = "text", bg = "surface0", modifiers = ["bold"] }
 "card.selected" = { fg = "lavender", bg = "surface0", modifiers = ["bold"] }
+"card.flash" = "rosewater"
+"card.mail" = { fg = "sky", modifiers = ["bold"] }
 topbar = "subtext0"
 "topbar.brand" = { fg = "crust", bg = "mauve", modifiers = ["bold"] }
 tab = "overlay1"

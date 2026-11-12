@@ -1,5 +1,7 @@
 //! Message pulses: when a message is posted, a glyph travels along the
-//! network's edge from the sender to each recipient.
+//! network's edge from the sender to each recipient, and in the tree along
+//! the links between their cards, where it rests a moment on the card it
+//! reached. A card the person writes to flashes.
 //!
 //! A pulse is a pure function of the message's time and the current time,
 //! so drawing never changes state and a frame at a given time always looks
@@ -13,6 +15,19 @@ use volee_core::time::Timestamp;
 
 /// How long a pulse takes from the sender to a recipient.
 pub(crate) const PULSE_MILLIS: i64 = 1_000;
+
+/// How long a packet rests on the card it reached, in the tree.
+pub(crate) const HOLD_MILLIS: i64 = 400;
+
+/// How long the border of a card the person wrote to flashes.
+pub(crate) const FLASH_MILLIS: i64 = 1_400;
+
+/// How long a pulse is kept: its trip and its rest, or the flash.
+const KEEP_MILLIS: i64 = if PULSE_MILLIS + HOLD_MILLIS > FLASH_MILLIS {
+    PULSE_MILLIS + HOLD_MILLIS
+} else {
+    FLASH_MILLIS
+};
 
 /// One message on its way to one recipient.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,10 +85,43 @@ impl Pulses {
         }
     }
 
-    /// Forgets the pulses that arrived before `now`.
+    /// Forgets the pulses that arrived, rested and flashed before `now`.
     pub(crate) fn prune(&mut self, now: Timestamp) {
         self.pulses
-            .retain(|pulse| pulse.at.plus_millis(PULSE_MILLIS) > now);
+            .retain(|pulse| pulse.at.plus_millis(KEEP_MILLIS) > now);
+    }
+
+    /// The packets of the tree at `now`, with how far each went: they
+    /// travel like pulses, then rest at 1 on the card they reached.
+    pub(crate) fn packets(&self, now: Timestamp) -> impl Iterator<Item = (&Pulse, f64)> {
+        self.pulses.iter().filter_map(move |pulse| {
+            let elapsed = now.as_millis() - pulse.at.as_millis();
+            if !(0..PULSE_MILLIS + HOLD_MILLIS).contains(&elapsed) {
+                return None;
+            }
+            let linear = ratio(elapsed.min(PULSE_MILLIS), PULSE_MILLIS);
+            Some((pulse, linear * linear * (3.0 - 2.0 * linear)))
+        })
+    }
+
+    /// How bright the flash of `agent`'s card is at `now`, from 1 (the
+    /// person just wrote to it) down to 0.
+    pub(crate) fn flash(&self, agent: volee_core::AgentId, now: Timestamp) -> f64 {
+        self.pulses
+            .iter()
+            .filter(|pulse| pulse.from == Party::Human && pulse.to == Party::Agent(agent))
+            .map(|pulse| now.as_millis() - pulse.at.as_millis())
+            .filter(|elapsed| (0..FLASH_MILLIS).contains(elapsed))
+            .map(|elapsed| 1.0 - ratio(elapsed, FLASH_MILLIS))
+            .fold(0.0, f64::max)
+    }
+
+    /// Whether a packet travels or rests, or a card flashes, at `now`: the
+    /// tree must be drawn again soon.
+    pub(crate) fn is_lasting(&self, now: Timestamp) -> bool {
+        self.pulses
+            .iter()
+            .any(|pulse| pulse.at <= now && pulse.at.plus_millis(KEEP_MILLIS) > now)
     }
 
     /// The pulses travelling at `now`, with how far each went.
@@ -163,7 +211,36 @@ mod tests {
         pulses.record(&message(0, &[agent(2)]), at(400));
         pulses.prune(at(999));
         assert_eq!(pulses.active(at(999)).count(), 1);
+        // Kept while it rests on the card it reached, or flashes.
         pulses.prune(at(1_000));
+        assert_eq!(pulses.active(at(500)).count(), 1);
+        pulses.prune(at(KEEP_MILLIS));
         assert_eq!(pulses.active(at(500)).count(), 0);
+    }
+
+    #[test]
+    fn packets_rest_on_the_card_they_reached_and_flashes_fade() {
+        let mut pulses = Pulses::default();
+        let mut sent = message(0, &[agent(2)]);
+        sent.from = Party::Human;
+        pulses.record(&sent, at(0));
+        let progress = |millis| pulses.packets(at(millis)).map(|(_, p)| p).next();
+        assert_eq!(progress(0), Some(0.0));
+        assert!(progress(500).is_some_and(|p| p > 0.0 && p < 1.0));
+        assert_eq!(
+            progress(1_200),
+            Some(1.0),
+            "it rests on the card it reached"
+        );
+        assert_eq!(progress(PULSE_MILLIS + HOLD_MILLIS), None);
+        let Party::Agent(to) = agent(2) else {
+            unreachable!()
+        };
+        assert!((pulses.flash(to, at(0)) - 1.0).abs() < f64::EPSILON);
+        assert!(pulses.flash(to, at(700)) > 0.4 && pulses.flash(to, at(700)) < 0.6);
+        assert!(pulses.flash(to, at(FLASH_MILLIS)).abs() < f64::EPSILON);
+        assert!(pulses.is_lasting(at(1_300)));
+        pulses.prune(at(1_500));
+        assert!(!pulses.is_lasting(at(1_500)));
     }
 }

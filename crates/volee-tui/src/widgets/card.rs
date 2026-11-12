@@ -19,7 +19,7 @@
 //!
 //! Subagents hang under their parent's card as one-line satellites.
 
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use volee_core::delivery::{ChecksState, Delivery, PrState};
 use volee_core::mission::Verdict;
@@ -33,7 +33,7 @@ use super::{state_glyph, truncated};
 use crate::activity;
 use crate::app::{Model, Motion};
 use crate::text;
-use crate::theme::StyleRole;
+use crate::theme::{StyleRole, glow, mix};
 use crate::views::hierarchy::{SceneNode, Zoom};
 
 /// The width of a compact card, and of every card in the network view.
@@ -83,6 +83,11 @@ impl<'a> CardContext<'a> {
         self.model.theme.style(role)
     }
 
+    /// The model the frame is drawn from.
+    pub(crate) const fn model(&self) -> &'a Model {
+        self.model
+    }
+
     /// The color of an agent: its own for a worker or a session started on
     /// its own, its role's for a lead or a coordinator, its parent's for a
     /// subagent.
@@ -111,10 +116,54 @@ impl<'a> CardContext<'a> {
 
 /// How a card looks.
 struct Look {
-    /// The border, and the name.
+    /// The name, and what is drawn in the agent's color.
     accent: Style,
+    /// The border: the agent's color, pulsing while the agent waits for the
+    /// person or just failed, lavender when selected, flashing when the
+    /// person writes to it.
+    border: Style,
+    /// Heavy lines: selected, or waiting for the person.
+    heavy: bool,
     selected: bool,
     dimmed: bool,
+}
+
+/// How long a failed agent's border pulses before it stays red.
+pub(crate) const FAILED_PULSE_MILLIS: i64 = 60_000;
+
+/// The border of an agent's card.
+fn border_of(agent: &Agent, accent: Style, selected: bool, context: &CardContext<'_>) -> Style {
+    let model = context.model;
+    let theme = &model.theme;
+    let edge = theme.fg(StyleRole::Edge, Color::Reset);
+    let moving = model.motion == Motion::Full;
+    let now = model.now.as_millis();
+    let state_color = theme.state(&agent.state).fg.unwrap_or(Color::Reset);
+    let since = now - agent.state_since.as_millis();
+    let mut border = match agent.state {
+        AgentState::NeedsInput { .. } => {
+            let level = if moving {
+                0.35 + 0.65 * glow(now, 1_000)
+            } else {
+                1.0
+            };
+            Style::default().fg(mix(edge, state_color, level))
+        }
+        AgentState::Failed if moving && since < FAILED_PULSE_MILLIS => {
+            Style::default().fg(mix(edge, state_color, 0.5 + 0.5 * glow(now, 600)))
+        }
+        _ if selected => Style::default().fg(theme.fg(StyleRole::CardSelected, state_color)),
+        _ => accent.remove_modifier(Modifier::BOLD),
+    };
+    if selected {
+        border = border.add_modifier(Modifier::BOLD);
+    }
+    let flash = model.pulses.flash(agent.id, model.now);
+    if moving && flash > 0.0 {
+        let current = border.fg.unwrap_or(edge);
+        border.fg = Some(mix(current, theme.fg(StyleRole::CardFlash, current), flash));
+    }
+    border
 }
 
 impl Look {
@@ -134,8 +183,15 @@ impl Look {
                 _ => context.accent(agent),
             }
         };
+        let border = if dimmed {
+            accent
+        } else {
+            border_of(agent, accent, selected, context)
+        };
         Self {
             accent,
+            border,
+            heavy: selected || matches!(agent.state, AgentState::NeedsInput { .. }),
             selected,
             dimmed,
         }
@@ -150,12 +206,8 @@ impl Look {
             .map_or_else(Style::default, |agent| Self::of(agent, context).border())
     }
 
-    fn border(&self) -> Style {
-        if self.selected {
-            self.accent.add_modifier(Modifier::BOLD)
-        } else {
-            self.accent.remove_modifier(Modifier::BOLD)
-        }
+    const fn border(&self) -> Style {
+        self.border
     }
 
     /// `style`, or the dim style when the card is filtered out.
@@ -226,17 +278,28 @@ fn frame(
         bottom_right,
         horizontal,
         vertical,
-    ] = if look.selected {
+    ] = if look.heavy {
         ["┏", "┓", "┗", "┛", "━", "┃"]
     } else {
         ["╭", "╮", "╰", "╯", "─", "│"]
     };
     if look.selected {
+        let selected = context.style(StyleRole::CardSelected);
         let fill = Style {
-            bg: context.style(StyleRole::CardSelected).bg,
+            bg: selected.bg,
             ..Style::default()
         };
         canvas.paint(x, y, width, height, fill);
+        // The marker at the left of the selected card.
+        canvas.put(
+            x - 1,
+            y + 1,
+            "▶",
+            Style {
+                bg: None,
+                ..selected.add_modifier(Modifier::BOLD)
+            },
+        );
     }
     let border = look.border();
     for dx in 1..w - 1 {
@@ -678,23 +741,41 @@ fn activity_bars(
     look: &Look,
     context: &CardContext<'_>,
 ) {
-    let counts = context.model.activity.counts(agent.id, context.model.now);
-    let shown = usize::from(width).min(counts.len());
-    let recent = &counts[counts.len() - shown..];
-    let live = matches!(agent.state, AgentState::Working | AgentState::Launching);
-    let color = if live {
-        look.or_dim(context.accent(agent), context)
-    } else {
-        context.style(StyleRole::TextDim)
+    let model = context.model;
+    let theme = &model.theme;
+    let edge = theme.fg(StyleRole::Edge, Color::Reset);
+    let rest = Style::default().fg(theme.fg(StyleRole::Border, edge));
+    let accent = context.accent(agent).fg.unwrap_or(edge);
+    let waiting = theme.style(StyleRole::StateNeedsInput).fg.unwrap_or(accent);
+    let failed = theme.style(StyleRole::StateFailed).fg.unwrap_or(accent);
+    // A finished agent's skyline fades: it tells what it did, not what it does.
+    let over = matches!(
+        agent.state.category(),
+        StateCategory::Done | StateCategory::Stopped | StateCategory::Lost
+    );
+    let shade = |color: Color| match (over, theme.base()) {
+        (true, Some(base)) => mix(color, base, 0.55),
+        _ => color,
     };
-    let baseline = context.style(StyleRole::Edge);
-    for (dx, bar) in (0..).zip(activity::bars(recent)) {
-        let (symbol, style) = match bar {
-            Some(bar) => (bar, color),
-            None => ('▁', baseline),
+    for (dx, bar) in (0..).zip(
+        model
+            .activity
+            .skyline(agent.id, model.now, usize::from(width)),
+    ) {
+        let style = match bar.phase {
+            activity::Phase::Work => Style::default().fg(shade(mix(edge, accent, 0.85))),
+            activity::Phase::Wait => Style::default().fg(shade(mix(edge, waiting, 0.7))),
+            activity::Phase::Fail => Style::default().fg(shade(failed)),
+            activity::Phase::Rest if bar.glyph == '▁' => rest,
+            activity::Phase::Rest => Style::default().fg(shade(mix(edge, accent, 0.5))),
         };
         let mut buffer = [0; 4];
-        canvas.put(x + dx, y, symbol.encode_utf8(&mut buffer), style);
+        canvas.put(
+            x + dx,
+            y,
+            bar.glyph.encode_utf8(&mut buffer),
+            look.or_dim(style, context),
+        );
     }
 }
 
@@ -725,6 +806,15 @@ fn changes(
     } else {
         vec![Span::styled("no changes", theme.style(StyleRole::TextDim))]
     };
+    let mut left = left;
+    let waiting = context.model.registry.pending_for(agent.id).len();
+    if waiting > 0 {
+        left.push(Span::raw(" "));
+        left.push(Span::styled(
+            format!("\u{2709} {waiting}"),
+            theme.style(StyleRole::CardMail),
+        ));
+    }
     let left = dim_all(&left, look, context);
     let used = canvas.spans(x, y, &truncated(&left, width), width);
     let right = dim_all(&delivery_short(&agent.delivery, context), look, context);
@@ -978,5 +1068,99 @@ mod tests {
             .find(|agent| agent.role == Role::Lead)
             .unwrap();
         assert_eq!(context.accent(lead), model.theme.role(Role::Lead));
+    }
+
+    fn border_of_card(model: &Model, agent: AgentId) -> Option<Color> {
+        let context = CardContext::new(model);
+        Look::of(model.registry.agent(agent).unwrap(), &context)
+            .border()
+            .fg
+    }
+
+    /// A message from the person to `to`, posted now in the demo's first
+    /// thread, not delivered yet.
+    fn written_to(model: &mut Model, to: AgentId) {
+        let first = (*model.registry.unanswered_questions().first().unwrap()).clone();
+        let message = volee_core::message::Message {
+            id: volee_core::MessageId::from_ulid(ulid::Ulid::from_parts(u64::MAX >> 16, 7)),
+            from: volee_core::message::Party::Human,
+            body: "Use the draft flag.".into(),
+            options: Vec::new(),
+            in_reply_to: None,
+            at: model.now,
+            receipts: vec![volee_core::message::Receipt {
+                to: volee_core::message::Party::Agent(to),
+                delivered_at: None,
+                read_at: None,
+            }],
+            ..first
+        };
+        let now = model.now;
+        crate::app::update(
+            model,
+            crate::app::Msg::Events(vec![volee_core::Event::new(
+                now,
+                volee_core::event::EventKind::MessagePosted { message },
+            )]),
+        );
+    }
+
+    #[test]
+    fn a_card_that_waits_for_the_person_pulses_and_one_written_to_flashes() {
+        let mut model = model(200, 50);
+        let schema = id(crate::demo::INVOICE_SCHEMA);
+        let waiting = model.registry.agent(schema).unwrap().state.clone();
+        assert!(matches!(waiting, AgentState::NeedsInput { .. }));
+        let bright = model.theme.state(&waiting).fg;
+        // A pulse of a second: dim at its start, the state's color half way.
+        let second = model.now.as_millis() - model.now.as_millis().rem_euclid(1_000);
+        model.now = volee_core::time::Timestamp::from_millis(second);
+        let dim = border_of_card(&model, schema);
+        model.now = volee_core::time::Timestamp::from_millis(second + 500);
+        assert_eq!(border_of_card(&model, schema), bright);
+        assert_ne!(dim, bright, "it pulses");
+        // Reduced motion: it stays bright.
+        model.motion = Motion::Reduced;
+        model.now = volee_core::time::Timestamp::from_millis(second);
+        assert_eq!(border_of_card(&model, schema), bright);
+        model.motion = Motion::Full;
+
+        let page = id(INVOICE_PAGE);
+        let before = border_of_card(&model, page);
+        written_to(&mut model, page);
+        assert_eq!(
+            border_of_card(&model, page),
+            model.theme.style(StyleRole::CardFlash).fg,
+            "it flashes when the person writes to it"
+        );
+        model.now = model.now.plus_millis(crate::pulses::FLASH_MILLIS);
+        assert_eq!(border_of_card(&model, page), before, "then fades");
+    }
+
+    #[test]
+    fn messages_waiting_for_an_agent_show_on_its_card() {
+        let mut model = model(200, 50);
+        let page = id(INVOICE_PAGE);
+        written_to(&mut model, page);
+        let area = ratatui::layout::Rect::new(0, 0, 200, 50);
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        crate::views::hierarchy::render(&model, area, &mut buffer);
+        let rect = model.scene.rect_of(page).unwrap();
+        let (ox, oy) = model.scene_offset;
+        let rows: Vec<String> = (rect.y..rect.bottom())
+            .map(|y| {
+                (rect.x..rect.right())
+                    .filter_map(|x| {
+                        let (cx, cy) = (i32::from(x) - ox, i32::from(y) - oy);
+                        let (cx, cy) = (u16::try_from(cx).ok()?, u16::try_from(cy).ok()?);
+                        Some(buffer[(cx, cy)].symbol().to_owned())
+                    })
+                    .collect()
+            })
+            .collect();
+        assert!(
+            rows.iter().any(|row| row.contains("\u{2709} 1")),
+            "{rows:#?}"
+        );
     }
 }

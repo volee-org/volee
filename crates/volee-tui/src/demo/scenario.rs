@@ -1057,6 +1057,13 @@ pub(crate) fn history(start: Timestamp) -> Vec<Event> {
         "explore-traces stopped with a message waiting; volee resumed its session to deliver it.",
         None,
     );
+    // The agents at work were busy before the demo started: their skylines
+    // are full from the first frame.
+    for cycle in -4..0 {
+        for offset in BEATS {
+            ambient(&mut script, cycle, offset);
+        }
+    }
 
     let mut events = script.events;
     // A stable sort keeps the order of events written at the same second.
@@ -1209,12 +1216,62 @@ fn beat(start: Timestamp, cycle: i64, offset: i64) -> Vec<Event> {
         36 => script.activity(base * 1_000, TOWER, "Bash volee ls"),
         _ => script.activity(base * 1_000, TRACE_GATEWAY, "Grep \"p95\" src/"),
     }
+    ambient(&mut script, cycle, offset);
     conversations(&mut script, cycle, offset);
     // Receipts come a second after their message, after the other events of
     // the beat; a stable sort keeps the rest in writing order.
     let mut events = script.events;
     events.sort_by_key(|event| event.at);
     events
+}
+
+/// The workers and sessions that work through the whole loop, and the tool
+/// calls they make between the beats. A lead's card shows no skyline.
+const AMBIENT: [(usize, [&str; 3]); 3] = [
+    (
+        TRACE_GATEWAY,
+        [
+            "Read src/middleware/auth.rs",
+            "Grep \"p95\" src/",
+            "Read src/middleware/rate_limit.rs",
+        ],
+    ),
+    (
+        TRACE_SEARCH,
+        [
+            "Bash cargo bench --bench query",
+            "Read benches/results.json",
+            "Edit benches/query.rs",
+        ],
+    ),
+    (
+        BROKEN_LINKS,
+        [
+            "Bash npm run check-links",
+            "Edit docs/guide/links.md",
+            "Read docs/guide/install.md",
+        ],
+    ),
+];
+
+/// Tool calls between the beats, none to two per agent at work, half a
+/// second after the beat and apart: a real agent reports one every few
+/// seconds, and their skylines move like a real agent's.
+fn ambient(script: &mut Script, cycle: i64, offset: i64) {
+    let base = (cycle * PERIOD_SECS + offset) * 1_000;
+    // Shifted to stay positive: the history's beats come before the start.
+    let beat = u64::try_from(cycle * PERIOD_SECS + offset + 1_000_000).unwrap_or(0);
+    for (member, summaries) in AMBIENT {
+        let seed = u64::try_from(member).unwrap_or(0) + 1;
+        let roll = jitter(seed, beat);
+        let calls = roll % 3;
+        for call in 0..calls {
+            let millis = base + 500 + i64::try_from(call).unwrap_or(0) * 700;
+            // At most 3 by construction.
+            let pick = usize::try_from((roll / 3 + call) % 3).unwrap_or(0);
+            script.activity(millis, member, summaries[pick]);
+        }
+    }
 }
 
 /// The number of the person's question to invoice-tools, relaying the

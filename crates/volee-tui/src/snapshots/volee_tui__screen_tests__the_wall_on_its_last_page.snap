@@ -33,7 +33,7 @@ expression: draw(&model)
 "│⏺ Read(benches/results.json)          ││                                      │┃⏺ Update(docs/guide/links.md)         ┃"
 "│  ⎿  Read 96 lines                    ││╭─────────────────────────────────────│┃  ⎿  Updated with 4 additions and 4 re┃"
 "│                                      │││ >                                   │┃                                      ┃"
-"│✻ Bash cargo bench --bench query… (esc││╰─────────────────────────────────────│┃✻ Read docs/guide/install.md… (esc to ┃"
+"│✻ Read benches/results.json… (esc to i││╰─────────────────────────────────────│┃✻ Read docs/guide/install.md… (esc to ┃"
 "│                                      ││  ? for shortcuts                     │┃                                      ┃"
 "│╭─────────────────────────────────────││                                      │┃╭─────────────────────────────────────┃"
 "││ >                                   ││                                      │┃│ >                                   ┃"
