@@ -137,6 +137,17 @@ keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
 | Found on the way to the release | A lead no longer takes its own row of `list_agents` for a duplicate of the mission it is asked to start (the row is marked `you`). A coordinator's name shows whole in the list. A mission's worker is judged only on evidence read after it stopped: one that committed and stopped within seconds was once said to have no commits. What is typed in edit mode before the agent's host answers is sent once it does, instead of being dropped | Done |
 | Release | v0.16.0 | Done: v0.16.0 |
 
+## 0.17: the tree comes to life
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| Messages between cards | Each message travels from its sender's card to its recipient's as a small comet, up the links to their common ancestor and down again, in the color of what it is; a card the person writes to flashes, and shows the messages waiting for it (`✉ 1`) | Done |
+| Living links | Light dotted links in a tint of each agent's color, the selected lineage in solid lines, dots flowing to the agents at work; the border of a card that waits for the person pulses | Done |
+| A skyline of activity | On each card, a column per five seconds: a low bar while the agent worked, a step taller per tool call, yellow while it waited, red when it failed, faded once it stopped | Done |
+| A large zoom | Bigger cards in the tree, with what the agent did before, its last message and its delivery; chosen when the tree is small | Done |
+| One status line | The two rows of key hints become one line in the manner of vim's: the mode at the left (`VOLEE`, `EDIT` in the agent's color, `FILTER`...), the few keys of the moment, `? help` at the right | Done |
+| Release | v0.17.0 | Done: v0.17.0 |
+
 ## Next
 
 Nothing is scheduled: the plan that ran from 0.11 to 0.14 is complete. What
@@ -154,6 +165,11 @@ comes next is chosen among the items below.
 - Finding agents of harnesses other than OpenCode in the process table, so
   that they show outside tuios too.
 - Messaging sessions started outside volee.
+- The status line while `volee attach` or `volee run` holds the whole
+  terminal, and a choice to put it at the top.
+- The cockpit's last touches: dim italic secondary text, the journal's
+  times and arrows, subagents as blinking satellites, cards that unfold
+  when an agent starts.
 - The context of sessions volee did not launch: Claude Code gives it only to
   a session's status line, which volee sets for the agents it launches
   ([ADR 0035](../adr/0035-the-context-an-agent-uses-comes-from-its-status-line.md)).
