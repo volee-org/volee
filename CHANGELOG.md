@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 It is generated from the commit history with [git-cliff](https://git-cliff.org):
 see [RELEASING.md](RELEASING.md).
 
+## [0.17.0] - 2026-11-12
+
+### Added
+
+- **tui**: Bring the tree to life like the cockpit, add a large zoom and a vim-like status line ([#171](https://github.com/volee-org/volee/pull/171))
+
+### Documentation
+
+- **roadmap**: Record 0.16, the cockpit's main screen ([#170](https://github.com/volee-org/volee/pull/170))
+
 ## [0.16.0] - 2026-11-11
 
 ### Added
@@ -311,6 +321,7 @@ see [RELEASING.md](RELEASING.md).
 - Mark the interface, messaging and views milestones done ([#52](https://github.com/volee-org/volee/pull/52))
 - Start the daemon in the first step of the guide, and say what tidy removes ([#56](https://github.com/volee-org/volee/pull/56))
 
+[0.17.0]: https://github.com/volee-org/volee/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/volee-org/volee/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/volee-org/volee/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/volee-org/volee/compare/v0.14.0...v0.14.1
