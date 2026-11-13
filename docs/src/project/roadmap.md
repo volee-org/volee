@@ -147,6 +147,8 @@ keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
 | A large zoom | Bigger cards in the tree, with what the agent did before, its last message and its delivery; chosen when the tree is small | Done |
 | One status line | The two rows of key hints become one line in the manner of vim's: the mode at the left (`VOLEE`, `EDIT` in the agent's color, `FILTER`...), the few keys of the moment, `? help` at the right | Done |
 | Release | v0.17.0 | Done: v0.17.0 |
+| By hand or in the background | The sessions nobody launched are grouped by whether they have a window: BY HAND (a terminal tab, a tuios or tmux pane) and BACKGROUND (Claude Code background sessions, and agents in a volee host, which 0.17.0 counted as terminals) | Done: v0.17.1 |
+| The answer above a pinned prompt | Claude Code 2.1.323 pins its prompt and status lines at the bottom of an agent's terminal, and the preview showed blank rows and the prompt. A screen taller than its view now folds its runs of blank rows into one row that says how many, whatever its source; a screen that fits is shown as it is ([ADR 0028](../adr/0028-one-emulator-and-the-wall-inside-the-interface.md#every-screen-that-does-not-fit-its-view)). Found by the release gate | Done: v0.17.1 |
 
 ## Next
 
