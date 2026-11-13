@@ -1,7 +1,7 @@
 # 0028. One emulator for every screen, and the wall inside the interface
 
 - Status: Accepted (completes [0020](0020-libghostty-vt-emulates-terminals.md); amends [0021](0021-take-over-watch-and-the-wall-of-screens.md), [0026](0026-edit-mode-types-into-an-agent-inside-volee.md) and [0027](0027-open-without-owning.md))
-- Date: 2026-11-11; corrected the same day by [its proof](#the-proof-and-what-it-found)
+- Date: 2026-11-11; corrected the same day by [its proof](#the-proof-and-what-it-found); the fold extended to [every screen that does not fit its view](#every-screen-that-does-not-fit-its-view) on 2026-11-13
 
 ## Context
 
@@ -176,9 +176,9 @@ What the proof establishes depends on where a screen comes from:
 
 | Where the agent runs | What the three views show | Is it the agent's screen? |
 | --- | --- | --- |
-| A volee host | the host's screen, row for row | yes, and live |
-| A view open on the session | the view's screen, row for row | yes, while the view is open |
-| A multiplexer pane | what the multiplexer captured, row for row (0.12.1 read it as a replay: a run of blank rows showed as one) | yes, as of the last reading |
+| A volee host | the host's screen, row for row (since 0.17.1, a view shorter than the screen folds its runs of blank rows, and says so) | yes, and live |
+| A view open on the session | the view's screen, row for row (folded as above) | yes, while the view is open |
+| A multiplexer pane | what the multiplexer captured, row for row (0.12.1 read it as a replay: a run of blank rows showed as one; since 0.17.1, folded as above) | yes, as of the last reading |
 | A Claude Code background session, not open | the replay of `claude logs`: every row of it full size and in `volee logs`; in the preview and on the wall, a run of three blank rows or more as one row that says how many it stands for (until 0.12.3: as one blank row, in every view, without a word) | its cells and its rows, as far as measured; what a view that crops folds, it says |
 
 The plan's words were "an exact preview everywhere", with the size
@@ -273,6 +273,44 @@ session that is not open needs a client on it, which resizes it
 Not measured: the replay of a session that has run for hours against its
 screen through a client, which would resize a session someone works in.
 Earlier versions showed gaps there in what had been drawn long before.
+
+### Every screen that does not fit its view
+
+Since 0.17.1, decided on 2026-11-13.
+
+Claude Code 2.1.323, in its fullscreen renderer (its `tui` setting), draws
+the screen of an agent in a volee host the way it drew a background
+session: the conversation at the top of the terminal, the prompt and the
+status lines pinned at the bottom, and blank rows between them while the
+conversation is short. Version 2.1.322 drew the prompt right under the
+conversation. Measured on the day 2.1.323 was installed, on an agent volee
+launched (a terminal of 160 by 45) with a status line of four rows: 26
+blank rows between a one-line answer and the prompt. The preview, twelve
+rows in a terminal of 170 by 50, showed four blank rows, the prompt in its
+frame and the status lines, and nothing of the answer; so did a tile of the
+wall; and in a terminal of 80 by 24 the full-screen view showed the same,
+the answer some thirty lines above. The release gate saw it: the three
+journeys that look for an agent's answer in those views failed with
+2.1.323, and had passed with 2.1.322 on the same volee.
+
+The fold was kept to replays because a screen itself had no such gap. That
+no longer holds, and the rule is now one rule, for every source and every
+view:
+
+- A screen that fits its view is shown as it is, every blank row included.
+  The full-screen view of an agent in a volee host draws it cell for cell
+  whenever the terminal holds it, and `volee logs` prints every row.
+- A screen with more lines than its view has rows shows each run of three
+  blank rows or more as one row, in volee's own dim style, which says how
+  many rows it stands for, whatever its source: a volee host, a view on a
+  session, a multiplexer's capture, a replay. One or two blank rows stay as
+  they are.
+
+The preview and the tiles of the wall, shorter than an agent's terminal,
+fold in practice; the full-screen view folds only in a terminal too small
+for the screen. What a view leaves out, it still says, and the proof
+compares the three views of a held screen, a capture and a replay against
+that one rule (`crates/volee-tui/src/same_screen.rs`).
 
 ### A screen at rest
 

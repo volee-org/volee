@@ -11,13 +11,13 @@
 //! and a blank in reverse video at the end of a row, which is how an
 //! agent's interface draws its cursor.
 //!
-//! Three times: for an agent in a volee host, whose screen volee holds and
-//! whose views show it row for row; for a session in a multiplexer's pane,
-//! whose views show what the multiplexer captured of it, row for row too;
-//! and for a session volee reads the replay of, whose views all show that
-//! replay: its rows as they are full size, and in the views that crop a
-//! run of blank rows as one line, volee's own, which says how many rows it
-//! stands for.
+//! Three times: for an agent in a volee host, whose screen volee holds; for
+//! a session in a multiplexer's pane, whose views show what the multiplexer
+//! captured of it; and for a session volee reads the replay of, whose views
+//! show that replay. Each time, a view that holds the screen shows its rows
+//! as they are, and a view shorter than the screen, the preview or a tile,
+//! shows a run of blank rows as one line, volee's own, which says how many
+//! rows it stands for.
 
 use std::fmt::Write as _;
 
@@ -162,29 +162,20 @@ fn answer(model: &mut Model, link: u64) {
     );
 }
 
-/// The rows of the reference a view that crops shows in `height` rows: the
-/// last ones down to the last row that shows something, as they are, gaps
-/// included.
-fn cropped_rows(frame: &Frame, height: usize) -> Vec<usize> {
-    let last = frame
-        .rows
-        .iter()
-        .rposition(|row| !row.iter().all(StyledCell::shows_nothing))
-        .unwrap_or(0);
-    let first = (last + 1).saturating_sub(height);
-    (first..=last).collect()
-}
-
 /// Among the rows a view shows, what stands for a line that is volee's
 /// own: a folded run of blank rows. No row of a screen has this index.
 const FOLD: usize = usize::MAX;
 
-/// The rows of the reference a view that crops shows of a replay in
-/// `height` rows: as for a screen itself, but a run of three rows or more
-/// that show nothing is one line, which is volee's ([`FOLD`]).
-fn replayed_rows(frame: &Frame, height: usize) -> Vec<usize> {
+/// The rows of the reference a view of `height` rows shows, none of them
+/// wrapped: the last ones down to the last row that shows something. When
+/// they do not all fit, a run of three rows or more that show nothing is
+/// one line, which is volee's ([`FOLD`]).
+fn shown_rows(frame: &Frame, height: usize) -> Vec<usize> {
     let empty = |row: &Vec<StyledCell>| row.iter().all(StyledCell::shows_nothing);
     let last = frame.rows.iter().rposition(|row| !empty(row)).unwrap_or(0);
+    if last < height {
+        return (0..=last).collect();
+    }
     let mut lines: Vec<usize> = Vec::new();
     let mut index = 0;
     while index <= last {
@@ -276,7 +267,7 @@ fn views_of_a_held_screen() -> (Frame, Vec<Seen>) {
         name: "the preview",
         buffer: draw(&model),
         area,
-        rows: cropped_rows(&frame, usize::from(area.height)),
+        rows: shown_rows(&frame, usize::from(area.height)),
     };
 
     // Full size: `z`, on the same connection.
@@ -308,19 +299,14 @@ fn views_of_a_held_screen() -> (Frame, Vec<Seen>) {
         name: "the tile of the wall",
         buffer: draw(&model),
         area,
-        rows: cropped_rows(&frame, usize::from(area.height)),
+        rows: shown_rows(&frame, usize::from(area.height)),
     };
     (frame, vec![preview, full, tile])
 }
 
 /// The three views of a session volee does not host: each shows what the
-/// source read, `reading`. Of the screen, the views that crop show the rows
-/// `shown` tells for their height, and the full-screen view its last rows
-/// as they are.
-fn views_of_a_reading(
-    reading: &Reading,
-    shown: fn(&Frame, usize) -> Vec<usize>,
-) -> (Frame, Vec<Seen>) {
+/// source read, `reading`, the rows [`shown_rows`] tells for its height.
+fn views_of_a_reading(reading: &Reading) -> (Frame, Vec<Seen>) {
     // What the source read is emulated at the size its output tells, at
     // least 200 by 50: wider and taller than what it wrote, which changes
     // no cell of it.
@@ -346,7 +332,7 @@ fn views_of_a_reading(
         name: "the preview",
         buffer: draw(&model),
         area,
-        rows: shown(&frame, usize::from(area.height)),
+        rows: shown_rows(&frame, usize::from(area.height)),
     };
 
     // Full size: the same reading, its long rows wrapped. None of these
@@ -360,7 +346,7 @@ fn views_of_a_reading(
         name: "the full-screen view",
         buffer: draw(&model),
         area,
-        rows: cropped_rows(&frame, usize::from(area.height)),
+        rows: shown_rows(&frame, usize::from(area.height)),
     };
 
     key(&mut model, KeyCode::Esc);
@@ -377,23 +363,22 @@ fn views_of_a_reading(
         name: "the tile of the wall",
         buffer: draw(&model),
         area,
-        rows: shown(&frame, usize::from(area.height)),
+        rows: shown_rows(&frame, usize::from(area.height)),
     };
     (frame, vec![preview, full, tile])
 }
 
 /// How many rows that show nothing follow one another, at most, among the
-/// rows a view shows.
+/// rows a view shows, between two lines that show something: the blank rows
+/// under the last row written are no gap.
 fn longest_gap(frame: &Frame, view: &Seen) -> usize {
     let mut longest = 0;
     let mut run = 0;
     for row in &view.rows {
-        if *row == FOLD {
-            run = 0;
-        } else if frame.rows[*row].iter().all(StyledCell::shows_nothing) {
+        if *row != FOLD && frame.rows[*row].iter().all(StyledCell::shows_nothing) {
             run += 1;
-            longest = longest.max(run);
         } else {
+            longest = longest.max(run);
             run = 0;
         }
     }
@@ -529,68 +514,14 @@ fn assert_the_same(found: &Compared, views: &[Seen]) {
     assert!(found.cut[2] > 0, "wide characters cut: {:?}", found.cut);
 }
 
-#[test]
-fn a_held_screen_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wall() {
-    let (frame, views) = views_of_a_held_screen();
-    let found = compare(&frame, &views);
-    assert_the_same(&found, &views);
-    // The gap of blank rows is in every view that reaches it, as it is on
-    // the screen: the tile shows a row that only a gap separates from the
-    // row above the gap.
-    // The last row of the longest run of blank rows between rows that show
-    // something: the gap, not the lone blank row under the banner, nor the
-    // rows under the last one written.
-    let blank = |index: usize| frame.rows[index].iter().all(StyledCell::shows_nothing);
-    let end = (0..frame.rows.len())
-        .rposition(|index| !blank(index))
-        .unwrap_or(0);
-    let mut longest = (0, 0);
-    let mut run = 0;
-    for index in 0..end {
-        run = if blank(index) { run + 1 } else { 0 };
-        if run > longest.0 {
-            longest = (run, index);
-        }
-    }
-    assert!(longest.0 >= 3, "the screen has a gap of blank rows");
-    let gap = longest.1;
-    assert!(
-        views[2].rows.contains(&gap) || views[0].rows.contains(&gap),
-        "row {gap} is the gap; the preview {:?} shows rows {:?}, the tile {:?} rows {:?}",
-        views[0].area,
-        views[0].rows,
-        views[2].area,
-        views[2].rows
-    );
-}
-
-#[test]
-fn a_capture_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wall() {
-    // What a multiplexer captured of a pane is the pane's screen: the
-    // source says so, and the views show its rows as they are.
-    let reading = Reading::screen(captured(), None);
-    let (frame, views) = views_of_a_reading(&reading, cropped_rows);
-    let found = compare(&frame, &views);
-    assert_the_same(&found, &views);
-    // The blank rows of the gap are in every view, as in the pane: all
-    // five full size, and as many as fit in the views that show the
-    // screen's last rows. A reading taken for a replay would show one.
-    assert_eq!(longest_gap(&frame, &views[1]), 5, "{}", views[1].name);
-    for view in &views {
-        assert!(longest_gap(&frame, view) >= 2, "{}", view.name);
-    }
-}
-
-#[test]
-fn a_replay_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wall() {
-    let text = String::from_utf8(screen_bytes()).unwrap();
-    let (frame, views) = views_of_a_reading(&Reading::replay(text), replayed_rows);
-    let found = compare(&frame, &views);
-    assert_the_same(&found, &views);
-    // Full size, the five blank rows of the gap are shown as they are.
-    assert_eq!(longest_gap(&frame, &views[1]), 5, "{}", views[1].name);
-    // In the views that crop, the gap is one line, which says how many rows
-    // it stands for: nothing of the screen is left out without a word.
+/// The gap of five blank rows: full size, where the screen fits, its rows
+/// are shown as they are; in the preview and the tile, shorter than the
+/// screen, it is one line, which says how many rows it stands for, so that
+/// the rows above it come into sight with the prompt and nothing of the
+/// screen is left out without a word.
+#[track_caller]
+fn assert_the_gap_folds_where_the_screen_does_not_fit(frame: &Frame, views: &[Seen]) {
+    assert_eq!(longest_gap(frame, &views[1]), 5, "{}", views[1].name);
     for view in [&views[0], &views[2]] {
         let line = view
             .rows
@@ -606,6 +537,34 @@ fn a_replay_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wall() 
             "{}: {said:?}",
             view.name
         );
-        assert!(longest_gap(&frame, view) < 3, "{}", view.name);
+        assert!(longest_gap(frame, view) < 3, "{}", view.name);
     }
+}
+
+#[test]
+fn a_held_screen_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wall() {
+    let (frame, views) = views_of_a_held_screen();
+    let found = compare(&frame, &views);
+    assert_the_same(&found, &views);
+    assert_the_gap_folds_where_the_screen_does_not_fit(&frame, &views);
+}
+
+#[test]
+fn a_capture_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wall() {
+    // What a multiplexer captured of a pane is the pane's screen: the
+    // source says so, and the views show it as they show a held screen.
+    let reading = Reading::screen(captured(), None);
+    let (frame, views) = views_of_a_reading(&reading);
+    let found = compare(&frame, &views);
+    assert_the_same(&found, &views);
+    assert_the_gap_folds_where_the_screen_does_not_fit(&frame, &views);
+}
+
+#[test]
+fn a_replay_is_the_same_cell_by_cell_in_the_preview_full_size_and_on_the_wall() {
+    let text = String::from_utf8(screen_bytes()).unwrap();
+    let (frame, views) = views_of_a_reading(&Reading::replay(text));
+    let found = compare(&frame, &views);
+    assert_the_same(&found, &views);
+    assert_the_gap_folds_where_the_screen_does_not_fit(&frame, &views);
 }

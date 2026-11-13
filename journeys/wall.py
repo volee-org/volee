@@ -17,9 +17,14 @@ and the comparison only counts when the screen did not change while it was made.
 
     python3 journeys/wall.py --volee target/release/volee --sandbox ~/code/sandbox
 """
+import re
+
 from journey import Journey, answered_with, arguments, cells, cut, folded, in_order, same_tail
 
 SPELL = "Reply only with the word made of these letters, in uppercase: "
+
+# The one line of a view that is volee's own: a run of blank rows folded.
+FOLD = re.compile("\u22ef (\\d+) blank rows \u22ef")
 
 
 def selected_tile(j):
@@ -43,7 +48,8 @@ def move_to(j, name):
 
 def held_screen(j, name):
     """The agent in a volee host, whose screen volee holds: the full-screen view
-    shows it cell for cell; the preview and its tile must show its last rows."""
+    shows it cell for cell; the preview and its tile must show its last rows, a run
+    of blank rows as one row that says so when the screen is taller than they are."""
     def full():
         j.keys("z", 1.5)
         rows, width = j.frame("Screen · " + name, margin=1)
@@ -81,8 +87,9 @@ def held_screen(j, name):
 def replayed_screen(j, name):
     """The session volee does not host: its three views show what the daemon reads,
     the same replay, which `volee logs` prints whole, every row of it. Full size the
-    rows are shown as they are; the preview and the tile, which crop, show a run of
-    blank rows as one row that says how many it stands for. A view reads the screen
+    rows are shown as they are; the preview and the tile, shorter than the screen,
+    show a run of blank rows as one row that says how many it stands for. A view
+    reads the screen
     every few seconds, and a screen still changes for a while after a turn (a hint
     goes away): the screen is first left to come to rest, each view is given the time
     of a few readings to show it, and the comparison counts when the screen has not
@@ -104,9 +111,9 @@ def replayed_screen(j, name):
         if not before:
             continue
         cropped = folded(before)
-        preview, preview_width = view("Preview · " + name, 1, cropped, same_tail)
+        preview, preview_width = view("Preview · " + name, 1, before, same_tail)
         j.keys("5", 3.0)
-        tile, tile_width = view(name, 0, cropped, same_tail)
+        tile, tile_width = view(name, 0, before, same_tail)
         j.keys("q", 1.0)
         j.keys("z", 2.0)
         full, full_width = view("Screen · " + name, 1, before, in_order)
@@ -128,7 +135,7 @@ def replayed_screen(j, name):
         if view is None:
             j.check(what + " shows the session's screen", False, "no such frame on screen")
             continue
-        same, compared, difference = same_tail(view, cropped, view_width)
+        same, compared, difference = same_tail(view, before, view_width)
         j.check("{} shows the same cells as what the daemon reads, a run of blank rows "
                 "as one row that says so".format(what), same,
                 difference or "{} cells compared, in {} columns".format(compared, view_width))
@@ -139,8 +146,31 @@ def replayed_screen(j, name):
     same, compared, difference = in_order(full, before, full_width)
     j.check("the full-screen view shows the same rows, the long ones wrapped", same,
             difference or "{} cells compared, in {} columns".format(compared, full_width))
-    j.check("and folds nothing: its blank rows are the screen's",
-            not any("blank rows" in cut(row, len(row)) for row in full))
+    # What the view folds, it says, and it folds only a screen taller than itself
+    # (ADR 0028). Whether a screen with wrapped rows fits depends on how they wrap:
+    # the second check is made only of a screen none of whose rows wraps.
+    rows = [cut(row, len(row)) for row in before]
+    while rows and not rows[-1]:
+        rows.pop()
+    runs, run = set(), 0
+    for row in rows:
+        if row:
+            runs.add(run)
+            run = 0
+        else:
+            run += 1
+    said = [int(match.group(1)) for match in
+            (FOLD.search(cut(row, len(row))) for row in full) if match]
+    j.check("what the full-screen view folds, it says: each fold is a run of blank rows "
+            "of the screen", all(count in runs for count in said),
+            "folds of {} rows, the screen's runs: {}".format(said, sorted(runs - {0})))
+    if len(rows) <= len(full) and all(len(cells(row)) <= full_width for row in rows):
+        j.check("a screen that fits the full-screen view folds nothing: its blank rows "
+                "are the screen's", not said,
+                "{} rows in a view of {}".format(len(rows), len(full)))
+    else:
+        j.say("the screen does not fit the view as it is ({} rows in {}): it may fold"
+              .format(len(rows), len(full)))
 
 
 def main():

@@ -2730,7 +2730,7 @@ fn scroll_screen(model: &mut Model, action: Action) {
         live.as_deref()
             .or(model.preview.screen.as_ref())
             .map_or(0, |screen| {
-                screen.line_count(columns.saturating_sub(3), Fit::Wrap)
+                screen.line_count(columns.saturating_sub(3), rows.saturating_sub(3), Fit::Wrap)
             })
     };
     let most = lines.saturating_sub(rows.saturating_sub(3));

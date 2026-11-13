@@ -7,6 +7,13 @@
 //! addressing and its text tell (at least 200x50), and the resulting cells
 //! are drawn, cropped to the panel: the bottom of the screen stays in view,
 //! since that is where the latest output and the prompt are.
+//!
+//! An agent's interface may draw its conversation at the top of its
+//! terminal and its prompt at the bottom, as Claude Code does since 2.1.323
+//! in its fullscreen renderer: the bottom of such a screen alone would be
+//! blank rows and the prompt. A screen taller than the panel folds each run
+//! of blank rows into one line that says how many rows it stands for; a
+//! screen that fits is drawn as it is (ADR 0028).
 
 use std::ops::Range;
 
@@ -200,17 +207,17 @@ struct PreviewCell {
 /// How a screen fits rows wider than the area it is drawn in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Fit {
-    /// Each row on one line, cut at the edge: the preview, a glance at as
-    /// many rows as fit. Of a replay, a run of blank rows is one line that
-    /// says how many it stands for.
+    /// Each row on one line, cut at the edge: the preview and the tiles of
+    /// the wall, a glance at as many rows as fit.
     Crop,
     /// A row whose text goes past the edge goes on over several lines: the
-    /// full-screen view, for reading. Every row is shown.
+    /// full-screen view, for reading.
     Wrap,
 }
 
-/// How many blank rows in a row a view that crops folds into one line. Fewer
-/// are how an interface spaces what it writes, and stay as they are.
+/// How many blank rows in a row a screen taller than its view folds into one
+/// line. Fewer are how an interface spaces what it writes, and stay as they
+/// are.
 const FOLD_FROM: usize = 3;
 
 /// One line of a screen as a view draws it.
@@ -242,20 +249,14 @@ pub(crate) struct PreviewScreen {
     rows: Vec<Vec<PreviewCell>>,
     /// The last row worth showing: the cursor's or the last with text.
     anchor: u16,
-    /// Whether a view that crops folds its runs of blank rows: for the
-    /// replay of a session's output.
-    folds: bool,
 }
 
 impl PreviewScreen {
     /// What a source read of an agent's screen, run through the emulator
     /// (libghostty-vt, as everywhere in volee: ADR 0020). Its rows are kept
     /// as they are, for a screen itself, such as the capture of a
-    /// multiplexer's pane, and for a replay. A replay is what volee has of
-    /// a session whose screen it does not hold, and such a session may draw
-    /// its conversation at the top of its terminal and its prompt at the
-    /// bottom: a view that crops folds its runs of blank rows, and says so
-    /// (ADR 0028).
+    /// multiplexer's pane, and for a replay, the output of a session whose
+    /// screen volee does not hold.
     ///
     /// The emulator has the size of the terminal the output was drawn in
     /// when the source says it: the snapshot of a volee host redraws its
@@ -272,7 +273,7 @@ impl PreviewScreen {
             return Self::default();
         };
         screen.feed(reading.text.as_bytes());
-        Self::read(&mut screen, depth, !reading.exact).unwrap_or_default()
+        Self::read(&mut screen, depth).unwrap_or_default()
     }
 
     /// The cells of a screen volee holds exactly (an agent in a volee host,
@@ -280,13 +281,12 @@ impl PreviewScreen {
     /// them, so that a view that crops them shows the same cells (ADR
     /// 0028). `None` when the emulator cannot be read.
     pub(crate) fn from_emulator(screen: &mut Screen, depth: ColorDepth) -> Option<Self> {
-        Self::read(screen, depth, false)
+        Self::read(screen, depth)
     }
 
     /// Reads the emulator's cells. Each row keeps its cells down to the
-    /// last one that shows something. A `replay` is marked as one: its rows
-    /// are the same, and a view that crops folds its runs of blank rows.
-    fn read(screen: &mut Screen, depth: ColorDepth, replay: bool) -> Option<Self> {
+    /// last one that shows something.
+    fn read(screen: &mut Screen, depth: ColorDepth) -> Option<Self> {
         let frame = screen.frame().ok()?;
         let height = frame.rows.len();
         if height == 0 {
@@ -323,18 +323,18 @@ impl PreviewScreen {
         Some(Self {
             rows: parsed,
             anchor: u16::try_from(anchor).unwrap_or(u16::MAX),
-            folds: replay,
         })
     }
 
-    /// How many lines the screen takes in `width` columns (see
-    /// [`Self::lines`]).
-    pub(crate) fn line_count(&self, width: u16, fit: Fit) -> u16 {
-        u16::try_from(self.lines(width, fit).len()).unwrap_or(u16::MAX)
+    /// How many lines the screen takes in a view of `width` columns and
+    /// `height` rows (see [`Self::lines`]).
+    pub(crate) fn line_count(&self, width: u16, height: u16, fit: Fit) -> u16 {
+        u16::try_from(self.lines(width, height, fit).len()).unwrap_or(u16::MAX)
     }
 
-    /// The lines the screen takes in `width` columns, down to its last row
-    /// worth showing, each as a row and a range of its cells. With
+    /// The lines the screen takes in a view of `width` columns and `height`
+    /// rows, down to its last row worth showing, each as a row and a range
+    /// of its cells. With
     /// [`Fit::Wrap`], a row with text past `width` goes on over as many
     /// lines as it needs, never inside a wide character. A line ends after
     /// its last blank, between two words, when that keeps at least half of
@@ -343,15 +343,25 @@ impl PreviewScreen {
     /// as the padding of a diff line or the right side of a frame, does not
     /// count: such a row stays one line, cut at the edge.
     ///
-    /// With [`Fit::Crop`], a run of blank rows of a replay is one line
-    /// ([`Line::Fold`]): a session volee does not hold may draw its
+    /// A screen with more lines than the view has rows folds each run of
+    /// blank rows into one line ([`Line::Fold`]) that says how many rows it
+    /// stands for, whatever its source: an agent's interface may draw its
     /// conversation at the top of its terminal and its prompt at the
-    /// bottom, and the last rows of its screen would be blank rows.
-    fn lines(&self, width: u16, fit: Fit) -> Vec<Line> {
+    /// bottom, and the last rows alone would be blank rows and the prompt.
+    /// A screen that fits is shown as it is, every blank row included.
+    fn lines(&self, width: u16, height: u16, fit: Fit) -> Vec<Line> {
+        let lines = self.lay_out(width, fit, false);
+        if lines.len() <= usize::from(height) {
+            return lines;
+        }
+        self.lay_out(width, fit, true)
+    }
+
+    /// The lines of [`Self::lines`], each run of blank rows folded or not.
+    fn lay_out(&self, width: u16, fit: Fit, fold: bool) -> Vec<Line> {
         let width = usize::from(width.max(1));
         let mut lines = Vec::new();
         let shown = usize::from(self.anchor) + 1;
-        let fold = self.folds && fit == Fit::Crop;
         // The first row after a folded run.
         let mut after_fold = 0;
         for (row, cells) in self.rows.iter().enumerate().take(shown) {
@@ -412,7 +422,8 @@ impl PreviewScreen {
     }
 
     /// Draws the screen in `area`, bottom-anchored, `scroll` lines up, rows
-    /// wider than the area fitted as `fit` says.
+    /// wider than the area fitted as `fit` says, runs of blank rows folded
+    /// when the screen is taller than the area.
     pub(crate) fn render(
         &self,
         area: Rect,
@@ -422,7 +433,7 @@ impl PreviewScreen {
         theme: &Theme,
     ) {
         let base = theme.style(StyleRole::Text);
-        let lines = self.lines(area.width, fit);
+        let lines = self.lines(area.width, area.height, fit);
         // The first line stays in sight however far the screen is scrolled.
         let bottom = lines
             .len()
@@ -603,28 +614,30 @@ mod tests {
     }
 
     #[test]
-    fn a_capture_and_a_replay_keep_their_rows_and_only_a_replay_folds() {
+    fn a_capture_and_a_replay_keep_their_rows_and_fold_alike_when_they_do_not_fit() {
         // Rows placed with cursor moves, as a multiplexer's capture comes.
         let output = "\x1b[1;1Hfirst\x1b[5;1Hfifth\x1b[6;1Hsixth";
         let capture = PreviewScreen::of(&Reading::screen(output, None), ColorDepth::TrueColor);
         assert_eq!(capture.text()[..6], ["first", "", "", "", "fifth", "sixth"]);
         assert_eq!(capture.anchor, 5);
-        assert_eq!(capture.line_count(40, Fit::Crop), 6);
-        // Read as a replay, the rows are the same. A view that crops folds
-        // the run; full size, every row is shown.
+        // Read as a replay, the rows are the same.
         let replay = PreviewScreen::of(&Reading::replay(output), ColorDepth::TrueColor);
         assert_eq!(replay.text(), capture.text());
         assert_eq!(replay.anchor, 5);
-        assert_eq!(
-            replay.lines(40, Fit::Crop),
-            [
-                Line::Cells(0, 0..5),
-                Line::Fold(3),
-                Line::Cells(4, 0..5),
-                Line::Cells(5, 0..5),
-            ]
-        );
-        assert_eq!(replay.line_count(40, Fit::Wrap), 6);
+        let folded = [
+            Line::Cells(0, 0..5),
+            Line::Fold(3),
+            Line::Cells(4, 0..5),
+            Line::Cells(5, 0..5),
+        ];
+        for screen in [&capture, &replay] {
+            for fit in [Fit::Crop, Fit::Wrap] {
+                // In a view of six rows, the six rows show as they are.
+                assert_eq!(screen.line_count(40, 6, fit), 6);
+                // In a view of five, the run of blank rows is one line.
+                assert_eq!(screen.lines(40, 5, fit), folded);
+            }
+        }
         // `volee logs` prints every row of both.
         assert_eq!(
             screen_text(&Reading::screen(output, None)),
@@ -738,10 +751,10 @@ mod tests {
     }
 
     #[test]
-    fn a_view_that_crops_folds_a_run_of_blank_rows_of_a_replay_and_says_so() {
-        // A background session's screen as its replay draws it: the
-        // conversation at the top of its terminal, the status line at the
-        // bottom, and blank rows between them.
+    fn a_screen_taller_than_its_view_folds_its_runs_of_blank_rows_and_says_so() {
+        // A screen as Claude Code draws it in its fullscreen renderer, here
+        // a background session's replay: the conversation at the top of its
+        // terminal, the status line at the bottom, and blank rows between.
         let output = "\x1b[1;1Hfirst\x1b[3;1Hsecond\x1b[40;1Hlast\x1b[73;1H18%\x1b[69;3H";
         let screen = PreviewScreen::parse(output, ColorDepth::TrueColor);
         // Its rows are the screen's, and `volee logs` prints them all.
@@ -753,19 +766,19 @@ mod tests {
         );
         assert_eq!(screen_text(&output.into()).lines().count(), 73);
 
-        // A view that crops: one blank row stays, a run becomes one line.
-        assert_eq!(
-            screen.lines(40, Fit::Crop),
-            [
-                Line::Cells(0, 0..5),
-                Line::Cells(1, 0..0),
-                Line::Cells(2, 0..6),
-                Line::Fold(36),
-                Line::Cells(39, 0..4),
-                Line::Fold(32),
-                Line::Cells(72, 0..3),
-            ]
-        );
+        // In a view too short for its 73 rows, one blank row stays and a run
+        // becomes one line, in the preview as in the full-screen view.
+        let folded = [
+            Line::Cells(0, 0..5),
+            Line::Cells(1, 0..0),
+            Line::Cells(2, 0..6),
+            Line::Fold(36),
+            Line::Cells(39, 0..4),
+            Line::Fold(32),
+            Line::Cells(72, 0..3),
+        ];
+        assert_eq!(screen.lines(40, 3, Fit::Crop), folded);
+        assert_eq!(screen.lines(40, 72, Fit::Wrap), folded);
         let area = Rect::new(0, 0, 24, 3);
         let mut buf = Buffer::empty(area);
         screen.render(area, &mut buf, 0, Fit::Crop, &Theme::default());
@@ -776,42 +789,63 @@ mod tests {
         // The line that is volee's own is not drawn as the agent's text.
         assert_ne!(buf[(0, 1)].style(), buf[(0, 0)].style());
 
-        // Full size, every row is shown: the 32 blank rows are there.
-        assert_eq!(screen.line_count(40, Fit::Wrap), 73);
+        // In a view that holds the 73 rows, every row is shown: the 32 blank
+        // rows are there.
+        assert_eq!(screen.line_count(40, 73, Fit::Wrap), 73);
+        let area = Rect::new(0, 0, 24, 73);
+        let mut buf = Buffer::empty(area);
+        screen.render(area, &mut buf, 0, Fit::Wrap, &Theme::default());
+        assert_eq!(drawn(&buf, 39), "last");
+        assert!((40..72).all(|y| drawn(&buf, y).is_empty()));
+        assert_eq!(drawn(&buf, 72), "18%");
+
+        // In a full-screen view too short for them, the conversation and the
+        // status line show together, from the first row.
         let area = Rect::new(0, 0, 24, 34);
         let mut buf = Buffer::empty(area);
         screen.render(area, &mut buf, 0, Fit::Wrap, &Theme::default());
-        assert_eq!(drawn(&buf, 0), "last");
-        assert!((1..33).all(|y| drawn(&buf, y).is_empty()));
-        assert_eq!(drawn(&buf, 33), "18%");
+        assert_eq!(
+            (0..8).map(|y| drawn(&buf, y)).collect::<Vec<_>>(),
+            [
+                "first",
+                "",
+                "second",
+                "\u{22ef} 36 blank rows \u{22ef}",
+                "last",
+                "\u{22ef} 32 blank rows \u{22ef}",
+                "18%",
+                "",
+            ]
+        );
     }
 
     #[test]
-    fn two_blank_rows_are_spacing_and_a_screen_itself_never_folds() {
+    fn two_blank_rows_are_spacing_and_a_screen_that_fits_never_folds() {
         let output = "\x1b[1;1Hfirst\x1b[4;1Hfourth\x1b[8;1Height";
-        // A replay: two blank rows stay as they are, three fold.
-        let replay = PreviewScreen::parse(output, ColorDepth::TrueColor);
-        assert_eq!(
-            replay.lines(40, Fit::Crop),
-            [
-                Line::Cells(0, 0..5),
-                Line::Cells(1, 0..0),
-                Line::Cells(2, 0..0),
-                Line::Cells(3, 0..6),
-                Line::Fold(3),
-                Line::Cells(7, 0..5),
-            ]
-        );
-        // The same output as a screen itself, a capture or a host's
-        // snapshot: row for row in every view.
-        let screen = PreviewScreen::of(&Reading::screen(output, None), ColorDepth::TrueColor);
-        assert_eq!(screen.line_count(40, Fit::Crop), 8);
-        assert!(
-            screen
-                .lines(40, Fit::Crop)
-                .iter()
-                .all(|line| matches!(line, Line::Cells(..)))
-        );
+        // A replay, or a screen itself, a capture or a host's snapshot: in a
+        // view too short for its eight rows, two blank rows stay as they
+        // are and three fold; in a view of eight rows, every row shows.
+        for reading in [Reading::replay(output), Reading::screen(output, None)] {
+            let screen = PreviewScreen::of(&reading, ColorDepth::TrueColor);
+            assert_eq!(
+                screen.lines(40, 7, Fit::Crop),
+                [
+                    Line::Cells(0, 0..5),
+                    Line::Cells(1, 0..0),
+                    Line::Cells(2, 0..0),
+                    Line::Cells(3, 0..6),
+                    Line::Fold(3),
+                    Line::Cells(7, 0..5),
+                ]
+            );
+            assert_eq!(screen.line_count(40, 8, Fit::Crop), 8);
+            assert!(
+                screen
+                    .lines(40, 8, Fit::Crop)
+                    .iter()
+                    .all(|line| matches!(line, Line::Cells(..)))
+            );
+        }
     }
 
     #[test]
@@ -825,9 +859,9 @@ mod tests {
             "\u{2500}".repeat(15),
         );
         let screen = PreviewScreen::parse(&output, ColorDepth::TrueColor);
-        assert_eq!(screen.line_count(10, Fit::Wrap), 7);
-        assert_eq!(screen.line_count(20, Fit::Wrap), 5);
-        assert_eq!(screen.line_count(10, Fit::Crop), 5);
+        assert_eq!(screen.line_count(10, 40, Fit::Wrap), 7);
+        assert_eq!(screen.line_count(20, 40, Fit::Wrap), 5);
+        assert_eq!(screen.line_count(10, 40, Fit::Crop), 5);
         let area = Rect::new(0, 0, 10, 7);
         let mut buf = Buffer::empty(area);
         screen.render(area, &mut buf, 0, Fit::Wrap, &Theme::default());
@@ -861,7 +895,7 @@ mod tests {
             "hello world again\r\na bcdefghijklmnop",
             ColorDepth::TrueColor,
         );
-        assert_eq!(screen.line_count(10, Fit::Wrap), 5);
+        assert_eq!(screen.line_count(10, 40, Fit::Wrap), 5);
         let area = Rect::new(0, 0, 10, 5);
         let mut buf = Buffer::empty(area);
         screen.render(area, &mut buf, 0, Fit::Wrap, &Theme::default());
