@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explore-handlers     ││                                       ▸ tower                                      │"
 "│ x   │ └ ▸ explore-traces  39 s ││                     ┌─────────────────┘┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈•                          │"
 "│ r   └ ▸ trace-search    11 min ││                     │                                   ┊                          │"
-"│ TERMINALS                      ││                     · invoicing                         · latency-audit            │"
+"│ BY HAND                        ││                     · invoicing                         · latency-audit            │"
 "│ i · infra               25 min ││   •┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈└┐┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈•                •┈ ▸ trace-gateway         │"
 "│ BACKGROUND                     ││   ┊                  │                 ┊                ┊  ├─ ▸ explore-handlers   │"
 "│ b ▸ broken-links        18 min ││   ! invoice-schema   ! invoice-tools   ✓ invoice-page   ┊  └─ ▸ explore-traces     │"

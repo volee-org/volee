@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explore-handlers     ││              │                                         ┊                           │"
 "│ x   │ └ ▸ explore-traces  39 s ││  ╭─ invoicing ──────────╮                  ╭─ latency-audit ──────╮                │"
 "│ r   └ ▸ trace-search    11 min ││  │  IDLE  14 min        │                  │  IDLE  12 min        │                │"
-"│ TERMINALS                      ││  ╰┬─────────────────────╯                  ╰───────────┬──────────╯                │"
+"│ BY HAND                        ││  ╰┬─────────────────────╯                  ╰───────────┬──────────╯                │"
 "│ i · infra               25 min ││   │ ┏━ invoice-schema ━━━━━┓              ••┈┈┈┈┈•┈┈┈┈┈•┈┈┈┈┈•┈┈┈┈┈••              │"
 "│ ╭ Changes · invoice-page · full patch ─────────────────────────────────────────────────────────────────────────────╮ │"
 "│ │ diff --git a/src/invoice_page.rs b/src/invoice_page.rs                                                           │ │"

@@ -15,7 +15,7 @@ expression: cards
 "│ e   │ ├ ▸ explore-handlers     ││             ╭─ tower ────────── ⠹ ─╮     ▶┃  NEEDS YOU  1 min    ┃                 │"
 "│ x   │ └ ▸ explore-traces  39 s ││             │  WORKING  24 min     │      ┗━━━━━━━━━━━━━━━━━━━━━━┛                 │"
 "│ r   └ ▸ trace-search    11 min ││             ╰──────────────────────╯        ◇ volee     ⠹⣆ ╭─ infra ──────────────╮│"
-"│ TERMINALS                      ││                         ⠰                        ⠉⠛⠶⣤⣀⡀  ⠘⣧│  IDLE  25 min        ││"
+"│ BY HAND                        ││                         ⠰                        ⠉⠛⠶⣤⣀⡀  ⠘⣧│  IDLE  25 min        ││"
 "│ i · infra               25 min ││                         ⠰                            ⠉⠙⠳⢦⣄?╰──────────────────────╯│"
 "│ BACKGROUND                     ││              ╭─ latency-audit ──────╮                    ?◉ you⠁                   │"
 "│ b ▸ broken-links        18 min ││              │  IDLE  12 min        │                ⣀⣤⠶╭─ broken-links ─── ⠹ ─╮   │"

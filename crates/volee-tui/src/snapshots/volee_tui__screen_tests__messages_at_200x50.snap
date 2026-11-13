@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explore-│   alert · volee: invoice-tools waits for a person: sh… │ Reviewed: I am merging it now.                                                                      │                   │"
 "│ x   │ └ ▸ explore-│ ● volee                                          7 min │                                                                                                     │                   │"
 "│ r   └ ▸ trace-sear│   alert · volee: explore-traces stopped with a messag… │ ● broken-links → you · question · 7 min ago                                                         │                   │"
-"│ TERMINALS         │   ◆ Latency audit                               11 min │ The docs link to /billing/invoices. Is that the final URL of the new invoices page?                 │                   │"
+"│ BY HAND           │   ◆ Latency audit                               11 min │ The docs link to /billing/invoices. Is that the final URL of the new invoices page?                 │                   │"
 "│ i · infra         │   contract · latency-audit: Read-only audit: find whe… │                                                                                                     │                   │"
 "│ BACKGROUND        │                                                        │ you → broken-links · answer · 7 min ago                                                             │                   │"
 "│ b ▸ broken-links  │                                                        │ It is /invoices; /billing/invoices redirects there.                                                 │                   │"

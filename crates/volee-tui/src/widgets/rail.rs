@@ -8,7 +8,7 @@
 //! │▌t ▸ tower            24 min │
 //! │ n ├─ · invoicing     14 min │
 //! │ s │  ├─ ! invoice-s…  2 min │
-//! │ TERMINALS                   │
+//! │ BY HAND                     │
 //! │ i · infra            25 min │
 //! ```
 
