@@ -82,9 +82,9 @@ def cut(row, width):
 
 
 def folded(rows):
-    """A screen, given as rows of cells, as a view that crops shows it when volee
-    reads it from a replay: a run of three blank rows or more is one row, volee's
-    own, which says how many rows it stands for."""
+    """A screen, given as rows of cells, as a view too short for it shows it: a run
+    of three blank rows or more is one row, volee's own, which says how many rows it
+    stands for."""
     out, run = [], 0
     for row in list(rows) + [None]:
         if row is not None and not cut(row, len(row)):
@@ -100,14 +100,26 @@ def folded(rows):
     return out
 
 
+def as_shown(rows, height):
+    """A screen, given as rows of cells, as a view of `height` rows shows it, down to
+    its last row that shows something (ADR 0028): as it is when that fits, and
+    otherwise `folded`, whatever the screen's source."""
+    rows = list(rows)
+    while rows and not cut(rows[-1], len(rows[-1])):
+        rows.pop()
+    return rows if len(rows) <= height else folded(rows)
+
+
 def same_tail(view, reference, width):
     """Whether a view that crops a screen shows its last rows, each cut at `width`:
-    cell for cell, as far as text tells. `view` and `reference` are rows of cells.
-    Returns whether it does, how many cells were compared, and the first difference."""
+    cell for cell, as far as text tells, the screen folded as the view's height asks
+    (`as_shown`). `view` and `reference` are rows of cells. Returns whether it does,
+    how many cells were compared, and the first difference."""
+    height = len(view)
     shown = [cut(row, width) for row in view]
     while shown and not shown[-1]:
         shown.pop()
-    wanted = [cut(row, width) for row in reference]
+    wanted = [cut(row, width) for row in as_shown(reference, height)]
     while wanted and not wanted[-1]:
         wanted.pop()
     if not shown or len(shown) > len(wanted):

@@ -129,7 +129,7 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   live, status line and prompt frame included, drawn at the agent's own
   size: looking at an agent never resizes it. The preview, the full-screen
   view and the agent's tile on the wall show the same cells of that screen,
-  its cursor and its blank rows included. The bottom of the screen,
+  its cursor included. The bottom of the screen,
   where the latest output is, stays in view; scroll it with `j` and `k` when
   the panel has the keyboard. Lines wider than the panel are cut at its
   edge. `z` shows that screen full size, its
@@ -147,13 +147,17 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   `claude logs`, which keeps only the session's recent output: in a session
   that has run for hours, parts of the screen drawn long ago and never
   redrawn since, such as a list that has not changed, can show gaps. A
-  recent session shows whole. A background session draws its conversation
-  at the top of its terminal and its prompt at the bottom: so that the end
-  of the conversation stays in view, the preview and the wall show a run
-  of three blank rows or more as one dim row that says how many it stands
-  for (`⋯ 12 blank rows ⋯`). `z` shows every row of the screen, and
-  [opening](#edit-mode-typing-into-an-agent) the session (`enter`) shows
-  it live.
+  recent session shows whole, and
+  [opening](#edit-mode-typing-into-an-agent) it (`enter`) shows it live.
+  Claude Code may draw its conversation at the top of its terminal and its
+  prompt at the bottom, with blank rows between them (a background
+  session, and since Claude Code 2.1.323 any session in its fullscreen
+  renderer). So that the end of the conversation stays in view, a screen
+  taller than the view shows a run of three blank rows or more as one dim
+  row that says how many it stands for (`⋯ 12 blank rows ⋯`): the preview
+  and the wall, and `z` in a terminal too small for the screen. A screen
+  that fits is shown as it is, every blank row included, and `volee logs`
+  prints every row.
 - **Status line.** One line at the bottom, in the manner of vim's. At its
   left, the mode the keyboard is in: `VOLEE` while your keys drive volee,
   `EDIT` in the agent's color while they go to an agent (with its name and
