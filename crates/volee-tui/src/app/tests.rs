@@ -2081,11 +2081,7 @@ fn small_screens_put_other_views_next_to_the_list() {
 #[test]
 fn sessions_nobody_launched_group_by_whether_they_have_a_window() {
     let model = model(120, 40);
-    let mut agent = model
-        .registry
-        .agent(id(INFRA))
-        .unwrap()
-        .clone();
+    let mut agent = model.registry.agent(id(INFRA)).unwrap().clone();
     let group = |agent: &Agent| rail_group(agent).1;
     for (location, expected) in [
         (Location::Terminal, "BY HAND"),
