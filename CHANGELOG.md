@@ -12,6 +12,7 @@ see [RELEASING.md](RELEASING.md).
 ### Fixed
 
 - **tui**: Group the agents nobody launched by whether they have a window, by hand or in the background ([#174](https://github.com/volee-org/volee/pull/174))
+- **tui**: Fold the blank rows of every screen taller than its view, so that the preview shows an agent's answer again with Claude Code 2.1.323 ([#176](https://github.com/volee-org/volee/pull/176))
 
 ### Documentation
 
