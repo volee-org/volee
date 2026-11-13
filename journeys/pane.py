@@ -11,7 +11,7 @@ the row stays the same row. Quit, the session leaves the list.
 In between, the proof asked of the one terminal component (ADR 0028), for a pane:
 what tuios captures of the pane is the pane's screen, and the preview, the tile of
 the wall, the full-screen view and `volee logs` must show it row for row, blank
-rows included: the pane's input box is left holding two marks with four blank rows
+rows included: the pane's input box is left holding two marks with two blank rows
 between them. The reference is the pane's screen as tuios itself gives it, which
 volee has no part in. A capture tells the characters, not the colors (a test
 compares those).
@@ -28,11 +28,16 @@ PANE = "agent"
 # nothing, and nothing is asked of the model.
 LEFT = "left-here-42"
 
-# Two marks typed in the pane's input box and left there, with five line feeds
-# between them: the box then holds four blank rows. As for LEFT, the screen changes,
-# the agent does nothing, and nothing is asked of the model.
+# Two marks typed in the pane's input box and left there, with three line feeds
+# between them: the box then holds two blank rows. As for LEFT, the screen changes,
+# the agent does nothing, and nothing is asked of the model. Not more: since Claude
+# Code 2.1.323, the box keeps a status line of several rows on screen by scrolling a
+# longer prompt inside itself, and in this pane it shows four rows of it (with five
+# line feeds, the first mark scrolled out of sight). Two blank rows are enough to
+# tell a view that shows them from one that counts them as one, and fewer than a
+# view folds (ADR 0028).
 TOP, END = "top-42", "end-42"
-FEEDS = 5
+FEEDS = 3
 
 
 def gap(rows):
