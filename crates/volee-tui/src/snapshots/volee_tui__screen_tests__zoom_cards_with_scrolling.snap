@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explore-handlers     ││   │ ┃ sonnet               ┃  ╭─ trace-gateway ── ⠹ ─╮  ╭─ trace-search ─── ⠹ ─╮   │"
 "│ x   │ └ ▸ explore-traces  39 s ││   │ ┃ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ ┃  │ gateway › audit/p95… │  │ search › audit/p95-… │   │"
 "│ r   └ ▸ trace-search    11 min ││   │ ┃ ctx ▰▰▰▰▰▰▰▰▰▱▱ 73%  ┃  │ sonnet · ◆ 2         │  │ haiku                │   │"
-"│ TERMINALS                      ││   │ ┃ ! Bash: bun run db:… ┃  │ ▆▄▆▄▂▄▅▇▅▄▅▄▄▃▅▇▃▄▄▂ │  │ ▃▅▅▄▅▇▅▅▇▅▅▅▃▂▆▃▄▄▃▂ │   │"
+"│ BY HAND                        ││   │ ┃ ! Bash: bun run db:… ┃  │ ▆▄▆▄▂▄▅▇▅▄▅▄▄▃▅▇▃▄▄▂ │  │ ▃▅▅▄▅▇▅▅▇▅▅▅▃▂▆▃▄▄▃▂ │   │"
 "│ i · infra               25 min ││   │ ┃ +214 −12   2 commits ┃  │ ctx ▰▰▰▱▱▱▱▱▱▱▱ 26%  │  │ ctx ▰▰▰▱▱▱▱▱▱▱▱ 24%  │   │"
 "│ BACKGROUND                     ││   │ ┃  NEEDS YOU  2 min    ┃  │ ⠹ Read src/middlewa… │  │ ⠹ Read benches/resu… │   │"
 "│ b ▸ broken-links        18 min ││   │ ┗━━━━━━━━━━━━━━━━━━━━━━┛  │ no changes           │  │ no changes           │   │"

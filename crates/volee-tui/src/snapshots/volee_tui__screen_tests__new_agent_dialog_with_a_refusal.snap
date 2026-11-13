@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explor╭ New agent ───────────────────────────────────────────────────────────────────────╮                 │"
 "│ x   │ └ ▸ explor│ repository    billing    dashboard    gateway    mcp-server    platform  ›       │╮                │"
 "│ r   └ ▸ trace-se│                                                                                  ││                │"
-"│ TERMINALS       │ branch       feat/invoice-export                                                 │╯                │"
+"│ BY HAND         │ branch       feat/invoice-export                                                 │╯                │"
 "│ i · infra       │                                                                                  │┈••              │"
 "│ BACKGROUND      │ task         Export invoices as CSV, one file per month.                         │  ┊              │"
 "│ b ▸ broken-links│              Keep amounts in cents.                                              │earch ─── ⠹ ─╮   │"

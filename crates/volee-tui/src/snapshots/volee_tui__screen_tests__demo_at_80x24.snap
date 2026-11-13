@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explore-handlers 6 min ││ delivery 1 commit · pushed               │"
 "│ x   │ └ ▸ explore-traces    39 s ││ last     Bash bun test tools · 1 min ago │"
 "│ r   └ ▸ trace-search      11 min │╰──────────────────────────────────────────╯"
-"│ TERMINALS                        │╭ Preview · invoice-tools ─────────────────╮"
+"│ BY HAND                          │╭ Preview · invoice-tools ─────────────────╮"
 "│ i · infra                 25 min ││   Should create_invoice accept a draft fl│"
 "│ BACKGROUND                       ││   I also sent it to your inbox.          │"
 "│ b ▸ broken-links          18 min ││                                          │"

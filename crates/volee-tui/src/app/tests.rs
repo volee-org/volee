@@ -2077,3 +2077,25 @@ fn small_screens_put_other_views_next_to_the_list() {
     assert_eq!(model.layout.mode, Mode::Narrow);
     assert_eq!(model.focus, Pane::Rail, "the hierarchy lives in the list");
 }
+
+#[test]
+fn sessions_nobody_launched_group_by_whether_they_have_a_window() {
+    let model = model(120, 40);
+    let mut agent = model.registry.agent(id(INFRA)).unwrap().clone();
+    let group = |agent: &Agent| rail_group(agent).1;
+    for (location, expected) in [
+        (Location::Terminal, "BY HAND"),
+        (
+            Location::Pane {
+                multiplexer: "tuios".into(),
+                target: "work:2".into(),
+            },
+            "BY HAND",
+        ),
+        (Location::Background, "BACKGROUND"),
+        (Location::Host { id: "h1".into() }, "BACKGROUND"),
+    ] {
+        agent.location = location;
+        assert_eq!(group(&agent), expected, "{:?}", agent.location);
+    }
+}

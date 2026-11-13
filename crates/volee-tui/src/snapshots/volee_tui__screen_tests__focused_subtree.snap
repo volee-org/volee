@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explore-handlers     ││                            ┃  IDLE  14 min            ┃                            │"
 "│ x   │ └ ▸ explore-traces  39 s ││                            ┗━━━━━━━━━━━━━┯━━━━━━━━━━━━┛                            │"
 "│ r   └ ▸ trace-search    11 min ││                •┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈•┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈•               │"
-"│ TERMINALS                      ││                ┊                         ┊                         ┊               │"
+"│ BY HAND                        ││                ┊                         ┊                         ┊               │"
 "│ i · infra               25 min ││    ┏━ invoice-schema ━━━━━┓  ┏━ invoice-tools ━━━━━━┓  ╭─ invoice-page ───────╮    │"
 "│ BACKGROUND                     ││    ┃ billing › feat/invo… ┃  ┃ mcp-server › feat/i… ┃  │ dashboard › feat/in… │    │"
 "│ b ▸ broken-links        18 min ││    ┃ sonnet               ┃  ┃ sonnet               ┃  │ sonnet               │    │"

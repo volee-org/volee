@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explore-handlers 6 min ││       e ▸ explore-handlers · subagent · ◆ Latency audit                                                                                  ││                      │"
 "│ x   │ └ ▸ explore-traces    39 s ││       x ▸ explore-traces · subagent · ◆ Latency audit                                                                                    ││                      │"
 "│ r   └ ▸ trace-search      11 min ││                                                                                                                                          ││                      │"
-"│ TERMINALS                        ││ infra › chore/load-balancer from main  /home/dev/code/infra-lb                                                                   1 agent ││                      │"
+"│ BY HAND                          ││ infra › chore/load-balancer from main  /home/dev/code/infra-lb                                                                   1 agent ││                      │"
 "│ i · infra                 25 min ││     i · infra  pushed · PR #12 merged ✓ checks                                                                                           ││                      │"
 "│ BACKGROUND                       ││                                                                                                                                          ││                      │"
 "│ b ▸ broken-links          18 min ││ mcp-server › feat/invoice-tools from main  /home/dev/code/mcp-server/.claude/worktrees/feat-invoice-tools                        1 agent ││                      │"

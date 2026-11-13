@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explore-handlers 6 min ││                                                               ╭─ tower ────────── ⠹ ─╮                                                   ││                      │"
 "│ x   │ └ ▸ explore-traces    39 s ││                                                               │  WORKING  24 min     │                                                   ││                      │"
 "│ r   └ ▸ trace-search      11 min ││                                                               ╰───────────┬──────────╯                                                   ││                      │"
-"│ TERMINALS                        ││                                           ┌───────────────────────────────┘┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈•                             ││                      │"
+"│ BY HAND                          ││                                           ┌───────────────────────────────┘┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈•                             ││                      │"
 "│ i · infra                 25 min ││                                           │                                                                ┊                             ││                      │"
 "│ BACKGROUND                       ││                               ╭─ invoicing ──────────╮                                         ╭─ latency-audit ──────╮                  ││                      │"
 "│ b ▸ broken-links          18 min ││                               │  IDLE  14 min        │                                         │  IDLE  12 min        │                  ││                      │"

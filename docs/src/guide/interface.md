@@ -66,7 +66,7 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
 │ n ├ · invoicing  14 min ││                 ╰──────────────┬──────────────╯            ││ ! invoice-schema         │
 │ s │ ├ ! invoice-…  2 min││      ┌─────────────────────────┴─────────────────┐         ││   Bash: bun run db:migra…│
 │▌v │ ├ ! invoice-…  1 min││ ╭─ invoicing ────────╮               ╭─ latency-audit ────╮  │╰──────────────────────────╯
-│ TERMINALS               ││ │ ◆ Invoicing · chan…│               │ ◆ Latency audit …  │  │╭ Journal ─────────────────╮
+│ BY HAND                 ││ │ ◆ Invoicing · chan…│               │ ◆ Latency audit …  │  │╭ Journal ─────────────────╮
 │ i · infra        25 min ││ ╰────────────────────╯               ╰────────────────────╯  ││  2 min invoice-schema ! …│
 ╰─────────────────────────╯│   (the workers' cards, side by side)                       ││  1 min invoice-tools ? y…│
 ╭ Detail ─────────────────╮│                                                            ││  40 s trace-gateway → e… │
@@ -89,8 +89,9 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   keeps the first counters only.
 - **Agents.** Every agent, one row each, its tree under its root, the roots
   grouped by kind: **LEADS**, **MISSIONS** (missions you started without a
-  lead), **TERMINALS** (sessions in a terminal, a multiplexer pane or a
-  volee host) and **BACKGROUND** (Claude Code background sessions), the
+  lead), **BY HAND** (sessions you started in a terminal tab or a tuios or
+  tmux pane) and **BACKGROUND** (what runs with no window: Claude Code
+  background sessions, and agents in a volee host), the
   most urgent first in each group. Each row shows the agent's jump letter,
   its place in its tree, its state, its name in its color, and how long it
   has been in that state when the name leaves room for it. volee opens on

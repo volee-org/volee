@@ -330,13 +330,18 @@ pub(crate) enum RailOrder {
 }
 
 /// The group of the agents list a tree goes in, by its root: its order
-/// and its title.
-fn rail_group(root: &Agent) -> (u8, &'static str) {
+/// and its title. A session nobody launched goes by whether it has a window
+/// of its own: one you started by hand in a terminal tab or a multiplexer
+/// pane, or one that runs with none, a Claude Code background session or
+/// an agent in a volee host.
+pub(crate) fn rail_group(root: &Agent) -> (u8, &'static str) {
     match root.role {
         Role::Lead => (0, "LEADS"),
         Role::Coordinator | Role::Worker | Role::Subagent => (1, "MISSIONS"),
-        Role::Independent if root.location == Location::Background => (3, "BACKGROUND"),
-        Role::Independent => (2, "TERMINALS"),
+        Role::Independent => match root.location {
+            Location::Background | Location::Host { .. } => (3, "BACKGROUND"),
+            Location::Pane { .. } | Location::Terminal | Location::Unknown => (2, "BY HAND"),
+        },
     }
 }
 

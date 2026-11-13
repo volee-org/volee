@@ -15,7 +15,7 @@ expression: dots
 "│ e   │ ├ ▸ explore-handlers     ││                    ⢀ ⠤ ⠊                    ⠙⢦⡀           ⢸⡇                       │"
 "│ x   │ └ ▸ explore-traces  39 s ││                  ▸t⠁                        ◇ volee       ⠘⣧                       │"
 "│ r   └ ▸ trace-search    11 min ││                  ⠆                              ⠈⠙⠶⣄⡀      ⣿                       │"
-"│ TERMINALS                      ││                  ⠰                                 ⠈⠙⠳⣤⣀   ⢸⡇             ⢀⣀⣀⣠⣤⣤⠶·i│"
+"│ BY HAND                        ││                  ⠰                                 ⠈⠙⠳⣤⣀   ⢸⡇             ⢀⣀⣀⣠⣤⣤⠶·i│"
 "│ i · infra               25 min ││                  ⠰                                     ⠉⠳⢦⣀⠘?   ⣀⣀⣀⣤⣤⡴⠶⠶⠛⠛⠋⠉⠉⠁     │"
 "│ BACKGROUND                     ││                  ⠰                                       ?◉ you⣛⠉⠉⠉                │"
 "│ b ▸ broken-links        18 min ││                  ⠐⠄                                 ⢀⣠⣤⠶⠛⠋⠁   ⠈⠉⠛⠶⢦⣤⣀⡀             │"

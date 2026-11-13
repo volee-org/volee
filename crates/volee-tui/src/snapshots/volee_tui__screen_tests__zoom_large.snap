@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explore-handlers 6 min ││         │ ┃ ctx ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱ 73%  ┃  │ ▄▂ ▂ ▄▄    ▂▄ ▄   ▂▆▂ ▂   ▂▆       │  │   ▂▄▂ ▄  ▂ ▂ ▂▂ ▂▆▂▂▆▂▂▂  ▄        │         ││                      │"
 "│ x   │ └ ▸ explore-traces    39 s ││         │ ┃ ! Bash: bun run db:migrate         ┃  │ ████████████████▄████████▆██▆██▄   │  │ ▆▆█████▆██▄█▆███████████▆▄█▆██▆▄   │         ││                      │"
 "│ r   └ ▸ trace-search      11 min ││         │ ┃ Edit src/db/schema.ts              ┃  │ ctx ▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 26%  │  │ ctx ▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 24%  │         ││                      │"
-"│ TERMINALS                        ││         │ ┃ Read src/db/schema.ts              ┃  │ ⠹ Read src/middleware/auth.rs      │  │ ⠹ Read benches/results.json        │         ││                      │"
+"│ BY HAND                          ││         │ ┃ Read src/db/schema.ts              ┃  │ ⠹ Read src/middleware/auth.rs      │  │ ⠹ Read benches/results.json        │         ││                      │"
 "│ i · infra                 25 min ││         │ ┃ → invoice-page: Stored: a generat… ┃  │ Grep "p95" src/                    │  │ Edit benches/query.rs              │         ││                      │"
 "│ BACKGROUND                       ││         │ ┃ +214 −12                           ┃  │ Read src/middleware/auth.rs        │  │ Read benches/results.json          │         ││                      │"
 "│ b ▸ broken-links          18 min ││         │ ┃ 2 commits · not pushed · uncommit… ┃  │ → you: Can you ask Invoicing whet… │  │ ← latency-audit: Read-only audit:… │         ││                      │"

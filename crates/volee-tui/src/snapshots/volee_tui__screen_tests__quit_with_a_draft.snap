@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explore-handlers 6 min ││ delivery 2 commits · not pushed · uncom… │"
 "│ x   │ └ ▸ explore-traces    39 s ││ last     Write migrations/0042_invoices… │"
 "│ r   └ ▸ trace-search      11 min │╰──────────────────────────────────────────╯"
-"│ TERMINALS                        │╭ Preview · invoice-schema ────────────────╮"
+"│ BY HAND                          │╭ Preview · invoice-schema ────────────────╮"
 "│ i · infra                 25 min ││ │   Apply the pending migrations to the l│"
 "│ BACKGROUND                       ││ │                                        │"
 "│ b ▸ broken-links          18 min ││ │ Do you want to proceed?                │"

@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explore-handlers     ││    e ▸ explore-hand…                                                ━━━━━━━━━━━━━━━│"
 "│ x   │ └ ▸ explore-traces  39 s ││    x ▸ explore-trac…                                                             ━━│"
 "│ r   └ ▸ trace-search    11 min ││   r ▸ trace-search                                         ◇━━━━━━━━━━━━━━━━━━━━━━━│"
-"│ TERMINALS                      ││ i · infra             ━━━━━━●●━?━─────────●────────────────────────────────────────│"
+"│ BY HAND                        ││ i · infra             ━━━━━━●●━?━─────────●────────────────────────────────────────│"
 "│ i · infra               25 min ││ b ▸ broken-links                            ━━━━━━━━━━━━━━━━━━━━━━●?◇━━━━━━━━━━━━━━│"
 "│ BACKGROUND                     ││                                                                                    │"
 "│ b ▸ broken-links        18 min ││                                                                                    │"

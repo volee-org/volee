@@ -15,7 +15,7 @@ expression: draw(&model)
 "│ e   │ ├ ▸ explore-handlers     ││              │                                         ┊                           │"
 "│ x   │ └ ▸ explore-traces  39 s ││  ╭─ invoicing ──────────╮                  ╭─ latency-audit ──────╮                │"
 "│ r   └ ▸ trace-search    11 min ││  │  IDLE  14 min        │                  │  IDLE  12 min        │                │"
-"│ TERMINALS                      ││  ╰┬─────────────────────╯                  ╰───────────┬──────────╯                │"
+"│ BY HAND                        ││  ╰┬─────────────────────╯                  ╰───────────┬──────────╯                │"
 "│ i · infra               25 min ││   │ ┏━ invoice-schema ━━━━━┓              ••┈┈┈┈┈•┈┈┈┈┈•┈┈┈┈┈•┈┈┈┈┈••              │"
 "│ BACKGROUND          ╭ Message to invoice-tools ────────────────────────────────────────────────╮      ┊              │"
 "│ b ▸ broken-links    │ in reply to "Should create_invoice accept a draft flag, or always issue… │ce-search ─── ⠹ ─╮   │"
