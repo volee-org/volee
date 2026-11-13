@@ -287,11 +287,12 @@ conversation. Measured on the day 2.1.323 was installed, on an agent volee
 launched (a terminal of 160 by 45) with a status line of four rows: 26
 blank rows between a one-line answer and the prompt. The preview, twelve
 rows in a terminal of 170 by 50, showed four blank rows, the prompt in its
-frame and the status lines, and nothing of the answer; so did a tile of the
-wall; and in a terminal of 80 by 24 the full-screen view showed the same,
-the answer some thirty lines above. The release gate saw it: the three
-journeys that look for an agent's answer in those views failed with
-2.1.323, and had passed with 2.1.322 on the same volee.
+frame and the status lines, and nothing of the answer, as would any tile of
+the wall shorter than the screen; and in a terminal of 80 by 24 the
+full-screen view showed the same, the answer some thirty lines above. The
+release gate saw it: the two journeys that look for an agent's answer in
+those views, `edit_mode` and `wall`, failed with 2.1.323, and had passed
+with 2.1.322 on the same volee.
 
 The fold was kept to replays because a screen itself had no such gap. That
 no longer holds, and the rule is now one rule, for every source and every
