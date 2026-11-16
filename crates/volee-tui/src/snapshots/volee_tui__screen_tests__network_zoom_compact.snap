@@ -15,7 +15,7 @@ expression: less
 "│ e   │ ├ ▸ explore-handlers     ││                    ⢀ ⠤ ⠊                    ⠙⢦⡀           ⢸⡇                       │"
 "│ x   │ └ ▸ explore-traces  39 s ││                  ▸t⠁                        ◇ volee       ⠘⣧                       │"
 "│ r   └ ▸ trace-search    11 min ││                  ⠆                              ⠈⠙⠶⣄⡀      ⣿                       │"
-"│ BY HAND                        ││                  ⠰                                 ⠈⠙⠳⣤⣀   ⢸⡇             ⢀⣀⣀⣠⣤⣤⠶·i│"
+"│ TERMINALS                      ││                  ⠰                                 ⠈⠙⠳⣤⣀   ⢸⡇             ⢀⣀⣀⣠⣤⣤⠶·i│"
 "│ i · infra               25 min ││                  ⠰                                     ⠉⠳⢦⣀⠘?   ⣀⣀⣀⣤⣤⡴⠶⠶⠛⠛⠋⠉⠉⠁     │"
 "│ BACKGROUND                     ││                  ⠰                                       ?◉ you⣛⠉⠉⠉                │"
 "│ b ▸ broken-links        18 min ││                  ⠐⠄                                 ⢀⣠⣤⠶⠛⠋⠁   ⠈⠉⠛⠶⢦⣤⣀⡀             │"

@@ -2084,13 +2084,13 @@ fn sessions_nobody_launched_group_by_whether_they_have_a_window() {
     let mut agent = model.registry.agent(id(INFRA)).unwrap().clone();
     let group = |agent: &Agent| rail_group(agent).1;
     for (location, expected) in [
-        (Location::Terminal, "BY HAND"),
+        (Location::Terminal, "TERMINALS"),
         (
             Location::Pane {
                 multiplexer: "tuios".into(),
                 target: "work:2".into(),
             },
-            "BY HAND",
+            "TERMINALS",
         ),
         (Location::Background, "BACKGROUND"),
         (Location::Host { id: "h1".into() }, "BACKGROUND"),
