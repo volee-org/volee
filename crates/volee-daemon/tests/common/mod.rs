@@ -32,6 +32,7 @@ pub(crate) struct FakeHarness {
     keep_on_remove: Mutex<bool>,
     listings: Mutex<usize>,
     listing_delay: Mutex<Duration>,
+    listing_hold: Mutex<Duration>,
     door: Mutex<Option<Vec<String>>>,
 }
 
@@ -45,6 +46,13 @@ impl FakeHarness {
     /// machine.
     pub(crate) fn slow_listings(&self, delay: Duration) {
         *self.listing_delay.lock().unwrap() = delay;
+    }
+
+    /// Makes each listing wait `hold` after it read the sessions, before it
+    /// answers, like a daemon slow to take a listing in on a loaded machine:
+    /// a round then judges the sessions it read while the test moves on.
+    pub(crate) fn hold_listings(&self, hold: Duration) {
+        *self.listing_hold.lock().unwrap() = hold;
     }
 
     /// Makes `remove` answer as Claude Code does for a worktree it did not
@@ -156,9 +164,11 @@ impl Harness for FakeHarness {
         if *self.failing.lock().unwrap() {
             return Err(unsupported("agents"));
         }
+        let sessions = self.sessions.lock().unwrap().clone();
+        std::thread::sleep(*self.listing_hold.lock().unwrap());
         Ok(Listing {
             harness: HarnessKind::ClaudeCode,
-            sessions: self.sessions.lock().unwrap().clone(),
+            sessions,
             complete: true,
         })
     }
