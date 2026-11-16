@@ -478,6 +478,9 @@ async fn a_session_that_ended_is_not_continued_by_one_that_starts_beside_it() {
 #[tokio::test]
 async fn a_run_of_a_few_seconds_never_becomes_an_agent() {
     let daemon = start();
+    // Each round judges the sessions it read a moment earlier, as on a
+    // loaded machine.
+    daemon.harness.hold_listings(Duration::from_millis(100));
     // Started one second ago, by a program that wants one answer.
     daemon
         .harness
@@ -488,8 +491,16 @@ async fn a_run_of_a_few_seconds_never_becomes_an_agent() {
     })
     .await;
     assert_eq!(registry(&daemon.socket).await.agents().count(), 0);
-    // Gone before it settled: nothing ever showed.
+    // Gone before it settled: nothing ever showed. The clock moves on only
+    // once a round has listed it gone: a round that read it before still
+    // judges its age, and with the clock a minute on it would find a
+    // session that lived a minute (0.17.2's release CI, on macOS).
     daemon.harness.set(vec![]);
+    let listed = daemon.harness.listings();
+    eventually("discovery listed it gone", || {
+        daemon.harness.listings() > listed
+    })
+    .await;
     daemon.clock.advance(60_000);
     let listed = daemon.harness.listings();
     eventually("discovery listed again", || {
