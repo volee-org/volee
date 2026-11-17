@@ -49,8 +49,7 @@ pub(crate) fn render(model: &Model, palette: &Palette, area: Rect, buf: &mut Buf
     let inner_width = columns.name + 2 + columns.label + 2 + columns.keys;
     let width = u16::try_from(inner_width + 4)
         .unwrap_or(u16::MAX)
-        .max(60)
-        .min(MOST_WIDTH)
+        .clamp(60, MOST_WIDTH)
         .min(area.width.saturating_sub(2));
     // The descriptions take what the names and the keys leave.
     columns.label = usize::from(width)
