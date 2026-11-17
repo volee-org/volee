@@ -151,6 +151,17 @@ keyboard ([journeys](https://github.com/volee-org/volee/tree/main/journeys)).
 | The answer above a pinned prompt | Claude Code 2.1.323 pins its prompt and status lines at the bottom of an agent's terminal, and the preview showed blank rows and the prompt. A screen taller than its view now folds its runs of blank rows into one row that says how many, whatever its source; a screen that fits is shown as it is ([ADR 0028](../adr/0028-one-emulator-and-the-wall-inside-the-interface.md#every-screen-that-does-not-fit-its-view)). Found by the release gate | Done: v0.17.1 |
 | TERMINALS again | The group of the sessions started in a terminal tab or a tuios or tmux pane is called TERMINALS again: BY HAND did not say what it holds, and now that the agents in a volee host are in BACKGROUND the old word is exact | Done: v0.17.2 |
 
+## 0.18: keys after LazyVim
+
+| Milestone | Content | Status |
+| --- | --- | --- |
+| Messages that arrive | A message for an agent that rests in a volee host past its wake-up hook is typed at its prompt and marked delivered; the messages window says whether what you wrote was delivered | Done: v0.18.0 |
+| LazyVim's keys | The leader then `q q` quits (or `:q`), `q` alone says how and closes windows; `Ctrl+h/j/k/l` move between panels; the leader's groups are LazyVim's (`a` agents, `g` git, `w` windows, `u` interface, `s` search, `n` messages) | Done: v0.18.0 |
+| A vim mode line | A thick status line: the mode in a coloured block (NORMAL, INSERT, VIEW, COMMAND), then the selected agent, in the manner of lualine; the command line opens in the middle of the screen | Done: v0.18.0 |
+| Panels to size | volee opens without the preview, which the leader then `u p` shows; `Ctrl` and the arrows move the borders, and the leader then `w =` puts them back | Done: v0.18.0 |
+| A lead from the interface | The leader then `a l` starts a lead in a folder, as `volee lead` does in a terminal | Done: v0.18.0 |
+| Release | v0.18.0 | Done: v0.18.0 |
+
 ## Next
 
 Nothing is scheduled: the plan that ran from 0.11 to 0.14 is complete. What
@@ -180,6 +191,8 @@ comes next is chosen among the items below.
   door for it (Ghostty 1.4 on macOS was measured to have one), and waiting
   from `volee attach` as the interface does
   ([ADR 0034](../adr/0034-a-session-in-its-own-terminal-opens-once-it-left-it.md)).
+- Moving the borders with the mouse, as well as with the keys.
+- A frame drawn with more care: the borders and titles of the panels.
 - A Homebrew tap and a crates.io release.
 
 ## Not planned
