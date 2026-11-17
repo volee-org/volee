@@ -62,9 +62,10 @@ sparkline = "cyan"
 statusline = "gray"
 "statusline.section" = { modifiers = ["reversed"] }
 "keys.panel" = { fg = "white", bg = "dark-gray" }
-"keys.title" = { fg = "white", bg = "dark-gray", modifiers = ["bold"] }
+"keys.header" = { fg = "white", bg = "magenta" }
+"keys.title" = { fg = "black", bg = "light-magenta", modifiers = ["bold"] }
 "keys.heading" = { fg = "gray", bg = "dark-gray" }
-"keys.key" = { fg = "light-blue", bg = "dark-gray", modifiers = ["bold"] }
+"keys.key" = { fg = "light-magenta", bg = "dark-gray", modifiers = ["bold"] }
 notice = { modifiers = ["reversed"] }
 "notice.error" = { fg = "black", bg = "red", modifiers = ["bold"] }
 input = { modifiers = ["bold"] }

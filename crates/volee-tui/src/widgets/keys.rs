@@ -11,10 +11,11 @@
 //! ```
 //!
 //! What follows a sequence shows in a panel in the manner of tuios's prefix
-//! panel: a solid ground, no border, one column per group under its name.
+//! panel: a solid ground, no border, a band at the top with the sequence's
+//! name in a block, one column per group under its name.
 //!
 //! ```text
-//!   leader · esc
+//!  LEADER                                                            esc
 //!
 //!   Agents             Windows            UI            Git        Other
 //!   a n  new agent     w w  wall          u p  preview  g d  diff  n  messages
@@ -62,8 +63,12 @@ const PANEL_LABEL: usize = 20;
 /// Columns between the panel's edges and its text.
 const PANEL_PAD: usize = 2;
 
-/// Columns between two columns of the panel.
+/// Columns between two columns of the panel, at least.
 const PANEL_GAP: usize = 3;
+
+/// The share of the screen's width that a panel of several columns takes,
+/// in percent, as tuios's prefix panel does; its columns spread over it.
+const PANEL_SHARE: usize = 72;
 
 /// The order of the leader's groups in its panel, as LazyVim lists them:
 /// agents, windows, interface, git, search, quit; any other after them.
@@ -100,10 +105,119 @@ const PAIRS: &[(&[Action], &str)] = &[
     (&[Action::NextPane, Action::PreviousPane], "panels"),
 ];
 
+/// The headings of the columns of the keys panel (`?`), in order.
+const CATEGORIES: [&str; 4] = ["Move", "Agent", "View", "Other"];
+
+/// The column of the keys panel an action shows in: an index of
+/// [`CATEGORIES`].
+fn category(action: Action) -> usize {
+    use Action as A;
+    match action {
+        A::Down
+        | A::Up
+        | A::Left
+        | A::Right
+        | A::First
+        | A::Last
+        | A::HalfPageDown
+        | A::HalfPageUp
+        | A::Jump
+        | A::JumpBack
+        | A::Filter
+        | A::NextMatch
+        | A::PreviousMatch
+        | A::PreviousEvent
+        | A::NextEvent
+        | A::NextPane
+        | A::PreviousPane
+        | A::FocusLeft
+        | A::FocusDown
+        | A::FocusUp
+        | A::FocusRight
+        | A::NextField
+        | A::PreviousField
+        | A::NextChoice
+        | A::PreviousChoice
+        | A::LineStart
+        | A::LineEnd => 0,
+        A::TakeOver
+        | A::Message
+        | A::Diff
+        | A::FullScreen
+        | A::Forget
+        | A::Adopt
+        | A::OpenWith
+        | A::OpenEditor
+        | A::OpenDiff
+        | A::OpenGit
+        | A::OpenIde
+        | A::NewAgent
+        | A::NewMission
+        | A::NewLead
+        | A::FocusSubtree
+        | A::Reply
+        | A::Summarize
+        | A::Send
+        | A::Messages
+        | A::Launch
+        | A::Apply
+        | A::Confirm
+        | A::ToggleFull
+        | A::Refresh => 1,
+        A::ShowHierarchy
+        | A::ShowNetwork
+        | A::ShowRepos
+        | A::ShowTimeline
+        | A::PreviousView
+        | A::NextView
+        | A::ZoomIn
+        | A::ZoomOut
+        | A::ZoomAuto
+        | A::ShowWall
+        | A::TogglePreview
+        | A::Wider
+        | A::Narrower
+        | A::Taller
+        | A::Shorter
+        | A::EqualPanels
+        | A::PickTheme => 2,
+        _ => 3,
+    }
+}
+
 /// The entries of the current screen's popup: the focused panel's keys,
 /// then the keys of everywhere, one per action or per pair of actions,
 /// sequences behind the leader folded into one entry.
 pub(crate) fn screen_entries(model: &Model) -> Vec<Entry> {
+    screen_keyed(model)
+        .into_iter()
+        .map(|(_, entry)| entry)
+        .collect()
+}
+
+/// The keys of the current screen in the panel's columns: what moves, what
+/// acts on an agent, what changes the view, the rest.
+pub(crate) fn screen_columns(model: &Model) -> Vec<Column> {
+    let keyed = screen_keyed(model);
+    CATEGORIES
+        .iter()
+        .enumerate()
+        .filter_map(|(index, title)| {
+            let entries: Vec<Entry> = keyed
+                .iter()
+                .filter(|(column, _)| *column == index)
+                .map(|(_, entry)| entry.clone())
+                .collect();
+            (!entries.is_empty()).then(|| Column {
+                title: (*title).to_owned(),
+                entries,
+            })
+        })
+        .collect()
+}
+
+/// The entries of [`screen_entries`], each with its column on the panel.
+fn screen_keyed(model: &Model) -> Vec<(usize, Entry)> {
     let contexts = model.screen_contexts();
     let leader = KeyCombo::char(' ');
     // The first key that reaches each action from here, in table order: one
@@ -133,7 +247,7 @@ pub(crate) fn screen_entries(model: &Model) -> Vec<Entry> {
             }
         }
     }
-    let mut entries: Vec<Entry> = Vec::new();
+    let mut entries: Vec<(usize, Entry)> = Vec::new();
     let mut done: Vec<Action> = Vec::new();
     for (action, keys, label) in &keyed {
         if done.contains(action) {
@@ -153,18 +267,24 @@ pub(crate) fn screen_entries(model: &Model) -> Vec<Entry> {
         if let Some((members, pair_label)) = pair {
             let keys: Vec<String> = members.iter().map(|(_, keys, _)| keys.clone()).collect();
             done.extend(members.iter().map(|(action, ..)| *action));
-            entries.push(Entry {
-                keys: join_keys(&keys),
-                label: pair_label.to_owned(),
-                group: false,
-            });
+            entries.push((
+                category(*action),
+                Entry {
+                    keys: join_keys(&keys),
+                    label: pair_label.to_owned(),
+                    group: false,
+                },
+            ));
         } else {
             done.push(*action);
-            entries.push(Entry {
-                keys: keys.replace("shift-", "⇧"),
-                label: (*label).to_owned(),
-                group: false,
-            });
+            entries.push((
+                category(*action),
+                Entry {
+                    keys: keys.replace("shift-", "⇧"),
+                    label: (*label).to_owned(),
+                    group: false,
+                },
+            ));
         }
     }
     if behind_leader {
@@ -172,11 +292,14 @@ pub(crate) fn screen_entries(model: &Model) -> Vec<Entry> {
         let at = entries.len().saturating_sub(3);
         entries.insert(
             at,
-            Entry {
-                keys: leader.short(),
-                label: format!("{}…", group_name(&[leader])),
-                group: true,
-            },
+            (
+                CATEGORIES.len() - 1,
+                Entry {
+                    keys: leader.short(),
+                    label: format!("{}…", group_name(&[leader])),
+                    group: true,
+                },
+            ),
         );
     }
     entries
@@ -284,13 +407,28 @@ fn screen_title(model: &Model) -> &'static str {
         })
 }
 
-/// Draws the popup of the current screen's keys.
+/// Draws the keys of the current screen: the panel of the leader's design,
+/// or the box when the panel does not fit.
 pub(crate) fn render_screen(model: &Model, area: Rect, buf: &mut Buffer) {
     let theme = &model.theme;
     let all = model
         .keymap
         .first_key(Context::Keys, Action::AllKeys)
         .map(KeySeq::short);
+    let name = screen_title(model).to_lowercase();
+    let hint = all
+        .as_ref()
+        .map_or_else(|| "esc".to_owned(), |all| format!("{all} all keys · esc"));
+    if render_panel(
+        theme,
+        &["keys", &name],
+        &hint,
+        &screen_columns(model),
+        area,
+        buf,
+    ) {
+        return;
+    }
     let mut title = vec![Span::raw(screen_title(model))];
     if let Some(all) = all {
         title.push(Span::styled(
@@ -305,11 +443,11 @@ pub(crate) fn render_screen(model: &Model, area: Rect, buf: &mut Buffer) {
 /// the panel does not fit.
 pub(crate) fn render_pending(model: &Model, area: Rect, buf: &mut Buffer) {
     let theme = &model.theme;
-    // `leader`, `leader › agents`, `go to`.
+    // `leader`, then `agents` after `Space a`; `go to`.
     let path: Vec<&str> = (1..=model.pending_keys.len())
         .map(|end| group_name(&model.pending_keys[..end]))
         .collect();
-    if render_panel(theme, &path.join(" › "), &pending_columns(model), area, buf) {
+    if render_panel(theme, &path, "esc", &pending_columns(model), area, buf) {
         return;
     }
     let typed: String = model
@@ -403,9 +541,9 @@ impl PanelLayout {
             .max()
             .unwrap_or(0)
             .max(title_width);
-        // A blank row above and below; the title and a blank row; each row
-        // of columns, its headings then its keys, a blank row between two.
-        let height = 4
+        // The band and a blank row; each row of columns, its headings then
+        // its keys, a blank row between two; a blank row below.
+        let height = 3
             + rows
                 .iter()
                 .map(|row| 1 + tallest(columns, row))
@@ -450,14 +588,38 @@ fn draw_column(theme: &Theme, column: &Column, keys_width: usize, at: Rect, buf:
     }
 }
 
+/// The band at the top of a panel: the first name in a block (`LEADER`),
+/// the names after it (`agents`), and `hint` on the right (how to close).
+fn header_spans<'a>(theme: &Theme, path: &[&str], hint: &str) -> (Vec<Span<'a>>, Span<'a>) {
+    let mut spans = Vec::new();
+    if let Some((first, rest)) = path.split_first() {
+        spans.push(Span::styled(
+            format!(" {} ", first.to_uppercase()),
+            theme.style(StyleRole::KeysTitle),
+        ));
+        for name in rest {
+            spans.push(Span::styled(
+                format!(" {name} "),
+                theme.style(StyleRole::KeysHeader),
+            ));
+        }
+    }
+    (
+        spans,
+        Span::styled(format!(" {hint} "), theme.style(StyleRole::KeysHeader)),
+    )
+}
+
 /// Draws columns of keys in a panel at the bottom right of `area`, above its
 /// last line (the status line), in the manner of tuios's prefix panel: a
-/// solid ground and no border, a title, each column under its heading, and
-/// rows of columns when they do not fit side by side. Draws nothing and
-/// returns false when the panel does not fit.
-fn render_panel(
+/// solid ground and no border, a band at the top (`path` in a block, `hint`
+/// on the right), each column under its heading, and rows of columns when
+/// they do not fit side by side. Draws nothing and returns false when the
+/// panel does not fit.
+pub(crate) fn render_panel(
     theme: &Theme,
-    title: &str,
+    path: &[&str],
+    hint: &str,
     columns: &[Column],
     area: Rect,
     buf: &mut Buffer,
@@ -466,16 +628,34 @@ fn render_panel(
     if columns.is_empty() {
         return false;
     }
-    let esc = " · esc";
-    let Some(layout) = PanelLayout::new(columns, text::width(title) + text::width(esc), area.width)
-    else {
+    let (title, hint) = header_spans(theme, path, hint);
+    // The band's words, a cell from each edge.
+    let header_width = title
+        .iter()
+        .chain(std::iter::once(&hint))
+        .map(|span| text::width(&span.content))
+        .sum::<usize>()
+        + 2;
+    let Some(layout) = PanelLayout::new(
+        columns,
+        header_width.saturating_sub(2 * PANEL_PAD),
+        area.width,
+    ) else {
         return false;
     };
-    let width = layout.content_width + 2 * PANEL_PAD;
+    let fitted = layout.content_width + 2 * PANEL_PAD;
     // The panel leaves the status line, the area's last row, in sight.
-    if width > usize::from(area.width) || layout.height >= usize::from(area.height) {
+    if fitted > usize::from(area.width) || layout.height >= usize::from(area.height) {
         return false;
     }
+    // Several columns spread over most of the width, as in tuios; a single
+    // group keeps the width of its keys.
+    let width = if columns.len() > 1 {
+        fitted.max(usize::from(area.width) * PANEL_SHARE / 100)
+    } else {
+        fitted
+    };
+    let inner = width - 2 * PANEL_PAD;
     let window = Rect::new(
         area.right().saturating_sub(cells(width)),
         area.bottom().saturating_sub(cells(layout.height) + 1),
@@ -484,25 +664,41 @@ fn render_panel(
     );
     Clear.render(window, buf);
     buf.set_style(window, theme.style(StyleRole::KeysPanel));
-    let left = window.x + cells(PANEL_PAD);
+    // The band, the whole width of the panel.
+    buf.set_style(
+        Rect::new(window.x, window.y, window.width, 1),
+        theme.style(StyleRole::KeysHeader),
+    );
     put_spans(
         buf,
-        left,
-        window.y + 1,
-        &[
-            Span::styled(title.to_owned(), theme.style(StyleRole::KeysTitle)),
-            Span::styled(esc, theme.style(StyleRole::KeysHeading)),
-        ],
-        cells(layout.content_width),
+        window.x + 1,
+        window.y,
+        &title,
+        window.width.saturating_sub(2),
     );
-    let mut y = window.y + 3;
+    let hint_width = cells(text::width(&hint.content));
+    put_spans(
+        buf,
+        window.right().saturating_sub(hint_width + 1),
+        window.y,
+        &[hint],
+        hint_width,
+    );
+    let left = window.x + cells(PANEL_PAD);
+    let mut y = window.y + 2;
     for row in &layout.rows {
+        // The room the row leaves, shared between its gaps.
+        let used: usize = row.iter().map(|index| layout.sizes[*index].1).sum();
+        let gap = match row.len() {
+            0 | 1 => 0,
+            count => (inner.saturating_sub(used) / (count - 1)).max(PANEL_GAP),
+        };
         let mut x = left;
         for index in row {
             let (keys_width, column_width) = layout.sizes[*index];
             let at = Rect::new(x, y, cells(column_width), 0);
             draw_column(theme, &columns[*index], keys_width, at, buf);
-            x += cells(column_width + PANEL_GAP);
+            x += cells(column_width + gap);
         }
         y += cells(tallest(columns, row) + 2);
     }
