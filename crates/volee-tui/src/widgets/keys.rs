@@ -9,6 +9,17 @@
 //!                  │ gg  first       a   take over  q   quit   │
 //!                  ╰──────────────────────────────────────────╯
 //! ```
+//!
+//! What follows a sequence shows in a panel in the manner of tuios's prefix
+//! panel: a solid ground, no border, one column per group under its name.
+//!
+//! ```text
+//!   leader · esc
+//!
+//!   Agents             Windows            UI            Git        Other
+//!   a n  new agent     w w  wall          u p  preview  g d  diff  n  messages
+//!   a m  new mission   w m  full screen   u C  theme…              o  open with…
+//! ```
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -34,6 +45,29 @@ pub(crate) struct Entry {
 
 /// The longest label shown before it is cut.
 const LABEL: usize = 16;
+
+/// A column of the leader's panel: a group of keys under its name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Column {
+    /// The group's name, `Agents` or `Windows`, or `Other` for the keys that
+    /// act at once.
+    pub(crate) title: String,
+    /// Its keys, spelled from the keys typed so far: `a n`.
+    pub(crate) entries: Vec<Entry>,
+}
+
+/// The longest label of the leader's panel before it is cut.
+const PANEL_LABEL: usize = 20;
+
+/// Columns between the panel's edges and its text.
+const PANEL_PAD: usize = 2;
+
+/// Columns between two columns of the panel.
+const PANEL_GAP: usize = 3;
+
+/// The order of the leader's groups in its panel, as LazyVim lists them:
+/// agents, windows, interface, git, search, quit; any other after them.
+const GROUP_ORDER: &str = "awugsq";
 
 /// The most rows of a popup before it takes another column.
 const ROWS: usize = 14;
@@ -166,6 +200,79 @@ pub(crate) fn pending_entries(model: &Model) -> Vec<Entry> {
         .collect()
 }
 
+/// A group's name as a column heading: `Agents`, `UI`, `Go to`.
+fn heading(name: &str) -> String {
+    if name.chars().count() <= 2 {
+        return name.to_uppercase();
+    }
+    let mut chars = name.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
+/// What can follow the keys typed so far, in columns, in the manner of
+/// tuios's prefix panel: one column per group, its keys spelled from here
+/// (`a n  new agent`), and the keys that act at once under `Other`. With no
+/// group to open, one column under the name of the group typed so far.
+pub(crate) fn pending_columns(model: &Model) -> Vec<Column> {
+    let contexts = model.contexts();
+    let mut groups: Vec<(usize, Column)> = Vec::new();
+    let mut direct: Vec<Entry> = Vec::new();
+    for next in model.keymap.continuations(&contexts, &model.pending_keys) {
+        if !next.group {
+            direct.push(Entry {
+                keys: next.key.short(),
+                label: next.label.to_owned(),
+                group: false,
+            });
+            continue;
+        }
+        let mut prefix = model.pending_keys.clone();
+        prefix.push(next.key);
+        let entries = model
+            .keymap
+            .continuations(&contexts, &prefix)
+            .into_iter()
+            .map(|then| Entry {
+                keys: format!("{} {}", next.key.short(), then.key.short()),
+                label: if then.group {
+                    format!("+{}", then.label)
+                } else {
+                    then.label.to_owned()
+                },
+                group: then.group,
+            })
+            .collect();
+        let rank = next
+            .key
+            .typed_char()
+            .and_then(|key| GROUP_ORDER.find(key))
+            .unwrap_or(GROUP_ORDER.len());
+        groups.push((
+            rank,
+            Column {
+                title: heading(next.label),
+                entries,
+            },
+        ));
+    }
+    groups.sort_by_key(|(rank, _)| *rank);
+    let mut columns: Vec<Column> = groups.into_iter().map(|(_, column)| column).collect();
+    if !direct.is_empty() {
+        let title = if columns.is_empty() {
+            heading(group_name(&model.pending_keys))
+        } else {
+            "Other".to_owned()
+        };
+        columns.push(Column {
+            title,
+            entries: direct,
+        });
+    }
+    columns
+}
+
 /// The title of the popup of the current screen: the focused panel's name.
 fn screen_title(model: &Model) -> &'static str {
     model
@@ -194,9 +301,17 @@ pub(crate) fn render_screen(model: &Model, area: Rect, buf: &mut Buffer) {
     render_box(theme, title, &screen_entries(model), area, buf);
 }
 
-/// Draws what can follow the keys typed so far.
+/// Draws what can follow the keys typed so far: the panel, or the box when
+/// the panel does not fit.
 pub(crate) fn render_pending(model: &Model, area: Rect, buf: &mut Buffer) {
     let theme = &model.theme;
+    // `leader`, `leader › agents`, `go to`.
+    let path: Vec<&str> = (1..=model.pending_keys.len())
+        .map(|end| group_name(&model.pending_keys[..end]))
+        .collect();
+    if render_panel(theme, &path.join(" › "), &pending_columns(model), area, buf) {
+        return;
+    }
     let typed: String = model
         .pending_keys
         .iter()
@@ -211,6 +326,187 @@ pub(crate) fn render_pending(model: &Model, area: Rect, buf: &mut Buffer) {
         ),
     ];
     render_box(theme, title, &pending_entries(model), area, buf);
+}
+
+/// A count of cells on screen.
+fn cells(count: usize) -> u16 {
+    u16::try_from(count).unwrap_or(u16::MAX)
+}
+
+/// The most keys among the columns of a row of the panel.
+fn tallest(columns: &[Column], row: &[usize]) -> usize {
+    row.iter()
+        .map(|index| columns[*index].entries.len())
+        .max()
+        .unwrap_or(0)
+}
+
+/// Where the leader's panel puts its columns.
+struct PanelLayout {
+    /// For each column, the width of its keys and its own width.
+    sizes: Vec<(usize, usize)>,
+    /// The columns of each row, left to right.
+    rows: Vec<Vec<usize>>,
+    /// The width of what the panel holds, inside its padding.
+    content_width: usize,
+    /// The panel's height, its blank rows above and below included.
+    height: usize,
+}
+
+impl PanelLayout {
+    /// Lays `columns` out under a title `title_width` cells wide, in a panel
+    /// at most `area_width` cells wide: columns left to right, a new row
+    /// where the next would not fit. `None` when a column alone is too wide.
+    fn new(columns: &[Column], title_width: usize, area_width: u16) -> Option<Self> {
+        let sizes: Vec<(usize, usize)> = columns
+            .iter()
+            .map(|column| {
+                let keys = column
+                    .entries
+                    .iter()
+                    .map(|entry| text::width(&entry.keys))
+                    .max()
+                    .unwrap_or(0);
+                let label = column
+                    .entries
+                    .iter()
+                    .map(|entry| text::width(&entry.label).min(PANEL_LABEL))
+                    .max()
+                    .unwrap_or(0);
+                (keys, (keys + 2 + label).max(text::width(&column.title)))
+            })
+            .collect();
+        let room = usize::from(area_width).saturating_sub(2 * PANEL_PAD);
+        let mut rows: Vec<Vec<usize>> = Vec::new();
+        let mut used = 0;
+        for (index, (_, width)) in sizes.iter().enumerate() {
+            match rows.last_mut() {
+                Some(row) if used + PANEL_GAP + width <= room => {
+                    row.push(index);
+                    used += PANEL_GAP + width;
+                }
+                _ => {
+                    if *width > room {
+                        return None;
+                    }
+                    rows.push(vec![index]);
+                    used = *width;
+                }
+            }
+        }
+        let content_width = rows
+            .iter()
+            .map(|row| {
+                row.iter().map(|index| sizes[*index].1).sum::<usize>()
+                    + PANEL_GAP * row.len().saturating_sub(1)
+            })
+            .max()
+            .unwrap_or(0)
+            .max(title_width);
+        // A blank row above and below; the title and a blank row; each row
+        // of columns, its headings then its keys, a blank row between two.
+        let height = 4
+            + rows
+                .iter()
+                .map(|row| 1 + tallest(columns, row))
+                .sum::<usize>()
+            + rows.len().saturating_sub(1);
+        Some(Self {
+            sizes,
+            rows,
+            content_width,
+            height,
+        })
+    }
+}
+
+/// Draws one column of the panel at the top left of `at`: its heading, then
+/// its keys, `keys_width` cells wide, and what they do.
+fn draw_column(theme: &Theme, column: &Column, keys_width: usize, at: Rect, buf: &mut Buffer) {
+    put_spans(
+        buf,
+        at.x,
+        at.y,
+        &[Span::styled(
+            column.title.clone(),
+            theme.style(StyleRole::KeysHeading),
+        )],
+        at.width,
+    );
+    for (offset, entry) in column.entries.iter().enumerate() {
+        let padding = keys_width.saturating_sub(text::width(&entry.keys)) + 2;
+        let label: String = entry.label.chars().take(PANEL_LABEL).collect();
+        let label_role = if entry.group {
+            StyleRole::KeysKey
+        } else {
+            StyleRole::KeysPanel
+        };
+        let spans = [
+            Span::styled(entry.keys.clone(), theme.style(StyleRole::KeysKey)),
+            Span::styled(" ".repeat(padding), theme.style(StyleRole::KeysPanel)),
+            Span::styled(label, theme.style(label_role)),
+        ];
+        put_spans(buf, at.x, at.y + 1 + cells(offset), &spans, at.width);
+    }
+}
+
+/// Draws columns of keys in a panel at the bottom right of `area`, above its
+/// last line (the status line), in the manner of tuios's prefix panel: a
+/// solid ground and no border, a title, each column under its heading, and
+/// rows of columns when they do not fit side by side. Draws nothing and
+/// returns false when the panel does not fit.
+fn render_panel(
+    theme: &Theme,
+    title: &str,
+    columns: &[Column],
+    area: Rect,
+    buf: &mut Buffer,
+) -> bool {
+    let area = area.intersection(buf.area);
+    if columns.is_empty() {
+        return false;
+    }
+    let esc = " · esc";
+    let Some(layout) = PanelLayout::new(columns, text::width(title) + text::width(esc), area.width)
+    else {
+        return false;
+    };
+    let width = layout.content_width + 2 * PANEL_PAD;
+    // The panel leaves the status line, the area's last row, in sight.
+    if width > usize::from(area.width) || layout.height >= usize::from(area.height) {
+        return false;
+    }
+    let window = Rect::new(
+        area.right().saturating_sub(cells(width)),
+        area.bottom().saturating_sub(cells(layout.height) + 1),
+        cells(width),
+        cells(layout.height),
+    );
+    Clear.render(window, buf);
+    buf.set_style(window, theme.style(StyleRole::KeysPanel));
+    let left = window.x + cells(PANEL_PAD);
+    put_spans(
+        buf,
+        left,
+        window.y + 1,
+        &[
+            Span::styled(title.to_owned(), theme.style(StyleRole::KeysTitle)),
+            Span::styled(esc, theme.style(StyleRole::KeysHeading)),
+        ],
+        cells(layout.content_width),
+    );
+    let mut y = window.y + 3;
+    for row in &layout.rows {
+        let mut x = left;
+        for index in row {
+            let (keys_width, column_width) = layout.sizes[*index];
+            let at = Rect::new(x, y, cells(column_width), 0);
+            draw_column(theme, &columns[*index], keys_width, at, buf);
+            x += cells(column_width + PANEL_GAP);
+        }
+        y += cells(tallest(columns, row) + 2);
+    }
+    true
 }
 
 /// Draws entries in columns, in a bordered box at the bottom right of
@@ -301,5 +597,64 @@ pub(crate) fn render_box(
             "…",
             theme.style(StyleRole::TextDim),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{model, press};
+
+    fn titles(columns: &[Column]) -> Vec<&str> {
+        columns.iter().map(|column| column.title.as_str()).collect()
+    }
+
+    fn keys(column: &Column) -> Vec<(&str, &str)> {
+        column
+            .entries
+            .iter()
+            .map(|entry| (entry.keys.as_str(), entry.label.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn the_leader_shows_one_column_per_group_in_lazyvim_order() {
+        let mut model = model(190, 50);
+        press(&mut model, " ");
+        let columns = pending_columns(&model);
+        assert_eq!(
+            titles(&columns),
+            ["Agents", "Windows", "UI", "Git", "Search", "Quit", "Other"]
+        );
+        assert_eq!(
+            keys(&columns[0]),
+            [
+                ("a n", "new agent"),
+                ("a m", "new mission"),
+                ("a l", "new lead"),
+                ("a a", "adopt"),
+                ("a d", "forget"),
+            ]
+        );
+        assert_eq!(keys(&columns[6]), [("n", "messages"), ("o", "open with…")]);
+    }
+
+    #[test]
+    fn a_group_shows_its_own_keys_under_its_name() {
+        let mut model = model(190, 50);
+        press(&mut model, " w");
+        let columns = pending_columns(&model);
+        assert_eq!(titles(&columns), ["Windows"]);
+        assert_eq!(
+            keys(&columns[0]),
+            [("m", "full screen"), ("w", "wall"), ("=", "equal panels")]
+        );
+    }
+
+    #[test]
+    fn headings_name_the_groups() {
+        assert_eq!(heading("agents"), "Agents");
+        assert_eq!(heading("ui"), "UI");
+        assert_eq!(heading("go to"), "Go to");
     }
 }

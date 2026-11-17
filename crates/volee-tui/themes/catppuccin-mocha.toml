@@ -92,6 +92,11 @@ sparkline = "sapphire"
 "mode.command" = { fg = "mantle", bg = "peach", modifiers = ["bold"] }
 statusline = { fg = "subtext0", bg = "mantle" }
 "statusline.section" = { fg = "text", bg = "surface0" }
+# The leader's panel, as tuios draws its prefix panel with Catppuccin.
+"keys.panel" = { fg = "text", bg = "surface0" }
+"keys.title" = { fg = "text", bg = "surface0", modifiers = ["bold"] }
+"keys.heading" = { fg = "overlay1", bg = "surface0" }
+"keys.key" = { fg = "lavender", bg = "surface0", modifiers = ["bold"] }
 notice = { fg = "text", bg = "surface0" }
 "notice.error" = { fg = "crust", bg = "red", modifiers = ["bold"] }
 input = { fg = "text", modifiers = ["bold"] }

@@ -1,6 +1,6 @@
 # 0025. Key sequences, a leader key and which-key popups; every key configurable
 
-- Status: Proposed (amended on 2026-11-17 by [LazyVim's keys](#lazyvims-keys))
+- Status: Proposed (amended on 2026-11-17 by [LazyVim's keys](#lazyvims-keys) and [the leader's panel](#the-leaders-panel))
 - Date: 2026-11-09
 
 ## Context
@@ -141,3 +141,21 @@ groups) wherever an action has a counterpart:
 Single letters that do one thing and do not collide with vim (`m` to write,
 `d` for the changes, `z` for a screen full size, `/`, `'`, `1` to `5`, `H`
 and `L`) stay. Every key can still be moved in `[tui.keys]`.
+
+## The leader's panel
+
+Added on 2026-11-17, after 0.18.0.
+
+The person compared the popup the leader opened with tuios's prefix panel,
+and asked for the leader to look like tuios. The leader now opens a panel:
+a solid ground with no border, at the bottom right above the status line,
+a title (`leader · esc`), then one column per group under its name
+(Agents, Windows, UI, Git, Search, Quit, in LazyVim's order) with each
+key spelled in full (`a n  new agent`), and the keys that act at once
+under Other. Everything the leader reaches shows at once, as tuios shows
+everything its prefix reaches. After the first key of a group, the panel
+shows that group alone (`leader › agents`). The panel takes rows of
+columns when they do not fit side by side, and a terminal too small for
+it falls back on the box above. `?` keeps its box. Four theme roles colour
+the panel: `keys.panel`, `keys.title`, `keys.heading` and `keys.key`.
+
