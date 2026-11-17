@@ -186,7 +186,8 @@ edge = "#3b4261"
 | `statusline` | The status line, at the bottom. |
 | `statusline.section` | The section of the status line after the mode: the selected agent, or the window the keys are in. |
 | `keys.panel` | The ground of the leader's panel, and what its keys do: the panel that lists what can follow the leader, in the manner of tuios. |
-| `keys.title` | The title of the leader's panel. |
+| `keys.header` | The band at the top of the leader's panel, and the words in it. |
+| `keys.title` | The title of the leader's panel, a block at the left of its band. |
 | `keys.heading` | The heading of each column of the leader's panel: a group's name. |
 | `keys.key` | The keys in the leader's panel. |
 | `notice` | Short notices at the bottom of the screen. |

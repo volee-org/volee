@@ -165,5 +165,15 @@ width and draws a violet ground (`#31284d`) under periwinkle keys
 (`#9a8cff`). volee now does the same: a panel of several columns takes 72%
 of the width, its columns spread over it, and the Catppuccin themes carry
 those two colours (`panel` and `periwinkle` in their palettes, at each
-flavor's lightness).
+flavor's lightness). He then asked for a different header at the top: the
+panel's first row is now a band of a deeper violet (`panel_head`, between
+the ground and the keys), the sequence's name in a periwinkle block at its
+left (`LEADER`, then `agents` after `Space a`), as the status line puts
+its mode in a block, and `esc` at its right. He asked for the same design
+on `?` and `:`. `?` now opens its keys in that panel, its band reading
+`KEYS` and the focused panel, its columns sorting them into Move, Agent,
+View and Other; the box stays for terminals too small for the panel. The
+command line keeps its place in the middle of the screen, in the panel's
+colours, its band reading `COMMAND`, the chosen command in a periwinkle
+block.
 

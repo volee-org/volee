@@ -34,6 +34,7 @@ crust = "#dce0e8"
 # The leader's panel, in the violet of tuios's prefix panel.
 panel = "#e3dcf7"
 periwinkle = "#6a5ce0"
+panel_head = "#cbc2f2"
 
 [roles]
 # On a light background the brand badge reads better with light text.

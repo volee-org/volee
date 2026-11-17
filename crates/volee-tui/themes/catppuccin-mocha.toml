@@ -33,6 +33,7 @@ crust = "#11111b"
 # The leader's panel, in the violet of tuios's prefix panel.
 panel = "#31284d"
 periwinkle = "#9a8cff"
+panel_head = "#463c71"
 
 [roles]
 background = { fg = "text", bg = "base" }
@@ -97,7 +98,8 @@ statusline = { fg = "subtext0", bg = "mantle" }
 "statusline.section" = { fg = "text", bg = "surface0" }
 # The leader's panel, in the colours of tuios's prefix panel.
 "keys.panel" = { fg = "subtext1", bg = "panel" }
-"keys.title" = { fg = "text", bg = "panel", modifiers = ["bold"] }
+"keys.header" = { fg = "text", bg = "panel_head" }
+"keys.title" = { fg = "crust", bg = "periwinkle", modifiers = ["bold"] }
 "keys.heading" = { fg = "overlay1", bg = "panel" }
 "keys.key" = { fg = "periwinkle", bg = "panel", modifiers = ["bold"] }
 notice = { fg = "text", bg = "surface0" }

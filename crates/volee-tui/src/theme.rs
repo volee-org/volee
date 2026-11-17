@@ -192,7 +192,9 @@ style_roles! {
     /// The ground of the leader's panel, and what its keys do: the panel
     /// that lists what can follow the leader, in the manner of tuios.
     KeysPanel => "keys.panel",
-    /// The title of the leader's panel.
+    /// The band at the top of the leader's panel, and the words in it.
+    KeysHeader => "keys.header",
+    /// The title of the leader's panel, a block at the left of its band.
     KeysTitle => "keys.title",
     /// The heading of each column of the leader's panel: a group's name.
     KeysHeading => "keys.heading",

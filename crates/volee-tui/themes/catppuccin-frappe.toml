@@ -34,3 +34,4 @@ crust = "#232634"
 # The leader's panel, in the violet of tuios's prefix panel.
 panel = "#42385f"
 periwinkle = "#a296ff"
+panel_head = "#554b7f"
