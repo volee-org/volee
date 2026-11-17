@@ -68,6 +68,7 @@ def same_screen(j, name, pane_rows):
         j.wait(lambda: same_tail(read(), screen, max(len(row) for row in screen))[0], 10, 1)
         return read()
 
+    j.show_preview()
     for _ in range(3):
         before = j.still(pane_rows)
         if not before:
@@ -158,7 +159,7 @@ def main():
             return
         j.keys("Enter", 2.5)
         j.check("Enter opens the pane inside volee, in edit mode",
-                j.sees("your keys go to " + name, timeout=20))
+                j.sees(j.editing(name), timeout=20))
         j.type("Reply only with the word fruit in uppercase")
         j.keys("Enter")
         j.check("typed text reaches the session and it answers", j.said("fruit"),
@@ -183,6 +184,7 @@ def main():
         # agent's status lines fill.
         j.check("the window takes the size of a tall, narrow terminal", j.resize(96, 60),
                 "{} lines".format(len(j.screen().splitlines())))
+        j.check("the leader then u p shows the preview", j.show_preview())
         j.tuios("send-text", "-s", j.session, "-w", PANE, LEFT)
         j.check("the pane shows what was typed in it", j.wait(lambda: LEFT in pane_screen(), 10))
         if not j.check("typed in its pane while the agent rests, the preview shows it",

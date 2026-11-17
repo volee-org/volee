@@ -56,6 +56,7 @@ def held_screen(j, name):
         j.keys("Escape", 1.0)
         return rows, width
 
+    j.show_preview()
     for _ in range(3):
         before, width = full()
         preview, preview_width = j.frame("Preview · " + name, margin=1)
@@ -106,6 +107,7 @@ def replayed_screen(j, name):
 
     if not j.select(name):
         return
+    j.show_preview()
     for _ in range(3):
         before = j.still(read)
         if not before:
@@ -207,6 +209,7 @@ def main():
         # ---- the live preview ------------------------------------------------------
         if not j.select(hosted):
             return
+        j.check("the leader then u p shows the preview", j.show_preview())
         j.check("the preview of an agent in a volee host is its live screen",
                 j.sees("Preview · " + hosted + " · live", timeout=15)
                 and j.said("hosted", timeout=15))
@@ -250,7 +253,7 @@ def main():
             return
         j.keys("Enter", 2.0)
         j.check("Enter opens the selected tile's session inside volee",
-                j.sees("your keys go to " + outside, timeout=20))
+                j.sees(j.editing(outside), timeout=20))
         j.type(SPELL + "b a c k")
         j.keys("Enter")
         j.check("typed text reaches it and it answers", j.said("back"),
@@ -271,7 +274,7 @@ def main():
             return
         j.keys("i", 2.0)
         j.check("i opens the agent in edit mode",
-                j.sees(" EDIT ", "your keys go to " + hosted, timeout=10))
+                j.sees(" EDIT ", j.editing(hosted), timeout=10))
         j.type(SPELL + "t i l e")
         j.keys("Enter")
         j.check("typed text reaches it and it answers", j.said("tile"),

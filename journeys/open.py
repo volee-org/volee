@@ -55,7 +55,7 @@ def main():
             return
         j.keys("Enter", 2.0)
         j.check("Enter opens it inside volee, in edit mode",
-                j.sees("your keys go to " + name, "7341", timeout=20))
+                j.sees(j.editing(name), "7341", timeout=20))
         j.show("a background session opened where it runs")
         j.check("no prompt asked to adopt it", "Move " + name not in j.screen())
         asked = "Add one to the number you remembered. Reply with the result in digits only."
@@ -96,7 +96,7 @@ def main():
         if j.select(name):
             j.keys("Enter", 2.0)
             j.check("Enter opens a stopped session too",
-                    j.sees("your keys go to " + name, timeout=30))
+                    j.sees(j.editing(name), timeout=30))
             asked = "Add two to the number you remembered. Reply with the result in digits only."
             j.type(asked)
             j.keys("Enter")
