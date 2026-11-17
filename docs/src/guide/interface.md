@@ -838,14 +838,28 @@ nothing to scroll. Press one of them and the popup closes and does it;
 `?` again lists every key of every context; `Esc` closes it.
 
 **The leader.** Less frequent actions sit behind the space bar, as in
-LazyVim: press `Space` and a popup at the bottom right shows what can
-follow, grouped as LazyVim groups them: `a` the agents (`a n` a new agent,
-`a m` a new mission, `a l` a new lead, `a a` adopt, `a d` forget), `n` your messages, `q` quit
-(`q q`), `s` search (`s k` every key), `u` the display (`u C` the theme),
-`w` the windows (`w w` the wall, `w m` the selected screen full size) and
-`g` git (`g d` the changes). `Esc`, or a key that
-continues nothing, drops the sequence. `gg` works the same way: after `g`,
-the popup shows what can follow.
+LazyVim: press `Space` and a panel at the bottom right shows everything
+that can follow, in the manner of tuios's prefix panel: one column per
+group under its name, each key spelled in full. The groups are LazyVim's:
+Agents (`a n` a new agent, `a m` a new mission, `a l` a new lead, `a a`
+adopt, `a d` forget), Windows (`w w` the wall, `w m` the selected screen
+full size, `w =` the borders back), UI (`u p` the preview, `u C` the
+theme), Git (`g d` the changes), Search (`s k` every key) and Quit
+(`q q`); the keys that act at once, `n` your messages and `o` open with,
+are under Other. After the first key of a group, the panel shows that
+group alone. A terminal too small for the panel shows the next keys in a
+small box instead. `Esc`, or a key that continues nothing, drops the
+sequence. `gg` works the same way: after `g`, the panel shows what can
+follow.
+
+```text
+  leader · esc
+
+  Agents             Windows             UI             Git         Other
+  a n  new agent     w m  full screen    u C  theme…    g d  diff   n  messages
+  a m  new mission   w w  wall           u p  preview               o  open with…
+  a l  new lead      w =  equal panels
+```
 
 **The command palette.** `:` opens the command line in the middle of the
 screen, as LazyVim's does, and lists under it the commands of the current
@@ -906,11 +920,11 @@ popups and the hints.
 | `z`, `space w m` | show the selected agent's screen full size, to read it | `full-screen` |
 | `space n` | your messages, questions waiting for you first | `messages` |
 | `o`, `space o` | open the selected agent's worktree in your editor, diff viewer or git tool | `open-with` |
-| `space a a` | move the selected agent into a volee host (asks first): its session is stopped and resumed there with volee's settings; opening it needs no adoption | `adopt` |
-| `space a d` | forget the selected agent: stop listing it (asks first) | `forget` |
 | `space a n` | launch an agent in a new worktree | `new-agent` |
 | `space a m` | create a mission, which launches its coordinator | `new-mission` |
 | `space a l` | start a lead in a folder: the agent you talk to, which launches agents and missions for you and never codes | `new-lead` |
+| `space a a` | move the selected agent into a volee host (asks first): its session is stopped and resumed there with volee's settings; opening it needs no adoption | `adopt` |
+| `space a d` | forget the selected agent: stop listing it (asks first) | `forget` |
 | `5`, `space w w` | show the screens of the agents that run, side by side, as a wall | `show-wall` |
 | `space u C` | pick a colour theme, with a live preview; volee keeps your choice | `pick-theme` |
 | `space s k` | list every key, in every context | `all-keys` |

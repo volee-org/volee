@@ -143,6 +143,20 @@ fn the_leader_shows_what_follows() {
 }
 
 #[test]
+fn the_leader_panel_takes_rows_in_a_small_terminal() {
+    let (mut model, demo) = demo_model(80, 24, Theme::default());
+    type_text(&demo, &mut model, " ");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
+fn a_group_of_the_leader_shows_its_keys_under_its_name() {
+    let (mut model, demo) = demo_model(120, 40, Theme::default());
+    type_text(&demo, &mut model, " a");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
 fn the_preview_of_a_hosted_agent_is_its_live_screen() {
     let (mut model, _) = crate::test_support::hosted_model(120, 40);
     update(

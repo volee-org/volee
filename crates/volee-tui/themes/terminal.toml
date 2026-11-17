@@ -61,6 +61,10 @@ sparkline = "cyan"
 "mode.command" = { fg = "black", bg = "yellow", modifiers = ["bold"] }
 statusline = "gray"
 "statusline.section" = { modifiers = ["reversed"] }
+"keys.panel" = { fg = "white", bg = "dark-gray" }
+"keys.title" = { fg = "white", bg = "dark-gray", modifiers = ["bold"] }
+"keys.heading" = { fg = "gray", bg = "dark-gray" }
+"keys.key" = { fg = "light-blue", bg = "dark-gray", modifiers = ["bold"] }
 notice = { modifiers = ["reversed"] }
 "notice.error" = { fg = "black", bg = "red", modifiers = ["bold"] }
 input = { modifiers = ["bold"] }
