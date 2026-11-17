@@ -217,6 +217,17 @@ impl Shared {
 #[derive(Debug)]
 pub struct Daemon;
 
+/// Without Claude Code, hosts and the agents of the process table still
+/// need following, and placing in their panes.
+async fn follow_without_harness(shared: Arc<Shared>) {
+    loop {
+        if let Some(live) = crate::screens::round(&shared).await {
+            crate::panes::locate(&shared, &live).await;
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+}
+
 impl Daemon {
     /// Runs the daemon until a client asks it to stop or the process
     /// receives SIGINT or SIGTERM. Takes the single-daemon lock, replays the
@@ -299,23 +310,15 @@ impl Daemon {
                 stop.clone(),
             ));
         } else if shared.hosts {
-            // Without Claude Code, hosts and the agents of the process
-            // table still need following, and placing in their panes.
-            let shared = Arc::clone(&shared);
-            tokio::spawn(async move {
-                loop {
-                    if let Some(live) = crate::screens::round(&shared).await {
-                        crate::panes::locate(&shared, &live).await;
-                    }
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                }
-            });
+            tokio::spawn(follow_without_harness(Arc::clone(&shared)));
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
         // A mission the person approved while the daemon was stopping, or
         // whose merge it could not finish, is carried out now.
         crate::missions::resume_approved(&shared).await;
         let resumer = crate::resume::spawn(&shared);
+        // Messages for agents that rest at their prompt with no hook waiting.
+        let typist = crate::typist::spawn(&shared);
         let files = crate::files::spawn(&shared, removals);
         // Agents a reboot interrupted come back in new hosts (ADR 0024).
         tokio::spawn(crate::resume::resume_interrupted(Arc::clone(&shared)));
@@ -338,7 +341,10 @@ impl Daemon {
         // The views end with the daemon; the sessions they showed go on.
         let closing = Arc::clone(&shared);
         let _ = tokio::task::spawn_blocking(move || closing.views.close_all(&closing.paths)).await;
-        for task in [refresher, resumer, Some(files)].into_iter().flatten() {
+        for task in [refresher, resumer, Some(files), Some(typist)]
+            .into_iter()
+            .flatten()
+        {
             task.abort();
         }
         Ok(())

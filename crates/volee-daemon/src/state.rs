@@ -271,7 +271,7 @@ impl State {
     /// The text that hands `agent` its pending messages, and the receipts of
     /// the messages it shows. Messages past the text's size limit stay
     /// pending; the text tells the agent to read them with `read_messages`.
-    fn render_pending(&self, agent: AgentId) -> Option<(String, Vec<Event>)> {
+    pub(crate) fn render_pending(&self, agent: AgentId) -> Option<(String, Vec<Event>)> {
         let pending = self.registry.pending_for(agent);
         if pending.is_empty() {
             return None;
@@ -309,6 +309,13 @@ impl State {
             },
         );
         (self.next_token, receiver)
+    }
+
+    /// Whether a hook of `agent` waits for its messages.
+    pub(crate) fn waits(&self, agent: AgentId) -> bool {
+        self.waiters
+            .get(&agent)
+            .is_some_and(|waiter| !waiter.sender.is_closed())
     }
 
     /// Removes a waiter that gave up, unless another one replaced it.

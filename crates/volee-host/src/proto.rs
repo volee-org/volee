@@ -196,6 +196,12 @@ pub struct Welcome {
     /// Hosts started before this field existed leave it out.
     #[serde(default)]
     pub keys: bool,
+    /// Whether another client had the input when this one connected: a
+    /// watcher learns whether someone types into the program, without
+    /// taking the input from them. Hosts started before this field existed
+    /// leave it out.
+    #[serde(default)]
+    pub owned: Option<bool>,
 }
 
 /// A key the input owner pressed (ADR 0026).

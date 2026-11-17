@@ -178,6 +178,35 @@ fn a_second_owner_takes_the_input() {
 }
 
 #[test]
+fn a_watcher_learns_whether_someone_types_into_the_program() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let dir = HostDir::new(root.path().join("hosts"));
+    let socket = dir.socket("owned");
+    let host = start(&dir, "owned", &["cat"]);
+    let watch = |socket: &Path| {
+        Connection::open(socket, Role::Watch, Size { cols: 0, rows: 0 }, "test")
+            .expect("connect")
+            .welcome
+            .owned
+    };
+
+    // Nobody has the input: a watcher learns it, and takes nothing.
+    assert_eq!(watch(&socket), Some(false));
+    let owner = control(&socket, SIZE);
+    assert!(owner.welcome.input);
+    assert_eq!(owner.welcome.owned, Some(false), "nobody had it before");
+    // Someone types: a watcher learns it, and the owner keeps the input.
+    assert_eq!(watch(&socket), Some(true));
+    let sender = owner.sender().expect("sender");
+    sender.input(b"still mine\r").expect("type");
+    let mut watcher = Watch::start(&socket, "test").expect("watch");
+    watch_until(&mut watcher, |watch| screen_has(watch, "still mine"));
+
+    sender.stop().expect("stop");
+    host.join().expect("host thread");
+}
+
+#[test]
 fn a_query_is_answered_while_nobody_owns_the_input() {
     let root = tempfile::tempdir().expect("tempdir");
     let dir = HostDir::new(root.path().join("hosts"));

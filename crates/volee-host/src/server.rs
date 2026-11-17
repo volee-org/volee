@@ -488,6 +488,7 @@ impl Host {
     fn connect(&mut self, id: u64, hello: &Hello, tx: SyncSender<Out>) {
         tracing::info!(id, client = %hello.client, role = ?hello.role, "client connected");
         let wants_input = hello.role == Role::Control && self.record.exit.is_none();
+        let owned = self.owner.is_some();
         if wants_input {
             if let Some(previous) = self.owner.take() {
                 self.send_event_to(previous, &Event::InputTaken);
@@ -509,6 +510,7 @@ impl Host {
             exit: self.record.exit.clone(),
             input: wants_input,
             keys: true,
+            owned: Some(owned),
         };
         let Ok(payload) = serde_json::to_vec(&welcome) else {
             return;
