@@ -67,6 +67,7 @@ pub(crate) fn render(model: &Model, dialog: &LaunchDialog, area: Rect, buf: &mut
     let mut title = vec![Span::raw(match dialog.kind {
         DialogKind::Agent => "New agent",
         DialogKind::Mission => "New mission",
+        DialogKind::Lead => "New lead",
     })];
     if dialog.sending {
         title.push(Span::styled(

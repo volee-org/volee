@@ -1,6 +1,7 @@
 //! Launching from the interface: a new agent in a new worktree
-//! (`agents.spawn`), or a new mission, whose coordinator volee launches
-//! (`missions.create`). A dialog asks for what is needed, and keeps the
+//! (`agents.spawn`), a new mission, whose coordinator volee launches
+//! (`missions.create`), or a lead in a folder (`agents.lead`, as `volee
+//! lead` starts one). A dialog asks for what is needed, and keeps the
 //! source's refusal on screen until the person fixes what it says.
 
 use volee_core::mission::MissionKind;
@@ -8,7 +9,7 @@ use volee_core::mission::MissionKind;
 use crate::app::{Effect, Model, Overlay};
 use crate::editor::{self, TextField};
 use crate::keymap::{Action, Context, KeyCombo, Keymap};
-use crate::source::{MissionRequest, NewMission, SourceError, SpawnRequest};
+use crate::source::{LeadRequest, MissionRequest, NewMission, SourceError, SpawnRequest};
 
 /// What the dialog launches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,6 +18,8 @@ pub(crate) enum DialogKind {
     Agent,
     /// A mission and its coordinator.
     Mission,
+    /// A lead, in a folder.
+    Lead,
 }
 
 /// One field of a dialog.
@@ -137,6 +140,7 @@ pub(crate) fn open(model: &mut Model, kind: DialogKind) {
                 placeholder: "",
             },
         ],
+        DialogKind::Lead => Vec::new(),
         DialogKind::Mission => vec![
             Field {
                 name: "title",
@@ -166,6 +170,11 @@ pub(crate) fn open(model: &mut Model, kind: DialogKind) {
                 placeholder: "what the mission delivers, as its coordinator will read it",
             },
         ],
+    };
+    let fields = if kind == DialogKind::Lead {
+        lead_fields()
+    } else {
+        fields
     };
     model.overlay = Some(Overlay::Launch(Box::new(LaunchDialog {
         kind,
@@ -342,10 +351,65 @@ fn submit(dialog: &mut LaunchDialog, effects: &mut Vec<Effect>) {
                 goal: value("goal"),
             })
         }
+        DialogKind::Lead => {
+            let folder = match lead_folder(&value("folder")) {
+                Ok(folder) => folder,
+                Err(reason) => {
+                    dialog.error = Some(reason);
+                    return;
+                }
+            };
+            let some = |text: String| (!text.is_empty()).then_some(text);
+            Effect::StartLead(LeadRequest {
+                folder,
+                name: some(value("name")),
+                task: some(value("task")),
+            })
+        }
     };
     dialog.error = None;
     dialog.sending = true;
     effects.push(effect);
+}
+
+/// The fields of a lead: where it runs, its name and what it is asked.
+fn lead_fields() -> Vec<Field> {
+    vec![
+        Field {
+            name: "folder",
+            value: Value::Line(TextField::default()),
+            placeholder: "where it runs, such as ~/Developer: the folder volee runs in when empty",
+        },
+        Field {
+            name: "name",
+            value: Value::Line(TextField::default()),
+            placeholder: "lead-<folder> when empty",
+        },
+        Field {
+            name: "task",
+            value: Value::Lines(TextField::default()),
+            placeholder: "what you ask of it at once; when empty, it says it is ready and waits",
+        },
+    ]
+}
+
+/// The folder a lead runs in, from what was typed: `~` is the home folder,
+/// a relative path is from the folder volee runs in, nothing is that
+/// folder. It must exist.
+fn lead_folder(typed: &str) -> Result<String, String> {
+    let here =
+        std::env::current_dir().map_err(|error| format!("Cannot read this folder: {error}."))?;
+    let path = if typed.is_empty() {
+        here
+    } else if let Some(rest) = typed.strip_prefix('~') {
+        let home = std::env::var_os("HOME").ok_or("Cannot find your home folder.")?;
+        std::path::PathBuf::from(home).join(rest.trim_start_matches('/'))
+    } else {
+        here.join(typed)
+    };
+    path.canonicalize()
+        .map(|path| path.display().to_string())
+        .map_err(|_| format!("No folder at {}.", path.display()))
 }
 
 /// The dialog of `kind` that is waiting for the source, if it is open.
@@ -354,6 +418,42 @@ fn waiting(model: &mut Model, kind: DialogKind) -> Option<&mut LaunchDialog> {
         Some(Overlay::Launch(dialog)) if dialog.kind == kind && dialog.sending => Some(dialog),
         _ => None,
     }
+}
+
+/// The source started the lead, or refused: the dialog closes and the lead
+/// is selected as soon as it shows, or the dialog shows why and stays.
+pub(crate) fn lead_started(
+    model: &mut Model,
+    result: Result<volee_core::AgentId, SourceError>,
+) -> bool {
+    match result {
+        Ok(agent) => {
+            model.notify(
+                "Lead started: it shows under LEADS; enter opens it to talk to it.",
+                false,
+            );
+            if waiting(model, DialogKind::Lead).is_some() {
+                model.overlay = None;
+            }
+            model.follow(agent);
+        }
+        Err(error) => {
+            if let Some(dialog) = waiting(model, DialogKind::Lead) {
+                dialog.sending = false;
+                dialog.error = Some(crate::text::sentence(&error.to_string()));
+            } else {
+                let reason = error.to_string();
+                model.notify(
+                    format!(
+                        "Could not start the lead: {}.",
+                        crate::text::clause(&reason)
+                    ),
+                    true,
+                );
+            }
+        }
+    }
+    true
 }
 
 /// The source launched the agent, or refused: the dialog closes, or shows
@@ -686,6 +786,51 @@ mod tests {
                 effects.contains(&Effect::LoadPreview(new_agent())),
                 "its screen is asked for: {effects:?}"
             );
+        }
+
+        #[test]
+        fn the_leader_then_a_l_starts_a_lead_and_selects_it() {
+            let mut model = model(120, 40);
+            press(&mut model, " al");
+            assert_eq!(model.contexts(), [Context::Dialog]);
+            let Some(Overlay::Launch(dialog)) = &model.overlay else {
+                panic!("no dialog");
+            };
+            assert_eq!(dialog.kind, DialogKind::Lead);
+            let names: Vec<&str> = dialog.fields.iter().map(|field| field.name).collect();
+            assert_eq!(names, ["folder", "name", "task"]);
+            // An empty folder is the folder volee runs in; nothing else is
+            // needed.
+            key(&mut model, KeyCode::Tab);
+            key(&mut model, KeyCode::Tab);
+            press(&mut model, "split the invoices work");
+            let effects = ctrl(&mut model, 's');
+            let here = std::env::current_dir().unwrap().canonicalize().unwrap();
+            assert_eq!(
+                effects,
+                [Effect::StartLead(LeadRequest {
+                    folder: here.display().to_string(),
+                    name: None,
+                    task: Some("split the invoices work".into()),
+                })]
+            );
+            update(&mut model, Msg::LeadStarted(Ok(new_agent())));
+            assert_eq!(model.overlay, None);
+            assert_eq!(model.awaited, Some(new_agent()), "selected once it shows");
+        }
+
+        #[test]
+        fn a_lead_in_a_folder_that_is_not_there_is_refused_in_the_dialog() {
+            let mut model = model(120, 40);
+            press(&mut model, " al");
+            press(&mut model, "no/such/folder/here");
+            let effects = ctrl(&mut model, 's');
+            assert!(effects.is_empty(), "{effects:?}");
+            let Some(Overlay::Launch(dialog)) = &model.overlay else {
+                panic!("the dialog stays");
+            };
+            let error = dialog.error.clone().unwrap_or_default();
+            assert!(error.starts_with("No folder at "), "{error}");
         }
 
         #[test]

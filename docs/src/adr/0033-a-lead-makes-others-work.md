@@ -1,6 +1,6 @@
 # 0033. A lead is the agent you talk to, and it makes others work
 
-- Status: Accepted (amends [0007](0007-missions.md))
+- Status: Accepted (amends [0007](0007-missions.md); on 2026-11-17, [a lead from the interface](#a-lead-from-the-interface))
 - Date: 2026-11-11
 
 ## Context
@@ -110,3 +110,16 @@ the two.
 - **A lead that also writes to the workers of its missions.** Two voices
   give a worker two sets of orders. The coordinator is the one that knows
   the split of the work.
+
+## A lead from the interface
+
+Added on 2026-11-17, in 0.18.
+
+The person asked to start a lead from volee as well as from a terminal, as
+the cockpit did. The leader then `a l` opens a dialog with the folder the
+lead runs in (the folder volee runs in when left empty, `~` the home
+folder; it must exist), its name and what it is asked at once. It sends the
+same request as `volee lead` (`agents.lead`), and volee selects the lead as
+soon as it shows: `Enter` opens it to talk to it. The lead itself is the
+same: no worktree, no editing tools, one per folder.
+

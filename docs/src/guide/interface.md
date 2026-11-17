@@ -592,7 +592,12 @@ is none), name the new branch, write the task (its first prompt) and,
 optionally, the model and the harness (`claude-code`, the default, or
 `opencode`). `Space a m` creates a mission: a title, its kind (`change`
 delivers branches and pull requests, `analysis` reports), its repositories
-and its goal; volee launches its coordinator.
+and its goal; volee launches its coordinator. `Space a l` starts a lead,
+as `volee lead` does in a terminal: the folder it runs in (the folder volee
+runs in when you leave it empty; `~` is your home folder), a name
+(`lead-<folder>` otherwise) and, if you like, what you ask of it at once.
+The lead shows under LEADS and volee selects it: `Enter` opens it to talk
+to it.
 
 `Tab` moves between fields, `←` and `→` choose, `space` picks a
 repository, and `Enter` starts a new line in the task or the goal (it moves
@@ -835,7 +840,7 @@ nothing to scroll. Press one of them and the popup closes and does it;
 **The leader.** Less frequent actions sit behind the space bar, as in
 LazyVim: press `Space` and a popup at the bottom right shows what can
 follow, grouped as LazyVim groups them: `a` the agents (`a n` a new agent,
-`a m` a new mission, `a a` adopt, `d` forget), `n` your messages, `q` quit
+`a m` a new mission, `a l` a new lead, `a a` adopt, `a d` forget), `n` your messages, `q` quit
 (`q q`), `s` search (`s k` every key), `u` the display (`u C` the theme),
 `w` the windows (`w w` the wall, `w m` the selected screen full size) and
 `g` git (`g d` the changes). `Esc`, or a key that
@@ -905,6 +910,7 @@ popups and the hints.
 | `space a d` | forget the selected agent: stop listing it (asks first) | `forget` |
 | `space a n` | launch an agent in a new worktree | `new-agent` |
 | `space a m` | create a mission, which launches its coordinator | `new-mission` |
+| `space a l` | start a lead in a folder: the agent you talk to, which launches agents and missions for you and never codes | `new-lead` |
 | `5`, `space w w` | show the screens of the agents that run, side by side, as a wall | `show-wall` |
 | `space u C` | pick a colour theme, with a live preview; volee keeps your choice | `pick-theme` |
 | `space s k` | list every key, in every context | `all-keys` |

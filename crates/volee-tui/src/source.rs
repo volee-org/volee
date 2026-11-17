@@ -105,6 +105,21 @@ pub trait Source: Send + Sync + 'static {
         request: MissionRequest,
     ) -> impl Future<Output = Result<NewMission, SourceError>> + Send;
 
+    /// Starts a lead in a folder (ADR 0033): the agent the person talks to,
+    /// which launches agents and missions and never codes. It comes back as
+    /// events.
+    fn start_lead(
+        &self,
+        request: LeadRequest,
+    ) -> impl Future<Output = Result<AgentId, SourceError>> + Send {
+        let _ = request;
+        async {
+            Err(SourceError::Unsupported(
+                "this source starts no lead: `volee lead` does, in a folder".into(),
+            ))
+        }
+    }
+
     /// Forgets an agent: the source stops listing it and ignores its
     /// sessions; nothing is stopped or deleted. The removal comes back as an
     /// event. Fails with [`SourceError::Unsupported`] when a rule refuses,
@@ -178,6 +193,18 @@ pub struct SpawnRequest {
     pub model: Option<String>,
     /// The harness profile (ADR 0022); Claude Code when absent.
     pub harness: Option<String>,
+}
+
+/// A lead to start, as the person describes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeadRequest {
+    /// The folder it runs in: an absolute path.
+    pub folder: String,
+    /// A display name; `lead-<folder>` when absent.
+    pub name: Option<String>,
+    /// What the person asks of it at once; it says it is ready and waits
+    /// when absent.
+    pub task: Option<String>,
 }
 
 /// A mission to create, as the person describes it.
