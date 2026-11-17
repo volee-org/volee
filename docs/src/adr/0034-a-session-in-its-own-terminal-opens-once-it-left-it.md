@@ -94,8 +94,9 @@ two conversations and it becomes a row.
 session in a terminal volee cannot reach no longer fails. A window says
 what to do, in three steps: go to the terminal where the session runs,
 named by its directory; press the left arrow key there, with nothing typed
-in its input box, where Claude Code itself shows `← for agents`; come
-back. A terminal too small for the window has it on the bottom line, in one
+in its input box, where Claude Code itself shows `← for agents` (or
+`← 1 agent`, and so on, once agents of its own run: seen on 2026-11-17
+with Claude Code 2.1.326, and the window names both); come back. A terminal too small for the window has it on the bottom line, in one
 sentence. The first release said it in that one sentence alone, `<name>
 runs in its own terminal: press ← on its empty prompt there, and volee
 opens it here.`, and the first person to read it did not know where to go
