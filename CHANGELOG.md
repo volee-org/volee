@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 It is generated from the commit history with [git-cliff](https://git-cliff.org):
 see [RELEASING.md](RELEASING.md).
 
+## [0.18.0] - 2026-11-17
+
+### Added
+
+- **tui**: Keys after LazyVim, a vim mode line and the command line in the middle ([#186](https://github.com/volee-org/volee/pull/186))
+- **tui**: Open without the preview, and move the borders as LazyVim resizes its windows ([#187](https://github.com/volee-org/volee/pull/187))
+- **tui**: Start a lead from the interface with the leader then a l ([#188](https://github.com/volee-org/volee/pull/188))
+
+### Fixed
+
+- **daemon**: Type a message at the prompt of an agent that rests in a volee host past its wake-up hook ([#185](https://github.com/volee-org/volee/pull/185))
+- **tui**: Name both hints Claude Code shows for the left arrow ([#189](https://github.com/volee-org/volee/pull/189))
+
+### Documentation
+
+- **roadmap**: Record 0.17.2, the sessions in a terminal tab or a pane are TERMINALS again ([#184](https://github.com/volee-org/volee/pull/184))
+
 ## [0.17.2] - 2026-11-16
 
 ### Fixed
@@ -342,6 +359,7 @@ see [RELEASING.md](RELEASING.md).
 - Mark the interface, messaging and views milestones done ([#52](https://github.com/volee-org/volee/pull/52))
 - Start the daemon in the first step of the guide, and say what tidy removes ([#56](https://github.com/volee-org/volee/pull/56))
 
+[0.18.0]: https://github.com/volee-org/volee/compare/v0.17.2...v0.18.0
 [0.17.2]: https://github.com/volee-org/volee/compare/v0.17.1...v0.17.2
 [0.17.1]: https://github.com/volee-org/volee/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/volee-org/volee/compare/v0.16.0...v0.17.0
