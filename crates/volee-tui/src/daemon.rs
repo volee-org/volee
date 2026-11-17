@@ -24,8 +24,7 @@ use volee_proto::rpc;
 
 use crate::source::{
     Changes, Door, LeadRequest, MissionRequest, NewMission, Outgoing, PaneFocus, Reading, Source,
-    SourceError,
-    SpawnRequest, Subscription, Summary, TakeOver,
+    SourceError, SpawnRequest, Subscription, Summary, TakeOver,
 };
 
 /// What the interface says once the daemon is gone.
