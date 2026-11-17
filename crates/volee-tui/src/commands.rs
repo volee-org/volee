@@ -65,6 +65,10 @@ pub(crate) fn all(model: &Model) -> Vec<Command> {
                         | Action::FocusDown
                         | Action::FocusUp
                         | Action::FocusRight
+                        | Action::Wider
+                        | Action::Narrower
+                        | Action::Taller
+                        | Action::Shorter
                 )
                 || commands
                     .iter()
