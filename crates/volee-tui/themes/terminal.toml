@@ -55,6 +55,12 @@ sparkline = "cyan"
 "agent.9" = "light-red"
 "hint.key" = { modifiers = ["reversed", "bold"] }
 "hint.text" = "dark-gray"
+"mode.normal" = { fg = "black", bg = "blue", modifiers = ["bold"] }
+"mode.insert" = { fg = "black", bg = "green", modifiers = ["bold"] }
+"mode.view" = { fg = "black", bg = "magenta", modifiers = ["bold"] }
+"mode.command" = { fg = "black", bg = "yellow", modifiers = ["bold"] }
+statusline = "gray"
+"statusline.section" = { modifiers = ["reversed"] }
 notice = { modifiers = ["reversed"] }
 "notice.error" = { fg = "black", bg = "red", modifiers = ["bold"] }
 input = { modifiers = ["bold"] }

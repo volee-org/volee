@@ -25,4 +25,4 @@ expression: draw(&model)
 "│ │                             │ where search p95 doubled.                  │ │"
 "│ ╰──────────────────────────────────────────────────────────────────────────╯ │"
 "╰──────────────────────────────────╯╰──────────────────────────────────────────╯"
-"  MESSAGES    j/k  move    enter  read    r  reply    s  summarize              "
+" NORMAL  messages    j/k  move    enter  read    r  reply    s  summarize       "

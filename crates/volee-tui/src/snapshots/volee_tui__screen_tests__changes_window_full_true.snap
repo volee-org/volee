@@ -41,4 +41,4 @@ expression: draw(&model)
 "│   ? for shortcuts                                                                                                    │"
 "│                                                                                                                      │"
 "╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯"
-"  CHANGES    j/k  scroll    f  summary/patch    r  refresh    o  open with    esc  close                                "
+" VIEW  changes    j/k  scroll    f  summary/patch    r  refresh    o  open with    esc  close                           "

@@ -17,7 +17,7 @@ volee ships with five themes:
 
 ### From the interface
 
-Press `Space t`, or type `:theme`, to open the theme picker at the bottom
+Press `Space u C` (where LazyVim picks a colorscheme), or type `:theme`, to open the theme picker at the bottom
 right of the screen. It lists the built-in themes, then your own from
 `~/.config/volee/themes`. Moving in the list applies each theme at once, so
 you see it on your own agents before you decide.
@@ -179,6 +179,12 @@ edge = "#3b4261"
 | `agent.9` | The ninth color that tells agents apart. |
 | `hint.key` | Keys in the hint bar and in the help. |
 | `hint.text` | Descriptions in the hint bar and in the help. |
+| `mode.normal` | The mode at the left of the status line, in normal mode. |
+| `mode.insert` | The mode at the left of the status line, in insert mode: the keys go to an agent, or into a text. |
+| `mode.view` | The mode at the left of the status line, in view mode: a screen, the wall or changes, to read. |
+| `mode.command` | The mode at the left of the status line, in command mode: the command line or the filter. |
+| `statusline` | The status line, at the bottom. |
+| `statusline.section` | The section of the status line after the mode: the selected agent, or the window the keys are in. |
 | `notice` | Short notices at the bottom of the screen. |
 | `notice.error` | Notices about something that failed. |
 | `input` | Text being typed, such as a filter. |

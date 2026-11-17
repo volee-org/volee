@@ -173,6 +173,22 @@ style_roles! {
     HintKey => "hint.key",
     /// Descriptions in the hint bar and in the help.
     HintText => "hint.text",
+    /// The mode at the left of the status line, in normal mode.
+    ModeNormal => "mode.normal",
+    /// The mode at the left of the status line, in insert mode: the keys go
+    /// to an agent, or into a text.
+    ModeInsert => "mode.insert",
+    /// The mode at the left of the status line, in view mode: a screen, the
+    /// wall or changes, to read.
+    ModeView => "mode.view",
+    /// The mode at the left of the status line, in command mode: the
+    /// command line or the filter.
+    ModeCommand => "mode.command",
+    /// The status line, at the bottom.
+    StatusLine => "statusline",
+    /// The section of the status line after the mode: the selected agent, or
+    /// the window the keys are in.
+    StatusSection => "statusline.section",
     /// Short notices at the bottom of the screen.
     Notice => "notice",
     /// Notices about something that failed.

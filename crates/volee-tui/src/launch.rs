@@ -648,7 +648,7 @@ mod tests {
         fn n_launches_an_agent_and_selects_it_once_it_appears() {
             let mut model = model(120, 40);
             model.settings.repos = vec!["billing".into()];
-            press(&mut model, " n");
+            press(&mut model, " an");
             assert_eq!(model.contexts(), [Context::Dialog]);
             key(&mut model, KeyCode::Tab);
             press(&mut model, "feat/export");
@@ -692,7 +692,7 @@ mod tests {
         fn a_refusal_stays_in_the_dialog_until_fixed() {
             let mut model = model(120, 40);
             model.settings.repos = vec!["billing".into()];
-            press(&mut model, " N");
+            press(&mut model, " am");
             press(&mut model, "Export");
             key(&mut model, KeyCode::Tab);
             key(&mut model, KeyCode::Tab);
@@ -739,7 +739,7 @@ mod tests {
         fn enter_moves_on_or_starts_a_line_and_never_launches() {
             let mut model = model(120, 40);
             model.settings.repos = vec!["billing".into()];
-            press(&mut model, " n");
+            press(&mut model, " an");
             // From the repository and the branch, Enter moves on.
             assert!(!launches(&key(&mut model, KeyCode::Enter)));
             press(&mut model, "feat/export");
@@ -776,7 +776,7 @@ mod tests {
         fn a_mission_s_goal_takes_several_lines() {
             let mut model = model(120, 40);
             model.settings.repos = vec!["billing".into()];
-            press(&mut model, " N");
+            press(&mut model, " am");
             press(&mut model, "Export");
             // Title, kind, then repositories: Enter moves on.
             key(&mut model, KeyCode::Enter);
@@ -804,10 +804,10 @@ mod tests {
         #[test]
         fn escape_cancels_and_ctrl_c_quits() {
             let mut model = model(120, 40);
-            press(&mut model, " n");
+            press(&mut model, " an");
             key(&mut model, KeyCode::Esc);
             assert_eq!(model.overlay, None);
-            press(&mut model, " n");
+            press(&mut model, " an");
             let effects = update(
                 &mut model,
                 Msg::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),

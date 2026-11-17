@@ -184,6 +184,13 @@ impl Terminal {
         thread::sleep(Duration::from_millis(60));
     }
 
+    /// Quits the interface as LazyVim quits: the leader, then `q q`.
+    fn quit(&self) {
+        for key in ["space", "q", "q"] {
+            self.key(key, false);
+        }
+    }
+
     /// Bytes as the person's terminal sends them, such as a mouse report.
     fn bytes(&self, bytes: &[u8]) {
         self.keys.input(bytes).unwrap();
@@ -279,7 +286,7 @@ fn a_background_session_is_listed_opened_typed_into_and_left() {
     // a terminal inside the interface. No prompt, no adoption.
     terminal.key("enter", false);
     terminal.sees("session 7d3c1f0a of the stand-in");
-    terminal.sees("your keys go to invoices");
+    terminal.sees("→ invoices");
     assert!(
         !terminal.screen().contains("Move invoices"),
         "opening never asks to adopt:\n{}",
@@ -303,7 +310,7 @@ fn a_background_session_is_listed_opened_typed_into_and_left() {
 
     // Opened again while its view still runs: the same view.
     terminal.key("enter", false);
-    terminal.sees("your keys go to invoices");
+    terminal.sees("→ invoices");
     terminal.sees("hello volee");
     assert_eq!(views(&world).len(), 2, "still one view");
     terminal.key("q", true);
@@ -326,7 +333,7 @@ fn a_background_session_is_listed_opened_typed_into_and_left() {
     assert_eq!(invoices["sessions"].as_array().unwrap().len(), 1);
 
     // The interface quits; the daemon stops and takes its view with it.
-    terminal.key("q", false);
+    terminal.quit();
     assert!(
         wait(15, || host.is_finished()),
         "the interface never quit:\n{}",
@@ -422,7 +429,7 @@ fn a_program_run_under_volee_is_an_agent_here_and_in_the_interface() {
     terminal.key("enter", false);
     terminal.sees("\u{258c}");
     terminal.key("enter", false);
-    terminal.sees("your keys go to ledger");
+    terminal.sees("→ ledger");
     terminal.sees("typed by hand");
     terminal.text("typed in volee");
     terminal.key("enter", false);
@@ -437,7 +444,7 @@ fn a_program_run_under_volee_is_an_agent_here_and_in_the_interface() {
     terminal.key("q", true);
     terminal.sees("z  back");
     assert!(
-        !terminal.screen().contains("your keys go to ledger"),
+        !terminal.screen().contains("→ ledger"),
         "the keys are still the program's:\n{}",
         terminal.screen()
     );
@@ -472,7 +479,7 @@ fn a_program_run_under_volee_is_an_agent_here_and_in_the_interface() {
         "{said}"
     );
 
-    terminal.key("q", false);
+    terminal.quit();
     assert!(
         wait(15, || host.is_finished()),
         "the interface never quit:\n{}",
@@ -630,7 +637,7 @@ fn the_wall_shows_a_session_and_the_mouse_reaches_it_once_opened() {
     // Enter opens the selected tile's session, as from the list.
     terminal.key("enter", false);
     terminal.sees("session 7d3c1f0a of the stand-in");
-    terminal.sees("your keys go to invoices");
+    terminal.sees("→ invoices");
 
     // The program asked for the mouse: a click on its screen reaches it, on
     // its own cell (the screen starts two columns and one row inside the
@@ -650,10 +657,10 @@ fn the_wall_shows_a_session_and_the_mouse_reaches_it_once_opened() {
     terminal.sees("Left invoices: it keeps running");
     terminal.sees("1 agent runs");
 
-    // `q` leaves the wall, then the interface.
+    // `q` leaves the wall; the leader then `q q` leaves the interface.
     terminal.key("q", false);
     terminal.sees("Agents");
-    terminal.key("q", false);
+    terminal.quit();
     assert!(
         wait(15, || host.is_finished()),
         "the interface never quit:\n{}",

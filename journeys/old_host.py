@@ -62,7 +62,7 @@ def main():
         j.keys("ctrl+q", 1.0)
         j.check("the leave key comes back", j.sees("Screen · " + name + " · live", timeout=10))
         j.keys("z", 0.5)
-        j.keys("q", 1.0)
+        j.quit()
     finally:
         j.finish()
 

@@ -85,6 +85,13 @@ sparkline = "sapphire"
 "agent.9" = "green"
 "hint.key" = { fg = "text", bg = "surface1", modifiers = ["bold"] }
 "hint.text" = "overlay1"
+# The status line, as lualine draws it with Catppuccin in LazyVim.
+"mode.normal" = { fg = "mantle", bg = "blue", modifiers = ["bold"] }
+"mode.insert" = { fg = "mantle", bg = "green", modifiers = ["bold"] }
+"mode.view" = { fg = "mantle", bg = "mauve", modifiers = ["bold"] }
+"mode.command" = { fg = "mantle", bg = "peach", modifiers = ["bold"] }
+statusline = { fg = "subtext0", bg = "mantle" }
+"statusline.section" = { fg = "text", bg = "surface0" }
 notice = { fg = "text", bg = "surface0" }
 "notice.error" = { fg = "crust", bg = "red", modifiers = ["bold"] }
 input = { fg = "text", modifiers = ["bold"] }

@@ -41,4 +41,4 @@ expression: draw(&model)
 "│   ? for shortcuts                                                                                                    │"
 "│                                                                                                                      │"
 "╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯"
-"  MESSAGE    enter  send    alt-enter  new line    tab/⇧tab  kind    esc  close                                         "
+" INSERT  message    enter  send    alt-enter  new line    tab/⇧tab  kind    esc  close                                  "

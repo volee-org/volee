@@ -343,6 +343,16 @@ macro_rules! actions {
 actions! {
     /// Quit volee.
     Quit => "quit",
+    /// Say how to quit: the leader then `q q`, or `:q`, as in LazyVim.
+    QuitHint => "quit-hint",
+    /// Focus the panel on the left.
+    FocusLeft => "focus-left",
+    /// Focus the panel below.
+    FocusDown => "focus-down",
+    /// Focus the panel above.
+    FocusUp => "focus-up",
+    /// Focus the panel on the right.
+    FocusRight => "focus-right",
     /// Show the keys of the current screen in a popup.
     Help => "help",
     /// Show every key, in every context.
@@ -698,9 +708,19 @@ pub(crate) fn join_keys(keys: &[String]) -> String {
 
 /// The name of a group of sequences, shown in the which-key popup.
 pub(crate) fn group_name(prefix: &[KeyCombo]) -> &'static str {
+    let leader = KeyCombo::char(' ');
     match prefix {
-        [key] if *key == KeyCombo::char(' ') => "leader",
+        [key] if *key == leader => "leader",
         [key] if *key == KeyCombo::char('g') => "go to",
+        [first, key] if *first == leader => match key.typed_char() {
+            Some('a') => "agents",
+            Some('g') => "git",
+            Some('q') => "quit",
+            Some('s') => "search",
+            Some('u') => "ui",
+            Some('w') => "windows",
+            _ => "more",
+        },
         _ => "more",
     }
 }
@@ -1155,21 +1175,25 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &["n"], A::NextMatch, "next match", Some("match"), "the next agent that matches the filter, round the list"),
         bind(C::Global, &["N"], A::PreviousMatch, "previous match", Some("match"), "the previous agent that matches the filter, round the list"),
         bind(C::Global, &["m"], A::Message, "message", Some("message"), "write a message to the selected agent"),
-        bind(C::Global, &["d"], A::Diff, "diff", Some("diff"), "show the selected agent's changes"),
-        bind(C::Global, &["enter", "i", "a"], A::TakeOver, "open", Some("open"), "open the selected agent: its own terminal, full size inside volee, takes your keys; the leave key (ctrl-q) comes back and the agent keeps running"),
-        bind(C::Global, &["z"], A::FullScreen, "full screen", Some("full screen"), "show the selected agent's screen full size"),
-        bind(C::Global, &["I", "space i"], A::Messages, "messages", Some("messages"), "your messages, questions waiting for you first"),
+        bind(C::Global, &["d", "space g d"], A::Diff, "diff", Some("diff"), "show the selected agent's changes"),
+        bind(C::Global, &["enter", "i", "a", "I", "A"], A::TakeOver, "open", Some("open"), "open the selected agent in insert mode: its own terminal, full size inside volee, takes your keys; the leave key (ctrl-q) comes back and the agent keeps running"),
+        bind(C::Global, &["z", "space w m"], A::FullScreen, "full screen", Some("full screen"), "show the selected agent's screen full size, to read it"),
+        bind(C::Global, &["space n"], A::Messages, "messages", Some("messages"), "your messages, questions waiting for you first"),
         bind(C::Global, &["o", "space o"], A::OpenWith, "open with…", None, "open the selected agent's worktree in your editor, diff viewer or git tool"),
-        bind(C::Global, &["A", "space a"], A::Adopt, "adopt", None, "move the selected agent into a volee host (asks first): its session is stopped and resumed there with volee's settings; opening it needs no adoption"),
-        bind(C::Global, &["F", "space f"], A::Forget, "forget", None, "forget the selected agent: stop listing it (asks first)"),
-        bind(C::Global, &["space n"], A::NewAgent, "new agent", None, "launch an agent in a new worktree"),
-        bind(C::Global, &["space N"], A::NewMission, "new mission", None, "create a mission, which launches its coordinator"),
-        bind(C::Global, &["space w", "5"], A::ShowWall, "wall", None, "show the screens of the agents that run, side by side, as a wall"),
-        bind(C::Global, &["space t"], A::PickTheme, "theme…", None, "pick a colour theme, with a live preview; volee keeps your choice"),
-        bind(C::Global, &["space k"], A::AllKeys, "all keys", None, "list every key, in every context"),
-        bind(C::Global, &[":"], A::Commands, "commands", Some("commands"), "the command palette: type part of a command's name and press enter"),
+        bind(C::Global, &["space a a"], A::Adopt, "adopt", None, "move the selected agent into a volee host (asks first): its session is stopped and resumed there with volee's settings; opening it needs no adoption"),
+        bind(C::Global, &["space a d"], A::Forget, "forget", None, "forget the selected agent: stop listing it (asks first)"),
+        bind(C::Global, &["space a n"], A::NewAgent, "new agent", None, "launch an agent in a new worktree"),
+        bind(C::Global, &["space a m"], A::NewMission, "new mission", None, "create a mission, which launches its coordinator"),
+        bind(C::Global, &["5", "space w w"], A::ShowWall, "wall", None, "show the screens of the agents that run, side by side, as a wall"),
+        bind(C::Global, &["space u C"], A::PickTheme, "theme…", None, "pick a colour theme, with a live preview; volee keeps your choice"),
+        bind(C::Global, &["space s k"], A::AllKeys, "all keys", None, "list every key, in every context"),
+        bind(C::Global, &[":"], A::Commands, "commands", Some("commands"), "the command line, in the middle of the screen: type part of a command's name, or q to quit, and press enter"),
         bind(C::Global, &["tab"], A::NextPane, "next panel", Some("panel"), "focus the next panel"),
         bind(C::Global, &["shift-tab"], A::PreviousPane, "previous panel", Some("panel"), "focus the previous panel"),
+        bind(C::Global, &["ctrl-h"], A::FocusLeft, "panel left", None, "focus the panel on the left"),
+        bind(C::Global, &["ctrl-j"], A::FocusDown, "panel below", None, "focus the panel below"),
+        bind(C::Global, &["ctrl-k"], A::FocusUp, "panel above", None, "focus the panel above"),
+        bind(C::Global, &["ctrl-l"], A::FocusRight, "panel right", None, "focus the panel on the right"),
         bind(C::Global, &["1"], A::ShowHierarchy, "tree", Some("views"), "show the tree of who launched whom"),
         bind(C::Global, &["2"], A::ShowNetwork, "network", Some("views"), "show the network"),
         bind(C::Global, &["3"], A::ShowRepos, "repositories", Some("views"), "show repositories and worktrees"),
@@ -1178,7 +1202,8 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &["L"], A::NextView, "next view", Some("view"), "show the next view"),
         bind(C::Global, &["?"], A::Help, "keys", Some("help"), "show the keys of this screen; ? again lists every key"),
         bind(C::Global, &["esc"], A::Back, "back", None, "close, cancel or go back (never quits)"),
-        bind(C::Global, &["q", "ctrl-c"], A::Quit, "quit", Some("quit"), "quit volee (asks first when a draft would be lost)"),
+        bind(C::Global, &["space q q", "ctrl-c"], A::Quit, "quit", Some("quit"), "quit volee (asks first when a draft would be lost)"),
+        bind(C::Global, &["q"], A::QuitHint, "how to quit", None, "says how to quit: the leader then q q, or :q, as in LazyVim; q closes windows"),
 
         bind(C::Agents, &["h", "left"], A::Left, "parent", Some("move"), "parent agent"),
         bind(C::Agents, &["j", "down"], A::Down, "next", Some("move"), "next agent"),
@@ -1291,7 +1316,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Inbox, &["enter"], A::Apply, "read", Some("read"), "read the thread, which marks its messages read"),
         bind(C::Inbox, &["r"], A::Reply, "reply", Some("reply"), "reply: the answer to the question, else a note to the agent"),
         bind(C::Inbox, &["s"], A::Summarize, "summarize", Some("summarize"), "summarize the thread with a model, when summaries are on"),
-        bind(C::Inbox, &["esc", "q", "I"], A::Back, "close", Some("close"), "leave the thread, then close the messages"),
+        bind(C::Inbox, &["esc", "q"], A::Back, "close", Some("close"), "leave the thread, then close the messages"),
         bind(C::Inbox, &["ctrl-c"], A::Quit, "quit", None, "quit volee"),
 
         bind(C::Tools, &["e"], A::OpenEditor, "editor", Some("editor"), "your editor ($VISUAL, $EDITOR or [tui.tools] editor)"),

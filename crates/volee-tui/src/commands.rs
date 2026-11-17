@@ -1,5 +1,7 @@
-//! The command palette (`:`): the actions of the current screen and the
-//! themes, found by typing part of their name, run with Enter.
+//! The command palette (`:`), in the middle of the screen as LazyVim's
+//! command line: the actions of the current screen and the themes, found by
+//! typing part of their name, run with Enter. `q`, `qa` and their kin quit,
+//! as in vim.
 
 use crate::app::{Effect, Model, Overlay};
 use crate::keymap::{Action, Context, KeyCombo};
@@ -54,7 +56,16 @@ pub(crate) fn all(model: &Model) -> Vec<Command> {
         for binding in model.keymap.bindings() {
             if binding.context != context
                 || MOVES.contains(&binding.action)
-                || matches!(binding.action, Action::Commands | Action::Back)
+                || matches!(
+                    binding.action,
+                    Action::Commands
+                        | Action::Back
+                        | Action::QuitHint
+                        | Action::FocusLeft
+                        | Action::FocusDown
+                        | Action::FocusUp
+                        | Action::FocusRight
+                )
                 || commands
                     .iter()
                     .any(|command| command.run == Run::Action(context, binding.action))
@@ -87,10 +98,24 @@ pub(crate) fn all(model: &Model) -> Vec<Command> {
     commands
 }
 
+/// What vim's command line quits with.
+const QUIT: [&str; 7] = ["q", "q!", "qa", "qa!", "qall", "quit", "quitall"];
+
 /// The commands that match `text`: each of its words is in the name or the
-/// label, names that start with the text first.
+/// label, names that start with the text first. vim's `q` and its kin are
+/// quit alone.
 pub(crate) fn matching(model: &Model, text: &str) -> Vec<Command> {
     let text = text.trim().to_lowercase();
+    if QUIT.contains(&text.as_str()) {
+        let quit = all(model)
+            .into_iter()
+            .filter(|command| matches!(command.run, Run::Action(_, Action::Quit)))
+            .take(1)
+            .collect::<Vec<_>>();
+        if !quit.is_empty() {
+            return quit;
+        }
+    }
     let words: Vec<&str> = text.split_whitespace().collect();
     let mut found: Vec<Command> = all(model)
         .into_iter()

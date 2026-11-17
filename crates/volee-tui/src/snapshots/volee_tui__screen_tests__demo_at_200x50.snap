@@ -51,4 +51,4 @@ expression: draw(&model)
 "│   ? for shortcuts                                                                                                                                                                                    │"
 "│                                                                                                                                                                                                      │"
 "╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯"
-"  VOLEE    I  messages    /  filter    ␣  more    :  commands    q  quit                                                                                                                        ?  help "
+" NORMAL  invoice-tools · needs you    ␣n  messages    /  filter    ␣  more    :  commands    ␣qq  quit                                                                                          ?  help "

@@ -38,7 +38,7 @@ Everything on the screen comes from the daemon, and so do the actions:
 | An agent's changes (`d`) | git, in the agent's worktree or folder. |
 | Opening an agent (`enter`, `i`, `a`, a double click) | A terminal on the agent, which the interface connects to: the volee host it runs in, or a view the daemon starts on the session where it runs (`claude attach` on a Claude Code background session, `tuios pane-view` on a tuios pane). tmux brings forward the pane of a session in one of its panes. |
 | The live full-screen view (`z`) | The agent's volee host. |
-| Adopting an agent (`A`) | Claude Code, which stops the background session (`claude stop`), then a new volee host, which resumes its conversation. |
+| Adopting an agent (`Space a a`) | Claude Code, which stops the background session (`claude stop`), then a new volee host, which resumes its conversation. |
 | The wall of screens (`5`) | For each agent of the list that runs: its volee host, followed live, or what the preview uses for an agent volee does not host. |
 | Writing to an agent (`m`) | Its own records and the agent's hooks. |
 
@@ -77,7 +77,7 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
 │ ⏺ Before I go on, one question:                                                                                       │
 │   Should create_invoice accept a draft flag?                                                                          │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-  VOLEE    I  messages    /  filter    ␣  more    :  commands    q  quit                                          ?  help
+  NORMAL  invoice-tools · needs you   ␣n  messages    /  filter    ␣  more    :  commands    ␣qq  quit          ?  help
 ```
 
 - **Top bar.** The views, numbered (press the number to switch; `5` opens
@@ -111,7 +111,7 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
 - **For you.** From 160 columns, at the right: what waits for you, the
   questions agents asked you that nobody answered, oldest first, then the
   agents that wait for you (a permission, a dialog), each with what it
-  asks. A click selects the agent; `I` opens the
+  asks. A click selects the agent; `Space n` opens the
   [messages](#messages) to answer.
 - **Journal.** Under it, what happened lately, newest at the bottom, with
   how long ago: who launched whom (`→`), who wrote to whom (`✉`, `?` for a
@@ -158,13 +158,15 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
   and the wall, and `z` in a terminal too small for the screen. A screen
   that fits is shown as it is, every blank row included, and `volee logs`
   prints every row.
-- **Status line.** One line at the bottom, in the manner of vim's. At its
-  left, the mode the keyboard is in: `VOLEE` while your keys drive volee,
-  `EDIT` in the agent's color while they go to an agent (with its name and
-  the key that gives them back), and `FILTER`, `MESSAGE`, `COMMAND`,
-  `MESSAGES`, `WALL`, `VIEW` or `HELP` while a field or a window has them.
-  Then the few keys of the moment, drawn as keys, and `? help` at the
-  right. On the main screen it shows only the keys that are nowhere else on
+- **Status line.** One line at the bottom, as lualine draws it in LazyVim.
+  At its left, the mode the keyboard is in, in a block of its color:
+  `NORMAL` on the main screen and in the windows your keys move through,
+  `INSERT` while they go to an agent (the agent's name follows, in its
+  color, with the key that gives them back) or into a text, `VIEW` while a
+  screen, the wall or changes are shown to read, `COMMAND` on the command
+  line and in the filter. Then a section with the selected agent and its
+  state, or the window the keys are in, then the few keys of the moment,
+  drawn as keys, and `? help` at the right. On the main screen it shows only the keys that are nowhere else on
   screen: the messages, the filter, the leader (`␣ more`), the commands and
   quitting; opening the selected agent and writing to it sit on its
   preview's border, or on this line when the layout has no preview border.
@@ -426,7 +428,7 @@ make the time scale finer or coarser, from a second to an hour per column;
 
 ## The wall of screens
 
-`5` (or `Space w`) opens the wall: the agents of the current list that run,
+`5` (or `Space w w`) opens the wall: the agents of the current list that run,
 each as a tile of its screen, over the whole terminal. The filter (`/`)
 applies, so filter first to watch one mission or one repository.
 
@@ -525,7 +527,7 @@ selected then. Quitting with a draft asks first.
 
 ## Messages
 
-`I` (or `Space i`) opens your messages. Questions agents asked you and that you have not
+`Space n` opens your messages, where LazyVim keeps its notifications. Questions agents asked you and that you have not
 answered come first, pinned until an answer refers to them; then every
 thread you take part in, the latest activity first: mission threads,
 threads with agents, and volee's own alerts. A `●` marks threads with
@@ -583,11 +585,11 @@ back when they exit; VS Code opens its own window and volee stays.
 
 ## Launching agents and missions
 
-`Space n` launches an agent in a new worktree: choose the repository (from
+`Space a n` launches an agent in a new worktree: choose the repository (from
 `[repos]` in the configuration, or type the path of a checkout when there
 is none), name the new branch, write the task (its first prompt) and,
 optionally, the model and the harness (`claude-code`, the default, or
-`opencode`). `Space N` creates a mission: a title, its kind (`change`
+`opencode`). `Space a m` creates a mission: a title, its kind (`change`
 delivers branches and pull requests, `analysis` reports), its repositories
 and its goal; volee launches its coordinator.
 
@@ -725,7 +727,7 @@ drive it from now on, like the agents it launches: messages reach it,
 `volee stop` stops it, a message resumes it, and it comes back after a
 reboot.
 
-`A` moves the selected agent's conversation into a volee host, as
+`Space a a` moves the selected agent's conversation into a volee host, as
 `volee adopt` does. It asks first, on the bottom line, because it changes
 the session: volee stops it (`claude stop`), so that two programs never
 write the same conversation, then resumes the conversation in a new host,
@@ -800,7 +802,7 @@ shows names that server. Zellij is not supported yet.
 
 ## Forgetting an agent
 
-`F` forgets the selected agent, after asking on the bottom line: volee stops
+`Space a d` forgets the selected agent, after asking on the bottom line: volee stops
 listing it and ignores its sessions from then on, as `volee forget` does.
 Nothing is stopped or deleted: its sessions, worktree and branch stay as
 they are. volee refuses an agent it launched that still runs (stop it first
@@ -809,12 +811,15 @@ which.
 
 ## Keys
 
-The keys follow the habits of vim and of terminal tools such as lazygit:
-`h`, `j`, `k`, `l` and the arrows move, `gg` and `G` go to the ends,
-`Ctrl+d` and `Ctrl+u` move half a page, `/` filters and `n` / `N` go
-through the matches, `?` shows the keys, `:` runs a command by name, `Esc`
-goes back and `q` quits. `q` quits at once, unless a message you started
-would be lost: then volee asks first.
+The keys follow LazyVim's: `h`, `j`, `k`, `l` and the arrows move, `gg`
+and `G` go to the ends, `Ctrl+d` and `Ctrl+u` move half a page, `/`
+filters and `n` / `N` go through the matches, `Ctrl+h`, `Ctrl+j`, `Ctrl+k`
+and `Ctrl+l` go to the panel on that side, `H` and `L` to the previous and
+next view, `i`, `a`, `I`, `A` or `Enter` open the selected agent in insert
+mode, `?` shows the keys, `:` opens the command line, `Esc` goes back.
+`Space q q` quits, as `:q` does; `q` alone closes a window, and on the
+main screen says how to quit. Quitting is at once, unless a message you
+started would be lost: then volee asks first.
 
 **The keys of this screen.** `?` opens a small popup at the bottom right
 with the keys of the panel you are in and of everywhere, in columns, with
@@ -823,18 +828,23 @@ nothing to scroll. Press one of them and the popup closes and does it;
 
 **The leader.** Less frequent actions sit behind the space bar, as in
 LazyVim: press `Space` and a popup at the bottom right shows what can
-follow, such as `n` for a new agent, `N` for a new mission, `t` for the
-theme, `w` for the wall or `k` for every key. `Esc`, or a key that
+follow, grouped as LazyVim groups them: `a` the agents (`a n` a new agent,
+`a m` a new mission, `a a` adopt, `d` forget), `n` your messages, `q` quit
+(`q q`), `s` search (`s k` every key), `u` the display (`u C` the theme),
+`w` the windows (`w w` the wall, `w m` the selected screen full size) and
+`g` git (`g d` the changes). `Esc`, or a key that
 continues nothing, drops the sequence. `gg` works the same way: after `g`,
 the popup shows what can follow.
 
-**The command palette.** `:` opens a prompt on the bottom line and lists
-the commands of the current screen, the ones matching what you type first:
+**The command palette.** `:` opens the command line in the middle of the
+screen, as LazyVim's does, and lists under it the commands of the current
+screen, the ones matching what you type first; `q`, `qa` and their kin
+quit, as in vim:
 each action by its name and what it does, and `theme <name>` for every
 theme. `Enter` runs the selected one, the arrows, `Tab` or `Ctrl+n` /
 `Ctrl+p` move, `Esc` closes.
 
-**The theme.** `Space t` (or `:theme`) opens the theme picker at the
+**The theme.** `Space u C` (or `:theme`) opens the theme picker at the
 bottom right: moving shows each theme at once, `Enter` keeps it in the
 [configuration](configuration.md#tui), `Esc` goes back to the theme you
 had. See [Themes](themes.md).
@@ -880,21 +890,25 @@ popups and the hints.
 | `n` | the next agent that matches the filter, round the list | `next-match` |
 | `N` | the previous agent that matches the filter, round the list | `previous-match` |
 | `m` | write a message to the selected agent | `message` |
-| `d` | show the selected agent's changes | `diff` |
-| `enter`, `i`, `a` | open the selected agent: its own terminal, full size inside volee, takes your keys; the leave key (ctrl-q) comes back and the agent keeps running | `take-over` |
-| `z` | show the selected agent's screen full size | `full-screen` |
-| `I`, `space i` | your messages, questions waiting for you first | `messages` |
+| `d`, `space g d` | show the selected agent's changes | `diff` |
+| `enter`, `i`, `a`, `I`, `A` | open the selected agent in insert mode: its own terminal, full size inside volee, takes your keys; the leave key (ctrl-q) comes back and the agent keeps running | `take-over` |
+| `z`, `space w m` | show the selected agent's screen full size, to read it | `full-screen` |
+| `space n` | your messages, questions waiting for you first | `messages` |
 | `o`, `space o` | open the selected agent's worktree in your editor, diff viewer or git tool | `open-with` |
-| `A`, `space a` | move the selected agent into a volee host (asks first): its session is stopped and resumed there with volee's settings; opening it needs no adoption | `adopt` |
-| `F`, `space f` | forget the selected agent: stop listing it (asks first) | `forget` |
-| `space n` | launch an agent in a new worktree | `new-agent` |
-| `space N` | create a mission, which launches its coordinator | `new-mission` |
-| `space w`, `5` | show the screens of the agents that run, side by side, as a wall | `show-wall` |
-| `space t` | pick a colour theme, with a live preview; volee keeps your choice | `pick-theme` |
-| `space k` | list every key, in every context | `all-keys` |
-| `:` | the command palette: type part of a command's name and press enter | `commands` |
+| `space a a` | move the selected agent into a volee host (asks first): its session is stopped and resumed there with volee's settings; opening it needs no adoption | `adopt` |
+| `space a d` | forget the selected agent: stop listing it (asks first) | `forget` |
+| `space a n` | launch an agent in a new worktree | `new-agent` |
+| `space a m` | create a mission, which launches its coordinator | `new-mission` |
+| `5`, `space w w` | show the screens of the agents that run, side by side, as a wall | `show-wall` |
+| `space u C` | pick a colour theme, with a live preview; volee keeps your choice | `pick-theme` |
+| `space s k` | list every key, in every context | `all-keys` |
+| `:` | the command line, in the middle of the screen: type part of a command's name, or q to quit, and press enter | `commands` |
 | `tab` | focus the next panel | `next-pane` |
 | `shift-tab` | focus the previous panel | `previous-pane` |
+| `ctrl-h` | focus the panel on the left | `focus-left` |
+| `ctrl-j` | focus the panel below | `focus-down` |
+| `ctrl-k` | focus the panel above | `focus-up` |
+| `ctrl-l` | focus the panel on the right | `focus-right` |
 | `1` | show the tree of who launched whom | `show-hierarchy` |
 | `2` | show the network | `show-network` |
 | `3` | show repositories and worktrees | `show-repos` |
@@ -903,7 +917,8 @@ popups and the hints.
 | `L` | show the next view | `next-view` |
 | `?` | show the keys of this screen; ? again lists every key | `help` |
 | `esc` | close, cancel or go back (never quits) | `back` |
-| `q`, `ctrl-c` | quit volee (asks first when a draft would be lost) | `quit` |
+| `space q q`, `ctrl-c` | quit volee (asks first when a draft would be lost) | `quit` |
+| `q` | says how to quit: the leader then q q, or :q, as in LazyVim; q closes windows | `quit-hint` |
 
 ### Agents list (`agents`)
 
@@ -1062,7 +1077,7 @@ popups and the hints.
 | `enter` | read the thread, which marks its messages read | `apply` |
 | `r` | reply: the answer to the question, else a note to the agent | `reply` |
 | `s` | summarize the thread with a model, when summaries are on | `summarize` |
-| `esc`, `q`, `I` | leave the thread, then close the messages | `back` |
+| `esc`, `q` | leave the thread, then close the messages | `back` |
 | `ctrl-c` | quit volee | `quit` |
 
 ### Open with (`tools`)

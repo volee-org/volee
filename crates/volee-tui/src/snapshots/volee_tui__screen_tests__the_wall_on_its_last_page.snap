@@ -41,4 +41,4 @@ expression: draw(&model)
 "│  ? for shortcuts                     ││                                      │┃  ? for shortcuts                     ┃"
 "│                                      ││                                      │┃                                      ┃"
 "╰──────────────────────────────────────╯╰──────────────────────────────────────╯┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
-"  WALL    h/j/k/l  move    z  full screen    enter  open    q  back                                                     "
+" VIEW  wall    h/j/k/l  move    z  full screen    enter  open    q  back                                                "

@@ -151,7 +151,7 @@ def main():
         j.check("every session Claude Code lists has one row", not missing and not twice,
                 "no row for {}; several rows for {}".format(missing, twice))
         j.check("no row without a session Claude Code lists", not orphans, str(orphans))
-        j.keys("q", 1.0)
+        j.quit()
     finally:
         j.finish()
 

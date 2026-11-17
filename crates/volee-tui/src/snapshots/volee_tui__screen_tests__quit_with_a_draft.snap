@@ -25,4 +25,4 @@ expression: draw(&model)
 "│                                  ││ ╰────────────────────────────────────────│"
 "│                                  ││                                          │"
 "╰──────────────────────────────────╯╰──────────────────────────────────────────╯"
-" Quit and lose the draft to invoice-schema?    y  yes    n  no                  "
+"  To quit: ␣qq, or :q then enter. q closes windows.                             "

@@ -615,6 +615,11 @@ class Journey:
         self.tuios("send-keys", "-s", self.session, "-w", self.window, keys)
         time.sleep(pause)
 
+    def quit(self, pause=1.0):
+        """Quits the interface as LazyVim quits: the leader, then `q q`. A `q` alone
+        only closes a window, or says how to quit."""
+        self.type(" qq", pause)
+
     def type(self, text, pause=0.4):
         """Types text as one burst, as a fast typist or a paste tool does."""
         self.tuios("send-text", "-s", self.session, "-w", self.window, text)
