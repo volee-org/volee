@@ -6,6 +6,13 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # chrono comes through rmcp (3.9 and 3.10 alike), which turns on
+    # schemars's `chrono04` feature for its server and macros: volee cannot
+    # turn it off. The advisory says chrono is unmaintained, not that it is
+    # vulnerable. Drop this once rmcp moves to jiff or time.
+    { id = "RUSTSEC-2026-0543", reason = "chrono comes through rmcp and schemars, which volee cannot change; unmaintained, not vulnerable" },
+]
 
 [licenses]
 version = 2
