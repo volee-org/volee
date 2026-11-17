@@ -345,6 +345,8 @@ actions! {
     Quit => "quit",
     /// Say how to quit: the leader then `q q`, or `:q`, as in LazyVim.
     QuitHint => "quit-hint",
+    /// Start a lead in a folder.
+    NewLead => "new-lead",
     /// Focus the panel on the left.
     FocusLeft => "focus-left",
     /// Focus the panel below.
@@ -1196,6 +1198,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &["space a d"], A::Forget, "forget", None, "forget the selected agent: stop listing it (asks first)"),
         bind(C::Global, &["space a n"], A::NewAgent, "new agent", None, "launch an agent in a new worktree"),
         bind(C::Global, &["space a m"], A::NewMission, "new mission", None, "create a mission, which launches its coordinator"),
+        bind(C::Global, &["space a l"], A::NewLead, "new lead", None, "start a lead in a folder: the agent you talk to, which launches agents and missions for you and never codes"),
         bind(C::Global, &["5", "space w w"], A::ShowWall, "wall", None, "show the screens of the agents that run, side by side, as a wall"),
         bind(C::Global, &["space u C"], A::PickTheme, "theme…", None, "pick a colour theme, with a live preview; volee keeps your choice"),
         bind(C::Global, &["space s k"], A::AllKeys, "all keys", None, "list every key, in every context"),

@@ -15,15 +15,16 @@ use volee_core::role::Role;
 use volee_core::{AgentId, Event, MessageId, ThreadId};
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
-    AgentParams, Attach, CreateMission, CreateMissionParams, Diff, DiffParams, Forget, MarkRead,
-    MarkReadParams, Preview, PreviewText, SendMessage, SendParams, Spawn, SpawnParams, Status,
-    StatusParams, Summarize, SummarizeParams,
+    AgentParams, Attach, CreateMission, CreateMissionParams, Diff, DiffParams, Forget, LeadParams,
+    MarkRead, MarkReadParams, Preview, PreviewText, SendMessage, SendParams, Spawn, SpawnParams,
+    StartLead, Status, StatusParams, Summarize, SummarizeParams,
 };
 use volee_proto::replica::{self, Feed, FeedEnd, ReplicaError, Updates};
 use volee_proto::rpc;
 
 use crate::source::{
-    Changes, Door, MissionRequest, NewMission, Outgoing, PaneFocus, Reading, Source, SourceError,
+    Changes, Door, LeadRequest, MissionRequest, NewMission, Outgoing, PaneFocus, Reading, Source,
+    SourceError,
     SpawnRequest, Subscription, Summary, TakeOver,
 };
 
@@ -300,6 +301,20 @@ impl Source for DaemonSource {
                 coordinator: created.coordinator,
             })
             .map_err(|error| failure(error, "this volee daemon cannot create missions"))
+    }
+
+    async fn start_lead(&self, request: LeadRequest) -> Result<AgentId, SourceError> {
+        let params = LeadParams {
+            cwd: request.folder,
+            task: request.task,
+            name: request.name,
+            model: None,
+        };
+        self.client
+            .call::<StartLead>(params)
+            .await
+            .map(|started| started.agent)
+            .map_err(|error| failure(error, "this volee daemon cannot start leads"))
     }
 }
 

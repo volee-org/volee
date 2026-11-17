@@ -30,8 +30,8 @@ use crate::live::{Live, LiveInput};
 use crate::preview::{Fit, PreviewScreen};
 use crate::pulses::Pulses;
 use crate::source::{
-    Changes, Door, MissionRequest, NewMission, Outgoing, PaneFocus, Reading, SourceError,
-    SpawnRequest, Summary, TakeOver,
+    Changes, Door, LeadRequest, MissionRequest, NewMission, Outgoing, PaneFocus, Reading,
+    SourceError, SpawnRequest, Summary, TakeOver,
 };
 use crate::text;
 use crate::theme::Theme;
@@ -448,6 +448,8 @@ pub(crate) enum Msg {
     Launched(Result<AgentId, SourceError>),
     /// The source created a mission, or refused.
     MissionCreated(Result<NewMission, SourceError>),
+    /// The source started a lead, or refused.
+    LeadStarted(Result<AgentId, SourceError>),
     /// A tool ran in this terminal, or started in its own window.
     ToolFinished {
         /// The tool's name.
@@ -546,6 +548,8 @@ pub(crate) enum Effect {
     Spawn(SpawnRequest),
     /// Create a mission.
     CreateMission(MissionRequest),
+    /// Start a lead.
+    StartLead(LeadRequest),
     /// Forget an agent: the source stops listing it.
     Forget {
         /// The agent.
@@ -1491,6 +1495,7 @@ pub(crate) fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         | Msg::Summarized { .. }
         | Msg::Launched(_)
         | Msg::MissionCreated(_)
+        | Msg::LeadStarted(_)
         | Msg::ToolFinished { .. }
         | Msg::Forgot { .. }
         | Msg::Adopted { .. }) => dirty = on_answer(model, answer, &mut effects),
@@ -1713,6 +1718,7 @@ fn on_window_answer(model: &mut Model, answer: Msg, effects: &mut Vec<Effect>) -
         }
         Msg::Launched(result) => return crate::launch::launched(model, result),
         Msg::MissionCreated(result) => return crate::launch::mission_created(model, result),
+        Msg::LeadStarted(result) => return crate::launch::lead_started(model, result),
         Msg::ToolFinished { label, result } => match result {
             Ok(()) => model.notify(format!("Back from {label}."), false),
             Err(error) => {
@@ -2127,6 +2133,7 @@ fn perform_windows(
             }
         }
         (_, Action::NewAgent) => crate::launch::open(model, crate::launch::DialogKind::Agent),
+        (_, Action::NewLead) => crate::launch::open(model, crate::launch::DialogKind::Lead),
         (_, Action::NewMission) => {
             crate::launch::open(model, crate::launch::DialogKind::Mission);
         }
