@@ -41,4 +41,4 @@ expression: draw(&model)
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯"
-"  VOLEE    I  messages    /  filter    ␣  more    :  commands    q  quit                                        ?  help "
+" NORMAL  invoicing · idle    ␣n  messages    /  filter    ␣  more    :  commands    ␣qq  quit                   ?  help "

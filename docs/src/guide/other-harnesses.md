@@ -131,7 +131,7 @@ stop it with `volee stop`, like any agent in a host.
     `ctrl-q` comes back and it goes on as before. Nothing is stopped or
     restarted for it.
   - **In a plain terminal**, volee has no door on it and says so: switch to
-    that terminal. To drive it from volee, quit it, then adopt it (`A`, or
+    that terminal. To drive it from volee, quit it, then adopt it (`Space a a`, or
     `volee adopt`): volee resumes it in a host, which only works when it
     was started with `--session`, since volee needs the session id. Or
     start it with [`volee run -- opencode`](#any-program-volee-run) next

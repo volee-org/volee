@@ -123,7 +123,7 @@ def main():
         j.sees("Agents", timeout=30)
         # Wide enough for the agent's name to show whole in the list of messages.
         j.check("the window is given the size of a large terminal", j.resize(160, 45))
-        j.keys("I", 1.0)
+        j.type(" n", 1.0)
         j.check("the messages open on the question, on top",
                 j.sees("1 question for you", name + " asks you", timeout=10))
         j.check("its answers show under its text, numbered",
@@ -158,7 +158,7 @@ def main():
         j.check("`volee msg questions` has nothing left",
                 j.volee_run("msg", "questions").stdout.strip() == "No question waits for you.")
         j.keys("Escape", 0.5)
-        j.keys("q", 1.0)
+        j.quit()
 
         # ---- the person answers from a shell -------------------------------------
         asked, said = asker.tool("ask_human", {

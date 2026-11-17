@@ -301,7 +301,7 @@ def main():
         held_screen(j, hosted)
         replayed_screen(j, outside)
         j.keys("Escape", 0.5)
-        j.keys("q", 1.0)
+        j.quit()
     finally:
         j.finish()
 

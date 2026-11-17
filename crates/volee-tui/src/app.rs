@@ -930,7 +930,7 @@ impl Model {
     }
 
     /// The panels that can take the keyboard, in Tab order.
-    fn panes(&self) -> Vec<Pane> {
+    pub(crate) fn panes(&self) -> Vec<Pane> {
         let mut panes = vec![Pane::Rail];
         if self.layout.view.is_some() {
             panes.push(Pane::View);
@@ -2010,7 +2010,10 @@ pub(crate) fn perform(
         half_page(model, context, action, effects);
         return;
     }
-    if perform_windows(model, context, action, effects) || perform_finding(model, action, effects) {
+    if perform_windows(model, context, action, effects)
+        || perform_finding(model, action, effects)
+        || perform_panels(model, action)
+    {
         return;
     }
     match action {
@@ -2019,19 +2022,6 @@ pub(crate) fn perform(
                 crate::edit::leave_screen(model, effects);
             }
             back(model);
-        }
-        Action::NextPane | Action::PreviousPane => {
-            let panes = model.panes();
-            let index = panes
-                .iter()
-                .position(|pane| *pane == model.focus)
-                .unwrap_or(0);
-            let next = if action == Action::NextPane {
-                (index + 1) % panes.len()
-            } else {
-                (index + panes.len() - 1) % panes.len()
-            };
-            model.focus = panes[next];
         }
         Action::ShowHierarchy => model.tab = Tab::Hierarchy,
         Action::ShowNetwork => model.tab = Tab::Network,
@@ -2426,6 +2416,57 @@ fn compose(model: &mut Model, action: Action, effects: &mut Vec<Effect>) {
         }
         Action::Quit => request_quit(model, effects),
         _ => {}
+    }
+}
+
+/// Moves between the panels, and says how to quit. Whether `action` was one
+/// of these.
+fn perform_panels(model: &mut Model, action: Action) -> bool {
+    match action {
+        Action::NextPane | Action::PreviousPane => {
+            let panes = model.panes();
+            let index = panes
+                .iter()
+                .position(|pane| *pane == model.focus)
+                .unwrap_or(0);
+            let next = if action == Action::NextPane {
+                (index + 1) % panes.len()
+            } else {
+                (index + panes.len() - 1) % panes.len()
+            };
+            model.focus = panes[next];
+        }
+        Action::FocusLeft | Action::FocusDown | Action::FocusUp | Action::FocusRight => {
+            if let Some(pane) = neighbour(model.focus, action)
+                && model.panes().contains(&pane)
+            {
+                model.focus = pane;
+            }
+        }
+        Action::QuitHint => {
+            let leader = model
+                .keymap
+                .first_key(Context::Global, Action::Quit)
+                .map_or_else(|| "space q q".to_owned(), crate::keymap::KeySeq::short);
+            model.notify(
+                format!("To quit: {leader}, or :q then enter. q closes windows."),
+                false,
+            );
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// The panel next to `pane` in the direction of `action` (`Ctrl+h/j/k/l`, as
+/// LazyVim moves between windows): the list at the left with the detail and
+/// the preview under it, the view at the right.
+fn neighbour(pane: Pane, action: Action) -> Option<Pane> {
+    match (pane, action) {
+        (Pane::View, Action::FocusLeft) | (Pane::Detail, Action::FocusUp) => Some(Pane::Rail),
+        (Pane::Rail | Pane::Detail, Action::FocusRight) => Some(Pane::View),
+        (Pane::Rail | Pane::View, Action::FocusDown) => Some(Pane::Detail),
+        _ => None,
     }
 }
 

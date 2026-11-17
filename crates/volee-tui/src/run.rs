@@ -674,6 +674,14 @@ mod tests {
         )))
     }
 
+    /// Ctrl+C: quits at once, as the leader then `q q` does.
+    fn ctrl_c() -> Input {
+        Input::Event(TerminalEvent::Key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        )))
+    }
+
     fn enter() -> Input {
         Input::Event(TerminalEvent::Key(KeyEvent::new(
             KeyCode::Enter,
@@ -796,7 +804,7 @@ mod tests {
                 push(&inbox, key('k'));
                 tokio::time::sleep(Duration::from_millis(1_250)).await;
                 *pushed_at.lock().unwrap() = Some(Instant::now());
-                push(&inbox, key('q'));
+                push(&inbox, ctrl_c());
             });
         }
         event_loop(
@@ -811,7 +819,10 @@ mod tests {
         .unwrap();
         let pushed_at = pushed_at.lock().unwrap().expect("the last key was sent");
         let waited = Instant::now() - pushed_at;
-        assert!(waited < Duration::from_millis(50), "q waited {waited:?}");
+        assert!(
+            waited < Duration::from_millis(50),
+            "ctrl-c waited {waited:?}"
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -826,7 +837,7 @@ mod tests {
         let mut model = Model::new(Theme::default(), Keymap::default(), None, (120, 40), start);
         type_later(
             send,
-            vec![vec![key('j'), key('a')], vec![key('?'), key('?'), key('q')]],
+            vec![vec![key('j'), key('a')], vec![key('?'), key('?'), ctrl_c()]],
         );
         event_loop(
             &mut screen,
@@ -874,7 +885,7 @@ mod tests {
                 attach: step(&["tuios", "attach", "work"]),
             }),
         };
-        type_later(send, vec![vec![key('q')]]);
+        type_later(send, vec![vec![ctrl_c()]]);
         let agent = crate::demo::agent_id(start, crate::demo::INFRA);
         event_loop(
             &mut screen,
@@ -924,7 +935,7 @@ mod tests {
             key('s'),
             enter(),
         ];
-        type_later(send, vec![answer.into(), vec![key('q')]]);
+        type_later(send, vec![answer.into(), vec![ctrl_c()]]);
         event_loop(
             &mut screen,
             Arc::new(source),

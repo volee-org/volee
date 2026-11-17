@@ -248,7 +248,7 @@ def main():
                 j.wait(lambda: BACK in screen_of("claude"), 15, 1), screen_of("claude")[-200:])
         j.check("a minute later it has left the list, and nothing took its place",
                 j.wait(lambda: not named(claude_name), 120, 2), str(named(claude_name))[:160])
-        j.keys("q", 1.0)
+        j.quit()
     finally:
         j.finish()
 

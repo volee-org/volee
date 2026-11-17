@@ -256,10 +256,10 @@ fn the_keys_popup_the_leader_and_vim_keys() {
     assert_eq!(model.selected, Some(id(INVOICE_PAGE)), "nothing moved");
     press(&mut model, "gg");
     assert_eq!(model.selected, Some(id(TOWER)));
-    // The leader opens the launch dialog; `n` no longer does.
+    // The leader then `a n` opens the launch dialog; `n` does not.
     press(&mut model, "n");
     assert!(model.overlay.is_none(), "n is the next match");
-    press(&mut model, " n");
+    press(&mut model, " an");
     assert!(matches!(model.overlay, Some(Overlay::Launch(_))));
     key(&mut model, KeyCode::Esc);
     // `n` and `N` go round the filtered list.
@@ -302,13 +302,13 @@ fn the_theme_picker_shows_themes_live_and_keeps_or_restores() {
         .collect();
     model.themes = crate::themes::ThemeMenu::new(themes, "catppuccin-mocha");
     let mocha = model.theme.clone();
-    press(&mut model, " t");
+    press(&mut model, " uC");
     assert!(matches!(model.overlay, Some(Overlay::Themes { .. })));
     press(&mut model, "j");
     assert_ne!(model.theme, mocha, "shown at once");
     key(&mut model, KeyCode::Esc);
     assert_eq!(model.theme, mocha, "Escape restores it");
-    press(&mut model, " tj");
+    press(&mut model, " uCj");
     let effects = key(&mut model, KeyCode::Enter);
     assert_eq!(effects, [Effect::SaveTheme("catppuccin-latte".into())]);
     assert_eq!(model.overlay, None);
@@ -320,9 +320,16 @@ fn the_theme_picker_shows_themes_live_and_keeps_or_restores() {
 }
 
 #[test]
-fn q_quits_at_once_and_ctrl_c_quits_from_prompts() {
+fn the_leader_then_q_q_quits_q_says_how_and_ctrl_c_quits_from_prompts() {
     let mut model = model(120, 40);
-    assert_eq!(press(&mut model, "q"), [Effect::Quit]);
+    // As in LazyVim: q alone quits nothing, and says how to.
+    assert!(press(&mut model, "q").is_empty(), "q alone quits nothing");
+    let notice = model.notice.as_ref().map(|notice| notice.text.clone());
+    assert!(
+        notice.as_deref().is_some_and(|text| text.contains(":q")),
+        "{notice:?}"
+    );
+    assert_eq!(press(&mut model, " qq"), [Effect::Quit]);
     press(&mut model, "/");
     assert_eq!(ctrl(&mut model, 'c'), [Effect::Quit]);
 }
@@ -385,13 +392,13 @@ fn adopting_asks_first_and_says_what_it_costs() {
     press(&mut model, "'s");
     // `A` moves a session into a volee host: asked first, never needed to
     // open it.
-    assert_eq!(press(&mut model, "A"), []);
+    assert_eq!(press(&mut model, " aa"), []);
     assert_eq!(model.prompt, Some(Prompt::AdoptAndTakeOver(schema)));
     // No: nothing happens.
     key(&mut model, KeyCode::Esc);
     assert_eq!(model.prompt, None);
     // Yes: it is adopted, then taken over once the adoption is done.
-    press(&mut model, "A");
+    press(&mut model, " aa");
     let effects = press(&mut model, "y");
     assert_eq!(
         effects,
@@ -419,7 +426,7 @@ fn adopting_asks_first_and_says_what_it_costs() {
         },
     );
     hosted(&mut model, schema);
-    assert_eq!(press(&mut model, "A"), []);
+    assert_eq!(press(&mut model, " aa"), []);
     assert_eq!(model.prompt, None);
     assert_eq!(
         model.notice.as_ref().unwrap().text,
@@ -432,7 +439,7 @@ fn a_failed_adoption_takes_nothing_over() {
     let mut model = model(120, 40);
     let schema = id(INVOICE_SCHEMA);
     press(&mut model, "'s");
-    press(&mut model, "Ay");
+    press(&mut model, " aay");
     let effects = update(
         &mut model,
         Msg::Adopted {
@@ -1145,16 +1152,16 @@ fn forgetting_an_agent_asks_first_and_says_how_it_went() {
     let schema = id(INVOICE_SCHEMA);
     press(&mut model, "'s");
     // F asks; n and Esc leave everything as it was.
-    assert_eq!(press(&mut model, "F"), []);
+    assert_eq!(press(&mut model, " ad"), []);
     assert_eq!(model.prompt, Some(Prompt::Forget(schema)));
     assert_eq!(model.contexts(), [Context::Confirm]);
     assert_eq!(press(&mut model, "n"), []);
     assert_eq!(model.prompt, None);
-    press(&mut model, "F");
+    press(&mut model, " ad");
     assert_eq!(key(&mut model, KeyCode::Esc), []);
     assert_eq!(model.prompt, None);
     // y asks the source, with the name for the notice that follows.
-    press(&mut model, "F");
+    press(&mut model, " ad");
     assert_eq!(
         press(&mut model, "y"),
         [Effect::Forget {
@@ -1197,7 +1204,7 @@ fn forgetting_an_agent_asks_first_and_says_how_it_went() {
          stop invoice-schema`), then forget it."
     );
     // Ctrl+C still quits from the question.
-    press(&mut model, "F");
+    press(&mut model, " ad");
     assert_eq!(ctrl(&mut model, 'c'), [Effect::Quit]);
 }
 
@@ -1425,7 +1432,7 @@ fn quitting_asks_first_when_a_draft_would_be_lost() {
     key(&mut model, KeyCode::Esc);
     assert_eq!(model.overlay, None);
     assert!(model.draft.is_some(), "escape keeps the draft");
-    assert!(press(&mut model, "q").is_empty(), "q asks first");
+    assert!(press(&mut model, " qq").is_empty(), "quitting asks first");
     assert_eq!(model.prompt, Some(Prompt::Quit));
     assert_eq!(model.contexts(), [Context::Confirm]);
     assert!(
@@ -1450,7 +1457,7 @@ fn quitting_asks_first_when_a_draft_would_be_lost() {
     press(&mut model, "  ");
     key(&mut model, KeyCode::Esc);
     assert_eq!(model.draft, None);
-    assert_eq!(press(&mut model, "q"), [Effect::Quit]);
+    assert_eq!(press(&mut model, " qq"), [Effect::Quit]);
 }
 
 #[test]

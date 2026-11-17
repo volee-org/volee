@@ -41,4 +41,4 @@ expression: draw(&model)
 "│   ? for shortcuts                                                                                                    │"
 "│                                                                                                                      │"
 "╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯"
-"  FILTER   /latency▏    enter  apply    esc  cancel                                                                     "
+" COMMAND  filter   /latency▏    enter  apply    esc  cancel                                                             "

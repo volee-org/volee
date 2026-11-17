@@ -26,7 +26,8 @@ volee
 The interface opens on every Claude Code session and every OpenCode agent
 running on this machine, whoever started it: in a terminal, in the
 background, or launched by another agent. The ones that need you come first.
-Press `?` for the keys; `q` quits without stopping anything. `volee ls`
+Press `?` for the keys; `Space q q` (or `:q`) quits without stopping anything, as in
+LazyVim. `volee ls`
 prints the same list without the interface.
 
 Nothing here depends on how you started the sessions: volee reads Claude
@@ -113,7 +114,7 @@ terminal application, is held by that terminal: nothing else can show it.
 prompt, which has Claude Code move the conversation to the background, and
 volee opens it by itself once you pressed it, on the same row.
 
-`volee adopt <agent>` (`A` in the interface, which asks first) is for a
+`volee adopt <agent>` (`Space a a` in the interface, which asks first) is for a
 session you want volee to drive from now on: it stops the session and
 resumes its conversation in a volee host, with volee's settings, where it
 receives messages and comes back after a reboot.
@@ -138,7 +139,7 @@ finish what is missing.
 
 Once every worker delivered, the coordinator merges nothing and closes
 nothing: it presents its report, and asks you. The question waits on top of
-your [messages](interface.md#messages) (`I`), and the mission shows as
+your [messages](interface.md#messages) (`Space n`), and the mission shows as
 `waiting for you`:
 
 ```text
@@ -189,7 +190,7 @@ repository or a mission for several, tells you in one line what it
 launched, and gives the hand back. It never codes, and it does not watch
 its agents: volee wakes it when one reports, and it tells you in three
 lines what is done, the proof and what is left. Before a merge you are
-asked, as in the section above: the question waits in your messages (`I`),
+asked, as in the section above: the question waits in your messages (`Space n`),
 not in the lead's conversation. A lead never answers for you, even when you
 tell it your answer: it tells you where to give it.
 

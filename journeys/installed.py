@@ -192,7 +192,7 @@ def main():
         the_wall(j, launched)
         session_by_hand(j, "journey-installed-bg-" + j.stamp)
         session_in_a_terminal(j, "journey-installed-tab-" + j.stamp)
-        j.keys("q", 1.0)
+        j.quit()
     finally:
         j.finish()
 

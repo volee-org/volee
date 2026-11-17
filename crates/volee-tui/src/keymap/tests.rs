@@ -137,10 +137,11 @@ fn the_focused_panel_takes_precedence_over_global_keys() {
         keymap.action(&contexts, KeyCombo::char('q')),
         Some(Action::Back)
     );
+    // On the main screen `q` says how to quit, as in LazyVim.
     let contexts = [Context::Agents, Context::Global];
     assert_eq!(
         keymap.action(&contexts, KeyCombo::char('q')),
-        Some(Action::Quit)
+        Some(Action::QuitHint)
     );
     assert_eq!(
         keymap.action(&contexts, KeyCombo::char('j')),
@@ -176,7 +177,22 @@ fn sequences_wait_for_their_next_key() {
     assert_eq!(keymap.resolve(&contexts, &[], space), Resolved::Prefix);
     assert_eq!(
         keymap.resolve(&contexts, &[space], KeyCombo::char('n')),
+        Resolved::Action(Context::Global, Action::Messages)
+    );
+    // Three keys: the leader, a group, its key.
+    let a = KeyCombo::char('a');
+    assert_eq!(keymap.resolve(&contexts, &[space], a), Resolved::Prefix);
+    assert_eq!(
+        keymap.resolve(&contexts, &[space, a], KeyCombo::char('n')),
         Resolved::Action(Context::Global, Action::NewAgent)
+    );
+    assert_eq!(
+        keymap.resolve(
+            &contexts,
+            &[space, KeyCombo::char('q')],
+            KeyCombo::char('q')
+        ),
+        Resolved::Action(Context::Global, Action::Quit)
     );
     assert_eq!(
         keymap.resolve(&contexts, &[space], KeyCombo::char('x')),
@@ -203,12 +219,31 @@ fn the_leader_lists_what_it_opens() {
         .iter()
         .map(|entry| (entry.key.short(), entry.label))
         .collect();
+    // LazyVim's groups behind the leader.
+    for expected in [
+        ("n", "messages"),
+        ("a", "agents"),
+        ("q", "quit"),
+        ("s", "search"),
+        ("u", "ui"),
+        ("w", "windows"),
+        ("g", "git"),
+    ] {
+        assert!(
+            entries.contains(&(expected.0.to_owned(), expected.1)),
+            "{expected:?} in {entries:?}"
+        );
+    }
+    let agents = keymap.continuations(&contexts, &[KeyCombo::char(' '), KeyCombo::char('a')]);
+    let entries: Vec<(String, &str)> = agents
+        .iter()
+        .map(|entry| (entry.key.short(), entry.label))
+        .collect();
     for expected in [
         ("n", "new agent"),
-        ("N", "new mission"),
-        ("t", "theme…"),
-        ("w", "wall"),
-        ("k", "all keys"),
+        ("m", "new mission"),
+        ("a", "adopt"),
+        ("d", "forget"),
     ] {
         assert!(
             entries.contains(&(expected.0.to_owned(), expected.1)),
@@ -250,7 +285,7 @@ fn overrides_reach_one_context_or_unbind() {
     let keymap = Keymap::with_overrides([
         KeyOverride::new("first", ["home"]).in_context("agents"),
         KeyOverride::new("adopt", Vec::<String>::new()),
-        KeyOverride::new("new-agent", ["c", "space n"]),
+        KeyOverride::new("new-agent", ["c", "space a x"]),
         KeyOverride::new("leave", ["ctrl-g"]),
     ])
     .unwrap();
@@ -263,7 +298,9 @@ fn overrides_reach_one_context_or_unbind() {
         keymap.resolve(&timeline, &[g], g),
         Resolved::Action(Context::Timeline, Action::First)
     );
-    assert_eq!(keymap.action(&agents, KeyCombo::char('A')), None);
+    // Adopt is unbound: the leader then `a a` does nothing.
+    let (space, a) = (KeyCombo::char(' '), KeyCombo::char('a'));
+    assert_eq!(keymap.resolve(&agents, &[space, a], a), Resolved::Unbound);
     assert_eq!(
         keymap.action(&agents, KeyCombo::char('c')),
         Some(Action::NewAgent)
@@ -324,8 +361,8 @@ fn hints_follow_the_focused_panel() {
     assert_eq!(
         line(&[Context::Hierarchy, Context::Global]),
         "h/j/k/l move · gg/G first/last · s subtree · +/_ zoom · ' jump · / filter · \
-         n/N match · m message · d diff · enter open · z full screen · I messages · \
-         : commands · tab/⇧tab panel · 1-4 views · H/L view · ␣ more · ? help · q quit"
+         n/N match · m message · d diff · enter open · z full screen · ␣n messages · \
+         : commands · tab/⇧tab panel · 1-4 views · H/L view · ␣ more · ? help · ␣qq quit"
     );
     assert_eq!(line(&[Context::Help]), "j/k scroll · esc close");
     assert_eq!(line(&[Context::Filter]), "enter apply · esc cancel");
@@ -351,11 +388,11 @@ fn the_markdown_tables_list_every_binding() {
         "### Everywhere (`global`)\n\n| Keys | What it does | Action |\n| --- | --- | --- |\n"
     ));
     assert!(markdown.contains(
-        "| `q`, `ctrl-c` | quit volee (asks first when a draft would be lost) | `quit` |"
+        "| `space q q`, `ctrl-c` | quit volee (asks first when a draft would be lost) | `quit` |"
     ));
     assert!(markdown.contains("| `alt-enter`, `ctrl-j` | start a new line | `new-line` |"));
     assert!(markdown.contains("| `gg`, `home` | first agent | `first` |"));
-    assert!(markdown.contains("| `space n` | launch an agent in a new worktree | `new-agent` |"));
+    assert!(markdown.contains("| `space a n` | launch an agent in a new worktree | `new-agent` |"));
     assert!(markdown.contains("### Hierarchy (`hierarchy`)"));
     assert_eq!(
         markdown.matches("\n| `").count(),

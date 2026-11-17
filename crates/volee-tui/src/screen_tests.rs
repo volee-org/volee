@@ -604,7 +604,7 @@ fn offline_after_the_daemon_left() {
 fn messages_at_every_size() {
     for (width, height) in [(80, 24), (120, 40), (200, 50)] {
         let (mut model, demo) = demo_model(width, height, Theme::default());
-        type_text(&demo, &mut model, "I");
+        type_text(&demo, &mut model, " n");
         assert_snapshot!(format!("messages_at_{width}x{height}"), draw(&model));
     }
 }
@@ -614,7 +614,7 @@ fn messages_with_a_question_that_offers_answers() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     crate::test_support::offer(&mut model, &["ok merge", "no"]);
     // The third pinned question: its answers, numbered, under its text.
-    type_text(&demo, &mut model, "Ijj");
+    type_text(&demo, &mut model, " njj");
     let offered = draw(&model);
     assert!(offered.contains("1 ok merge"), "{offered}");
     assert!(offered.contains("2 no"), "{offered}");
@@ -635,7 +635,7 @@ fn messages_with_a_question_that_offers_answers() {
     // wraps instead of being cut.
     let (mut model, demo) = demo_model(80, 24, Theme::default());
     crate::test_support::offer(&mut model, &["ok merge", "no"]);
-    type_text(&demo, &mut model, "Ijj");
+    type_text(&demo, &mut model, " njj");
     let small = draw(&model);
     for part in [
         "1 ok merge",
@@ -671,7 +671,7 @@ fn an_answered_question_no_longer_shows_its_answers() {
     );
     // The thread of the question and its answer: the latest activity, so
     // the row after the two questions still waiting.
-    type_text(&demo, &mut model, "Ijj");
+    type_text(&demo, &mut model, " njj");
     let thread = draw(&model);
     assert!(
         thread.contains("Both pull requests are green. Merge them?"),
@@ -687,7 +687,7 @@ fn messages_reading_a_mission_thread_with_its_summary() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     // The row after the pinned question: the Invoicing mission's thread,
     // where volee's supervisor wrote last.
-    type_text(&demo, &mut model, "Ij");
+    type_text(&demo, &mut model, " nj");
     keys(&demo, &mut model, &[KeyCode::Enter]);
     let effects = update(
         &mut model,
@@ -734,7 +734,7 @@ fn tools_menu_offers_what_was_found() {
 fn new_agent_dialog_with_a_refusal() {
     let (mut model, demo) = demo_model(120, 40, Theme::default());
     model.settings.repos = demo.repos();
-    type_text(&demo, &mut model, " n");
+    type_text(&demo, &mut model, " an");
     keys(&demo, &mut model, &[KeyCode::Right, KeyCode::Tab]);
     type_text(&demo, &mut model, "feat/invoice-export");
     keys(&demo, &mut model, &[KeyCode::Tab]);
@@ -769,7 +769,7 @@ fn new_agent_dialog_with_a_refusal() {
 fn new_mission_dialog_on_a_small_screen() {
     let (mut model, demo) = demo_model(80, 24, Theme::default());
     model.settings.repos = demo.repos();
-    type_text(&demo, &mut model, " N");
+    type_text(&demo, &mut model, " am");
     type_text(&demo, &mut model, "Invoice export");
     keys(
         &demo,

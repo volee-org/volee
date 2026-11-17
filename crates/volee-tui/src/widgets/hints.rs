@@ -1,10 +1,13 @@
-//! The status line, at the bottom, in the manner of vim's: the mode the
-//! keyboard is in at the left (`VOLEE` while the keys drive volee, `EDIT`
-//! and the agent's name while they go to an agent, `FILTER`, `MESSAGE`...),
-//! then the few keys of the moment, generated from the keymap, and the way
-//! to every key (`? help`) at the right; or the prompt or the notice of the
-//! moment. On the main screen it shows only the keys that are not on screen
-//! elsewhere: opening and writing to an agent sit on its preview's border.
+//! The status line, at the bottom, as lualine draws it in LazyVim: the mode
+//! the keyboard is in at the left, in a block of its color (`NORMAL`,
+//! `INSERT` while the keys go to an agent or into a text, `VIEW` while a
+//! screen, the wall or changes are shown to read, `COMMAND` on the command
+//! line and in the filter), then a section with the selected agent or the
+//! window the keys are in, then the few keys of the moment, generated from
+//! the keymap, and the way to every key (`? help`) at the right; or the
+//! prompt or the notice of the moment. On the main screen it shows only the
+//! keys that are not on screen elsewhere: opening and writing to an agent
+//! sit on its preview's border.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -26,41 +29,48 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
         return;
     }
     let row = Rect::new(area.x, area.bottom() - 1, area.width, 1);
+    buf.set_style(row, model.theme.style(StyleRole::StatusLine));
     render_row(model, row, buf);
 }
 
-/// The mode the keyboard is in, vim style, and how its badge looks: the
-/// main screen is `VOLEE`, a window or a field says what it is, and edit
-/// mode stands out in the agent's color.
-fn mode(model: &Model, contexts: &[Context]) -> (&'static str, Style) {
-    let theme = &model.theme;
-    let window = theme.style(StyleRole::TabActive);
-    let typing = theme.style(StyleRole::Notice).add_modifier(Modifier::BOLD);
+/// The vim mode the keyboard is in, the role of its block, and the window
+/// the keys are in, if any. The main screen and the windows the keys move
+/// through are `NORMAL`; text being typed and an agent taken over are
+/// `INSERT`; a screen, the wall or changes shown to read are `VIEW`; the
+/// command line and the filter are `COMMAND`.
+fn mode(contexts: &[Context]) -> (&'static str, StyleRole, Option<&'static str>) {
+    let (normal, insert, view, command) = (
+        ("NORMAL", StyleRole::ModeNormal),
+        ("INSERT", StyleRole::ModeInsert),
+        ("VIEW", StyleRole::ModeView),
+        ("COMMAND", StyleRole::ModeCommand),
+    );
     let found = [
-        (Context::Attached, "EDIT", typing),
-        (Context::Filter, "FILTER", typing),
-        (Context::Composer, "MESSAGE", typing),
-        (Context::Dialog, "LAUNCH", typing),
-        (Context::Commands, "COMMAND", typing),
-        (Context::Themes, "THEME", window),
-        (Context::Help, "HELP", window),
-        (Context::Keys, "KEYS", window),
-        (Context::Inbox, "MESSAGES", window),
-        (Context::Diff, "CHANGES", window),
-        (Context::Tools, "OPEN", window),
-        (Context::Wall, "WALL", window),
-        (Context::Screen, "VIEW", window),
+        (Context::Attached, insert, None),
+        (Context::Filter, command, Some("filter")),
+        (Context::Composer, insert, Some("message")),
+        (Context::Dialog, insert, Some("launch")),
+        (Context::Commands, command, Some("command line")),
+        (Context::Themes, normal, Some("theme")),
+        (Context::Help, normal, Some("help")),
+        (Context::Keys, normal, Some("keys")),
+        (Context::Inbox, normal, Some("messages")),
+        (Context::Diff, view, Some("changes")),
+        (Context::Tools, normal, Some("open with")),
+        (Context::Wall, view, Some("wall")),
+        (Context::Screen, view, Some("screen")),
     ]
     .into_iter()
     .find(|(context, _, _)| contexts.contains(context));
     match found {
-        Some((_, name, style)) => (name, style),
-        None => ("VOLEE", theme.style(StyleRole::TopbarBrand)),
+        Some((_, (name, role), window)) => (name, role, window),
+        None => (normal.0, normal.1, None),
     }
 }
 
-/// Draws the mode's badge at `x` and returns the cells it took, with the
-/// gap after it.
+/// Draws the mode's block at `x`, then the section after it: the window the
+/// keys are in, or on the main screen the selected agent. Returns the cells
+/// they took, with the gap after them.
 fn put_mode(
     model: &Model,
     contexts: &[Context],
@@ -69,15 +79,35 @@ fn put_mode(
     width: u16,
     buf: &mut Buffer,
 ) -> u16 {
-    let (name, style) = mode(model, contexts);
-    let used = put_spans(
-        buf,
-        x,
-        y,
-        &[Span::styled(format!(" {name} "), style)],
-        width,
-    );
+    let theme = &model.theme;
+    let (name, role, window) = mode(contexts);
+    let section = theme.style(StyleRole::StatusSection);
+    let mut spans = vec![Span::styled(format!(" {name} "), theme.style(role))];
+    match window {
+        Some(window) => spans.push(Span::styled(format!(" {window} "), section)),
+        None => spans.extend(selected_section(model)),
+    }
+    let used = put_spans(buf, x, y, &spans, width);
     (used + 2).min(width)
+}
+
+/// The section after the mode on the main screen: the selected agent's name
+/// in its color, and its state.
+fn selected_section(model: &Model) -> Vec<Span<'static>> {
+    let theme = &model.theme;
+    let section = theme.style(StyleRole::StatusSection);
+    let Some(agent) = model.selected_agent() else {
+        return Vec::new();
+    };
+    let accent = crate::widgets::card::CardContext::new(model).accent(agent);
+    vec![
+        Span::styled(" ", section),
+        Span::styled(
+            agent.name.clone(),
+            section.patch(accent).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!(" · {} ", agent.state.label()), section),
+    ]
 }
 
 /// The order of the keys on the main screen's status line.
@@ -128,8 +158,8 @@ fn render_row(model: &Model, area: Rect, buf: &mut Buffer) {
         return;
     }
     if model.filter.editing {
-        let skip = put_mode(model, &[Context::Filter], x, area.y, width, buf);
-        let (x, width) = (x + skip, width.saturating_sub(skip));
+        let skip = put_mode(model, &[Context::Filter], area.x, area.y, area.width, buf);
+        let (x, width) = (area.x + skip, area.width.saturating_sub(skip));
         let mut spans = vec![
             Span::styled("/", key),
             Span::styled(model.filter.text.clone(), theme.style(StyleRole::Input)),
@@ -144,7 +174,7 @@ fn render_row(model: &Model, area: Rect, buf: &mut Buffer) {
         return;
     }
     if model.notice.is_none() && crate::edit::editing(model) {
-        render_editing(model, Rect::new(x, area.y, width, 1), buf);
+        render_editing(model, area, buf);
         return;
     }
     if let Some(notice) = &model.notice {
@@ -196,8 +226,8 @@ fn render_row(model: &Model, area: Rect, buf: &mut Buffer) {
         .position(|(action, _)| *action == Some(Action::Help))
         .map(|index| groups.remove(index).1);
     let help_width = help.as_deref().map_or(0, spans_width);
-    let skip = put_mode(model, &contexts, x, area.y, width, buf);
-    let (x, width) = (x + skip, width.saturating_sub(skip));
+    let skip = put_mode(model, &contexts, area.x, area.y, area.width, buf);
+    let (x, width) = (area.x + skip, area.width.saturating_sub(skip + 1));
     let room = width.saturating_sub(help_width + 2);
     let rest = groups.into_iter().map(|(_, group)| group);
     put_spans(buf, x, area.y, &join(rest, usize::from(room)), room);
@@ -225,36 +255,29 @@ fn spans_width(spans: &[Span<'_>]) -> u16 {
     .unwrap_or(u16::MAX)
 }
 
-/// Edit mode: where the keys go, and the key that gives them back.
+/// Insert mode on an agent: whose keys these are, in the agent's color, and
+/// the key that gives them back.
 fn render_editing(model: &Model, area: Rect, buf: &mut Buffer) {
     let theme = &model.theme;
+    let section = theme.style(StyleRole::StatusSection);
     let name = model
         .live
         .as_ref()
         .map(|live| model.name_of(live.agent))
         .unwrap_or_default();
     let leave = model.keymap.leave_key().short();
-    // The badge in the agent's color: whose keys these are shows from afar.
     let accent = model
         .live
         .as_ref()
         .and_then(|live| model.registry.agent(live.agent))
-        .map(|agent| crate::widgets::card::CardContext::new(model).accent(agent));
-    let badge = match accent.and_then(|style| style.fg) {
-        Some(color) => Style {
-            fg: theme.style(StyleRole::TopbarBrand).fg,
-            bg: Some(color),
-            ..Style::default()
-        }
-        .add_modifier(Modifier::BOLD),
-        None => theme.style(StyleRole::Notice).add_modifier(Modifier::BOLD),
-    };
+        .map_or_else(Style::default, |agent| {
+            crate::widgets::card::CardContext::new(model).accent(agent)
+        });
     let spans = vec![
-        Span::styled(" EDIT ", badge),
-        Span::styled(
-            format!("  your keys go to {name}"),
-            theme.style(StyleRole::Input),
-        ),
+        Span::styled(" INSERT ", theme.style(StyleRole::ModeInsert)),
+        Span::styled(" → ", section),
+        Span::styled(name, section.patch(accent).add_modifier(Modifier::BOLD)),
+        Span::styled(" ", section),
         Span::raw(SEPARATOR),
         Span::styled(leave, theme.style(StyleRole::HintKey)),
         Span::styled(" back to volee", theme.style(StyleRole::HintText)),

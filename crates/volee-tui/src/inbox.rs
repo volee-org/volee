@@ -509,9 +509,9 @@ mod tests {
         }
 
         #[test]
-        fn capital_i_opens_the_messages_and_enter_reads_a_thread() {
+        fn the_leader_then_n_opens_the_messages_and_enter_reads_a_thread() {
             let mut model = model(120, 40);
-            press(&mut model, "I");
+            press(&mut model, " n");
             assert_eq!(model.contexts(), [Context::Inbox]);
             let rows = rows(&model.registry);
             assert_eq!(view(&model).selected, Some(rows[0]), "the question first");
@@ -542,7 +542,7 @@ mod tests {
         fn r_answers_the_question_and_comes_back_to_the_messages() {
             let mut model = model(120, 40);
             let tools = id(INVOICE_TOOLS);
-            press(&mut model, "Ir");
+            press(&mut model, " nr");
             assert_eq!(model.overlay, Some(Overlay::Composer));
             let draft = model.draft.clone().unwrap();
             assert_eq!(draft.to, tools);
@@ -582,7 +582,7 @@ mod tests {
             let tools = id(INVOICE_TOOLS);
             let question = offer(&mut model, &["ok merge", "no"]);
             let thread = model.registry.message(question).unwrap().thread;
-            press(&mut model, "Ijj");
+            press(&mut model, " njj");
             assert_eq!(view(&model).selected, Some(Row::Question(question)));
             // A digit beyond its answers is not one of them.
             assert_eq!(press(&mut model, "3"), []);
@@ -627,7 +627,7 @@ mod tests {
         fn a_digit_does_nothing_on_a_question_without_answers_or_once_answered() {
             let mut model = model(120, 40);
             // The demo's questions offer nothing.
-            press(&mut model, "I");
+            press(&mut model, " n");
             assert_eq!(press(&mut model, "1"), []);
             assert_eq!(model.prompt, None);
             key(&mut model, KeyCode::Esc);
@@ -667,7 +667,7 @@ mod tests {
                 )]),
             );
             assert_eq!(offered(&model.registry, row), None);
-            press(&mut model, "I");
+            press(&mut model, " n");
             assert_eq!(press(&mut model, "1"), []);
             assert_eq!(model.prompt, None);
         }
@@ -675,7 +675,7 @@ mod tests {
         #[test]
         fn s_summarizes_the_thread_or_says_why_not() {
             let mut model = model(120, 40);
-            press(&mut model, "I");
+            press(&mut model, " n");
             let thread = thread_of(&model.registry, rows(&model.registry)[0]).unwrap();
             assert_eq!(press(&mut model, "s"), [Effect::Summarize(thread)]);
             assert_eq!(view(&model).summary, Some((thread, SummaryState::Loading)));
@@ -705,7 +705,7 @@ mod tests {
                         if model.registry.thread(*thread).is_some_and(|t| t.title == "volee"))
                 })
                 .unwrap();
-            press(&mut model, "I");
+            press(&mut model, " n");
             press(&mut model, &"j".repeat(alerts));
             press(&mut model, "r");
             assert_eq!(view(&model).selected, Some(rows[alerts]));

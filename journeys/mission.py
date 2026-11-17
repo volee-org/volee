@@ -326,7 +326,7 @@ def main():
                 and "Answers: 1 ok merge · 2 no" in listed, listed[:500])
 
         # ---- the person says ok merge, with two keys -----------------------------
-        j.keys("I", 1.5)
+        j.type(" n", 1.5)
         j.check("the messages open with the report, its answers numbered",
                 j.sees("for you", "is ready to merge", "1 ok merge", "2 no", timeout=15))
         j.check("the report is the only question the mission asks the person",
@@ -396,7 +396,7 @@ def main():
                     and repo.ok("rev-parse", "--verify", "--quiet", "refs/heads/" + branch),
                     str(repo.worktrees(branch)))
         j.keys("Escape", 0.5)
-        j.keys("I", 1.5)
+        j.type(" n", 1.5)
         said = j.wait(lambda: closing(thread_shown(j, title), title), 20, 0.5) or ""
         j.check("one message says what is merged and what was tidied",
                 "Merged: " in said and "({} into {})".format(branch, repos[0].base) in said
@@ -465,7 +465,7 @@ def main():
                     told, "it said: " + j.last_answer())
             j.show("the lead, after one agent's work")
             j.keys("Escape", 0.5)
-        j.keys("q", 1.0)
+        j.quit()
     finally:
         if j.keep:
             j.finish()

@@ -174,7 +174,7 @@ def main():
                 str((j.agent(name) or {}).get("state")))
         j.check("then leaves volee's list",
                 j.wait(lambda: j.agent(name) is None, 120, 2), str(j.agent(name))[:120])
-        j.keys("q", 1.0)
+        j.quit()
     finally:
         j.finish()
 

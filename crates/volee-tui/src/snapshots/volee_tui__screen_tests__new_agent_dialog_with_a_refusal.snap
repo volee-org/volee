@@ -41,4 +41,4 @@ expression: draw(&model)
 "│   ? for shortcuts                                                                                                    │"
 "│                                                                                                                      │"
 "╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯"
-"  LAUNCH    ctrl-s  launch    tab/⇧tab  field    enter  new line    esc  cancel                                         "
+" INSERT  launch    ctrl-s  launch    tab/⇧tab  field    enter  new line    esc  cancel                                  "

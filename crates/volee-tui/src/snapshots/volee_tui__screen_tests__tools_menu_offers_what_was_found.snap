@@ -41,4 +41,4 @@ expression: draw(&model)
 "│   ? for shortcuts                                                                                                    │"
 "│                                                                                                                      │"
 "╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯"
-"  OPEN    e  editor    d  diff    g  git    w  window    esc  close                                                     "
+" NORMAL  open with    e  editor    d  diff    g  git    w  window    esc  close                                         "

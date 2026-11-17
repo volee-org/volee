@@ -70,10 +70,11 @@ def by_keyboard(j, name):
     j.check("the leave key comes back to volee, the screen stays", back)
 
     j.keys("z", 1.0)
-    j.keys("I", 1.0)
-    j.check("I opens the messages", "Messages" in j.screen() or "messages" in j.screen())
+    j.type(" n", 1.0)
+    j.check("the leader then n opens the messages",
+            "Messages" in j.screen() or "messages" in j.screen())
     j.keys("Escape", 0.5)
-    j.keys("q", 1.0)
+    j.quit()
 
 
 def resized(j, name):
@@ -112,7 +113,8 @@ def resized(j, name):
     j.check("the agent follows a smaller terminal (87x23 in 90x26)", second == (87, 23), str(second))
     send(b"\x11", 1)
     send(b"q", 1)
-    send(b"q", 1)
+    # As in LazyVim: q closes the full-screen view, the leader then q q quits.
+    send(b" qq", 1)
     # The interface writes its last output while it exits: keep reading meanwhile.
     end = time.time() + 10
     exited = False
@@ -126,7 +128,7 @@ def resized(j, name):
             drain(0.2)
     if not exited:
         os.kill(pid, signal.SIGKILL)
-    j.check("q quits the interface", exited)
+    j.check("the leader then q q quits the interface", exited)
     os.close(fd)
 
 

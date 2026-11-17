@@ -1,6 +1,6 @@
 # 0025. Key sequences, a leader key and which-key popups; every key configurable
 
-- Status: Proposed
+- Status: Proposed (amended on 2026-11-17 by [LazyVim's keys](#lazyvims-keys))
 - Date: 2026-11-09
 
 ## Context
@@ -107,3 +107,37 @@ wait, skipped when not a terminal, then `COLORFGBG`) and picks
   next match is a reflex. The leader keeps launching two keys away.
 - **Configure the leave key as any key.** Only Control and a letter
   survives every keyboard protocol an agent may switch on.
+
+## LazyVim's keys
+
+Added on 2026-11-17, in 0.18.
+
+The person who uses volee every day works in LazyVim, and found volee's keys
+unlike it, quitting first: `q` quit at once, where LazyVim keeps `q` for
+closing windows and quits with the leader then `q q`. volee's keys now
+follow LazyVim's defaults (read from its `keymaps.lua` and its which-key
+groups) wherever an action has a counterpart:
+
+- Quit: `Space q q`, or `:q` and its kin on the command line; `Ctrl+C`
+  still quits. `q` closes a window, and on the main screen says how to quit.
+- Windows: `Ctrl+h`, `Ctrl+j`, `Ctrl+k` and `Ctrl+l` focus the panel on
+  that side; `Tab` still goes round them.
+- Insert mode: `i`, `a`, `I`, `A` and `Enter` open the selected agent with
+  the keys going to it, as they enter insert mode in vim. `I` no longer
+  opens the messages and `A` no longer adopts.
+- The leader's groups carry LazyVim's names: `a` agents (`a n` a new agent,
+  `a m` a new mission, `a a` adopt, `a d` forget), `n` the messages (where
+  LazyVim keeps its notifications), `q` quit, `s` search (`s k` every key),
+  `u` the display (`u C` the theme, LazyVim's colorscheme picker), `w` the
+  windows (`w w` the wall, `w m` a screen full size) and `g` for the
+  repository (`g d` the changes).
+- The command line (`:`) opens in the middle of the screen, as LazyVim's
+  command line does, and stays where it is while its matches change.
+- The status line names the mode as vim does, in a block of its color:
+  `NORMAL`, `INSERT`, `VIEW` (a screen, the wall or changes, to read) and
+  `COMMAND` (the command line and the filter), then the selected agent or
+  the window the keys are in.
+
+Single letters that do one thing and do not collide with vim (`m` to write,
+`d` for the changes, `z` for a screen full size, `/`, `'`, `1` to `5`, `H`
+and `L`) stay. Every key can still be moved in `[tui.keys]`.
