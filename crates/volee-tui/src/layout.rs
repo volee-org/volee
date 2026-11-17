@@ -1,7 +1,8 @@
 //! Where each panel goes.
 //!
-//! Panel sizes depend only on the terminal size and on the view, never on
-//! the content or on the selection, so nothing jumps while you move around.
+//! Panel sizes depend only on the terminal size, on the view and on what
+//! the person chose of the panels ([`Panels`]), never on the content or on
+//! the selection, so nothing jumps while you move around.
 //!
 //! ```text
 //!  wide (100 columns and 28 rows or more; the right column from 160)
@@ -11,9 +12,9 @@
 //! ├──────────┤                                ├──────────────┤
 //! │ detail   │                                │ journal      │
 //! ├──────────┴────────────────────────────────┴──────────────┤
-//! │ preview: the selected agent, its state and its actions,  │
-//! │ then its screen                                          │
-//! └──────────────────────── key hints ───────────────────────┘
+//! │ preview, when shown: the selected agent, its state and   │
+//! │ its actions, then its screen                             │
+//! └──────────────────────── status line ─────────────────────┘
 //!
 //!  narrow, tree               narrow, other views
 //! ┌────── top bar ──────┐     ┌────── top bar ──────┐
@@ -62,6 +63,38 @@ pub(crate) struct ScreenLayout {
     pub(crate) hints: Rect,
 }
 
+/// What the person chose of the panels: whether the selected agent's screen
+/// shows, and how far they moved the borders (`Ctrl` and the arrows, as
+/// LazyVim resizes its windows).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Panels {
+    /// Whether the preview shows: hidden until asked for (`Space u p`).
+    pub(crate) preview: bool,
+    /// Columns added to the agents' column, or taken from it.
+    pub(crate) list: i16,
+    /// Rows added to the preview, or taken from it; to the detail when the
+    /// preview is hidden.
+    pub(crate) lower: i16,
+}
+
+impl Panels {
+    /// The panels with the preview shown, borders where they start.
+    #[cfg(test)]
+    pub(crate) fn with_preview() -> Self {
+        Self {
+            preview: true,
+            ..Self::default()
+        }
+    }
+}
+
+/// `base` moved by `delta`, kept between `least` and `most`.
+fn moved(base: u16, delta: i16, least: u16, most: u16) -> u16 {
+    let most = most.max(least);
+    u16::try_from((i32::from(base) + i32::from(delta)).clamp(i32::from(least), i32::from(most)))
+        .unwrap_or(least)
+}
+
 /// The smallest size with room for the view next to the agents.
 const WIDE_MIN: (u16, u16) = (100, 28);
 
@@ -79,7 +112,7 @@ impl ScreenLayout {
     /// The layout of a terminal of the given size. On small screens, the
     /// hierarchy fits in the agents list as a tree (`tree_view`); the other
     /// views take the place of the preview.
-    pub(crate) fn compute(area: Rect, tree_view: bool) -> Self {
+    pub(crate) fn compute(area: Rect, tree_view: bool, panels: Panels) -> Self {
         let top = Rect::new(area.x, area.y, area.width, 1.min(area.height));
         // One status line: the mode and the keys of the moment.
         let rows = 1;
@@ -96,9 +129,15 @@ impl ScreenLayout {
             area.height.saturating_sub(top.height + hints.height),
         );
         if area.width >= WIDE_MIN.0 && area.height >= WIDE_MIN.1 {
-            Self::wide(main, top, hints)
+            Self::wide(main, top, hints, panels)
         } else if !tree_view {
             let left = (area.width * 3 / 8).clamp(24.min(area.width), 34);
+            let left = moved(
+                left,
+                panels.list,
+                20.min(area.width),
+                area.width.saturating_sub(30),
+            );
             let right = area.width.saturating_sub(left);
             let detail_height = (main.height * 2 / 5).clamp(6, 10).min(main.height / 2);
             let rail_height = main.height - detail_height;
@@ -115,8 +154,24 @@ impl ScreenLayout {
             }
         } else {
             let left = (area.width * 45 / 100).clamp(24.min(area.width), 44);
+            let left = moved(
+                left,
+                panels.list,
+                20.min(area.width),
+                area.width.saturating_sub(30),
+            );
             let right = area.width.saturating_sub(left);
-            let detail_height = main.height.min(12);
+            let detail_height = if panels.preview {
+                moved(
+                    main.height.min(12),
+                    -panels.lower,
+                    4,
+                    main.height.saturating_sub(5),
+                )
+                .min(main.height)
+            } else {
+                main.height
+            };
             let preview_height = main.height - detail_height;
             Self {
                 mode: Mode::Narrow,
@@ -138,8 +193,17 @@ impl ScreenLayout {
     /// in a column at the left, the view in the middle, what waits for you
     /// and the journal in a column at the right when there is room, and the
     /// selected agent's screen across the bottom.
-    fn wide(main: Rect, top: Rect, hints: Rect) -> Self {
-        let bottom = (main.height * 3 / 10).clamp(10, 14);
+    fn wide(main: Rect, top: Rect, hints: Rect, panels: Panels) -> Self {
+        let bottom = if panels.preview {
+            moved(
+                (main.height * 3 / 10).clamp(10, 14),
+                panels.lower,
+                5,
+                main.height.saturating_sub(12),
+            )
+        } else {
+            0
+        };
         let upper = main.height - bottom;
         let right_column = main.width >= RIGHT_COLUMN_MIN;
         let (left, right) = if right_column {
@@ -147,8 +211,14 @@ impl ScreenLayout {
         } else {
             ((main.width * 2 / 7).clamp(28, 36), 0)
         };
+        let left = moved(left, panels.list, 20, main.width.saturating_sub(right + 40));
         let view = main.width - left - right;
         let detail = (upper * 2 / 5).clamp(8, 14);
+        let detail = if panels.preview {
+            detail
+        } else {
+            moved(detail, panels.lower, 5, upper.saturating_sub(6))
+        };
         let rail = upper - detail;
         let for_you = upper / 2;
         Self {
@@ -157,7 +227,9 @@ impl ScreenLayout {
             rail: Rect::new(main.x, main.y, left, rail),
             view: Some(Rect::new(main.x + left, main.y, view, upper)),
             detail: Rect::new(main.x, main.y + rail, left, detail),
-            preview: Some(Rect::new(main.x, main.y + upper, main.width, bottom)),
+            preview: panels
+                .preview
+                .then(|| Rect::new(main.x, main.y + upper, main.width, bottom)),
             for_you: right_column.then(|| Rect::new(main.x + left + view, main.y, right, for_you)),
             journal: right_column.then(|| {
                 Rect::new(
@@ -205,14 +277,17 @@ mod tests {
         ] {
             let area = Rect::new(0, 0, width, height);
             for tree_view in [true, false] {
-                covers_without_overlap(&ScreenLayout::compute(area, tree_view), area);
+                covers_without_overlap(
+                    &ScreenLayout::compute(area, tree_view, Panels::with_preview()),
+                    area,
+                );
             }
         }
     }
 
     #[test]
     fn small_terminals_show_the_hierarchy_in_the_list() {
-        let layout = ScreenLayout::compute(Rect::new(0, 0, 80, 24), true);
+        let layout = ScreenLayout::compute(Rect::new(0, 0, 80, 24), true, Panels::with_preview());
         assert_eq!(layout.mode, Mode::Narrow);
         assert_eq!(layout.view, None);
         assert_eq!(layout.rail.width, 36);
@@ -222,7 +297,7 @@ mod tests {
 
     #[test]
     fn small_terminals_give_other_views_the_right_side() {
-        let layout = ScreenLayout::compute(Rect::new(0, 0, 80, 24), false);
+        let layout = ScreenLayout::compute(Rect::new(0, 0, 80, 24), false, Panels::with_preview());
         assert_eq!(layout.mode, Mode::Split);
         assert_eq!(layout.view, Some(Rect::new(30, 1, 50, 22)));
         assert_eq!(layout.rail, Rect::new(0, 1, 30, 14));
@@ -232,10 +307,10 @@ mod tests {
 
     #[test]
     fn wide_terminals_keep_the_detail_under_the_agents_and_the_screen_below() {
-        let layout = ScreenLayout::compute(Rect::new(0, 0, 120, 40), true);
+        let layout = ScreenLayout::compute(Rect::new(0, 0, 120, 40), true, Panels::with_preview());
         assert_eq!(
             layout,
-            ScreenLayout::compute(Rect::new(0, 0, 120, 40), false)
+            ScreenLayout::compute(Rect::new(0, 0, 120, 40), false, Panels::with_preview())
         );
         assert_eq!(layout.mode, Mode::Wide);
         assert_eq!(layout.rail, Rect::new(0, 1, 34, 17));
@@ -247,7 +322,7 @@ mod tests {
 
     #[test]
     fn the_right_column_leaves_the_tree_the_room_of_five_cards() {
-        let layout = ScreenLayout::compute(Rect::new(0, 0, 190, 50), true);
+        let layout = ScreenLayout::compute(Rect::new(0, 0, 190, 50), true, Panels::with_preview());
         let view = layout.view.unwrap();
         // 128 columns inside the border: five cards of 24 and their gaps.
         assert_eq!(view.width, 130);
@@ -265,8 +340,73 @@ mod tests {
     fn tiny_terminals_do_not_panic() {
         for (width, height) in [(0, 0), (1, 1), (10, 3), (30, 8), (60, 12)] {
             for tree_view in [true, false] {
-                let _ = ScreenLayout::compute(Rect::new(0, 0, width, height), tree_view);
+                let _ = ScreenLayout::compute(
+                    Rect::new(0, 0, width, height),
+                    tree_view,
+                    Panels::with_preview(),
+                );
             }
         }
+    }
+
+    #[test]
+    fn the_preview_hides_until_asked_for_and_the_view_takes_its_rows() {
+        let area = Rect::new(0, 0, 190, 50);
+        let hidden = ScreenLayout::compute(area, true, Panels::default());
+        assert_eq!(hidden.preview, None);
+        let shown = ScreenLayout::compute(area, true, Panels::with_preview());
+        let preview = shown.preview.unwrap();
+        // The view goes down to the status line instead.
+        assert_eq!(
+            hidden.view.unwrap().height,
+            shown.view.unwrap().height + preview.height
+        );
+        covers_without_overlap(&hidden, area);
+    }
+
+    #[test]
+    fn the_borders_move_by_the_cells_asked_and_stop_short() {
+        let area = Rect::new(0, 0, 190, 50);
+        let start = ScreenLayout::compute(area, true, Panels::with_preview());
+        let moved = ScreenLayout::compute(
+            area,
+            true,
+            Panels {
+                preview: true,
+                list: 6,
+                lower: 4,
+            },
+        );
+        assert_eq!(moved.rail.width, start.rail.width + 6);
+        assert_eq!(moved.view.unwrap().width, start.view.unwrap().width - 6);
+        assert_eq!(
+            moved.preview.unwrap().height,
+            start.preview.unwrap().height + 4
+        );
+        covers_without_overlap(&moved, area);
+        // However far, every panel keeps room.
+        let far = ScreenLayout::compute(
+            area,
+            true,
+            Panels {
+                preview: true,
+                list: 500,
+                lower: 500,
+            },
+        );
+        assert!(far.view.unwrap().width >= 40, "{:?}", far.view);
+        assert!(far.preview.unwrap().height <= 50 - 12);
+        covers_without_overlap(&far, area);
+        let narrow = ScreenLayout::compute(
+            area,
+            true,
+            Panels {
+                preview: false,
+                list: -500,
+                lower: -500,
+            },
+        );
+        assert_eq!(narrow.rail.width, 20);
+        covers_without_overlap(&narrow, area);
     }
 }

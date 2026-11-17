@@ -2106,3 +2106,41 @@ fn sessions_nobody_launched_group_by_whether_they_have_a_window() {
         assert_eq!(group(&agent), expected, "{:?}", agent.location);
     }
 }
+
+#[test]
+fn volee_opens_without_the_preview_and_ctrl_arrows_move_the_borders() {
+    let model = Model::new(
+        Theme::default(),
+        Keymap::default(),
+        None,
+        (190, 50),
+        crate::test_support::start(),
+    );
+    assert!(
+        !model.panels.preview,
+        "the preview waits for the leader then u p"
+    );
+    let mut model = model_at(190, 50);
+    let wide = model.layout.rail.width;
+    let arrow = |code| {
+        Msg::Key(KeyEvent::new_with_kind(
+            code,
+            KeyModifiers::CONTROL,
+            KeyEventKind::Press,
+        ))
+    };
+    update(&mut model, arrow(KeyCode::Right));
+    assert_eq!(
+        model.layout.rail.width,
+        wide + 2,
+        "ctrl-right widens the list"
+    );
+    update(&mut model, arrow(KeyCode::Left));
+    update(&mut model, arrow(KeyCode::Left));
+    assert_eq!(model.layout.rail.width, wide - 2, "ctrl-left narrows it");
+    press(&mut model, " w=");
+    assert_eq!(
+        model.layout.rail.width, wide,
+        "the leader then w = puts it back"
+    );
+}

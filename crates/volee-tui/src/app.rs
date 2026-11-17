@@ -705,6 +705,9 @@ pub(crate) struct Model {
     pub(crate) size: (u16, u16),
     /// Where each panel is.
     pub(crate) layout: ScreenLayout,
+    /// What the person chose of the panels: the preview shown or not, the
+    /// borders moved.
+    pub(crate) panels: crate::layout::Panels,
     /// The rows of the agents list.
     pub(crate) rail: Vec<RailEntry>,
     /// How the list is sorted.
@@ -787,6 +790,7 @@ impl Model {
             awaited: None,
             size,
             layout: ScreenLayout::default(),
+            panels: crate::layout::Panels::default(),
             rail: Vec::new(),
             rail_order: RailOrder::default(),
             rail_offset: 0,
@@ -1071,7 +1075,7 @@ impl Model {
     /// It runs at the end of every update; drawing reads its results.
     fn relayout(&mut self) {
         let area = Rect::new(0, 0, self.size.0, self.size.1);
-        self.layout = ScreenLayout::compute(area, self.tab == Tab::Hierarchy);
+        self.layout = ScreenLayout::compute(area, self.tab == Tab::Hierarchy, self.panels);
         self.rail_order = if self.layout.mode == Mode::Narrow
             && self.tab == Tab::Hierarchy
             && !self.subtree.is_empty()
@@ -2453,10 +2457,27 @@ fn perform_panels(model: &mut Model, action: Action) -> bool {
                 false,
             );
         }
+        Action::TogglePreview => {
+            model.panels.preview = !model.panels.preview;
+            if !model.panels.preview && model.focus == Pane::Detail {
+                model.focus = Pane::Rail;
+            }
+        }
+        Action::Wider => model.panels.list = model.panels.list.saturating_add(BORDER_STEP),
+        Action::Narrower => model.panels.list = model.panels.list.saturating_sub(BORDER_STEP),
+        Action::Taller => model.panels.lower = model.panels.lower.saturating_add(BORDER_STEP),
+        Action::Shorter => model.panels.lower = model.panels.lower.saturating_sub(BORDER_STEP),
+        Action::EqualPanels => {
+            model.panels.list = 0;
+            model.panels.lower = 0;
+        }
         _ => return false,
     }
     true
 }
+
+/// The cells a border moves at each press of `Ctrl` and an arrow.
+const BORDER_STEP: i16 = 2;
 
 /// The panel next to `pane` in the direction of `action` (`Ctrl+h/j/k/l`, as
 /// LazyVim moves between windows): the list at the left with the detail and

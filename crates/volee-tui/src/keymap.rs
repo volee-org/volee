@@ -353,6 +353,18 @@ actions! {
     FocusUp => "focus-up",
     /// Focus the panel on the right.
     FocusRight => "focus-right",
+    /// Show or hide the selected agent's screen under the view.
+    TogglePreview => "toggle-preview",
+    /// Widen the agents' column.
+    Wider => "wider",
+    /// Narrow the agents' column.
+    Narrower => "narrower",
+    /// Make the preview taller, or the detail when the preview is hidden.
+    Taller => "taller",
+    /// Make the preview shorter, or the detail when the preview is hidden.
+    Shorter => "shorter",
+    /// Put every border back where it started.
+    EqualPanels => "equal-panels",
     /// Show the keys of the current screen in a popup.
     Help => "help",
     /// Show every key, in every context.
@@ -1194,6 +1206,12 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &["ctrl-j"], A::FocusDown, "panel below", None, "focus the panel below"),
         bind(C::Global, &["ctrl-k"], A::FocusUp, "panel above", None, "focus the panel above"),
         bind(C::Global, &["ctrl-l"], A::FocusRight, "panel right", None, "focus the panel on the right"),
+        bind(C::Global, &["space u p"], A::TogglePreview, "preview", None, "show or hide the selected agent's screen under the view"),
+        bind(C::Global, &["ctrl-right"], A::Wider, "wider list", None, "widen the agents' column, as LazyVim widens a window"),
+        bind(C::Global, &["ctrl-left"], A::Narrower, "narrower list", None, "narrow the agents' column"),
+        bind(C::Global, &["ctrl-up"], A::Taller, "taller", None, "make the preview taller, or the detail when the preview is hidden"),
+        bind(C::Global, &["ctrl-down"], A::Shorter, "shorter", None, "make the preview shorter, or the detail when the preview is hidden"),
+        bind(C::Global, &["space w ="], A::EqualPanels, "equal panels", None, "put every border back where it started"),
         bind(C::Global, &["1"], A::ShowHierarchy, "tree", Some("views"), "show the tree of who launched whom"),
         bind(C::Global, &["2"], A::ShowNetwork, "network", Some("views"), "show the network"),
         bind(C::Global, &["3"], A::ShowRepos, "repositories", Some("views"), "show repositories and worktrees"),

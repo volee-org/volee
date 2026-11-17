@@ -116,8 +116,9 @@ The theme, the keys and reduced motion come from the `[tui]` table of the
 - **Journal.** Under it, what happened lately, newest at the bottom, with
   how long ago: who launched whom (`→`), who wrote to whom (`✉`, `?` for a
   question), who needs you, who finished or failed, who left the list.
-- **Preview.** Across the bottom, the selected agent: on the panel's
-  border, its state as a badge, for how long and what it does, and at the
+- **Preview.** Hidden when volee opens, so that the view goes down to the
+  status line; `Space u p` shows it, and hides it again. Across the bottom,
+  the selected agent: on the panel's border, its state as a badge, for how long and what it does, and at the
   right the keys of what you can do with it (open it, write to it, its
   changes, its screen full size). Inside, its terminal screen, kept up to
   date. For
@@ -821,6 +822,11 @@ mode, `?` shows the keys, `:` opens the command line, `Esc` goes back.
 main screen says how to quit. Quitting is at once, unless a message you
 started would be lost: then volee asks first.
 
+**The panels.** `Ctrl` and the arrows move the borders, as LazyVim resizes
+its windows: right and left widen and narrow the agents' column, up and
+down make the preview taller and shorter (the detail, while the preview is
+hidden). `Space w =` puts every border back where it started.
+
 **The keys of this screen.** `?` opens a small popup at the bottom right
 with the keys of the panel you are in and of everywhere, in columns, with
 nothing to scroll. Press one of them and the popup closes and does it;
@@ -909,6 +915,12 @@ popups and the hints.
 | `ctrl-j` | focus the panel below | `focus-down` |
 | `ctrl-k` | focus the panel above | `focus-up` |
 | `ctrl-l` | focus the panel on the right | `focus-right` |
+| `space u p` | show or hide the selected agent's screen under the view | `toggle-preview` |
+| `ctrl-→` | widen the agents' column, as LazyVim widens a window | `wider` |
+| `ctrl-←` | narrow the agents' column | `narrower` |
+| `ctrl-↑` | make the preview taller, or the detail when the preview is hidden | `taller` |
+| `ctrl-↓` | make the preview shorter, or the detail when the preview is hidden | `shorter` |
+| `space w =` | put every border back where it started | `equal-panels` |
 | `1` | show the tree of who launched whom | `show-hierarchy` |
 | `2` | show the network | `show-network` |
 | `3` | show repositories and worktrees | `show-repos` |

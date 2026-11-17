@@ -38,6 +38,8 @@ fn demo_model_at(width: u16, height: u16, theme: Theme, at: Timestamp) -> (Model
         (width, height),
         at,
     );
+    // Most screens show the preview, as `Space u p` shows it.
+    model.panels.preview = true;
     let effects = update(&mut model, Msg::Events(demo.events_until(at)));
     serve(&demo, &mut model, effects);
     (model, demo)
@@ -91,6 +93,24 @@ fn demo_at_120x40() {
 fn demo_at_200x50() {
     let (model, _) = demo_model(200, 50, Theme::default());
     assert_snapshot!(draw(&model));
+}
+
+/// The screen as volee opens: no preview, the view down to the status line,
+/// until the leader then `u p` shows it.
+#[test]
+fn the_preview_hides_until_the_leader_then_u_p_shows_it() {
+    let (mut model, demo) = demo_model(190, 50, Theme::default());
+    model.panels = crate::layout::Panels::default();
+    keys(&demo, &mut model, &[KeyCode::Esc]);
+    assert_eq!(model.layout.preview, None);
+    assert_snapshot!(draw(&model));
+    type_text(&demo, &mut model, " up");
+    assert!(
+        model.layout.preview.is_some(),
+        "the leader then u p shows it"
+    );
+    type_text(&demo, &mut model, " up");
+    assert_eq!(model.layout.preview, None, "and hides it again");
 }
 
 #[test]

@@ -37,6 +37,8 @@ pub(crate) fn model(width: u16, height: u16) -> Model {
         (width, height),
         start(),
     );
+    // Most tests look at the preview: shown, as `Space u p` shows it.
+    model.panels.preview = true;
     update(&mut model, Msg::Events(demo().events_until(start())));
     model
 }
