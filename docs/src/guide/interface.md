@@ -693,7 +693,7 @@ fail. A window says what to do, and volee waits:
 │  1  Go to the terminal where it runs:                          │
 │     claude, in /home/you/code/dashboard                        │
 │  2  Press the left arrow key there, with nothing typed in its  │
-│     input box. Claude Code shows ← for agents under it.        │
+│     input box: Claude Code shows ← for agents, or ← 1 agent.   │
 │  3  Come back here: volee opens it by itself.                  │
 │                                                                │
 │ The conversation moves to Claude Code's background, where its  │

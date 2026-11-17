@@ -78,10 +78,14 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
             Span::styled("left arrow key", strong),
             Span::styled(" there, with nothing typed in its", words),
         ],
+        // Claude Code's hint under its input box: `← for agents` while no
+        // agent of its own runs, `← 1 agent` (and so on) once some do.
         vec![
-            Span::styled("    input box. Claude Code shows ", words),
+            Span::styled("    input box: Claude Code shows ", words),
             Span::styled("← for agents", strong),
-            Span::styled(" under it.", words),
+            Span::styled(", or ", words),
+            Span::styled("← 1 agent", strong),
+            Span::styled(".", words),
         ],
         vec![
             Span::styled(" 3", step),
