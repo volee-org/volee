@@ -28,6 +28,7 @@ mod setup;
 mod sqlite;
 mod state;
 mod tidy;
+mod typist;
 mod views;
 mod watchers;
 

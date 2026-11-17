@@ -43,7 +43,7 @@ git = "gitui"
 | --- | --- | --- |
 | `model` | the harness default | Model for the agents volee launches, unless the repository sets one. |
 | `permission_mode` | `manual` | `acceptEdits`, `auto`, `manual`, `dontAsk` or `plan`, passed to Claude Code with every launch and resume. `manual` asks before every tool that needs permission: the agent then waits until you take it over and answer. volee never passes `bypassPermissions`, and never leaves the mode to your own Claude Code default. OpenCode agents get `--auto` when the mode is `auto`, and nothing otherwise. |
-| `wake_timeout` | `3600` | Seconds an idle agent stays reachable by the wake-up hook. Afterwards, a message resumes the session instead. |
+| `wake_timeout` | `3600` | Seconds an idle agent's wake-up hook waits for messages. Afterwards, volee types a message at the prompt of an agent in a volee host, once it has rested twenty seconds and nobody types into it; a session that ended is resumed with its messages. |
 | `resume_after_reboot` | `true` | Resume, in new volee hosts, the agents a reboot interrupted, the first time the daemon starts afterwards ([after a reboot](cli.md#after-a-reboot)). `false`: they show as stopped, and your next message to one resumes it. |
 
 ## Worktrees

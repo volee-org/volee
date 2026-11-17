@@ -136,5 +136,6 @@ pub(crate) fn welcome(size: volee_host::Size, keys: bool) -> Box<volee_host::Wel
         exit: None,
         input: true,
         keys,
+        owned: Some(false),
     })
 }

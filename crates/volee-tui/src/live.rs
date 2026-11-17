@@ -517,6 +517,7 @@ mod tests {
             exit: None,
             input: true,
             keys,
+            owned: Some(false),
         }
     }
 

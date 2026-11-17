@@ -10,7 +10,7 @@ expression: draw(&model)
 "│ │ ? trace-gateway asks … 30 s │ that the final URL of the new invoices     │ │"
 "│▌│   Can you ask Invoicing wh… │ page?                                      │ │"
 "│ │ ● Inbox (4)            30 s │                                            │ │"
-"│ │   question · trace-gateway… │ you → broken-links · answer · 7 min ago    │ │"
+"│ │   question · trace-gateway… │ you → broken-links · answer · 7 min ago · ✓│ │"
 "│ │   ◆ Invoicing          59 s │ It is /invoices; /billing/invoices         │ │"
 "│ │   alert · volee: invoice-t… │ redirects there.                           │ │"
 "│ │ ● volee               7 min │                                            │ │"

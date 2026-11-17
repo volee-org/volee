@@ -356,6 +356,28 @@ fn message_lines(
             format!(" · {} ago", Elapsed::between(message.at, model.now)),
             dim,
         ));
+        // Whether what the person wrote reached the agents it is for.
+        if message.from == Party::Human {
+            let agents = message
+                .receipts
+                .iter()
+                .filter(|receipt| matches!(receipt.to, Party::Agent(_)));
+            let (handed, waiting): (Vec<&volee_core::message::Receipt>, Vec<_>) =
+                agents.partition(|receipt| receipt.delivered_at.is_some());
+            if !waiting.is_empty() {
+                header.push(Span::styled(" · ", dim));
+                header.push(Span::styled(
+                    "⋯ not delivered yet",
+                    theme.style(StyleRole::StateNeedsInput),
+                ));
+            } else if !handed.is_empty() {
+                header.push(Span::styled(" · ", dim));
+                header.push(Span::styled(
+                    "✓ delivered",
+                    theme.style(StyleRole::StateDone),
+                ));
+            }
+        }
         lines.push(header);
         let body_style = if highlighted == Some(message.id) {
             theme.style(StyleRole::Input)
