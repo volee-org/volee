@@ -62,8 +62,12 @@ const PANEL_LABEL: usize = 20;
 /// Columns between the panel's edges and its text.
 const PANEL_PAD: usize = 2;
 
-/// Columns between two columns of the panel.
+/// Columns between two columns of the panel, at least.
 const PANEL_GAP: usize = 3;
+
+/// The share of the screen's width that a panel of several columns takes,
+/// in percent, as tuios's prefix panel does; its columns spread over it.
+const PANEL_SHARE: usize = 72;
 
 /// The order of the leader's groups in its panel, as LazyVim lists them:
 /// agents, windows, interface, git, search, quit; any other after them.
@@ -471,11 +475,19 @@ fn render_panel(
     else {
         return false;
     };
-    let width = layout.content_width + 2 * PANEL_PAD;
+    let fitted = layout.content_width + 2 * PANEL_PAD;
     // The panel leaves the status line, the area's last row, in sight.
-    if width > usize::from(area.width) || layout.height >= usize::from(area.height) {
+    if fitted > usize::from(area.width) || layout.height >= usize::from(area.height) {
         return false;
     }
+    // Several columns spread over most of the width, as in tuios; a single
+    // group keeps the width of its keys.
+    let width = if columns.len() > 1 {
+        fitted.max(usize::from(area.width) * PANEL_SHARE / 100)
+    } else {
+        fitted
+    };
+    let inner = width - 2 * PANEL_PAD;
     let window = Rect::new(
         area.right().saturating_sub(cells(width)),
         area.bottom().saturating_sub(cells(layout.height) + 1),
@@ -493,16 +505,22 @@ fn render_panel(
             Span::styled(title.to_owned(), theme.style(StyleRole::KeysTitle)),
             Span::styled(esc, theme.style(StyleRole::KeysHeading)),
         ],
-        cells(layout.content_width),
+        cells(inner),
     );
     let mut y = window.y + 3;
     for row in &layout.rows {
+        // The room the row leaves, shared between its gaps.
+        let used: usize = row.iter().map(|index| layout.sizes[*index].1).sum();
+        let gap = match row.len() {
+            0 | 1 => 0,
+            count => (inner.saturating_sub(used) / (count - 1)).max(PANEL_GAP),
+        };
         let mut x = left;
         for index in row {
             let (keys_width, column_width) = layout.sizes[*index];
             let at = Rect::new(x, y, cells(column_width), 0);
             draw_column(theme, &columns[*index], keys_width, at, buf);
-            x += cells(column_width + PANEL_GAP);
+            x += cells(column_width + gap);
         }
         y += cells(tallest(columns, row) + 2);
     }

@@ -143,6 +143,13 @@ fn the_leader_shows_what_follows() {
 }
 
 #[test]
+fn the_leader_panel_spreads_over_a_wide_terminal() {
+    let (mut model, demo) = demo_model(220, 50, Theme::default());
+    type_text(&demo, &mut model, " ");
+    assert_snapshot!(draw(&model));
+}
+
+#[test]
 fn the_leader_panel_takes_rows_in_a_small_terminal() {
     let (mut model, demo) = demo_model(80, 24, Theme::default());
     type_text(&demo, &mut model, " ");

@@ -159,3 +159,11 @@ columns when they do not fit side by side, and a terminal too small for
 it falls back on the box above. `?` keeps its box. Four theme roles colour
 the panel: `keys.panel`, `keys.title`, `keys.heading` and `keys.key`.
 
+The same morning the person found it too small and too grey next to tuios's.
+Measured on his screen, tuios's panel takes about three quarters of the
+width and draws a violet ground (`#31284d`) under periwinkle keys
+(`#9a8cff`). volee now does the same: a panel of several columns takes 72%
+of the width, its columns spread over it, and the Catppuccin themes carry
+those two colours (`panel` and `periwinkle` in their palettes, at each
+flavor's lightness).
+

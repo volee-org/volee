@@ -839,8 +839,9 @@ nothing to scroll. Press one of them and the popup closes and does it;
 
 **The leader.** Less frequent actions sit behind the space bar, as in
 LazyVim: press `Space` and a panel at the bottom right shows everything
-that can follow, in the manner of tuios's prefix panel: one column per
-group under its name, each key spelled in full. The groups are LazyVim's:
+that can follow, in the manner of tuios's prefix panel and in its violet:
+about three quarters of the width, one column per group under its name,
+each key spelled in full. The groups are LazyVim's:
 Agents (`a n` a new agent, `a m` a new mission, `a l` a new lead, `a a`
 adopt, `a d` forget), Windows (`w w` the wall, `w m` the selected screen
 full size, `w =` the borders back), UI (`u p` the preview, `u C` the

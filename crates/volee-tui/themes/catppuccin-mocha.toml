@@ -30,6 +30,9 @@ surface0 = "#313244"
 base = "#1e1e2e"
 mantle = "#181825"
 crust = "#11111b"
+# The leader's panel, in the violet of tuios's prefix panel.
+panel = "#31284d"
+periwinkle = "#9a8cff"
 
 [roles]
 background = { fg = "text", bg = "base" }
@@ -92,11 +95,11 @@ sparkline = "sapphire"
 "mode.command" = { fg = "mantle", bg = "peach", modifiers = ["bold"] }
 statusline = { fg = "subtext0", bg = "mantle" }
 "statusline.section" = { fg = "text", bg = "surface0" }
-# The leader's panel, as tuios draws its prefix panel with Catppuccin.
-"keys.panel" = { fg = "text", bg = "surface0" }
-"keys.title" = { fg = "text", bg = "surface0", modifiers = ["bold"] }
-"keys.heading" = { fg = "overlay1", bg = "surface0" }
-"keys.key" = { fg = "lavender", bg = "surface0", modifiers = ["bold"] }
+# The leader's panel, in the colours of tuios's prefix panel.
+"keys.panel" = { fg = "subtext1", bg = "panel" }
+"keys.title" = { fg = "text", bg = "panel", modifiers = ["bold"] }
+"keys.heading" = { fg = "overlay1", bg = "panel" }
+"keys.key" = { fg = "periwinkle", bg = "panel", modifiers = ["bold"] }
 notice = { fg = "text", bg = "surface0" }
 "notice.error" = { fg = "crust", bg = "red", modifiers = ["bold"] }
 input = { fg = "text", modifiers = ["bold"] }
