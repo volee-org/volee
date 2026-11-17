@@ -688,6 +688,21 @@ class Journey:
         return bool(self.wait(lambda: all(needle in self.screen() for needle in needles),
                               timeout, every))
 
+    @staticmethod
+    def editing(name=""):
+        """What the status line says while the keys go to `name`: the INSERT
+        mode, then an arrow to the agent (0.18)."""
+        return "INSERT  → " + name
+
+    def show_preview(self):
+        """Shows the preview of the selected agent. volee opens without it since
+        0.18, and the leader then `u p` shows it, as a person who wants it does.
+        The keys switch it, so nothing is pressed when it already shows."""
+        if "Preview · " in self.screen():
+            return True
+        self.type(" up", 0.5)
+        return self.sees("Preview · ", timeout=10)
+
     def select(self, name):
         """Selects the agent called `name` with the filter, and checks that the
         selected row is that agent's: no key must ever go to another agent."""

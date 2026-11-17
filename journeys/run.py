@@ -141,6 +141,7 @@ def main():
         # ---- its screen, without opening it ---------------------------------------
         if not j.select(name):
             return
+        j.check("the leader then u p shows the preview", j.show_preview())
         same, seen = shows("Preview · " + name, 1, screen)
         j.check("its preview is the screen the person sees in the terminal, row for row",
                 same, seen)
@@ -160,7 +161,7 @@ def main():
         # ---- from the interface: open, type, come back -----------------------------
         j.keys("Enter", 2.5)
         j.check("Enter opens it inside volee, in edit mode",
-                j.sees("your keys go to " + name, timeout=20))
+                j.sees(j.editing(name), timeout=20))
         j.type(LEFT)
         j.check("typed text reaches the program",
                 j.wait(lambda: LEFT in logs(name), 15, 1), logs(name)[-200:])
@@ -172,7 +173,7 @@ def main():
                 j.wait(lambda: LEFT not in logs(name), 15, 1), logs(name)[-200:])
         j.keys("ctrl+q", 1.5)
         j.check("the leave key gives the keys back; its screen stays, live",
-                j.wait(lambda: "your keys go to" not in j.screen()
+                j.wait(lambda: j.editing() not in j.screen()
                        and "Screen · " + name in j.screen(), 10, 1))
         j.keys("z", 1.0)
         j.check("and `z` comes back to the list", j.sees("Agents", timeout=10))

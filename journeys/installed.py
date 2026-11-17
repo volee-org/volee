@@ -34,7 +34,7 @@ def launched_agent(j, name):
     j.check("z shows its screen live",
             j.sees("Screen · " + name + " · live") and j.said("ready", timeout=15))
     j.keys("Enter", 2.0)
-    j.check("Enter opens it in edit mode", j.sees("your keys go to " + name, timeout=10))
+    j.check("Enter opens it in edit mode", j.sees(j.editing(name), timeout=10))
     j.type("Reply with the word fruit in uppercase, nothing else")
     j.keys("Enter")
     j.check("typed text reaches the agent and it answers", j.said("fruit"),
@@ -83,7 +83,7 @@ def session_by_hand(j, name):
         return
     j.keys("Enter", 2.0)
     j.check("Enter opens it inside volee, with no question about adopting it",
-            j.sees("your keys go to " + name, "7341", timeout=20)
+            j.sees(j.editing(name), "7341", timeout=20)
             and "Move " + name not in j.screen())
     asked = "Add one to the number you remembered. Reply with the result in digits only."
     j.type(asked)
@@ -141,7 +141,7 @@ def session_in_a_terminal(j, name):
         return
     title = moved.get("name") or moved["id"]
     if not j.check("volee opens it by itself, on the conversation",
-                   j.sees("your keys go to " + title, "5127", timeout=40)):
+                   j.sees(j.editing(title), "5127", timeout=40)):
         return
     after = j.agent(title) or {}
     j.check("on the same row, which followed it to the background",

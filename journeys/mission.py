@@ -216,7 +216,7 @@ def main():
             return
         j.keys("Enter", 2.0)
         if not j.check("Enter opens the lead inside volee",
-                       j.sees("your keys go to " + lead, timeout=30)):
+                       j.sees(j.editing(lead), timeout=30)):
             return
         request = ("Start a mission titled `{title}` in the repositories {a} and {b}. "
                    "Its goal: in each of the two repositories, add a file named `{file}` "
@@ -244,7 +244,7 @@ def main():
         j.show("the lead, asked for a mission")
         j.keys("ctrl+q", 1.5)
         j.check("the leave key gives the keyboard back to volee, on the lead's screen",
-                j.wait(lambda: "your keys go to " + lead not in j.screen()
+                j.wait(lambda: j.editing(lead) not in j.screen()
                        and "Screen · " + lead in j.screen(), 10))
         j.keys("Escape", 1.0)
         j.check("Escape comes back to the list, and the lead keeps running",

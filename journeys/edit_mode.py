@@ -35,7 +35,7 @@ def by_keyboard(j, name):
             " ".join(j.screen().split()).count("enter open") > 0)
 
     j.keys("i")
-    editing = "your keys go to " + name
+    editing = j.editing(name)
     j.check("i enters edit mode inside volee's frame", j.sees(" EDIT ", editing, timeout=10))
     j.show("edit mode")
 

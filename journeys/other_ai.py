@@ -137,6 +137,7 @@ def main():
             same, compared, difference = same_tail(rows, screen, width)
             return same, difference or "{} cells compared, in {} columns".format(compared, width)
 
+        j.check("the leader then u p shows the preview", j.show_preview())
         same, seen = shows("Preview · " + name, 1)
         j.check("its preview is the pane's screen, row for row", same, seen)
         j.keys("5", 2.0)
@@ -147,7 +148,7 @@ def main():
         # ---- open, type, come back ---------------------------------------------------
         j.keys("Enter", 2.5)
         j.check("Enter opens the pane inside volee, in edit mode",
-                j.sees("your keys go to " + name, timeout=20))
+                j.sees(j.editing(name), timeout=20))
         j.type(LEFT)
         j.check("typed text reaches the program, in its pane",
                 j.wait(lambda: LEFT in pane_screen(), 15, 1))

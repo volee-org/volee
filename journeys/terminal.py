@@ -15,6 +15,7 @@ here asks one for anything, and nothing shows on the person's screen.
     python3 journeys/terminal.py --volee target/release/volee --sandbox ~/code/sandbox
 """
 import os
+import re
 import time
 
 from journey import Journey, Terminal, arguments
@@ -74,8 +75,10 @@ def main():
                 where)
         j.show("volee waits for the session to leave its terminal")
         j.check("and says nothing of a failure", bool(said) and "Cannot open" not in said)
+        # `← for agents` while no agent of its own runs, `← 1 agent` and so on
+        # once some do: the window names both.
         j.check("Claude Code shows that key under the session's prompt, as the window says",
-                "← for agents" in terminal.wrote(count=6000))
+                re.search(r"← (for agents|\d+ agents?)\b", terminal.wrote(count=6000)))
         j.keys("Escape", 1.0)
         j.check("Escape gives the wait up", j.wait(lambda: waits not in j.screen(), 5))
         still = j.claude_session(name) or {}
@@ -101,7 +104,7 @@ def main():
 
         # ---- volee opens it by itself, on the same row -----------------------------
         opened = j.check("volee opens it by itself, in edit mode, on the conversation",
-                         j.sees("your keys go to " + title, "7341", timeout=40),
+                         j.sees(j.editing(title), "7341", timeout=40),
                          "{:.0f} s after the key".format(time.time() - pressed))
         j.show("the conversation opened once it left its terminal")
         if not opened:
@@ -143,7 +146,7 @@ def main():
         if j.select(title):
             j.keys("Enter", 2.0)
             j.check("Enter now opens it at once",
-                    j.sees("your keys go to " + title, timeout=20) and waits not in j.screen())
+                    j.sees(j.editing(title), timeout=20) and waits not in j.screen())
             j.keys("ctrl+q", 1.5)
             j.sees("Left " + title, timeout=10)
         time.sleep(SETTLE + 6)
