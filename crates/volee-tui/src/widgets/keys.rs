@@ -10,14 +10,14 @@
 //!                  ╰──────────────────────────────────────────╯
 //! ```
 //!
-//! What follows a sequence shows in a panel in the manner of tuios's prefix
-//! panel: a solid ground, no border, a band at the top with the sequence's
-//! name in a block, one column per group under its name.
+//! Both are modal windows in the manner of the cockpit's keyboard help: the
+//! screen behind fades, a thick lavender frame, each section's name in
+//! capitals, each key drawn as a key of a keyboard.
 //!
 //! ```text
-//!  LEADER                                                            esc
-//!
-//!   Agents             Windows            UI            Git        Other
+//! ┏ Leader ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+//! ┃                                                                       ┃
+//! ┃  AGENTS               WINDOWS                UI              OTHER     ┃
 //!   a n  new agent     w w  wall          u p  preview  g d  diff  n  messages
 //!   a m  new mission   w m  full screen   u C  theme…              o  open with…
 //! ```
@@ -25,9 +25,8 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
-use ratatui::widgets::{Clear, Widget};
 
-use super::{panel, put_spans};
+use super::{modal, put_spans};
 use crate::app::Model;
 use crate::keymap::{Action, Context, KeyCombo, KeySeq, group_name, join_keys};
 use crate::text;
@@ -60,8 +59,13 @@ pub(crate) struct Column {
 /// The longest label of the leader's panel before it is cut.
 const PANEL_LABEL: usize = 20;
 
-/// Columns between the panel's edges and its text.
-const PANEL_PAD: usize = 2;
+/// Columns between a keys window's edges and its text: the frame and two
+/// spaces.
+const PANEL_PAD: usize = 3;
+
+/// The width of the keys of the screen in the middle of the screen, as the
+/// cockpit's keyboard help.
+const MODAL_WIDTH: usize = 104;
 
 /// Columns between two columns of the panel, at least.
 const PANEL_GAP: usize = 3;
@@ -415,15 +419,16 @@ pub(crate) fn render_screen(model: &Model, area: Rect, buf: &mut Buffer) {
         .keymap
         .first_key(Context::Keys, Action::AllKeys)
         .map(KeySeq::short);
-    let name = screen_title(model).to_lowercase();
-    let hint = all
-        .as_ref()
-        .map_or_else(|| "esc".to_owned(), |all| format!("{all} all keys · esc"));
+    let footer = all.as_ref().map_or_else(
+        || "esc to close".to_owned(),
+        |all| format!("{all} all keys · esc to close"),
+    );
     if render_panel(
         theme,
-        &["keys", &name],
-        &hint,
+        &format!("Keys · {}", screen_title(model)),
+        &footer,
         &screen_columns(model),
+        Placement::Center,
         area,
         buf,
     ) {
@@ -443,11 +448,19 @@ pub(crate) fn render_screen(model: &Model, area: Rect, buf: &mut Buffer) {
 /// the panel does not fit.
 pub(crate) fn render_pending(model: &Model, area: Rect, buf: &mut Buffer) {
     let theme = &model.theme;
-    // `leader`, then `agents` after `Space a`; `go to`.
+    // `Leader`, then `Leader › agents` after `Space a`; `Go to`.
     let path: Vec<&str> = (1..=model.pending_keys.len())
         .map(|end| group_name(&model.pending_keys[..end]))
         .collect();
-    if render_panel(theme, &path, "esc", &pending_columns(model), area, buf) {
+    if render_panel(
+        theme,
+        &heading(&path.join(" › ")),
+        "esc to close",
+        &pending_columns(model),
+        Placement::BottomRight,
+        area,
+        buf,
+    ) {
         return;
     }
     let typed: String = model
@@ -471,7 +484,7 @@ fn cells(count: usize) -> u16 {
     u16::try_from(count).unwrap_or(u16::MAX)
 }
 
-/// The most keys among the columns of a row of the panel.
+/// The most keys among the columns of a row of the window.
 fn tallest(columns: &[Column], row: &[usize]) -> usize {
     row.iter()
         .map(|index| columns[*index].entries.len())
@@ -479,39 +492,42 @@ fn tallest(columns: &[Column], row: &[usize]) -> usize {
         .unwrap_or(0)
 }
 
-/// Where the leader's panel puts its columns.
+/// Where a keys window puts its columns.
 struct PanelLayout {
-    /// For each column, the width of its keys and its own width.
+    /// For each column, the width of its widest key drawn as a key, and its
+    /// own width.
     sizes: Vec<(usize, usize)>,
     /// The columns of each row, left to right.
     rows: Vec<Vec<usize>>,
-    /// The width of what the panel holds, inside its padding.
+    /// The width of what the window holds, inside its padding.
     content_width: usize,
-    /// The panel's height, its blank rows above and below included.
+    /// The window's height, its frame included.
     height: usize,
 }
 
 impl PanelLayout {
-    /// Lays `columns` out under a title `title_width` cells wide, in a panel
+    /// Lays `columns` out under a title `title_width` cells wide, in a window
     /// at most `area_width` cells wide: columns left to right, a new row
     /// where the next would not fit. `None` when a column alone is too wide.
     fn new(columns: &[Column], title_width: usize, area_width: u16) -> Option<Self> {
         let sizes: Vec<(usize, usize)> = columns
             .iter()
             .map(|column| {
-                let keys = column
+                // A key drawn as a key: its name with a space on each side.
+                let cap = column
                     .entries
                     .iter()
                     .map(|entry| text::width(&entry.keys))
                     .max()
-                    .unwrap_or(0);
+                    .unwrap_or(0)
+                    + 2;
                 let label = column
                     .entries
                     .iter()
                     .map(|entry| text::width(&entry.label).min(PANEL_LABEL))
                     .max()
                     .unwrap_or(0);
-                (keys, (keys + 2 + label).max(text::width(&column.title)))
+                (cap, (cap + 2 + label).max(text::width(&column.title)))
             })
             .collect();
         let room = usize::from(area_width).saturating_sub(2 * PANEL_PAD);
@@ -541,9 +557,10 @@ impl PanelLayout {
             .max()
             .unwrap_or(0)
             .max(title_width);
-        // The band and a blank row; each row of columns, its headings then
-        // its keys, a blank row between two; a blank row below.
-        let height = 3
+        // The frame and a blank row; each row of columns, its sections'
+        // names then their keys, a blank row between two; a blank row and
+        // the frame.
+        let height = 4
             + rows
                 .iter()
                 .map(|row| 1 + tallest(columns, row))
@@ -558,69 +575,66 @@ impl PanelLayout {
     }
 }
 
-/// Draws one column of the panel at the top left of `at`: its heading, then
-/// its keys, `keys_width` cells wide, and what they do.
-fn draw_column(theme: &Theme, column: &Column, keys_width: usize, at: Rect, buf: &mut Buffer) {
+/// Draws one column at the top left of `at`: its section's name in
+/// capitals, then each key drawn as a key, and what it does `cap_width` and
+/// two cells on.
+fn draw_column(theme: &Theme, column: &Column, cap_width: usize, at: Rect, buf: &mut Buffer) {
     put_spans(
         buf,
         at.x,
         at.y,
         &[Span::styled(
-            column.title.clone(),
-            theme.style(StyleRole::KeysHeading),
+            column.title.to_uppercase(),
+            theme.style(StyleRole::ModalSection),
         )],
         at.width,
     );
-    for (offset, entry) in column.entries.iter().enumerate() {
-        let padding = keys_width.saturating_sub(text::width(&entry.keys)) + 2;
+    let offset = cells(cap_width + 2);
+    for (row, entry) in column.entries.iter().enumerate() {
+        let y = at.y + 1 + cells(row);
+        let cap = [Span::styled(
+            format!(" {} ", entry.keys),
+            theme.style(StyleRole::ModalKey),
+        )];
+        put_spans(buf, at.x, y, &cap, at.width);
         let label: String = entry.label.chars().take(PANEL_LABEL).collect();
-        let label_role = if entry.group {
-            StyleRole::KeysKey
+        let role = if entry.group {
+            StyleRole::ModalTitle
         } else {
-            StyleRole::KeysPanel
+            StyleRole::ModalText
         };
-        let spans = [
-            Span::styled(entry.keys.clone(), theme.style(StyleRole::KeysKey)),
-            Span::styled(" ".repeat(padding), theme.style(StyleRole::KeysPanel)),
-            Span::styled(label, theme.style(label_role)),
-        ];
-        put_spans(buf, at.x, at.y + 1 + cells(offset), &spans, at.width);
+        put_spans(
+            buf,
+            at.x + offset,
+            y,
+            &[Span::styled(label, theme.style(role))],
+            at.width.saturating_sub(offset),
+        );
     }
 }
 
-/// The band at the top of a panel: the first name in a block (`LEADER`),
-/// the names after it (`agents`), and `hint` on the right (how to close).
-fn header_spans<'a>(theme: &Theme, path: &[&str], hint: &str) -> (Vec<Span<'a>>, Span<'a>) {
-    let mut spans = Vec::new();
-    if let Some((first, rest)) = path.split_first() {
-        spans.push(Span::styled(
-            format!(" {} ", first.to_uppercase()),
-            theme.style(StyleRole::KeysTitle),
-        ));
-        for name in rest {
-            spans.push(Span::styled(
-                format!(" {name} "),
-                theme.style(StyleRole::KeysHeader),
-            ));
-        }
-    }
-    (
-        spans,
-        Span::styled(format!(" {hint} "), theme.style(StyleRole::KeysHeader)),
-    )
+/// Where a keys window shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Placement {
+    /// At the bottom right, above the status line, most of the width wide:
+    /// what can follow the leader.
+    BottomRight,
+    /// In the middle of the screen: the keys of the screen.
+    Center,
 }
 
-/// Draws columns of keys in a panel at the bottom right of `area`, above its
-/// last line (the status line), in the manner of tuios's prefix panel: a
-/// solid ground and no border, a band at the top (`path` in a block, `hint`
-/// on the right), each column under its heading, and rows of columns when
-/// they do not fit side by side. Draws nothing and returns false when the
-/// panel does not fit.
+/// Draws columns of keys in a modal window in the manner of the cockpit's
+/// keyboard help: the screen behind fades, a thick lavender frame, `title`
+/// in it and `footer` in the middle of its bottom, each column under its
+/// section's name in capitals, each key drawn as a key. Columns take rows
+/// when they do not fit side by side. Draws nothing and returns false when
+/// the window does not fit.
 pub(crate) fn render_panel(
     theme: &Theme,
-    path: &[&str],
-    hint: &str,
+    title: &str,
+    footer: &str,
     columns: &[Column],
+    placement: Placement,
     area: Rect,
     buf: &mut Buffer,
 ) -> bool {
@@ -628,61 +642,48 @@ pub(crate) fn render_panel(
     if columns.is_empty() {
         return false;
     }
-    let (title, hint) = header_spans(theme, path, hint);
-    // The band's words, a cell from each edge.
-    let header_width = title
-        .iter()
-        .chain(std::iter::once(&hint))
-        .map(|span| text::width(&span.content))
-        .sum::<usize>()
-        + 2;
-    let Some(layout) = PanelLayout::new(
-        columns,
-        header_width.saturating_sub(2 * PANEL_PAD),
-        area.width,
-    ) else {
+    let words = (text::width(title) + 2).max(text::width(footer) + 2);
+    let Some(layout) = PanelLayout::new(columns, words, area.width) else {
         return false;
     };
     let fitted = layout.content_width + 2 * PANEL_PAD;
-    // The panel leaves the status line, the area's last row, in sight.
+    // The window leaves the status line, the area's last row, in sight.
     if fitted > usize::from(area.width) || layout.height >= usize::from(area.height) {
         return false;
     }
-    // Several columns spread over most of the width, as in tuios; a single
-    // group keeps the width of its keys.
+    // Several columns spread over a wide window, as in tuios and the
+    // cockpit; a single group keeps the width of its keys.
     let width = if columns.len() > 1 {
-        fitted.max(usize::from(area.width) * PANEL_SHARE / 100)
+        let wide = match placement {
+            Placement::BottomRight => usize::from(area.width) * PANEL_SHARE / 100,
+            Placement::Center => MODAL_WIDTH.min(usize::from(area.width).saturating_sub(4)),
+        };
+        fitted.max(wide)
     } else {
         fitted
     };
     let inner = width - 2 * PANEL_PAD;
-    let window = Rect::new(
-        area.right().saturating_sub(cells(width)),
-        area.bottom().saturating_sub(cells(layout.height) + 1),
-        cells(width),
-        cells(layout.height),
-    );
-    Clear.render(window, buf);
-    buf.set_style(window, theme.style(StyleRole::KeysPanel));
-    // The band, the whole width of the panel.
-    buf.set_style(
-        Rect::new(window.x, window.y, window.width, 1),
-        theme.style(StyleRole::KeysHeader),
-    );
-    put_spans(
+    let (window_width, window_height) = (cells(width), cells(layout.height));
+    let window = match placement {
+        Placement::BottomRight => Rect::new(
+            area.right().saturating_sub(window_width),
+            area.bottom().saturating_sub(window_height + 1),
+            window_width,
+            window_height,
+        ),
+        Placement::Center => Rect::new(
+            area.x + area.width.saturating_sub(window_width) / 2,
+            area.y + area.height.saturating_sub(window_height) / 2,
+            window_width,
+            window_height,
+        ),
+    };
+    modal(
         buf,
-        window.x + 1,
-        window.y,
-        &title,
-        window.width.saturating_sub(2),
-    );
-    let hint_width = cells(text::width(&hint.content));
-    put_spans(
-        buf,
-        window.right().saturating_sub(hint_width + 1),
-        window.y,
-        &[hint],
-        hint_width,
+        window,
+        vec![Span::raw(title.to_owned())],
+        footer,
+        theme,
     );
     let left = window.x + cells(PANEL_PAD);
     let mut y = window.y + 2;
@@ -695,9 +696,9 @@ pub(crate) fn render_panel(
         };
         let mut x = left;
         for index in row {
-            let (keys_width, column_width) = layout.sizes[*index];
+            let (cap_width, column_width) = layout.sizes[*index];
             let at = Rect::new(x, y, cells(column_width), 0);
-            draw_column(theme, &columns[*index], keys_width, at, buf);
+            draw_column(theme, &columns[*index], cap_width, at, buf);
             x += cells(column_width + gap);
         }
         y += cells(tallest(columns, row) + 2);
@@ -758,9 +759,7 @@ pub(crate) fn render_box(
         width,
         height,
     );
-    Clear.render(window, buf);
-    buf.set_style(window, theme.style(StyleRole::Background));
-    let inner = panel(buf, window, title, true, theme);
+    let inner = modal(buf, window, title, "", theme);
     let visible = usize::from(inner.height);
     for (index, entry) in entries.iter().enumerate() {
         let (column_index, row) = (index / rows.max(1), index % rows.max(1));

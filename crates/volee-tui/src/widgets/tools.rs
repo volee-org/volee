@@ -4,9 +4,8 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
-use ratatui::widgets::{Clear, Widget};
 
-use super::{panel, put_spans, truncated};
+use super::{modal, put_spans, truncated};
 use crate::app::Model;
 use crate::keymap::Context;
 use crate::text;
@@ -30,10 +29,8 @@ pub(crate) fn render(model: &Model, menu: ToolMenu, area: Rect, buf: &mut Buffer
         width,
         height,
     );
-    Clear.render(window, buf);
-    buf.set_style(window, theme.style(StyleRole::Background));
     let title = vec![Span::raw(format!("Open the worktree of {}", agent.name))];
-    let inner = panel(buf, window, title, true, theme);
+    let inner = modal(buf, window, title, "esc to close", theme);
     let room = inner.width.saturating_sub(2);
     let dim = theme.style(StyleRole::TextDim);
     for (row, kind) in (0u16..).zip(ToolKind::ALL) {

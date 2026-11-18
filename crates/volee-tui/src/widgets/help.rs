@@ -5,9 +5,8 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
-use ratatui::widgets::{Clear, Widget};
 
-use super::{panel, put_spans};
+use super::{modal, put_spans};
 use crate::app::Model;
 use crate::keymap::{Context, KeySeq};
 use crate::text;
@@ -120,8 +119,6 @@ pub(crate) fn render(model: &Model, scroll: u16, area: Rect, buf: &mut Buffer) {
     if window.width < 10 || window.height < 3 {
         return;
     }
-    Clear.render(window, buf);
-    buf.set_style(window, theme.style(StyleRole::Background));
     let title = vec![
         Span::raw("All keys"),
         Span::styled(
@@ -129,7 +126,7 @@ pub(crate) fn render(model: &Model, scroll: u16, area: Rect, buf: &mut Buffer) {
             theme.style(StyleRole::TextDim),
         ),
     ];
-    let inner = panel(buf, window, title, true, theme);
+    let inner = modal(buf, window, title, "esc to close", theme);
     let (columns, column) = columns(model, inner.width);
     let visible = usize::from(inner.height);
     let tallest = columns.iter().map(Vec::len).max().unwrap_or(0);

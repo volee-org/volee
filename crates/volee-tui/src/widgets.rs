@@ -23,9 +23,9 @@ pub(crate) mod top_bar;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Widget};
+use ratatui::widgets::{Block, BorderType, Clear, Widget};
 use volee_core::AgentState;
 
 use crate::app::{Model, inner};
@@ -134,6 +134,83 @@ fn framed(
         .title(Line::from(spans))
         .render(area, buf);
     inner(area)
+}
+
+/// Draws a modal window in the manner of the cockpit's: everything drawn so
+/// far fades behind it, then the window on the modal's own ground in a thick
+/// lavender frame, `title` in the frame at the top left and `footer`, when
+/// there is one, in the middle of its bottom. Returns the area inside the
+/// frame.
+pub(crate) fn modal(
+    buf: &mut Buffer,
+    window: Rect,
+    title: Vec<Span<'_>>,
+    footer: &str,
+    theme: &Theme,
+) -> Rect {
+    fade(buf, theme);
+    let window = window.intersection(buf.area);
+    Clear.render(window, buf);
+    buf.set_style(window, theme.style(StyleRole::Modal));
+    let inside = framed(
+        buf,
+        window,
+        title,
+        theme.style(StyleRole::ModalBorder),
+        theme.style(StyleRole::ModalTitle),
+        BorderType::Thick,
+    );
+    let words = format!(" {footer} ");
+    let width = u16::try_from(text::width(&words)).unwrap_or(u16::MAX);
+    if !footer.is_empty() && window.height > 1 && width + 4 <= window.width {
+        buf.set_stringn(
+            window.x + (window.width - width) / 2,
+            window.bottom() - 1,
+            &words,
+            usize::from(width),
+            theme.style(StyleRole::ModalTitle),
+        );
+    }
+    inside
+}
+
+/// Fades everything drawn so far toward the modal's ground, as the cockpit
+/// does under its windows: colours half way, grounds a third of the way, no
+/// bold. A colour of the terminal's own palette, with no value to blend, is
+/// dimmed by the terminal instead.
+fn fade(buf: &mut Buffer, theme: &Theme) {
+    let toward = theme.style(StyleRole::Modal).bg;
+    let area = buf.area;
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            let Some(cell) = buf.cell_mut((x, y)) else {
+                continue;
+            };
+            match (cell.fg, toward) {
+                (Color::Rgb(..), Some(to @ Color::Rgb(..))) => cell.fg = blend(cell.fg, to, 50),
+                _ => cell.modifier.insert(Modifier::DIM),
+            }
+            if let (Color::Rgb(..), Some(to @ Color::Rgb(..))) = (cell.bg, toward) {
+                cell.bg = blend(cell.bg, to, 30);
+            }
+            cell.modifier.remove(Modifier::BOLD);
+        }
+    }
+}
+
+/// `from` moved `percent` of the way to `to`, for two RGB colours; `from`
+/// for any other.
+fn blend(from: Color, to: Color, percent: u16) -> Color {
+    match (from, to) {
+        (Color::Rgb(r, g, b), Color::Rgb(to_r, to_g, to_b)) => {
+            let mix = |a: u8, b: u8| {
+                u8::try_from((u16::from(a) * (100 - percent) + u16::from(b) * percent) / 100)
+                    .unwrap_or(u8::MAX)
+            };
+            Color::Rgb(mix(r, to_r), mix(g, to_g), mix(b, to_b))
+        }
+        _ => from,
+    }
 }
 
 /// Spans cut to `max` cells; the last one kept ends with `…` when cut.

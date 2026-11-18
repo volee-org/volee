@@ -17,9 +17,8 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
-use ratatui::widgets::{Clear, Widget};
 
-use super::panel;
+use super::modal;
 use crate::text;
 use crate::theme::{StyleRole, Theme};
 
@@ -59,9 +58,7 @@ pub(crate) fn render<S: AsRef<str>>(
         return;
     }
     let window = Rect::new(area.right() - width, area.bottom() - height, width, height);
-    Clear.render(window, buf);
-    buf.set_style(window, theme.style(StyleRole::Background));
-    let inner = panel(buf, window, vec![Span::raw("Theme")], true, theme);
+    let inner = modal(buf, window, vec![Span::raw("Theme")], "", theme);
     // The footer needs a row of its own besides one row of names.
     let footer = inner.height >= 2;
     let rows = usize::from(inner.height) - usize::from(footer);
