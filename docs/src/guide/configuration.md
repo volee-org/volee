@@ -254,5 +254,15 @@ git = ""                        # never offer lazygit
 ide = "zed {dir}"
 ```
 
+On macOS, an application with no command of its own opens with `open -a`,
+and the menu names the tool after the application:
+
+```toml
+[tui.tools]
+editor = "nvim ."                         # LazyVim, or any Neovim
+diff = "nvim -c 'DiffviewOpen {base}'"
+ide = "open -a WebStorm {dir}"            # shown as WebStorm
+```
+
 Tools that run in the terminal take it over, as taking over an agent does,
 and the interface comes back when they exit.

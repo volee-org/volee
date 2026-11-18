@@ -38,12 +38,12 @@ pub(crate) fn resolve(config: &Tools, machine: &Machine<'_>) -> Result<Vec<Tool>
                 None => continue,
             },
         };
-        let Some(program) = command.first() else {
+        if command.is_empty() {
             continue;
-        };
+        }
         tools.push(Tool {
             kind,
-            label: label(program),
+            label: label(&command),
             command,
         });
     }
@@ -72,14 +72,22 @@ fn found(kind: ToolKind, machine: &Machine<'_>) -> Option<Vec<String>> {
     (machine.has)(&command[0]).then_some(command)
 }
 
-/// A program's name in the menu.
-fn label(program: &str) -> String {
+/// A tool's name in the menu: its program's, `VS Code` for `code`, and the
+/// application's for macOS's `open -a <application>` (`WebStorm` for
+/// `open -a WebStorm {dir}` or `open -a /Applications/WebStorm.app`).
+fn label(command: &[String]) -> String {
+    let program = command.first().map_or("", String::as_str);
     let name = Path::new(program).file_name().map_or_else(
         || program.to_owned(),
         |name| name.to_string_lossy().into_owned(),
     );
     match name.as_str() {
         "code" => "VS Code".to_owned(),
+        "open" => command
+            .windows(2)
+            .find(|pair| pair[0] == "-a")
+            .and_then(|pair| Path::new(&pair[1]).file_stem())
+            .map_or(name.clone(), |app| app.to_string_lossy().into_owned()),
         _ => name,
     }
 }
@@ -138,6 +146,22 @@ pub(crate) fn data_home(var: impl Fn(&str) -> Option<String>) -> Option<PathBuf>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tool_is_named_after_its_program_or_its_application() {
+        let words = |line: &str| split_command(line).unwrap();
+        assert_eq!(label(&words("nvim .")), "nvim");
+        assert_eq!(label(&words("/opt/homebrew/bin/lazygit")), "lazygit");
+        assert_eq!(label(&words("code {dir}")), "VS Code");
+        assert_eq!(label(&words("open -a WebStorm {dir}")), "WebStorm");
+        assert_eq!(
+            label(&words(
+                "open -a '/Applications/Visual Studio Code.app' {dir}"
+            )),
+            "Visual Studio Code"
+        );
+        assert_eq!(label(&words("open {dir}")), "open");
+    }
 
     fn resolved(
         config: &Tools,
