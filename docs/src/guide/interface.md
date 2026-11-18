@@ -622,15 +622,26 @@ and the bottom line say **EDIT** and whose keys these are now:
 │                                                                        │
 │ ❯ commit and push                                                      │
 ╰────────────────────────────────────────────────────────────────────────╯
-  EDIT   your keys go to invoicing   ctrl-q back to volee
+ INSERT  → invoicing    ctrl-space q back to volee
 ```
 
 Every key goes to the agent, `Esc`, `q` and `Ctrl+C` included, and so does
 what you paste, in one piece (as a bracketed paste when the agent turned it
-on). `Ctrl+Q` gives the keys back to volee: the screen stays, live, `i`
-types again, and `z` or `esc` comes back to the list. `Ctrl+Q` never
-reaches the agent; to use another key, set `leave` in
-`[tui.keys.attached]` ([Keys](#keys)).
+on), but one: `Ctrl+Space`, the menu key. It opens a small window of what
+volee can do from inside the agent, as tmux's prefix does:
+
+| After `Ctrl+Space` | Does |
+| --- | --- |
+| `q` | gives the keys back to volee: the screen stays, live, `i` types again, and `z` or `esc` comes back to the list |
+| `d` | leaves edit mode and shows the agent's changes |
+| `n`, `p` | opens the next or the previous agent of the list, in edit mode |
+| `Ctrl+Space` | sends `Ctrl+Space` itself to the agent |
+| `Esc`, any other key | closes the menu; the key reaches no one |
+
+The menu key never reaches the agent unless you press it twice. Each key
+of the menu is an action of `[tui.keys.attached]` ([Keys](#keys)):
+`leave` takes a menu key then a letter (`ctrl-space q`), or Control and a
+letter for a single key that leaves at once (`ctrl-space` then `q`, as before 0.19).
 
 The mouse goes to the agent too, when its program asked for it (Claude Code
 does): clicks, drags and the wheel land on the agent's own cells. For a
@@ -650,7 +661,7 @@ encoding), and `Ctrl+Z`, which suspends Claude Code, is followed by its
 resumption: in a volee host there is no shell to bring it back.
 
 `volee attach <agent>`, from a shell, takes an agent over in the whole
-terminal instead; `Ctrl+Q` comes back there too. Taking an agent over in
+terminal instead; `Ctrl+Space` then `q` comes back there too. Taking an agent over in
 one place ends edit mode in another: volee says so and watches the agent
 again.
 
@@ -669,7 +680,7 @@ the door it already has
 | A terminal of its own, for another harness | says so, on the bottom line |
 
 Nothing is stopped, restarted or adopted for it: it is the same session, in
-the same process, with its own tools and settings. `Ctrl+Q` closes the
+the same process, with its own tools and settings. `Ctrl+Space` then `q` closes the
 terminal volee opened and comes back to the list, and the bottom line says
 that the agent keeps running. While it is open, the session takes the size
 of volee's panel; a tuios pane goes back to its own size when you leave.
@@ -763,7 +774,7 @@ time it looks for sessions, and the Detail panel says where it runs
 is the pane's screen, and `enter` opens the pane inside volee: the daemon
 runs `tuios pane-view` on it, and what you type goes to the pane. While no
 tuios window shows the pane's session, the pane takes the size of volee's
-panel, and goes back to its own when you leave with `Ctrl+Q`. No pane is
+panel, and goes back to its own when you leave with `Ctrl+Space` then `q`. No pane is
 opened, closed or moved, and the session in it is none the wiser.
 
 The session shows in volee ten seconds after it starts, like any session
@@ -929,7 +940,7 @@ popups and the hints.
 | `N` | the previous agent that matches the filter, round the list | `previous-match` |
 | `m` | write a message to the selected agent | `message` |
 | `d`, `space g d` | show the selected agent's changes | `diff` |
-| `enter`, `i`, `a`, `I`, `A` | open the selected agent in insert mode: its own terminal, full size inside volee, takes your keys; the leave key (ctrl-q) comes back and the agent keeps running | `take-over` |
+| `enter`, `i`, `a`, `I`, `A` | open the selected agent in insert mode: its own terminal, full size inside volee, takes your keys; the leave key (ctrl-space then q) comes back and the agent keeps running | `take-over` |
 | `z`, `space w m` | show the selected agent's screen full size, to read it | `full-screen` |
 | `space n` | your messages, questions waiting for you first | `messages` |
 | `o`, `space o` | open the selected agent's worktree in your editor, diff viewer or git tool | `open-with` |
@@ -1062,7 +1073,7 @@ popups and the hints.
 | `gg`, `home` | the top of the screen | `first` |
 | `G`, `end` | the bottom, the newest lines | `last` |
 | `r` | refresh the screen | `refresh` |
-| `enter`, `i`, `a` | open the agent: your keys go to it; the leave key (ctrl-q) comes back | `take-over` |
+| `enter`, `i`, `a` | open the agent: your keys go to it; the leave key (ctrl-space then q) comes back | `take-over` |
 | `z`, `esc`, `q` | come back to the interface | `back` |
 | `ctrl-c` | quit volee | `quit` |
 
@@ -1215,7 +1226,7 @@ popups and the hints.
 | `gg`, `home` | the first screen | `first` |
 | `G`, `end` | the last screen | `last` |
 | `z` | the selected screen alone, full size; back comes back to the wall | `full-screen` |
-| `enter`, `i`, `a` | open the selected agent: your keys go to it; the leave key (ctrl-q) comes back to the wall | `take-over` |
+| `enter`, `i`, `a` | open the selected agent: your keys go to it; the leave key (ctrl-space then q) comes back to the wall | `take-over` |
 | `q`, `esc` | leave the wall | `back` |
 | `ctrl-c` | quit volee; in `volee host wall`, leave the wall | `quit` |
 
@@ -1223,5 +1234,9 @@ popups and the hints.
 
 | Keys | What it does | Action |
 | --- | --- | --- |
-| `ctrl-q` | leave edit mode, or an agent taken over from a shell, and come back; Control and a letter only | `leave` |
+| `ctrl-space q` | leave edit mode, or an agent taken over from a shell, and come back; the agent keeps running | `leave` |
+| `ctrl-space d` | leave edit mode and show the agent's changes | `diff` |
+| `ctrl-space n` | open the next agent of the list in edit mode | `next-agent` |
+| `ctrl-space p` | open the previous agent of the list in edit mode | `previous-agent` |
+| `ctrl-space ctrl-space` | send the menu key itself to the agent | `send-prefix` |
 <!-- keys:end -->

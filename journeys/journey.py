@@ -611,9 +611,14 @@ class Journey:
             pass
 
     def keys(self, keys, pause=0.4):
-        """Presses keys, named as `tuios send-keys` names them: `Enter`, `ctrl+q`, `z`."""
+        """Presses keys, named as `tuios send-keys` names them: `Enter`, `ctrl+c`, `z`."""
         self.tuios("send-keys", "-s", self.session, "-w", self.window, keys)
         time.sleep(pause)
+
+    def leave(self, pause=1.5):
+        """Leaves edit mode as a person does: the menu key, Control and Space,
+        then q. The agent keeps running."""
+        self.keys("ctrl+Space q", pause)
 
     def quit(self, pause=1.0):
         """Quits the interface as LazyVim quits: the leader, then `q q`. A `q` alone

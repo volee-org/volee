@@ -1,4 +1,5 @@
-//! Take an agent over in this terminal; Ctrl+Q comes back (ADR 0021).
+//! Take an agent over in this terminal; the leave keys, Ctrl+Space then q by
+//! default, bring the terminal back (ADR 0021).
 
 use std::io::{self, Write};
 use std::os::fd::AsFd;
@@ -11,7 +12,7 @@ use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::termios::{OptionalActions, Termios, tcgetattr, tcgetwinsize, tcsetattr};
 
 use crate::client::{Connection, HostSender, Update};
-use crate::keys;
+use crate::keys::{self, Leave};
 use crate::proto::{Event, Exit, Role, Size};
 
 /// Saves the person's screen and starts from a blank one.
@@ -30,7 +31,7 @@ const LEAVE: &[u8] = b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x
 /// How a take over ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AttachEnd {
-    /// The person pressed Ctrl+Q.
+    /// The person pressed the leave keys (Ctrl+Space then q by default).
     Detached,
     /// The program ended.
     Exited(Exit),
@@ -41,15 +42,20 @@ pub enum AttachEnd {
 }
 
 /// Connects this terminal to the host at `socket` as its input owner, until
-/// the person presses Ctrl+Q or the program ends. stdin and stdout must be
-/// the person's terminal.
+/// the person presses the leave keys (Ctrl+Space then q) or the program
+/// ends. stdin and stdout must be the person's terminal.
 pub fn attach(socket: &Path, client: &str) -> io::Result<AttachEnd> {
-    attach_leaving(socket, client, keys::DEFAULT_LEAVE)
+    attach_with(socket, client, Leave::default())
 }
 
-/// Like [`attach`], leaving with Control and `leave` (a letter, see
-/// [`keys::valid_leave`]) instead of Ctrl+Q.
+/// Like [`attach`], leaving with the single key Control and `leave` (a
+/// letter, see [`keys::valid_leave`]) instead of the menu.
 pub fn attach_leaving(socket: &Path, client: &str, leave: char) -> io::Result<AttachEnd> {
+    attach_with(socket, client, Leave::Key(leave))
+}
+
+/// Like [`attach`], leaving with the keys `leave` (see [`Leave`]).
+pub fn attach_with(socket: &Path, client: &str, leave: Leave) -> io::Result<AttachEnd> {
     let size = terminal_size().unwrap_or(Size { cols: 80, rows: 24 });
     // Raw mode first: connecting takes the input from whoever has it, which
     // must not happen when this is not a terminal.
@@ -110,7 +116,7 @@ fn relay(
     }
 }
 
-/// Reads the person's keys and sends them, without Ctrl+Q, and the
+/// Reads the person's keys and sends them, without the leave keys, and the
 /// terminal's size when it changes. Polls so that it stops reading as soon
 /// as the take over ends: a thread blocked on stdin would steal the next key
 /// from whatever runs after.
@@ -119,7 +125,7 @@ fn forward_keys(
     stop: &AtomicBool,
     detached: &AtomicBool,
     mut size: Size,
-    leave: char,
+    leave: Leave,
 ) {
     let stdin = io::stdin();
     let mut buf = [0u8; 4096];

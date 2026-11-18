@@ -135,9 +135,10 @@ base of its base branch, and lists the files it created; a very long diff is
 cut, and the rest is in the worktree.
 
 `volee attach` hands this terminal to the agent, where it runs. For an
-agent in a volee host, `Ctrl+Q` comes back; the agent keeps running after
-you leave. `Ctrl+Q` never reaches the agent, whatever keyboard protocol the
-agent turned on. While you type, your terminal's size is the agent's size,
+agent in a volee host, `Ctrl+Space` then `q` comes back; the agent keeps
+running after you leave. `Ctrl+Space` never reaches the agent, whatever
+keyboard protocol the agent turned on, unless you press it twice; after it,
+any key but `q` is dropped. While you type, your terminal's size is the agent's size,
 and it stays when you leave; nothing else resizes an agent. Taking the same
 agent over from a second terminal moves the input there, and the first
 terminal returns to its shell.
@@ -246,7 +247,7 @@ A lead is the agent you talk to. It launches agents and missions for you,
 hears their reports, and never codes
 ([ADR 0033](../adr/0033-a-lead-makes-others-work.md)). `volee lead` starts
 one in the current directory, in a volee host, and opens it in your
-terminal at once; `Ctrl+Q` gives the terminal back and the lead keeps
+terminal at once; `Ctrl+Space` then `q` gives the terminal back and the lead keeps
 running. Without a terminal, it says how to open it. `enter` on its row in
 the interface, or `volee attach <name>`, opens it again. It is named
 `lead-<directory>` unless `--name` says otherwise, and uses the configured
@@ -276,7 +277,7 @@ volee run --name invoices -- gemini     # with a name of your choice
 `volee run [--name <name>] -- <command>` starts the command in a volee
 host, in the current directory and with this terminal's environment, makes
 it an agent of the list, and puts this terminal on it: you use the program
-as if you had typed the command alone. `ctrl-q` (the leave key) gives the
+as if you had typed the command alone. `ctrl-space` then `q` (the leave keys) gives the
 terminal back, and the program keeps running under volee: `volee ls` and
 the interface list it, `volee attach <name>` and `enter` open it,
 `volee logs <name>` prints its screen and `volee stop <name>` ends it. The
@@ -534,7 +535,7 @@ volee host spawn -- htop                     # start a program in a new host; pr
 volee host spawn --cwd ~/code/api --name api-tests -- cargo test
 volee host ls                                # hosts, running or ended; --json for scripts
 volee host peek <id>                         # its screen, as plain text
-volee host attach <id>                       # take it over; Ctrl+Q comes back
+volee host attach <id>                       # take it over; Ctrl+Space then q comes back
 volee host stop <id>                         # end its program
 volee host wall                              # every running host as a wall of live screens
 ```

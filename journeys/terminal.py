@@ -135,7 +135,7 @@ def main():
                   if session.get("sessionId") in (session_id, moved["sessionId"])
                   or (session.get("name") or "").startswith(name)]
         j.check("Claude Code lists the conversation once", copies == ["background"], str(copies))
-        j.keys("ctrl+q", 1.5)
+        j.leave(1.5)
         j.check("the leave key comes back to the list and says it keeps running",
                 j.sees("Left " + title + ": it keeps running", "Agents", timeout=10))
         # What that terminal shows is the person's own list of agents: not printed.
@@ -147,7 +147,7 @@ def main():
             j.keys("Enter", 2.0)
             j.check("Enter now opens it at once",
                     j.sees(j.editing(title), timeout=20) and waits not in j.screen())
-            j.keys("ctrl+q", 1.5)
+            j.leave(1.5)
             j.sees("Left " + title, timeout=10)
         time.sleep(SETTLE + 6)
         missing, orphans, twice = j.compare(SETTLE)

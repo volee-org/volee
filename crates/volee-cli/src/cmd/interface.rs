@@ -146,9 +146,18 @@ pub(crate) fn keymap_or_default() -> Keymap {
     })
 }
 
-/// How the leave key reads in a sentence: `Ctrl+Q`.
+/// How the leave keys read in a sentence: `Ctrl+Space then q`, or `Ctrl+Q`
+/// for a single Control key.
 pub(crate) fn leave_key_name(keymap: &Keymap) -> String {
-    format!("Ctrl+{}", keymap.leave_letter().to_ascii_uppercase())
+    let control = |key: volee_tui::KeyCombo| match key.ctrl_char() {
+        Some(' ') => "Ctrl+Space".to_owned(),
+        Some(letter) => format!("Ctrl+{}", letter.to_ascii_uppercase()),
+        None => key.to_string(),
+    };
+    match keymap.leave_keys() {
+        volee_tui::LeaveKeys::Key(key) => control(key),
+        volee_tui::LeaveKeys::Menu { prefix, then } => format!("{} then {then}", control(prefix)),
+    }
 }
 
 /// The `[tui.keys]` table as keymap overrides: `action = "key"` or a list

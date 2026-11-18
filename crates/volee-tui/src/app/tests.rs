@@ -514,12 +514,9 @@ fn enter_i_and_a_open_the_selected_agent_where_it_runs() {
     );
     assert!(crate::edit::editing(&model));
 
-    // The leave key closes the view and comes back to the list; the agent
-    // keeps running where it runs.
-    let effects = update(
-        &mut model,
-        Msg::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)),
-    );
+    // The menu key then q closes the view and comes back to the list; the
+    // agent keeps running where it runs.
+    let effects = crate::test_support::leave_edit(&mut model);
     assert_eq!(effects, [Effect::LiveClose { link: 1 }]);
     assert_eq!(model.overlay, None);
     assert_eq!(model.door, None);

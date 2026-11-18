@@ -169,7 +169,7 @@ def main():
         j.check("it is the same session in the same process",
                 now.get("sessionId") == before.get("sessionId") and now.get("pid") == before.get("pid"),
                 "{} pid {}".format(now.get("sessionId"), now.get("pid")))
-        j.keys("ctrl+q", 1.5)
+        j.leave(1.5)
         j.check("the leave key comes back to the list and says it keeps running",
                 j.sees("Left " + name + ": it keeps running", "Agents", timeout=10))
         j.check("the pane goes on as before, with what was said in it",

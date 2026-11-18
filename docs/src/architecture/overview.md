@@ -185,7 +185,7 @@ requests; **analysis** missions deliver reports.
 | `volee-git` | Git queries behind a trait (CLI implementation). | core |
 | `volee-harness` | Harness profiles ([ADR 0022](../adr/0022-harness-profiles.md)). Claude Code: launch and resume in a host, discover, hooks, logs of background sessions, stop, wake. OpenCode: launch and resume in a host, find its processes. | core |
 | `volee-term` | Terminal emulation with libghostty-vt ([ADR 0020](../adr/0020-libghostty-vt-emulates-terminals.md)): a screen fed with bytes, rendered back as VT sequences, answering terminal queries, drawn into a ratatui buffer. | none |
-| `volee-host` | The volee host ([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md)): the process that holds an agent's terminal, its socket protocol, its record, watchers, and taking over with Ctrl+Q. | term |
+| `volee-host` | The volee host ([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md)): the process that holds an agent's terminal, its socket protocol, its record, watchers, and taking over with Ctrl+Space then q. | term |
 | `volee-mux` | Location adapters ([ADR 0015](../adr/0015-tuios-location-adapter.md)): the multiplexer panes agents run in. tuios and tmux: find, capture, focus. | core, harness |
 | `volee-daemon` | The daemon: reconcilers, message router, mission supervisor, launches and their setup commands, views on sessions started elsewhere, adoption, resumes after a reboot. | core, config, proto, store, git, harness, host, mux |
 | `volee-mcp` | MCP server exposed to agents. | core, proto |

@@ -103,3 +103,27 @@ them ([ADR 0023](0023-every-agent-on-the-machine.md)).
 - **The newest client sets the size, as `claude attach` does.** Measured: a
   watcher that connects resizes everybody, and the size sticks after it
   leaves. Only the person typing should decide it.
+
+## A menu key (2026-11-18)
+
+The person did not want a single key that leaves at once: he asked for a
+key that opens a menu, as tmux's prefix does, and chose Control and Space.
+Control and B, tmux's, was set aside: tmux and tuios take it before volee
+sees it, and Claude Code uses it to send a command to the background.
+Control and Space is free in Claude Code, tmux, tuios, zellij and the
+shells; macOS uses it to switch keyboard layouts only where several are
+installed.
+
+The leave keys are now `ctrl-space q` by default, which reverses the
+alternative set aside above (a prefix key, like tmux). In the interface,
+Control and Space opens a small window over the agent's screen: `q` comes
+back, `d` shows the agent's changes, `n` and `p` open the next or the
+previous agent, Control and Space again is sent to the agent, and any other
+key closes the menu and reaches no one. `volee attach`, `volee run` and
+`volee host wall` read the same keys in the raw input: the filter of the
+host's client recognizes Control and Space in every encoding (`0x00`, the
+kitty protocol's `CSI 32 ; 5 u`, xterm's `CSI 27 ; 5 ; 32 ~`), arms a menu
+that waits across reads, detaches on q, sends a second Control and Space as
+it came and drops any other key. A single Control key that leaves at once
+(`leave = "ctrl-q"`) is still accepted.
+

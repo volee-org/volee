@@ -265,7 +265,10 @@ fn render_editing(model: &Model, area: Rect, buf: &mut Buffer) {
         .as_ref()
         .map(|live| model.name_of(live.agent))
         .unwrap_or_default();
-    let leave = model.keymap.leave_key().short();
+    let leave = match model.keymap.leave_keys() {
+        crate::keymap::LeaveKeys::Key(key) => key.short(),
+        crate::keymap::LeaveKeys::Menu { prefix, then } => format!("{} {then}", prefix.short()),
+    };
     let accent = model
         .live
         .as_ref()

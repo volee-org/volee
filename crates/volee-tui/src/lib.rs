@@ -66,7 +66,7 @@ use std::sync::Arc;
 pub use clock::{Clock, ManualClock, SystemClock};
 pub use daemon::DaemonSource;
 pub use demo::DemoSource;
-pub use keymap::{Keymap, KeymapError};
+pub use keymap::{KeyCombo, Keymap, KeymapError, LeaveKeys};
 pub use preview::screen_text;
 pub use source::{
     Changes, Door, MissionRequest, NewMission, Outgoing, PaneFocus, Reading, Source, SourceError,

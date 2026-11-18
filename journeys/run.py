@@ -147,7 +147,7 @@ def main():
                 same, seen)
 
         # ---- the person leaves; the program keeps running ----------------------------
-        keys_in("shell", "ctrl+q")
+        keys_in("shell", "ctrl+Space q")
         j.check("the leave key gives the terminal back and says the program keeps running",
                 j.wait(lambda: "it keeps running" in screen_of("shell")
                        and BACK in screen_of("shell"), 15, 1), screen_of("shell")[-200:])
@@ -171,7 +171,7 @@ def main():
                 str(len(LEFT) - 1))
         j.check("and so do the keys that erase it",
                 j.wait(lambda: LEFT not in logs(name), 15, 1), logs(name)[-200:])
-        j.keys("ctrl+q", 1.5)
+        j.leave(1.5)
         j.check("the leave key gives the keys back; its screen stays, live",
                 j.wait(lambda: j.editing() not in j.screen()
                        and "Screen · " + name in j.screen(), 10, 1))

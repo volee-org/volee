@@ -1,6 +1,6 @@
 //! The full-screen view of an agent in a volee host, live, and its edit
 //! mode (ADR 0026): your keys go to the agent inside volee's frame, the
-//! leave key (Ctrl+Q) gives them back to volee.
+//! menu key (Ctrl+Space) then q gives them back to volee.
 //!
 //! An agent that runs in no volee host is opened the same way, through a
 //! view: a host the source starts on the session's own door (ADR 0027).
@@ -14,7 +14,7 @@ use volee_core::AgentId;
 use volee_host::{Size, Update, Welcome};
 
 use crate::app::{Effect, Model, Msg, Overlay};
-use crate::keymap::KeyCombo;
+use crate::keymap::{Action, Context, KeyCombo, Resolved};
 use crate::live::{Live, LiveInput, Outcome, Phase, TYPED_AHEAD_MAX, TypedAhead, key_press};
 use crate::text;
 
@@ -214,19 +214,77 @@ pub(crate) fn close(model: &mut Model, effects: &mut Vec<Effect>) {
     model.door = None;
 }
 
-/// A key in edit mode: the leave key comes back, every other key goes to
-/// the agent.
+/// A key in edit mode: the menu key (Control and Space) opens the menu, a
+/// key of the menu does what it says, every other key goes to the agent.
 ///
 /// What becomes of each key is traced, never the key itself: what a person
 /// types into an agent is theirs. Only whether Control was held is kept,
 /// which tells a shortcut from text.
 pub(crate) fn on_key(model: &mut Model, key: &KeyEvent, effects: &mut Vec<Effect>) {
     let control = key.modifiers.contains(KeyModifiers::CONTROL);
-    if KeyCombo::from_event(key) == model.keymap.leave_key() {
-        tracing::debug!("edit mode: the leave key");
-        leave(model, effects);
-        return;
+    let combo = KeyCombo::from_event(key);
+    match model
+        .keymap
+        .resolve(&[Context::Attached], &model.pending_keys, combo)
+    {
+        Resolved::Action(_, action) => {
+            let prefix = model.edit_prefix.take();
+            model.pending_keys.clear();
+            tracing::debug!(?action, "edit mode: a key of the menu");
+            perform(model, action, prefix, effects);
+        }
+        Resolved::Prefix => {
+            if model.pending_keys.is_empty() {
+                model.edit_prefix = Some(*key);
+            }
+            model.pending_keys.push(combo);
+            tracing::debug!("edit mode: the menu key");
+        }
+        // A key the menu does not know closes it and is dropped, as tmux
+        // drops a key its prefix has no use for.
+        Resolved::Unbound if !model.pending_keys.is_empty() => {
+            model.pending_keys.clear();
+            model.edit_prefix = None;
+            tracing::debug!(control, "edit mode: a key the menu does not know, dropped");
+        }
+        Resolved::Unbound => forward(model, key, effects),
     }
+}
+
+/// What a key of the edit-mode menu does; `prefix` is the menu key as it
+/// was pressed.
+fn perform(model: &mut Model, action: Action, prefix: Option<KeyEvent>, effects: &mut Vec<Effect>) {
+    let agent = model.live.as_ref().map(|live| live.agent);
+    match action {
+        Action::Leave => leave(model, effects),
+        Action::SendPrefix => {
+            if let Some(key) = prefix {
+                forward(model, &key, effects);
+            }
+        }
+        Action::Diff => {
+            if let Some(agent) = agent {
+                leave(model, effects);
+                crate::app::open_diff(model, agent, false, effects);
+            }
+        }
+        Action::NextAgent | Action::PreviousAgent => {
+            let next = agent.and_then(|agent| {
+                crate::app::rail_neighbour(model, agent, action == Action::NextAgent)
+            });
+            if let Some(next) = next {
+                leave(model, effects);
+                model.select(next, effects);
+                crate::app::open_agent(model, next, effects);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Sends a key to the agent, or keeps it until the agent's host answers.
+fn forward(model: &mut Model, key: &KeyEvent, effects: &mut Vec<Effect>) {
+    let control = key.modifiers.contains(KeyModifiers::CONTROL);
     let Some(live) = &mut model.live else {
         tracing::debug!(control, "edit mode: a key with no live screen, dropped");
         return;
@@ -702,6 +760,39 @@ mod tests {
     }
 
     #[test]
+    fn the_menu_key_twice_goes_to_the_agent() {
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "a");
+        answer(&mut model, 1, true);
+        assert!(
+            sent(&ctrl(&mut model, ' ')).is_empty(),
+            "the menu key opens the menu"
+        );
+        assert_eq!(model.pending_keys.len(), 1, "the menu waits");
+        assert_eq!(sent(&ctrl(&mut model, ' ')), [press_of(" ", true)]);
+        assert_eq!(model.pending_keys, []);
+        assert!(editing(&model));
+    }
+
+    #[test]
+    fn a_key_the_menu_does_not_know_closes_it_and_reaches_no_one() {
+        let (mut model, _) = hosted_model(120, 40);
+        press(&mut model, "a");
+        answer(&mut model, 1, true);
+        ctrl(&mut model, ' ');
+        assert!(
+            sent(&press(&mut model, "x")).is_empty(),
+            "dropped, as tmux drops it"
+        );
+        assert!(model.pending_keys.is_empty(), "the menu closed");
+        assert_eq!(sent(&press(&mut model, "y")), [press_of("y", false)]);
+        // Escape closes the menu too, and stays volee's.
+        ctrl(&mut model, ' ');
+        assert_eq!(sent(&key(&mut model, KeyCode::Esc)), []);
+        assert!(editing(&model));
+    }
+
+    #[test]
     fn every_key_goes_to_the_agent_but_the_leave_key() {
         let (mut model, _) = hosted_model(120, 40);
         press(&mut model, "a");
@@ -715,7 +806,7 @@ mod tests {
         assert_eq!(sent(&ctrl(&mut model, 'c')), [press_of("c", true)]);
         assert!(editing(&model));
 
-        let effects = ctrl(&mut model, 'q');
+        let effects = crate::test_support::leave_edit(&mut model);
         assert_eq!(
             effects,
             [
@@ -943,7 +1034,7 @@ mod tests {
             (vec![1], vec![(2, true)])
         );
         answer(&mut model, 2, true);
-        let effects = ctrl(&mut model, 'q');
+        let effects = crate::test_support::leave_edit(&mut model);
         assert_eq!(
             (closes(&effects), opens(&effects)),
             (vec![2], vec![(3, false)])
@@ -1149,7 +1240,7 @@ mod tests {
         press(&mut model, "i");
         press(&mut model, "x");
         // The leave key before the host answered: the keys stay with volee.
-        ctrl(&mut model, 'q');
+        crate::test_support::leave_edit(&mut model);
         let effects = update(
             &mut model,
             Msg::LiveOpened {

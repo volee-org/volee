@@ -33,7 +33,7 @@ an agent, named after the pane's directory, with the harness tuios names
 From there it is an agent in a pane like any other
 ([panes](interface.md#agents-in-tuios-panes)): its preview and its tile on
 the wall are the pane's screen, row for row, and `enter` opens the pane
-inside volee, where you type into it; `ctrl-q` comes back and it goes on as
+inside volee, where you type into it; `ctrl-space` then `q` comes back and it goes on as
 before. Nothing is stopped, restarted or configured for it.
 
 - **State.** It shows as idle while it runs: volee reads no state for it.
@@ -59,7 +59,7 @@ volee run --name invoices -- gemini     # with a name of your choice
 `volee run` starts the program in a volee host, in the directory you are
 in and with your terminal's environment, exactly as if you had typed the
 command alone. Your terminal is on it at once: you use the program as
-usual. `ctrl-q` gives the terminal back and the program keeps running; it
+usual. `ctrl-space` then `q` gives the terminal back and the program keeps running; it
 is now an agent of the list, named after its directory unless you named it
 ([ADR 0029](../adr/0029-volee-run.md)).
 
@@ -128,7 +128,7 @@ stop it with `volee stop`, like any agent in a host.
     ([panes](interface.md#agents-in-tuios-panes)): the list says which
     pane, its preview and its tile on the wall are the pane's screen, and
     in a tuios pane `enter` opens it inside volee, where you type into it;
-    `ctrl-q` comes back and it goes on as before. Nothing is stopped or
+    `ctrl-space` then `q` comes back and it goes on as before. Nothing is stopped or
     restarted for it.
   - **In a plain terminal**, volee has no door on it and says so: switch to
     that terminal. To drive it from volee, quit it, then adopt it (`Space a a`, or

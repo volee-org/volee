@@ -92,10 +92,13 @@ A client says in its hello what it wants:
 input owner ([ADR 0021](../adr/0021-take-over-watch-and-the-wall-of-screens.md)).
 The client puts the person's terminal in raw mode, switches it to the
 alternate screen, clears it and writes the snapshot. It then forwards the
-person's keys without Ctrl+Q, which it recognizes in every encoding: the
-plain byte `0x11`, the kitty keyboard protocol (`CSI 113 ; 5 u`, with any
-event type) and xterm's `modifyOtherKeys` (`CSI 27 ; 5 ; 113 ~`). Ctrl+Q
-ends the take over and never reaches the agent. On the way out, the client
+person's keys but the leave keys, Ctrl+Space then q unless configured
+otherwise, which it recognizes in every encoding: the plain byte (`0x00`
+for Ctrl+Space, `0x11` for a single Ctrl+Q), the kitty keyboard protocol
+(`CSI 32 ; 5 u`, with any event type) and xterm's `modifyOtherKeys`
+(`CSI 27 ; 5 ; 32 ~`). Ctrl+Space arms a menu that waits across reads: q
+ends the take over, Ctrl+Space again is sent to the agent as it came, and
+any other key is dropped. Neither key reaches the agent. On the way out, the client
 turns off what the agent may have left on (mouse reporting, focus events,
 bracketed paste, synchronized output, application cursor keys and keypad,
 the scrolling region, the cursor style, `modifyOtherKeys`, kitty keyboard

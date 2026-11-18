@@ -158,6 +158,8 @@ fn category(action: Action) -> usize {
         | A::NewAgent
         | A::NewMission
         | A::NewLead
+        | A::NextAgent
+        | A::PreviousAgent
         | A::FocusSubtree
         | A::Reply
         | A::Summarize

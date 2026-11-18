@@ -130,3 +130,9 @@ watches again.
 - **Not forwarding Ctrl+Z.** Simpler, but a key that silently does nothing
   surprises more than one that does what the agent says, and `volee
   attach` forwards it anyway.
+
+## The menu key (2026-11-18)
+
+Edit mode no longer gives the keys back on Ctrl+Q: Control and Space opens
+a menu, whose `q` comes back to volee ([ADR 0021](0021-take-over-watch-and-the-wall-of-screens.md#a-menu-key-2026-11-18)).
+

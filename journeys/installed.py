@@ -45,7 +45,7 @@ def launched_agent(j, name):
     j.keys("Enter")
     j.check("after Ctrl+Z the agent still answers", j.said("sky"),
             "it answered: " + j.last_answer())
-    j.keys("ctrl+q", 1.0)
+    j.leave(1.0)
     j.check("the leave key comes back, the screen stays",
             j.sees("Screen · " + name + " · live", timeout=10))
     j.keys("z", 1.0)
@@ -97,7 +97,7 @@ def session_by_hand(j, name):
     j.check("it is the same session in the same process",
             now.get("sessionId") == session_id and now.get("pid") == pid,
             "{} pid {}".format(now.get("sessionId"), now.get("pid")))
-    j.keys("ctrl+q", 1.5)
+    j.leave(1.5)
     j.check("the leave key comes back to the list and says it keeps running",
             j.sees("Left " + name + ": it keeps running", timeout=10))
     j.claude("stop", handle)
@@ -155,7 +155,7 @@ def session_in_a_terminal(j, name):
     j.check("it is the conversation that was in the terminal: it remembers the number",
             j.sees("5128", timeout=30, every=1), "it answered: " + j.last_answer())
     j.show("a session that left its terminal, opened on the installed volee")
-    j.keys("ctrl+q", 1.5)
+    j.leave(1.5)
     j.check("the leave key comes back to the list and says it keeps running",
             j.sees("Left " + title + ": it keeps running", timeout=10))
     j.claude("stop", moved["id"])
