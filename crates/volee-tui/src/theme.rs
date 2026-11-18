@@ -189,17 +189,22 @@ style_roles! {
     /// The section of the status line after the mode: the selected agent, or
     /// the window the keys are in.
     StatusSection => "statusline.section",
-    /// The ground of the leader's panel, and what its keys do: the panel
-    /// that lists what can follow the leader, in the manner of tuios.
-    KeysPanel => "keys.panel",
-    /// The band at the top of the leader's panel, and the words in it.
-    KeysHeader => "keys.header",
-    /// The title of the leader's panel, a block at the left of its band.
-    KeysTitle => "keys.title",
-    /// The heading of each column of the leader's panel: a group's name.
-    KeysHeading => "keys.heading",
-    /// The keys in the leader's panel.
-    KeysKey => "keys.key",
+    /// The ground of a modal window (the keys, the command line, the
+    /// changes, the messages, the dialogs), and its text.
+    Modal => "modal",
+    /// The frame of a modal window.
+    ModalBorder => "modal.border",
+    /// The title of a modal window, in its frame, and the words in the
+    /// middle of the frame's bottom.
+    ModalTitle => "modal.title",
+    /// The name of a section of a modal window, in capitals.
+    ModalSection => "modal.section",
+    /// A key in a modal window, drawn as a key of a keyboard.
+    ModalKey => "modal.key",
+    /// What a key or an entry does, in a modal window.
+    ModalText => "modal.text",
+    /// The chosen entry of a list in a modal window.
+    ModalSelected => "modal.selected",
     /// Short notices at the bottom of the screen.
     Notice => "notice",
     /// Notices about something that failed.

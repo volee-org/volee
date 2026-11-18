@@ -4,9 +4,8 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
-use ratatui::widgets::{Clear, Widget};
 
-use super::{panel, put_spans};
+use super::{modal, put_spans};
 use crate::app::{DiffView, Model};
 use crate::theme::{StyleRole, Theme};
 
@@ -60,8 +59,6 @@ pub(crate) fn render(model: &Model, diff: &DiffView, area: Rect, buf: &mut Buffe
     if window.width < 10 || window.height < 3 {
         return;
     }
-    Clear.render(window, buf);
-    buf.set_style(window, theme.style(StyleRole::Background));
     let dim = theme.style(StyleRole::TextDim);
     let mut title = vec![
         Span::raw("Changes"),
@@ -78,7 +75,7 @@ pub(crate) fn render(model: &Model, diff: &DiffView, area: Rect, buf: &mut Buffe
     if diff.loading {
         title.push(Span::styled(" · loading", dim));
     }
-    let inner = panel(buf, window, title, true, theme);
+    let inner = modal(buf, window, title, "esc to close", theme);
     let x = inner.x + 1;
     let room = inner.width.saturating_sub(2);
     let message = match (&diff.changes, &diff.error) {

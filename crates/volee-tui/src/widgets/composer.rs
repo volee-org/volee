@@ -14,11 +14,10 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::Span;
-use ratatui::widgets::{Clear, Widget};
 use volee_core::Agent;
 use volee_core::message::MessageKind;
 
-use super::{panel, put_spans, truncated};
+use super::{modal, put_spans, truncated};
 use crate::app::{Draft, MESSAGE_KINDS, Model};
 use crate::text;
 use crate::theme::StyleRole;
@@ -56,13 +55,11 @@ pub(crate) fn render(model: &Model, draft: &Draft, area: Rect, buf: &mut Buffer)
         width,
         height,
     );
-    Clear.render(window, buf);
-    buf.set_style(window, theme.style(StyleRole::Background));
     let mut title = vec![Span::raw(format!("Message to {name}"))];
     if draft.sending {
         title.push(Span::styled(" · sending…", theme.style(StyleRole::TextDim)));
     }
-    let inner = panel(buf, window, title, true, theme);
+    let inner = modal(buf, window, title, "esc closes, the draft stays", theme);
     let x = inner.x + 1;
     let mut y = inner.y;
 

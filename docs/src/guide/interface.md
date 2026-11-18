@@ -832,19 +832,25 @@ its windows: right and left widen and narrow the agents' column, up and
 down make the preview taller and shorter (the detail, while the preview is
 hidden). `Space w =` puts every border back where it started.
 
+**Windows over the screen.** Every window that opens over the screen (the
+keys, the command line, the changes, the messages, the dialogs) looks as
+the cockpit's do: the screen behind fades, and the window sits on its own
+ground in a thick frame, its title at the top and how to close it in the
+middle of its bottom.
+
 **The keys of this screen.** `?` opens the keys of the panel you are in
-and of everywhere in the leader's panel: its band reads `KEYS` and the
-panel's name, and its columns sort them into what moves, what acts on an
-agent, what changes the view, and the rest, with nothing to scroll. A
+and of everywhere, in the middle of the screen, sorted into what moves,
+what acts on an agent, what changes the view and the rest, each section's
+name in capitals and each key drawn as a key, with nothing to scroll. A
 terminal too small for it shows them in a small box at the bottom right.
-Press one of them and the panel closes and does it; `?` again lists every
+Press one of them and the window closes and does it; `?` again lists every
 key of every context; `Esc` closes it.
 
 **The leader.** Less frequent actions sit behind the space bar, as in
-LazyVim: press `Space` and a panel at the bottom right shows everything
-that can follow, in the manner of tuios's prefix panel and in its violet:
-about three quarters of the width, a band at the top with `LEADER` in a
-block, one column per group under its name, each key spelled in full. The groups are LazyVim's:
+LazyVim: press `Space` and a window at the bottom right shows everything
+that can follow, in the manner of tuios's prefix panel: about three
+quarters of the width, one column per group under its name, each key
+spelled in full and drawn as a key. The groups are LazyVim's:
 Agents (`a n` a new agent, `a m` a new mission, `a l` a new lead, `a a`
 adopt, `a d` forget), Windows (`w w` the wall, `w m` the selected screen
 full size, `w =` the borders back), UI (`u p` the preview, `u C` the
@@ -857,18 +863,19 @@ sequence. `gg` works the same way: after `g`, the panel shows what can
 follow.
 
 ```text
- LEADER                                                                   esc
-
-  Agents             Windows             UI             Git         Other
-  a n  new agent     w m  full screen    u C  theme…    g d  diff   n  messages
-  a m  new mission   w w  wall           u p  preview               o  open with…
-  a l  new lead      w =  equal panels
+┏ Leader ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                                                                                  ┃
+┃  AGENTS               WINDOWS                UI                OTHER             ┃
+┃   a n   new agent      w m   full screen      u C   theme…      n   messages     ┃
+┃   a m   new mission    w w   wall             u p   preview     o   open with…   ┃
+┃   a l   new lead       w =   equal panels                                        ┃
+┃                                                                                  ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ esc to close ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ```
 
 **The command palette.** `:` opens the command line in the middle of the
-screen, as LazyVim's does, in the leader's design (a violet ground, its
-band reading `COMMAND`, the chosen command in a block), and lists under it
-the commands of the current
+screen, as LazyVim's does, the chosen command on a lavender ground, and
+lists under it the commands of the current
 screen, the ones matching what you type first; `q`, `qa` and their kin
 quit, as in vim:
 each action by its name and what it does, and `theme <name>` for every

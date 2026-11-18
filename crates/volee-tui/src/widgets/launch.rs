@@ -18,9 +18,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
-use ratatui::widgets::{Clear, Widget};
 
-use super::{panel, put_spans};
+use super::{modal, put_spans};
 use crate::app::Model;
 use crate::editor::TextField;
 use crate::launch::{DialogKind, LaunchDialog, Value};
@@ -62,8 +61,6 @@ pub(crate) fn render(model: &Model, dialog: &LaunchDialog, area: Rect, buf: &mut
         width,
         height,
     );
-    Clear.render(window, buf);
-    buf.set_style(window, theme.style(StyleRole::Background));
     let mut title = vec![Span::raw(match dialog.kind {
         DialogKind::Agent => "New agent",
         DialogKind::Mission => "New mission",
@@ -75,7 +72,7 @@ pub(crate) fn render(model: &Model, dialog: &LaunchDialog, area: Rect, buf: &mut
             theme.style(StyleRole::TextDim),
         ));
     }
-    let inner = panel(buf, window, title, true, theme);
+    let inner = modal(buf, window, title, "ctrl-s launches · esc to cancel", theme);
     let x = inner.x + 1;
     let value_x = x + NAMES;
     let mut y = inner.y;

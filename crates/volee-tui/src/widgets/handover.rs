@@ -7,9 +7,8 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
-use ratatui::widgets::{Clear, Widget};
 
-use super::{panel, put_spans};
+use super::{modal, put_spans};
 use crate::app::{Model, Prompt};
 use crate::keymap::{Action, Context};
 use crate::text;
@@ -43,10 +42,8 @@ pub(crate) fn render(model: &Model, area: Rect, buf: &mut Buffer) {
         height,
     );
     let theme = &model.theme;
-    Clear.render(window, buf);
-    buf.set_style(window, theme.style(StyleRole::Background));
     let title = vec![Span::raw(format!("Open {}", agent.name))];
-    let inner = panel(buf, window, title, true, theme);
+    let inner = modal(buf, window, title, "", theme);
 
     let words = theme.style(StyleRole::Text);
     let dim = theme.style(StyleRole::TextDim);

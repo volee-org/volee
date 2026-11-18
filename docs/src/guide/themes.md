@@ -185,11 +185,13 @@ edge = "#3b4261"
 | `mode.command` | The mode at the left of the status line, in command mode: the command line or the filter. |
 | `statusline` | The status line, at the bottom. |
 | `statusline.section` | The section of the status line after the mode: the selected agent, or the window the keys are in. |
-| `keys.panel` | The ground of the leader's panel, and what its keys do: the panel that lists what can follow the leader, in the manner of tuios. |
-| `keys.header` | The band at the top of the leader's panel, and the words in it. |
-| `keys.title` | The title of the leader's panel, a block at the left of its band. |
-| `keys.heading` | The heading of each column of the leader's panel: a group's name. |
-| `keys.key` | The keys in the leader's panel. |
+| `modal` | The ground of a modal window (the keys, the command line, the changes, the messages, the dialogs), and its text. |
+| `modal.border` | The frame of a modal window. |
+| `modal.title` | The title of a modal window, in its frame, and the words in the middle of the frame's bottom. |
+| `modal.section` | The name of a section of a modal window, in capitals. |
+| `modal.key` | A key in a modal window, drawn as a key of a keyboard. |
+| `modal.text` | What a key or an entry does, in a modal window. |
+| `modal.selected` | The chosen entry of a list in a modal window. |
 | `notice` | Short notices at the bottom of the screen. |
 | `notice.error` | Notices about something that failed. |
 | `input` | Text being typed, such as a filter. |

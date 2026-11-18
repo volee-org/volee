@@ -142,38 +142,34 @@ Single letters that do one thing and do not collide with vim (`m` to write,
 `d` for the changes, `z` for a screen full size, `/`, `'`, `1` to `5`, `H`
 and `L`) stay. Every key can still be moved in `[tui.keys]`.
 
-## The leader's panel
+## The leader's panel and the modal windows
 
-Added on 2026-11-17, after 0.18.0.
+Added on 2026-11-17, after 0.18.0, and changed the same day as the person
+reviewed it in a build of the work in progress.
 
-The person compared the popup the leader opened with tuios's prefix panel,
-and asked for the leader to look like tuios. The leader now opens a panel:
-a solid ground with no border, at the bottom right above the status line,
-a title (`leader · esc`), then one column per group under its name
-(Agents, Windows, UI, Git, Search, Quit, in LazyVim's order) with each
-key spelled in full (`a n  new agent`), and the keys that act at once
-under Other. Everything the leader reaches shows at once, as tuios shows
-everything its prefix reaches. After the first key of a group, the panel
-shows that group alone (`leader › agents`). The panel takes rows of
-columns when they do not fit side by side, and a terminal too small for
-it falls back on the box above. `?` keeps its box. Four theme roles colour
-the panel: `keys.panel`, `keys.title`, `keys.heading` and `keys.key`.
+The person first asked for the leader to look like tuios's prefix panel.
+The leader now opens a wide window at the bottom right, above the status
+line: 72% of the width when it holds several columns, as tuios's does, one
+column per group under its name (Agents, Windows, UI, Git, Search, Quit, in
+LazyVim's order), each key spelled in full (`a n  new agent`), the keys
+that act at once under Other, and that group alone after its first key
+(`Leader › agents`). Columns take rows when they do not fit side by side; a
+terminal too small for the window falls back on the box above.
 
-The same morning the person found it too small and too grey next to tuios's.
-Measured on his screen, tuios's panel takes about three quarters of the
-width and draws a violet ground (`#31284d`) under periwinkle keys
-(`#9a8cff`). volee now does the same: a panel of several columns takes 72%
-of the width, its columns spread over it, and the Catppuccin themes carry
-those two colours (`panel` and `periwinkle` in their palettes, at each
-flavor's lightness). He then asked for a different header at the top: the
-panel's first row is now a band of a deeper violet (`panel_head`, between
-the ground and the keys), the sequence's name in a periwinkle block at its
-left (`LEADER`, then `agents` after `Space a`), as the status line puts
-its mode in a block, and `esc` at its right. He asked for the same design
-on `?` and `:`. `?` now opens its keys in that panel, its band reading
-`KEYS` and the focused panel, its columns sorting them into Move, Agent,
-View and Other; the box stays for terminals too small for the panel. The
-command line keeps its place in the middle of the screen, in the panel's
-colours, its band reading `COMMAND`, the chosen command in a periwinkle
-block.
-
+He then set volee's windows beside those of the cockpit (`cockpit ui`) and
+asked for every modal window to look like them, so that a window can be
+told from what is behind it. Every modal window (the leader's, `?`, every
+key, the command line, the changes, the messages, the composer, the launch
+dialogs, the themes, open with, the window that waits for a terminal) now
+goes through one function, `widgets::modal`, which does what the cockpit
+does: everything drawn so far fades toward the modal's ground (colours half
+way, grounds a third of the way, no bold; a colour of the terminal's own
+palette is dimmed by the terminal), then the window on its own ground
+(Catppuccin's mantle) in a thick lavender frame, its title in the frame and
+how to close it in the middle of its bottom. The keys windows draw each
+section's name in capitals in mauve and each key as a key of a keyboard
+(text on surface1), as the cockpit's keyboard help does; `?` shows in the
+middle of the screen, the leader at the bottom right. Seven theme roles
+colour them: `modal`, `modal.border`, `modal.title`, `modal.section`,
+`modal.key`, `modal.text` and `modal.selected`. A violet ground after
+tuios's came and went the same day: the cockpit's windows read better.

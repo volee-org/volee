@@ -15,12 +15,11 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
-use ratatui::widgets::{Clear, Widget};
 use volee_core::message::{Message, MessageKind, Party};
 use volee_core::time::Elapsed;
 use volee_core::{Registry, ThreadId};
 
-use super::{panel, put_spans, truncated};
+use super::{modal, put_spans, truncated};
 use crate::app::Model;
 use crate::inbox::{self, InboxView, Row, SummaryState};
 use crate::text;
@@ -89,8 +88,6 @@ pub(crate) fn render(model: &Model, view: &InboxView, area: Rect, buf: &mut Buff
     if window.width < 40 || window.height < 8 {
         return;
     }
-    Clear.render(window, buf);
-    buf.set_style(window, theme.style(StyleRole::Background));
     let dim = theme.style(StyleRole::TextDim);
     let counts = inbox::counts(registry);
     let mut header = vec![Span::raw("Messages")];
@@ -107,7 +104,7 @@ pub(crate) fn render(model: &Model, view: &InboxView, area: Rect, buf: &mut Buff
     if counts.unread > 0 {
         header.push(Span::styled(format!(" · {} unread", counts.unread), dim));
     }
-    let inner = panel(buf, window, header, true, theme);
+    let inner = modal(buf, window, header, "esc to close", theme);
     let rows = inbox::rows(registry);
     let current = view.current(&rows);
     let list_width = (inner.width * 2 / 5).clamp(28, 56).min(inner.width / 2);
