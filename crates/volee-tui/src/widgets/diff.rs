@@ -5,7 +5,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 
-use super::{modal, put_spans};
+use super::{modal, modal_outer, put_spans};
 use crate::app::{DiffView, Model};
 use crate::theme::{StyleRole, Theme};
 
@@ -102,9 +102,10 @@ pub(crate) fn render(model: &Model, diff: &DiffView, area: Rect, buf: &mut Buffe
         put_spans(buf, x, inner.y + row, &colored(line, theme), room);
     }
     if scroll + visible < lines.len() {
+        let frame = modal_outer(window, buf.area);
         buf.set_string(
-            window.right().saturating_sub(3),
-            window.bottom().saturating_sub(1),
+            frame.right().saturating_sub(3),
+            frame.bottom().saturating_sub(1),
             "▼",
             dim,
         );

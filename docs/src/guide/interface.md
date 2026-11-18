@@ -835,8 +835,8 @@ hidden). `Space w =` puts every border back where it started.
 **Windows over the screen.** Every window that opens over the screen (the
 keys, the command line, the changes, the messages, the dialogs) looks as
 the cockpit's do: the screen behind fades, and the window sits on its own
-ground in a thick frame, its title at the top and how to close it in the
-middle of its bottom.
+ground in a thick frame, with room between the frame and what it holds,
+its title at the top and how to close it in the middle of its bottom.
 
 **The keys of this screen.** `?` opens the keys of the panel you are in
 and of everywhere, in the middle of the screen, sorted into what moves,

@@ -139,8 +139,10 @@ fn framed(
 /// Draws a modal window in the manner of the cockpit's: everything drawn so
 /// far fades behind it, then the window on the modal's own ground in a thick
 /// lavender frame, `title` in the frame at the top left and `footer`, when
-/// there is one, in the middle of its bottom. Returns the area inside the
-/// frame.
+/// there is one, in the middle of its bottom. The frame stands a cell
+/// further out than `window` on every side it can ([`modal_outer`]), for air
+/// around what the window holds, as the cockpit leaves. Returns the area
+/// inside `window`'s own edges, where its content goes as before.
 pub(crate) fn modal(
     buf: &mut Buffer,
     window: Rect,
@@ -148,8 +150,61 @@ pub(crate) fn modal(
     footer: &str,
     theme: &Theme,
 ) -> Rect {
-    fade(buf, theme);
     let window = window.intersection(buf.area);
+    draw_modal(buf, modal_outer(window, buf.area), title, footer, theme);
+    inner(window)
+}
+
+/// A modal window whose layout already leaves air inside its frame, such as
+/// the keys windows: the frame on `window`'s own edges. Returns the area
+/// inside the frame.
+pub(crate) fn modal_fitted(
+    buf: &mut Buffer,
+    window: Rect,
+    title: Vec<Span<'_>>,
+    footer: &str,
+    theme: &Theme,
+) -> Rect {
+    draw_modal(buf, window.intersection(buf.area), title, footer, theme)
+}
+
+/// The frame of a modal `window`: a cell further out on every side, never
+/// out of the `screen`, and never over its last row (the status line) when
+/// the window was clear of it.
+pub(crate) fn modal_outer(window: Rect, screen: Rect) -> Rect {
+    let status = screen.bottom().saturating_sub(1);
+    let left = if window.x > screen.x {
+        window.x - 1
+    } else {
+        window.x
+    };
+    let top = if window.y > screen.y {
+        window.y - 1
+    } else {
+        window.y
+    };
+    let right = if window.right() < screen.right() {
+        window.right() + 1
+    } else {
+        window.right()
+    };
+    let bottom = if window.bottom() < status {
+        window.bottom() + 1
+    } else {
+        window.bottom()
+    };
+    Rect::new(left, top, right - left, bottom - top)
+}
+
+/// The modal window itself, its frame on `window`'s edges.
+fn draw_modal(
+    buf: &mut Buffer,
+    window: Rect,
+    title: Vec<Span<'_>>,
+    footer: &str,
+    theme: &Theme,
+) -> Rect {
+    fade(buf, theme);
     Clear.render(window, buf);
     buf.set_style(window, theme.style(StyleRole::Modal));
     let inside = framed(

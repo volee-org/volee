@@ -26,7 +26,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 
-use super::{modal, put_spans};
+use super::{modal, modal_fitted, put_spans};
 use crate::app::Model;
 use crate::keymap::{Action, Context, KeyCombo, KeySeq, group_name, join_keys};
 use crate::text;
@@ -678,7 +678,7 @@ pub(crate) fn render_panel(
             window_height,
         ),
     };
-    modal(
+    modal_fitted(
         buf,
         window,
         vec![Span::raw(title.to_owned())],
