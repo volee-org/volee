@@ -172,4 +172,9 @@ section's name in capitals in mauve and each key as a key of a keyboard
 middle of the screen, the leader at the bottom right. Seven theme roles
 colour them: `modal`, `modal.border`, `modal.title`, `modal.section`,
 `modal.key`, `modal.text` and `modal.selected`. A violet ground after
-tuios's came and went the same day: the cockpit's windows read better.
+tuios's came and went the same day: the cockpit's windows read better. On
+2026-11-18 he asked for the cockpit's air as well: the frame stands a cell
+further out than a window's content on every side it can
+(`widgets::modal_outer`, never over the status line), which leaves a blank
+row and two blank columns around what the window holds; the keys windows,
+whose layout already leaves that room, keep their frame where it is.

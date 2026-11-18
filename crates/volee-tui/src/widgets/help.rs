@@ -6,7 +6,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 
-use super::{modal, put_spans};
+use super::{modal, modal_outer, put_spans};
 use crate::app::Model;
 use crate::keymap::{Context, KeySeq};
 use crate::text;
@@ -164,9 +164,10 @@ pub(crate) fn render(model: &Model, scroll: u16, area: Rect, buf: &mut Buffer) {
         }
     }
     if scroll + visible < tallest {
+        let frame = modal_outer(window, buf.area);
         buf.set_string(
-            window.right().saturating_sub(3),
-            window.bottom().saturating_sub(1),
+            frame.right().saturating_sub(3),
+            frame.bottom().saturating_sub(1),
             "▼",
             theme.style(StyleRole::TextDim),
         );

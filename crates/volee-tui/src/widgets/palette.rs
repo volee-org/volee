@@ -56,12 +56,12 @@ pub(crate) fn render(model: &Model, palette: &Palette, area: Rect, buf: &mut Buf
     columns.label = usize::from(width)
         .saturating_sub(4 + columns.name + 2 + 2 + columns.keys)
         .min(columns.label);
-    let height = u16::try_from(shown.len().max(1) + 6)
+    let height = u16::try_from(shown.len().max(1) + 4)
         .unwrap_or(u16::MAX)
         .min(area.height.saturating_sub(1));
     // Centred across; down, where the tallest window would be centred, so
     // that the typed row does not move as the matches change.
-    let tallest = u16::try_from(most + 6).unwrap_or(u16::MAX);
+    let tallest = u16::try_from(most + 4).unwrap_or(u16::MAX);
     let window = Rect::new(
         area.x + area.width.saturating_sub(width) / 2,
         area.y + area.height.saturating_sub(tallest) / 2,
@@ -79,14 +79,14 @@ pub(crate) fn render(model: &Model, palette: &Palette, area: Rect, buf: &mut Buf
     render_prompt(
         theme,
         &palette.text,
-        Rect::new(inner.x + 1, inner.y + 1, inner.width.saturating_sub(1), 1),
+        Rect::new(inner.x + 1, inner.y, inner.width.saturating_sub(1), 1),
         buf,
     );
     let inner = Rect::new(
         inner.x,
-        inner.y + 3,
+        inner.y + 2,
         inner.width,
-        inner.height.saturating_sub(4),
+        inner.height.saturating_sub(2),
     );
     if shown.is_empty() {
         let none = [Span::styled(
