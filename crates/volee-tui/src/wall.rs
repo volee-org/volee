@@ -238,8 +238,8 @@ impl Wall {
             return;
         };
         let id = tile.id.clone();
-        let leave = self.keymap.leave_letter();
-        self.status = match volee_host::attach_leaving(&self.dir.socket(&id), &self.client, leave) {
+        let leave = self.keymap.leave_for_host();
+        self.status = match volee_host::attach_with(&self.dir.socket(&id), &self.client, leave) {
             Ok(AttachEnd::Detached) => format!("back from {id}; it keeps running"),
             Ok(AttachEnd::Exited(_)) => format!("{id} ended"),
             Ok(AttachEnd::InputTaken) => format!("{id} was taken over from another terminal"),

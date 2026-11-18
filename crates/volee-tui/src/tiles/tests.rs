@@ -8,7 +8,7 @@ use volee_host::{Size, Update};
 use super::*;
 use crate::app::{Msg, update};
 use crate::source::Door;
-use crate::test_support::{ctrl, hosted_model, key, model, press, start, welcome};
+use crate::test_support::{hosted_model, key, model, press, start, welcome};
 
 const SIZE: Size = Size {
     cols: 100,
@@ -274,7 +274,7 @@ fn what_is_opened_from_the_wall_comes_back_to_the_wall() {
         },
     );
     // The leave key gives the keys back; the screen stays, full size.
-    let effects = ctrl(&mut model, 'q');
+    let effects = crate::test_support::leave_edit(&mut model);
     assert_eq!(model.overlay, Some(Overlay::Screen));
     assert_eq!(
         (closes(&effects), opens(&effects)),
@@ -349,7 +349,7 @@ fn an_agent_that_runs_elsewhere_opens_through_its_door_and_comes_back() {
         },
     );
     // Leaving a view closes it: straight back to the wall, on that tile.
-    ctrl(&mut model, 'q');
+    crate::test_support::leave_edit(&mut model);
     assert_eq!(model.overlay, Some(Overlay::Wall));
     assert_eq!(model.selected, Some(agent));
     assert_eq!(shown(&model), all[..PAGE]);

@@ -628,6 +628,9 @@ pub(crate) struct Model {
     pub(crate) keymap: Keymap,
     /// The keys of a sequence typed so far, such as the leader.
     pub(crate) pending_keys: Vec<KeyCombo>,
+    /// The menu key of edit mode as it was pressed, while the menu waits for
+    /// its next key: sent to the agent as it came when pressed twice.
+    pub(crate) edit_prefix: Option<KeyEvent>,
     /// The themes the picker offers.
     pub(crate) themes: crate::themes::ThemeMenu,
     /// A word about the data, such as "demo".
@@ -757,6 +760,7 @@ impl Model {
             theme,
             keymap,
             pending_keys: Vec::new(),
+            edit_prefix: None,
             themes: crate::themes::ThemeMenu::default(),
             banner,
             registry: Registry::new(),
@@ -2188,6 +2192,19 @@ fn take_over_selected(model: &mut Model, effects: &mut Vec<Effect>) {
     }
 }
 
+/// The agent after `agent` in the list, or before it, round the list: what
+/// the edit-mode menu opens next. `None` when it is alone or not listed.
+pub(crate) fn rail_neighbour(model: &Model, agent: AgentId, next: bool) -> Option<AgentId> {
+    let count = model.rail.len();
+    let index = model.rail.iter().position(|entry| entry.agent == agent)?;
+    let step = if next { index + 1 } else { index + count - 1 };
+    model
+        .rail
+        .get(step % count)
+        .map(|entry| entry.agent)
+        .filter(|other| *other != agent)
+}
+
 /// Opens an agent: its terminal inside volee, taking your keys. An agent
 /// in a volee host is opened at once; for any other, the source gives a
 /// terminal on the session where it runs, through the session's own door.
@@ -2336,7 +2353,7 @@ pub(crate) fn request_quit(model: &mut Model, effects: &mut Vec<Effect>) {
 }
 
 /// Opens the changes window on an agent and asks for its changes.
-fn open_diff(model: &mut Model, agent: AgentId, full: bool, effects: &mut Vec<Effect>) {
+pub(crate) fn open_diff(model: &mut Model, agent: AgentId, full: bool, effects: &mut Vec<Effect>) {
     model.overlay = Some(Overlay::Diff(DiffView {
         agent,
         full,

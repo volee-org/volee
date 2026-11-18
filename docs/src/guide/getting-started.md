@@ -87,16 +87,16 @@ needing you, and you answer by taking it over.
 
 ```sh
 volee msg send invoices "Use cents, not floats, for amounts."
-volee attach invoices       # Ctrl+Q comes back
+volee attach invoices       # Ctrl+Space then q comes back
 volee diff invoices         # what it changed so far
 volee stop invoices         # stop it; its conversation is kept
 ```
 
 A message reaches the agent at the end of its turn, wakes it if it is idle,
 and resumes it in a new host if it stopped. `volee attach` hands your
-terminal to the agent, from any terminal; `Ctrl+Q` returns to where you were,
+terminal to the agent, from any terminal; `Ctrl+Space` then `q` returns to where you were,
 and the agent keeps running. In the interface, `enter` opens the agent
-inside volee and sends it your keys until `Ctrl+Q`, `z` shows its screen
+inside volee and sends it your keys until `Ctrl+Space` then `q`, `z` shows its screen
 full size, and `5` shows the screens of the agents that run, side by side.
 After `volee stop`, volee does not resume the agent on its own, even when
 other agents write to it: your next message to it does.
@@ -104,7 +104,7 @@ other agents write to it: your next message to it does.
 The sessions you started yourself open the same way, where they run, and
 stay what they are: `enter` (or `volee attach`) on a background session
 runs Claude Code's own `claude attach` on it, and `enter` on a session in a
-tuios pane shows that pane. Nothing is stopped or restarted, and `Ctrl+Q`
+tuios pane shows that pane. Nothing is stopped or restarted, and `Ctrl+Space` then `q`
 leaves the session running as it was. Messages are for the agents volee
 launched: to say something to another session, open it and type.
 
@@ -177,7 +177,7 @@ volee lead
 ```
 
 A lead is the agent you talk to: it launches the others. `volee lead` starts
-one in the current directory and opens it in your terminal; `Ctrl+Q` leaves
+one in the current directory and opens it in your terminal; `Ctrl+Space` then `q` leaves
 it running, and `enter` on its row in the interface, or `volee attach`,
 comes back to it. Tell it what you want in your own words:
 

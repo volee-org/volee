@@ -36,7 +36,7 @@ do*. volee shows what they do.
   shows the screens of every agent that runs, hosted by volee or not. The agent survives closed
   windows, the interface and the daemon, and comes back after a reboot.
 - **Your terminal, your tools**: open an agent with a key, type into it
-  inside volee and come back with `Ctrl+Q`; open its worktree in your
+  inside volee and come back with `Ctrl+Space` then `q`; open its worktree in your
   editor, your diff viewer or your
   git interface. None of them is required, and no multiplexer either; a
   session you started in a tuios or tmux pane is shown and reached there.

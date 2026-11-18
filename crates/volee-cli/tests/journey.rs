@@ -304,7 +304,8 @@ fn a_background_session_is_listed_opened_typed_into_and_left() {
     terminal.sees("hello volee");
 
     // The leave key comes back to the list; the session is none the wiser.
-    terminal.key("q", true);
+    terminal.key(" ", true);
+    terminal.key("q", false);
     terminal.sees("Left invoices: it keeps running");
     terminal.sees("Agents");
 
@@ -313,7 +314,8 @@ fn a_background_session_is_listed_opened_typed_into_and_left() {
     terminal.sees("→ invoices");
     terminal.sees("hello volee");
     assert_eq!(views(&world).len(), 2, "still one view");
-    terminal.key("q", true);
+    terminal.key(" ", true);
+    terminal.key("q", false);
     terminal.sees("Left invoices");
 
     // `volee ls` shows it as what it is: a background session someone else
@@ -407,7 +409,8 @@ fn a_program_run_under_volee_is_an_agent_here_and_in_the_interface() {
     );
 
     // The leave key gives the terminal back; the program keeps running.
-    here.key("q", true);
+    here.key(" ", true);
+    here.key("q", false);
     here.sees("back from ledger; it keeps running");
     assert!(
         wait(15, || shell.is_finished()),
@@ -441,7 +444,8 @@ fn a_program_run_under_volee_is_an_agent_here_and_in_the_interface() {
     );
     // The leave key takes the keys back: the screen of an agent in a host
     // stays, live, and `z` goes back to the list.
-    terminal.key("q", true);
+    terminal.key(" ", true);
+    terminal.key("q", false);
     terminal.sees("z  back");
     assert!(
         !terminal.screen().contains("→ ledger"),
@@ -653,7 +657,8 @@ fn the_wall_shows_a_session_and_the_mouse_reaches_it_once_opened() {
     terminal.sees("9mx");
 
     // The leave key comes back to the wall the session was opened from.
-    terminal.key("q", true);
+    terminal.key(" ", true);
+    terminal.key("q", false);
     terminal.sees("Left invoices: it keeps running");
     terminal.sees("1 agent runs");
 

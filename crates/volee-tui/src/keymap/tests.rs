@@ -126,7 +126,49 @@ fn the_default_table_has_no_conflicts_and_every_action() {
             binding.label
         );
     }
-    assert_eq!(keymap.leave_key(), "ctrl-q".parse().unwrap());
+    assert_eq!(
+        keymap.leave_keys(),
+        LeaveKeys::Menu {
+            prefix: "ctrl-space".parse().unwrap(),
+            then: 'q',
+        }
+    );
+}
+
+#[test]
+fn leave_is_a_menu_key_then_a_letter_or_control_and_a_letter() {
+    let menu = Keymap::with_overrides([KeyOverride::new("leave", ["ctrl-a x"])]).unwrap();
+    assert_eq!(
+        menu.leave_keys(),
+        LeaveKeys::Menu {
+            prefix: KeyCombo::ctrl('a'),
+            then: 'x',
+        }
+    );
+    assert_eq!(
+        menu.leave_for_host(),
+        volee_host::Leave::Menu {
+            prefix: 'a',
+            then: 'x',
+        }
+    );
+    let space = Keymap::default();
+    assert_eq!(
+        space.leave_for_host(),
+        volee_host::Leave::Menu {
+            prefix: ' ',
+            then: 'q',
+        }
+    );
+    for refused in ["ctrl-space ctrl-q", "q", "ctrl-space q x", "ctrl-h"] {
+        assert!(
+            matches!(
+                Keymap::with_overrides([KeyOverride::new("leave", [refused])]).unwrap_err(),
+                KeymapError::LeaveKey(_)
+            ),
+            "{refused}"
+        );
+    }
 }
 
 #[test]
@@ -305,7 +347,8 @@ fn overrides_reach_one_context_or_unbind() {
         keymap.action(&agents, KeyCombo::char('c')),
         Some(Action::NewAgent)
     );
-    assert_eq!(keymap.leave_key(), KeyCombo::ctrl('g'));
+    assert_eq!(keymap.leave_keys(), LeaveKeys::Key(KeyCombo::ctrl('g')));
+    assert_eq!(keymap.leave_for_host(), volee_host::Leave::Key('g'));
 }
 
 #[test]

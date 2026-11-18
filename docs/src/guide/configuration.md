@@ -214,7 +214,7 @@ first = "home"
 take-over = "enter"
 
 [tui.keys.attached]
-leave = "ctrl-g"
+leave = "ctrl-g q"     # the menu key ctrl-g, then q
 ```
 
 A key is written like `q`, `G`, `ctrl-c`, `alt-x`, `shift-tab`, `enter`,
@@ -222,8 +222,11 @@ A key is written like `q`, `G`, `ctrl-c`, `alt-x`, `shift-tab`, `enter`,
 with spaces between them, like `g g` or `space n` (`gg` works too). volee
 refuses, naming the action, an unknown action or context, two actions on
 the same key where both apply, and a key that both acts and starts a
-longer sequence. The leave key must be Control and a letter other than
-`h`, `i`, `j` or `m`.
+longer sequence. `leave` takes a menu key then a letter, like the default
+`ctrl-space q`, or Control and a letter for a single key that leaves at
+once, like `ctrl-q`; the Control key is Space or a letter other than `h`,
+`i`, `j` or `m`. The other keys of the edit-mode menu are `diff`,
+`next-agent`, `previous-agent` and `send-prefix`.
 
 ### `[tui.tools]`
 

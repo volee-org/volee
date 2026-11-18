@@ -64,7 +64,7 @@ def by_keyboard(j, name):
     j.check("a paste reaches the agent in one piece", j.said("sea"),
             "it answered: " + j.last_answer())
 
-    j.keys("ctrl+q", 1.0)
+    j.leave(1.0)
     back = j.wait(lambda: "Screen · " + name + " · live" in j.screen()
                   and editing not in j.screen(), 10)
     j.check("the leave key comes back to volee, the screen stays", back)
@@ -111,7 +111,8 @@ def resized(j, name):
     drain(2)
     second = j.wait(lambda: j.host_size(name) if j.host_size(name) != first else None, 5)
     j.check("the agent follows a smaller terminal (87x23 in 90x26)", second == (87, 23), str(second))
-    send(b"\x11", 1)
+    send(b"\x00", 1)
+    send(b"q", 1)
     send(b"q", 1)
     # As in LazyVim: q closes the full-screen view, the leader then q q quits.
     send(b" qq", 1)

@@ -242,7 +242,7 @@ def main():
                        in ("idle", "done"), 120, 1),
                 str((j.agent(lead) or {}).get("state")))
         j.show("the lead, asked for a mission")
-        j.keys("ctrl+q", 1.5)
+        j.leave(1.5)
         j.check("the leave key gives the keyboard back to volee, on the lead's screen",
                 j.wait(lambda: j.editing(lead) not in j.screen()
                        and "Screen · " + lead in j.screen(), 10))

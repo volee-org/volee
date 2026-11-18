@@ -138,7 +138,7 @@ For an agent in a volee host
 `agents.preview` returns a snapshot of the host's screen (`exact`, with the
 `size` of the host's terminal: a snapshot redraws its screen in a terminal
 of that size only), `agents.attach`
-returns the `volee host attach` command for the client to run (Ctrl+Q comes
+returns the `volee host attach` command for the client to run (Ctrl+Space then q comes
 back), and `agents.stop` asks the host to end the program. For a Claude
 Code background session that volee does not host, `agents.attach` returns
 the harness's own command (`claude attach <id>`): nothing is stopped or

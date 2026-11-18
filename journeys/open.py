@@ -78,7 +78,7 @@ def main():
         j.check("volee still shows it in the background, not in a host of its own",
                 row.get("location", {}).get("kind") == "background" and len(row.get("sessions", [])) == 1,
                 str(row.get("location")))
-        j.keys("ctrl+q", 1.5)
+        j.leave(1.5)
         j.check("the leave key comes back to the list and says it keeps running",
                 j.sees("Left " + name + ": it keeps running", "Agents", timeout=10))
         now = j.claude_session(name) or {}
@@ -108,7 +108,7 @@ def main():
             j.check("under the same session id", now.get("sessionId") == session_id,
                     str(now.get("sessionId")))
             j.show("a stopped session opened again")
-            j.keys("ctrl+q", 1.5)
+            j.leave(1.5)
             j.sees("Left " + name, timeout=10)
 
         # ---- removed, it leaves the list ------------------------------------------

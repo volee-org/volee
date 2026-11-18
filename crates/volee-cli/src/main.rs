@@ -72,7 +72,7 @@ enum Command {
         harness: Option<String>,
     },
     /// Start a lead here and talk to it: it launches agents and missions
-    /// for you, and never codes; Ctrl+Q leaves it running.
+    /// for you, and never codes; Ctrl+Space then q leaves it running.
     Lead {
         /// What you ask of it at once; without it, the lead waits for you.
         task: Option<String>,
@@ -83,7 +83,7 @@ enum Command {
         #[arg(long)]
         model: Option<String>,
     },
-    /// Run any program as an agent, in this terminal; Ctrl+Q leaves it
+    /// Run any program as an agent, in this terminal; Ctrl+Space then q leaves it
     /// running.
     Run {
         /// The agent's name; the name of this directory when absent.
@@ -93,7 +93,7 @@ enum Command {
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
-    /// Take an agent over in this terminal; Ctrl+Q comes back.
+    /// Take an agent over in this terminal; Ctrl+Space then q comes back.
     Attach {
         /// The agent: its name, short id or id.
         agent: String,
@@ -275,7 +275,7 @@ enum HostCommand {
         /// The host's id.
         id: String,
     },
-    /// Take a host over in this terminal; Ctrl+Q comes back.
+    /// Take a host over in this terminal; Ctrl+Space then q comes back.
     Attach {
         /// The host's id.
         id: String,

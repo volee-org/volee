@@ -26,7 +26,7 @@ volee host ([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md),
 | Launch | `claude --session-id=<uuid> --name=<name> --settings=<file> --worktree=<name> --opt=value... -- <prompt>`, in a new host | Runs from the repository's main checkout. volee chooses the session id, so it knows the session before its first hook. |
 | Resume | `claude --resume=<session-uuid> --worktree=<name> --opt=value... -- <prompt>`, in a new host | Continues a stopped session: for a message, after a reboot, or to adopt a session (then without a prompt, so it waits at its prompt). Linked to the same agent. |
 | Preview | the host's screen | Exact, status line and prompt frame included; read without resizing the agent. |
-| Take over | `volee host attach <host>` | Runs in the client's terminal; `Ctrl+Q` returns. |
+| Take over | `volee host attach <host>` | Runs in the client's terminal; `Ctrl+Space` then `q` returns. |
 | Stop | through the host: `SIGHUP` to the program's process group, `SIGKILL` five seconds later | Like a closed terminal; the conversation is kept. |
 
 Background sessions (`claude --bg`) are the ones volee 0.7 launched, and any

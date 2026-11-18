@@ -59,7 +59,7 @@ def main():
         j.type("Reply with the word sky in uppercase, nothing else")
         j.keys("Enter")
         j.check("the agent still answers", j.said("sky"), "it answered: " + j.last_answer())
-        j.keys("ctrl+q", 1.0)
+        j.leave(1.0)
         j.check("the leave key comes back", j.sees("Screen · " + name + " · live", timeout=10))
         j.keys("z", 0.5)
         j.quit()

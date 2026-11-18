@@ -98,6 +98,15 @@ impl KeyCombo {
         self.code
     }
 
+    /// The character of a Control and Space or Control and letter key: `' '`
+    /// for `ctrl-space`, `q` for `ctrl-q`.
+    pub fn ctrl_char(self) -> Option<char> {
+        match self.code {
+            KeyCode::Char(' ') if self.modifiers == KeyModifiers::CONTROL => Some(' '),
+            _ => self.ctrl_letter(),
+        }
+    }
+
     /// The letter of a Control and letter key, such as `q` for `ctrl-q`.
     pub fn ctrl_letter(self) -> Option<char> {
         match self.code {
@@ -501,7 +510,14 @@ actions! {
     LineStart => "line-start",
     /// Move the cursor to the end of the line.
     LineEnd => "line-end",
-    /// Leave an agent you took over and come back (Control and a letter).
+    /// In edit mode, open the next agent of the list.
+    NextAgent => "next-agent",
+    /// In edit mode, open the previous agent of the list.
+    PreviousAgent => "previous-agent",
+    /// In edit mode, send the menu key itself to the agent.
+    SendPrefix => "send-prefix",
+    /// Leave an agent you took over and come back: the menu key then a
+    /// letter (Control and Space, then q), or Control and a letter.
     Leave => "leave",
 }
 
@@ -663,6 +679,47 @@ pub(crate) struct Hint {
     pub(crate) action: Option<Action>,
 }
 
+/// How a person leaves an agent taken over, in edit mode and in `volee
+/// attach` or `volee run` (ADR 0021).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LeaveKeys {
+    /// Control and a letter, at once.
+    Key(KeyCombo),
+    /// A menu key (Control and Space, or Control and a letter), then a
+    /// letter.
+    Menu {
+        /// The menu key.
+        prefix: KeyCombo,
+        /// The letter that leaves.
+        then: char,
+    },
+}
+
+impl LeaveKeys {
+    /// The leave keys a sequence spells: Control and a letter, or a menu key
+    /// then a letter; `None` for any other.
+    pub(crate) fn from_seq(seq: &KeySeq) -> Option<Self> {
+        match seq.keys() {
+            [key] => key
+                .ctrl_letter()
+                .filter(|letter| volee_host::keys::valid_leave(*letter))
+                .map(|_| Self::Key(*key)),
+            [prefix, then] => {
+                let menu = prefix
+                    .ctrl_char()
+                    .is_some_and(|c| c == ' ' || volee_host::keys::valid_leave(c));
+                then.typed_char()
+                    .filter(|c| menu && c.is_ascii_alphabetic())
+                    .map(|then| Self::Menu {
+                        prefix: *prefix,
+                        then,
+                    })
+            }
+            _ => None,
+        }
+    }
+}
+
 /// What the keys typed so far do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Resolved {
@@ -726,6 +783,8 @@ pub(crate) fn group_name(prefix: &[KeyCombo]) -> &'static str {
     match prefix {
         [key] if *key == leader => "leader",
         [key] if *key == KeyCombo::char('g') => "go to",
+        // The menu of edit mode, after its Control key.
+        [key] if key.ctrl_char().is_some() => "volee",
         [first, key] if *first == leader => match key.typed_char() {
             Some('a') => "agents",
             Some('g') => "git",
@@ -770,10 +829,12 @@ pub enum KeymapError {
         #[source]
         source: ParseKeyError,
     },
-    /// The leave key must be Control and a letter.
+    /// The leave keys must be a menu key then a letter, or Control and a
+    /// letter.
     #[error(
-        "action `leave`: `{0}` must be Control and a letter, such as `ctrl-q`: it is the only key \
-         every terminal sends the same way while an agent owns the keyboard"
+        "action `leave`: `{0}` must be a menu key then a letter, such as `ctrl-space q`, or \
+         Control and a letter, such as `ctrl-q`: the only keys every terminal sends the same way \
+         while an agent owns the keyboard"
     )]
     LeaveKey(String),
     /// Two actions share a key where both apply.
@@ -881,11 +942,7 @@ impl Keymap {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             if action == Action::Leave
-                && let Some(key) = keys.iter().find(|key| {
-                    key.single()
-                        .and_then(KeyCombo::ctrl_letter)
-                        .is_none_or(|letter| !volee_host::keys::valid_leave(letter))
-                })
+                && let Some(key) = keys.iter().find(|key| LeaveKeys::from_seq(key).is_none())
             {
                 return Err(KeymapError::LeaveKey(key.to_string()));
             }
@@ -1050,19 +1107,26 @@ impl Keymap {
             .and_then(|binding| binding.keys.first())
     }
 
-    /// The leave key of a taken-over agent: Control and a letter.
-    pub fn leave_key(&self) -> KeyCombo {
+    /// How a person leaves an agent taken over: the first keys of `leave` in
+    /// edit mode.
+    pub fn leave_keys(&self) -> LeaveKeys {
         self.first_key(Context::Attached, Action::Leave)
-            .and_then(KeySeq::single)
-            .filter(|key| key.ctrl_letter().is_some())
+            .and_then(LeaveKeys::from_seq)
             .unwrap_or(LEAVE)
     }
 
-    /// The letter of the leave key, for `volee_host::attach_leaving`.
-    pub fn leave_letter(&self) -> char {
-        self.leave_key()
-            .ctrl_letter()
-            .unwrap_or(volee_host::keys::DEFAULT_LEAVE)
+    /// The leave keys for `volee_host::attach_with`, which reads them in the
+    /// raw input of a terminal.
+    pub fn leave_for_host(&self) -> volee_host::Leave {
+        match self.leave_keys() {
+            LeaveKeys::Key(key) => {
+                volee_host::Leave::Key(key.ctrl_letter().unwrap_or(volee_host::keys::DEFAULT_LEAVE))
+            }
+            LeaveKeys::Menu { prefix, then } => volee_host::Leave::Menu {
+                prefix: prefix.ctrl_char().unwrap_or(' '),
+                then,
+            },
+        }
     }
 
     /// The hint bar for the active contexts: bindings with a hint, in table
@@ -1147,10 +1211,13 @@ impl Keymap {
     }
 }
 
-/// The default leave key.
-const LEAVE: KeyCombo = KeyCombo {
-    code: KeyCode::Char('q'),
-    modifiers: KeyModifiers::CONTROL,
+/// The default leave keys: Control and Space, then q.
+const LEAVE: LeaveKeys = LeaveKeys::Menu {
+    prefix: KeyCombo {
+        code: KeyCode::Char(' '),
+        modifiers: KeyModifiers::CONTROL,
+    },
+    then: 'q',
 };
 
 /// The sequences of a default binding. Every default key parses: debug
@@ -1190,7 +1257,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Global, &["N"], A::PreviousMatch, "previous match", Some("match"), "the previous agent that matches the filter, round the list"),
         bind(C::Global, &["m"], A::Message, "message", Some("message"), "write a message to the selected agent"),
         bind(C::Global, &["d", "space g d"], A::Diff, "diff", Some("diff"), "show the selected agent's changes"),
-        bind(C::Global, &["enter", "i", "a", "I", "A"], A::TakeOver, "open", Some("open"), "open the selected agent in insert mode: its own terminal, full size inside volee, takes your keys; the leave key (ctrl-q) comes back and the agent keeps running"),
+        bind(C::Global, &["enter", "i", "a", "I", "A"], A::TakeOver, "open", Some("open"), "open the selected agent in insert mode: its own terminal, full size inside volee, takes your keys; the leave key (ctrl-space then q) comes back and the agent keeps running"),
         bind(C::Global, &["z", "space w m"], A::FullScreen, "full screen", Some("full screen"), "show the selected agent's screen full size, to read it"),
         bind(C::Global, &["space n"], A::Messages, "messages", Some("messages"), "your messages, questions waiting for you first"),
         bind(C::Global, &["o", "space o"], A::OpenWith, "open with…", None, "open the selected agent's worktree in your editor, diff viewer or git tool"),
@@ -1297,7 +1364,7 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Screen, &["g g", "home"], A::First, "top", None, "the top of the screen"),
         bind(C::Screen, &["G", "end"], A::Last, "bottom", None, "the bottom, the newest lines"),
         bind(C::Screen, &["r"], A::Refresh, "refresh", Some("refresh"), "refresh the screen"),
-        bind(C::Screen, &["enter", "i", "a"], A::TakeOver, "open", Some("open"), "open the agent: your keys go to it; the leave key (ctrl-q) comes back"),
+        bind(C::Screen, &["enter", "i", "a"], A::TakeOver, "open", Some("open"), "open the agent: your keys go to it; the leave key (ctrl-space then q) comes back"),
         bind(C::Screen, &["z", "esc", "q"], A::Back, "back", Some("back"), "come back to the interface"),
         bind(C::Screen, &["ctrl-c"], A::Quit, "quit", None, "quit volee"),
 
@@ -1396,11 +1463,15 @@ fn default_bindings() -> Vec<Binding> {
         bind(C::Wall, &["g g", "home"], A::First, "first", None, "the first screen"),
         bind(C::Wall, &["G", "end"], A::Last, "last", None, "the last screen"),
         bind(C::Wall, &["z"], A::FullScreen, "full screen", Some("full screen"), "the selected screen alone, full size; back comes back to the wall"),
-        bind(C::Wall, &["enter", "i", "a"], A::TakeOver, "open", Some("open"), "open the selected agent: your keys go to it; the leave key (ctrl-q) comes back to the wall"),
+        bind(C::Wall, &["enter", "i", "a"], A::TakeOver, "open", Some("open"), "open the selected agent: your keys go to it; the leave key (ctrl-space then q) comes back to the wall"),
         bind(C::Wall, &["q", "esc"], A::Back, "back", Some("back"), "leave the wall"),
         bind(C::Wall, &["ctrl-c"], A::Quit, "quit", None, "quit volee; in `volee host wall`, leave the wall"),
 
-        bind(C::Attached, &["ctrl-q"], A::Leave, "leave", Some("back to volee"), "leave edit mode, or an agent taken over from a shell, and come back; Control and a letter only"),
+        bind(C::Attached, &["ctrl-space q"], A::Leave, "back to volee", Some("back to volee"), "leave edit mode, or an agent taken over from a shell, and come back; the agent keeps running"),
+        bind(C::Attached, &["ctrl-space d"], A::Diff, "changes", None, "leave edit mode and show the agent's changes"),
+        bind(C::Attached, &["ctrl-space n"], A::NextAgent, "next agent", None, "open the next agent of the list in edit mode"),
+        bind(C::Attached, &["ctrl-space p"], A::PreviousAgent, "previous agent", None, "open the previous agent of the list in edit mode"),
+        bind(C::Attached, &["ctrl-space ctrl-space"], A::SendPrefix, "to the agent", None, "send the menu key itself to the agent"),
     ]
 }
 

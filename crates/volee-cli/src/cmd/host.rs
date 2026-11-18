@@ -239,7 +239,7 @@ pub(crate) fn peek(dir: &HostDir, id: &str) -> anyhow::Result<()> {
     }
 }
 
-/// Takes a host over in this terminal until Ctrl+Q.
+/// Takes a host over in this terminal until Ctrl+Space then q.
 pub(crate) fn attach(dir: &HostDir, id: &str) -> anyhow::Result<()> {
     check_id(id)?;
     // Checked first: connecting takes the input from whoever has it.
@@ -257,7 +257,7 @@ pub(crate) fn attach(dir: &HostDir, id: &str) -> anyhow::Result<()> {
     let keymap = super::interface::keymap_or_default();
     let leave = super::interface::leave_key_name(&keymap);
     eprintln!("volee: taking over {name}; {leave} comes back");
-    let end = volee_host::attach_leaving(&socket, &client_name("attach"), keymap.leave_letter())
+    let end = volee_host::attach_with(&socket, &client_name("attach"), keymap.leave_for_host())
         .with_context(|| format!("cannot take over {id}"))?;
     match end {
         AttachEnd::Detached => eprintln!("volee: back from {name}; it keeps running"),

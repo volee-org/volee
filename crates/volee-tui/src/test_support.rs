@@ -56,6 +56,28 @@ pub(crate) fn key(model: &mut Model, code: KeyCode) -> Vec<Effect> {
 }
 
 /// A letter with Ctrl held, such as `ctrl-s`.
+/// Leaves edit mode as a person does: the menu key, Control and Space, then
+/// q. The effects of the q.
+pub(crate) fn leave_edit(model: &mut Model) -> Vec<Effect> {
+    let menu = update(
+        model,
+        Msg::Key(KeyEvent::new_with_kind(
+            KeyCode::Char(' '),
+            KeyModifiers::CONTROL,
+            KeyEventKind::Press,
+        )),
+    );
+    assert!(menu.is_empty(), "the menu key sends nothing: {menu:?}");
+    update(
+        model,
+        Msg::Key(KeyEvent::new_with_kind(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+            KeyEventKind::Press,
+        )),
+    )
+}
+
 pub(crate) fn ctrl(model: &mut Model, letter: char) -> Vec<Effect> {
     update(
         model,

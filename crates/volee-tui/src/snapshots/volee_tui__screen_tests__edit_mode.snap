@@ -25,4 +25,4 @@ expression: terminal.backend().to_string()
 "│                                                                              │"
 "│                                                                              │"
 "╰──────────────────────────────────────────────────────────────────────────────╯"
-" INSERT  → invoicing    ctrl-q back to volee                                    "
+" INSERT  → invoicing    ctrl-space q back to volee                              "

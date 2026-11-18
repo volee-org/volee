@@ -45,7 +45,7 @@ code, not by trust.
 - Each agent volee launches runs in a volee host, a small process that holds
   its terminal and its exact screen, so it survives closed windows, the
   interface and the daemon. Open one with `enter` or `volee attach`, come
-  back with `Ctrl+Q`.
+  back with `Ctrl+Space` then `q`.
 - A preview, a full-screen view and a wall of screens show every agent
   that runs. An agent volee hosts shows live, exactly as its terminal
   does, status line included, without being resized; any other shows as

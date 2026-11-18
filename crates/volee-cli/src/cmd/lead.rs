@@ -2,7 +2,7 @@
 //!
 //! A lead is the agent the person talks to. It launches agents and missions
 //! for them, hears their reports, and never codes. The daemon starts it in a
-//! volee host; from a terminal, this command opens it at once, and `Ctrl+Q`
+//! volee host; from a terminal, this command opens it at once, and `Ctrl+Space` then `q`
 //! leaves it running.
 
 use std::io::IsTerminal;

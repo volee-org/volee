@@ -156,7 +156,7 @@ def main():
         j.tuios("send-keys", *in_volee(), "Backspace", "--repeat", str(len(LEFT)))
         j.check("and so do the keys that erase it",
                 j.wait(lambda: LEFT not in pane_screen(), 15, 1))
-        j.keys("ctrl+q", 1.5)
+        j.leave(1.5)
         j.check("the leave key comes back to the list and says it keeps running",
                 j.sees("Left " + name + ": it keeps running", "Agents", timeout=10))
         now = j.agent(name) or {}

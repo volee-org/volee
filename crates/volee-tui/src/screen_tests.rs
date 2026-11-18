@@ -567,10 +567,16 @@ fn edit_mode_inside_volee() {
     assert_eq!((position.x, position.y), (2 + 19, 1 + 3));
     terminal.backend_mut().assert_cursor_position((21, 4));
 
-    // Back to volee: the same screen, watched.
+    // The menu key opens the menu over the agent's screen.
     update(
         &mut model,
-        Msg::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)),
+        Msg::Key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL)),
+    );
+    assert_snapshot!("edit_mode_menu", draw(&model));
+    // Its q goes back to volee: the same screen, watched.
+    update(
+        &mut model,
+        Msg::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
     );
     update(
         &mut model,

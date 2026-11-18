@@ -263,7 +263,7 @@ def main():
                 now.get("sessionId") == session_id and now.get("pid") == pid,
                 "{} pid {} / {} pid {}".format(now.get("sessionId"), now.get("pid"),
                                                session_id, pid))
-        j.keys("ctrl+q", 1.5)
+        j.leave(1.5)
         j.check("the leave key comes back to the wall",
                 j.sees("Wall", "2 agents run", timeout=10))
         j.check("on the tile that was opened", outside in selected_tile(j), selected_tile(j))
@@ -279,7 +279,7 @@ def main():
         j.keys("Enter")
         j.check("typed text reaches it and it answers", j.said("tile"),
                 "it answered: " + j.last_answer())
-        j.keys("ctrl+q", 1.5)
+        j.leave(1.5)
         j.check("the leave key gives the keys back, the screen stays",
                 j.sees("Screen · " + hosted + " · live", timeout=10))
         j.keys("Escape", 1.5)

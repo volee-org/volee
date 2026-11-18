@@ -300,7 +300,7 @@ async fn hosted(shared: &Arc<Shared>, agent: AgentId) -> Option<Hosted> {
 const HOST_CLIENT: &str = concat!("volee daemon ", env!("CARGO_PKG_VERSION"));
 
 /// What a person reads before taking over an agent in a host.
-const HOST_ATTACH_HINT: &str = "Press Ctrl+Q to come back; the agent keeps running.";
+const HOST_ATTACH_HINT: &str = "Press Ctrl+Space then q to come back; the agent keeps running.";
 
 /// A multiplexer failure about the pane of the agent `name`, said for
 /// people.
@@ -454,7 +454,7 @@ pub(crate) async fn attach(
     params: AgentParams,
 ) -> Result<AttachCommand, DaemonError> {
     // An agent in a host: `volee host attach`, which the client runs in its
-    // own terminal; Ctrl+Q comes back (ADR 0021).
+    // own terminal; Ctrl+Space then q comes back (ADR 0021).
     if let Some(Hosted {
         id, name, generic, ..
     }) = hosted(shared, params.agent).await
