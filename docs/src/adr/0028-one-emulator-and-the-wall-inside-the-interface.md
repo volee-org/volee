@@ -1,6 +1,6 @@
 # 0028. One emulator for every screen, and the wall inside the interface
 
-- Status: Accepted (completes [0020](0020-libghostty-vt-emulates-terminals.md); amends [0021](0021-take-over-watch-and-the-wall-of-screens.md), [0026](0026-edit-mode-types-into-an-agent-inside-volee.md) and [0027](0027-open-without-owning.md))
+- Status: Superseded by the v2 restart (`docs/v2/framing.md`, 2026-11-21), kept as history of 0.x. Status in 0.x: Accepted (completes [0020](0020-libghostty-vt-emulates-terminals.md); amends [0021](0021-take-over-watch-and-the-wall-of-screens.md), [0026](0026-edit-mode-types-into-an-agent-inside-volee.md) and [0027](0027-open-without-owning.md))
 - Date: 2026-11-11; corrected the same day by [its proof](#the-proof-and-what-it-found); the fold extended to [every screen that does not fit its view](#every-screen-that-does-not-fit-its-view) on 2026-11-13
 
 ## Context

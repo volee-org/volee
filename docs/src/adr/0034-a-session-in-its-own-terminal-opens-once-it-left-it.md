@@ -1,6 +1,6 @@
 # 0034. A session in a terminal of its own opens once it left it, on the same row
 
-- Status: Accepted (amends [0027](0027-open-without-owning.md))
+- Status: Superseded by the v2 restart (`docs/v2/framing.md`, 2026-11-21), kept as history of 0.x. Status in 0.x: Accepted (amends [0027](0027-open-without-owning.md))
 - Date: 2026-11-11
 
 ## Context

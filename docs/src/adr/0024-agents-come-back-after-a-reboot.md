@@ -1,6 +1,6 @@
 # 0024. Agents interrupted by a reboot come back in new hosts
 
-- Status: Accepted
+- Status: Superseded by the v2 restart (`docs/v2/framing.md`, 2026-11-21), kept as history of 0.x. Status in 0.x: Accepted
 - Date: 2026-11-08
 
 ## Context

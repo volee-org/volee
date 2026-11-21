@@ -1,6 +1,6 @@
 # 0027. volee opens every agent where it runs, and its list shows what runs
 
-- Status: Accepted (amends [0023](0023-every-agent-on-the-machine.md), [0026](0026-edit-mode-types-into-an-agent-inside-volee.md), [0021](0021-take-over-watch-and-the-wall-of-screens.md) and [0004](0004-sources-and-reconciliation.md))
+- Status: Superseded by the v2 restart (`docs/v2/framing.md`, 2026-11-21), kept as history of 0.x. Status in 0.x: Accepted (amends [0023](0023-every-agent-on-the-machine.md), [0026](0026-edit-mode-types-into-an-agent-inside-volee.md), [0021](0021-take-over-watch-and-the-wall-of-screens.md) and [0004](0004-sources-and-reconciliation.md))
 - Date: 2026-11-10
 
 ## Context

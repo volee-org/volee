@@ -1,6 +1,6 @@
 # 0002. The harness owns agent processes
 
-- Status: Superseded by [0019](0019-a-host-process-holds-each-agent-terminal.md)
+- Status: Superseded by the v2 restart (`docs/v2/framing.md`, 2026-11-21), kept as history of 0.x. Status in 0.x: Superseded by [0019](0019-a-host-process-holds-each-agent-terminal.md)
 - Date: 2026-11-06
 
 ## Context

@@ -1,6 +1,6 @@
 # 0021. Take over with `a` or `volee attach`, leave with Ctrl+Q, watch on a wall
 
-- Status: Accepted; taking over from the interface amended by [0026](0026-edit-mode-types-into-an-agent-inside-volee.md), the wall by [0028](0028-one-emulator-and-the-wall-inside-the-interface.md)
+- Status: Superseded by the v2 restart (`docs/v2/framing.md`, 2026-11-21), kept as history of 0.x. Status in 0.x: Accepted; taking over from the interface amended by [0026](0026-edit-mode-types-into-an-agent-inside-volee.md), the wall by [0028](0028-one-emulator-and-the-wall-inside-the-interface.md)
 - Date: 2026-11-08
 
 Since [ADR 0028](0028-one-emulator-and-the-wall-inside-the-interface.md),

@@ -1,6 +1,6 @@
 # 0019. A volee-host process holds each agent's terminal
 
-- Status: Accepted (supersedes [0002](0002-harness-owns-processes.md))
+- Status: Superseded by the v2 restart (`docs/v2/framing.md`, 2026-11-21), kept as history of 0.x. Status in 0.x: Accepted (supersedes [0002](0002-harness-owns-processes.md))
 - Date: 2026-11-08
 
 ## Context

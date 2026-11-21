@@ -8,14 +8,14 @@ never edited after it is accepted: a later ADR supersedes it.
 | --- | --- | --- |
 | [0000](0000-record-architecture-decisions.md) | Record architecture decisions | Accepted |
 | [0001](0001-agent-identity.md) | An agent is a unit of work, not a pane or a process | Accepted |
-| [0002](0002-harness-owns-processes.md) | The harness owns agent processes | Superseded by 0019 |
+| [0002](0002-harness-owns-processes.md) | The harness owns agent processes | Superseded by v2 (was: Superseded by 0019) |
 | [0003](0003-daemon-and-event-log.md) | A daemon with an event log is the single source of truth | Accepted |
 | [0004](0004-sources-and-reconciliation.md) | Hooks, harness listing, git and forge are reconciled into one model | Accepted |
 | [0005](0005-harness-neutral-agent-protocol.md) | Agents talk to volee through MCP and the CLI | Accepted |
 | [0006](0006-messaging.md) | Typed, threaded messages delivered through documented hooks (amended by 0031) | Accepted |
 | [0007](0007-missions.md) | Missions are run by a supervisor program and a coordinator agent (amended by 0032 and 0033) | Accepted |
 | [0008](0008-multiplexers-are-optional.md) | Multiplexers are optional location adapters | Accepted |
-| [0009](0009-tui-architecture.md) | The TUI follows the Elm architecture with one keymap table | Accepted |
+| [0009](0009-tui-architecture.md) | The TUI follows the Elm architecture with one keymap table | Superseded by v2 (was: Accepted) |
 | [0010](0010-git-access.md) | Git is read through the git CLI behind a trait | Accepted |
 | [0011](0011-safety-and-delivery-evidence.md) | Destructive actions require delivery evidence (amended by 0032) | Accepted |
 | [0012](0012-language-license-and-scope.md) | Rust, dual MIT/Apache-2.0, Unix first | Accepted |
@@ -25,23 +25,23 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0016](0016-what-a-failed-launch-left-untouched.md) | Reuse or tidy what a failed launch left untouched (refines 0011) | Accepted |
 | [0017](0017-setup-commands-for-new-worktrees.md) | Setup commands prepare a new worktree before its agent starts | Accepted |
 | [0018](0018-panes-that-show-background-sessions.md) | A pane that shows a background session is its preview | Superseded by 0023 |
-| [0019](0019-a-host-process-holds-each-agent-terminal.md) | A volee-host process holds each agent's terminal (supersedes 0002) | Accepted |
-| [0020](0020-libghostty-vt-emulates-terminals.md) | libghostty-vt emulates every terminal volee reads | Accepted |
-| [0021](0021-take-over-watch-and-the-wall-of-screens.md) | Take over with `a` or `volee attach`, leave with Ctrl+Q, watch on a wall | Accepted |
-| [0022](0022-harness-profiles.md) | A profile per harness says how to launch, resume, find and read it (amended by 0029) | Accepted |
-| [0023](0023-every-agent-on-the-machine.md) | volee shows every agent on the machine, and adopts the ones it did not start (supersedes 0018; amended by 0027, 0029 and 0030) | Accepted |
-| [0024](0024-agents-come-back-after-a-reboot.md) | Agents interrupted by a reboot come back in new hosts | Accepted |
-| [0025](0025-key-sequences-a-leader-and-which-key-popups.md) | Key sequences, a leader key and which-key popups; every key configurable | Proposed |
-| [0026](0026-edit-mode-types-into-an-agent-inside-volee.md) | Edit mode types into an agent inside volee; the host encodes keys | Proposed |
-| [0027](0027-open-without-owning.md) | volee opens every agent where it runs, and its list shows what runs (amends 0023, 0026, 0021 and 0004; amended by 0034) | Accepted |
-| [0028](0028-one-emulator-and-the-wall-inside-the-interface.md) | One emulator for every screen, and the wall inside the interface (completes 0020; amends 0021, 0026 and 0027) | Accepted |
+| [0019](0019-a-host-process-holds-each-agent-terminal.md) | A volee-host process holds each agent's terminal (supersedes 0002) | Superseded by v2 (was: Accepted) |
+| [0020](0020-libghostty-vt-emulates-terminals.md) | libghostty-vt emulates every terminal volee reads | Superseded by v2 (was: Accepted) |
+| [0021](0021-take-over-watch-and-the-wall-of-screens.md) | Take over with `a` or `volee attach`, leave with Ctrl+Q, watch on a wall | Superseded by v2 (was: Accepted) |
+| [0022](0022-harness-profiles.md) | A profile per harness says how to launch, resume, find and read it (amended by 0029) | Superseded by v2 (was: Accepted) |
+| [0023](0023-every-agent-on-the-machine.md) | volee shows every agent on the machine, and adopts the ones it did not start (supersedes 0018; amended by 0027, 0029 and 0030) | Superseded by v2 (was: Accepted) |
+| [0024](0024-agents-come-back-after-a-reboot.md) | Agents interrupted by a reboot come back in new hosts | Superseded by v2 (was: Accepted) |
+| [0025](0025-key-sequences-a-leader-and-which-key-popups.md) | Key sequences, a leader key and which-key popups; every key configurable | Superseded by v2 (was: Proposed) |
+| [0026](0026-edit-mode-types-into-an-agent-inside-volee.md) | Edit mode types into an agent inside volee; the host encodes keys | Superseded by v2 (was: Proposed) |
+| [0027](0027-open-without-owning.md) | volee opens every agent where it runs, and its list shows what runs (amends 0023, 0026, 0021 and 0004; amended by 0034) | Superseded by v2 (was: Accepted) |
+| [0028](0028-one-emulator-and-the-wall-inside-the-interface.md) | One emulator for every screen, and the wall inside the interface (completes 0020; amends 0021, 0026 and 0027) | Superseded by v2 (was: Accepted) |
 | [0029](0029-volee-run.md) | `volee run` makes any program an agent, in the terminal it is typed in (amends 0022 and 0023) | Accepted |
 | [0030](0030-a-multiplexer-may-say-which-panes-run-an-agent.md) | A multiplexer may say which of its panes run an agent (amends 0023 and 0015) | Accepted |
 | [0031](0031-a-question-may-offer-its-answers.md) | A question to the person may offer its answers (amends 0006) | Accepted |
 | [0032](0032-a-mission-is-merged-only-after-the-person-approved.md) | A mission is merged only after the person approved its report (amends 0007 and 0011) | Accepted |
 | [0033](0033-a-lead-makes-others-work.md) | A lead is the agent you talk to, and it makes others work (amends 0007) | Accepted |
-| [0034](0034-a-session-in-its-own-terminal-opens-once-it-left-it.md) | A session in a terminal of its own opens once it left it, on the same row (amends 0027) | Accepted |
-| [0035](0035-the-context-an-agent-uses-comes-from-its-status-line.md) | The context an agent uses comes from its status line | Accepted |
+| [0034](0034-a-session-in-its-own-terminal-opens-once-it-left-it.md) | A session in a terminal of its own opens once it left it, on the same row (amends 0027) | Superseded by v2 (was: Accepted) |
+| [0035](0035-the-context-an-agent-uses-comes-from-its-status-line.md) | The context an agent uses comes from its status line | Superseded by v2 (was: Accepted) |
 
 ## Not built yet
 
