@@ -39,8 +39,9 @@ configurations for Codex CLI and Gemini CLI.
 Agents volee launches may call every tool below without a permission
 prompt: their settings allow `mcp__volee`, so that a background agent never
 stalls on asking to send a message. Only a mission's coordinator may call
-`spawn_worker` and `request_approval`; only a lead may call `spawn_agent`
-and `start_mission`. No tool merges or closes a mission: volee does both,
+`request_approval`. The tools that launched agents and missions
+(`spawn_worker`, `spawn_agent`, `start_mission`) left with the v2 restart.
+No tool merges or closes a mission: volee does both,
 once the human approved.
 
 ## Tools
@@ -131,46 +132,6 @@ task is done, blocked or failed. A `done` report is a `report` message;
 | `outcome` | `done`, `blocked`, `failed` | How the task ended. |
 | `summary` | string | What was done, what is left, what to check. |
 | `refs` | list | Commits, pull requests or files that prove the work. |
-
-### `spawn_worker`
-
-For a mission's coordinator: launches a worker on a new branch, in its own
-worktree of one of the mission's repositories. volee tells the coordinator
-when the worker stops, with the evidence it checked. A mission launches at
-most `[missions] max_workers` agents (8 by default); past it, the tool
-returns an error that tells the coordinator to ask the human.
-
-| Argument | Type | Meaning |
-| --- | --- | --- |
-| `repo` | string | A repository, as the mission lists it. |
-| `branch` | string | A new branch, such as `feat/invoices`. |
-| `task` | string | The whole task: the worker knows only what it says. |
-| `name` | string, optional | A short display name. |
-| `base` | string, optional | The branch to start from; the repository's default branch otherwise. |
-
-### `spawn_agent`
-
-For a lead ([ADR 0033](../adr/0033-a-lead-makes-others-work.md)): launches
-an agent on one task in one repository, on a new branch in its own
-worktree. The agent's parent is the lead: it reports to it. The arguments
-are those of `spawn_worker`; `repo` is a name `whoami` lists, or an
-absolute path. volee refuses, with the name of the agent to write to
-instead, when an agent already works on that branch of that repository.
-
-### `start_mission`
-
-For a lead: starts a mission in its name. Its coordinator answers to the
-lead: its reports go to it, and each may write to the other.
-
-| Argument | Type | Meaning |
-| --- | --- | --- |
-| `title` | string | A short title, which names the mission everywhere. |
-| `goal` | string | The whole goal: its coordinator knows only what it says. |
-| `repos` | list of strings | Names `whoami` lists, or absolute paths. |
-| `kind` | `change` or `analysis`, optional | What the mission delivers; `change` by default. |
-
-volee refuses, with the name of the coordinator to write to instead, while
-a mission is open under the same title.
 
 ### `request_approval`
 
