@@ -11,7 +11,6 @@ use volee_core::harness::HarnessKind;
 use volee_core::ids::{AgentId, MessageId, MissionId, ThreadId};
 use volee_core::message::{MessageKind, Party, Reference};
 use volee_core::mission::MissionKind;
-use volee_core::role::Role;
 use volee_core::time::Timestamp;
 
 /// A protocol method.
@@ -125,27 +124,10 @@ pub struct StatusInfo {
     /// or has not checked it yet.
     #[serde(default)]
     pub forge: Option<ForgeStatus>,
-    /// The terminal multiplexers whose panes the daemon finds agents in
-    /// (ADR 0015); none when none is installed.
-    #[serde(default)]
-    pub multiplexers: Vec<MultiplexerStatus>,
     /// The repositories of the configuration, by name: where agents and
     /// missions can be launched without giving a path.
     #[serde(default)]
     pub repos: Vec<String>,
-}
-
-/// What the daemon knows about a terminal multiplexer on this machine.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MultiplexerStatus {
-    /// Its name, such as `tuios`.
-    pub name: String,
-    /// Whether volee can use it now: installed, with a server running.
-    pub available: bool,
-    /// Its version, when known.
-    pub version: Option<String>,
-    /// Why it is unavailable, or a note.
-    pub detail: Option<String>,
 }
 
 method!(
@@ -363,158 +345,6 @@ method!(
     TidyOutcome
 );
 
-/// Parameters of [`Spawn`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SpawnParams {
-    /// A repository name from the configuration, or a path to a checkout.
-    pub repo: String,
-    /// The branch to create for the agent.
-    pub branch: String,
-    /// The base branch; the repository's default branch when absent.
-    pub base: Option<String>,
-    /// The task, written as the agent's first prompt.
-    pub task: String,
-    /// The agent's role; usually `worker`.
-    pub role: Role,
-    /// The agent that asks for this one.
-    pub parent: Option<AgentId>,
-    /// The mission it works for.
-    pub mission: Option<MissionId>,
-    /// The model; the harness default when absent.
-    pub model: Option<String>,
-    /// A display name; derived from the repository and branch when absent.
-    pub name: Option<String>,
-    /// The harness profile (ADR 0022): `claude-code` when absent, or
-    /// `opencode`.
-    #[serde(default)]
-    pub harness: Option<String>,
-}
-
-/// The result of [`Spawn`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Spawned {
-    /// The new agent.
-    pub agent: AgentId,
-    /// Its worktree.
-    pub worktree: String,
-    /// The log of the repository's setup commands, when it has some
-    /// (ADR 0017).
-    #[serde(default)]
-    pub setup_log: Option<String>,
-}
-
-method!(
-    /// Creates a worktree and launches an agent in it.
-    Spawn,
-    "agents.spawn",
-    SpawnParams,
-    Spawned
-);
-
-/// Parameters of [`StartLead`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LeadParams {
-    /// The directory the lead runs in: an absolute path.
-    pub cwd: String,
-    /// What the person asks of it at once; without it, the lead says that
-    /// it is ready and waits.
-    #[serde(default)]
-    pub task: Option<String>,
-    /// A display name; `lead-<directory>` when absent.
-    #[serde(default)]
-    pub name: Option<String>,
-    /// The model; the configured one, else the harness default, when absent.
-    #[serde(default)]
-    pub model: Option<String>,
-}
-
-/// The result of [`StartLead`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LeadStarted {
-    /// The new agent.
-    pub agent: AgentId,
-    /// The name it is listed under.
-    pub name: String,
-}
-
-method!(
-    /// Starts a lead: an agent the person talks to, which launches agents
-    /// and missions and never codes (ADR 0033). It has no worktree.
-    StartLead,
-    "agents.lead",
-    LeadParams,
-    LeadStarted
-);
-
-/// Parameters of [`Run`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RunParams {
-    /// The id of a volee host the client started, in the daemon's hosts
-    /// directory: the program it runs becomes an agent.
-    pub host: String,
-    /// The agent's name; the host's own name, else the name of the
-    /// program's directory, when absent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-}
-
-/// The result of [`Run`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Ran {
-    /// The new agent.
-    pub agent: AgentId,
-    /// Its name.
-    pub name: String,
-}
-
-method!(
-    /// Makes the program a volee host runs an agent of the list (`volee
-    /// run`): any program, with the generic profile (ADR 0022). The client
-    /// starts the host itself, in the person's own terminal environment.
-    Run,
-    "agents.run",
-    RunParams,
-    Ran
-);
-
-/// The size of a terminal, in cells.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScreenSize {
-    /// Its columns.
-    pub cols: u16,
-    /// Its rows.
-    pub rows: u16,
-}
-
-/// The result of [`Preview`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PreviewText {
-    /// The agent's recent terminal output, with ANSI sequences, to be
-    /// rendered by a terminal emulator.
-    pub screen: String,
-    /// Whether `screen` draws the agent's screen itself, row for row: the
-    /// snapshot of a volee host, what a multiplexer captured of a pane.
-    /// False for the replay of a session's output, which leaves blank what
-    /// it never redrew, and for a daemon from before 0.12.2, which did not
-    /// say what it had read.
-    #[serde(default)]
-    pub exact: bool,
-    /// The size of the terminal `screen` was drawn in, when the daemon
-    /// knows it: a volee host says its own. Without it, a reader tells the
-    /// size from what `screen` writes.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size: Option<ScreenSize>,
-}
-
-method!(
-    /// The agent's recent terminal output. Refused for an agent in a terminal
-    /// of its own (an interactive session), which only that terminal shows.
-    Preview,
-    "agents.preview",
-    AgentParams,
-    PreviewText
-);
-
 /// Parameters of [`Diff`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiffParams {
@@ -542,115 +372,6 @@ method!(
     "agents.diff",
     DiffParams,
     DiffText
-);
-
-/// The result of [`Attach`]: a command the client runs with its own
-/// terminal, or, for an agent in a multiplexer pane, how to bring that pane
-/// forward.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AttachCommand {
-    /// The program; empty when `focus` is given.
-    pub program: String,
-    /// Its arguments.
-    pub args: Vec<String>,
-    /// Its working directory.
-    pub cwd: Option<String>,
-    /// Environment variables to remove before running it: the ones that
-    /// would tie it to another agent's session.
-    #[serde(default)]
-    pub env_remove: Vec<String>,
-    /// A sentence telling the person how to come back.
-    pub hint: String,
-    /// For an agent whose session runs in a multiplexer pane volee found
-    /// (ADR 0015): the pane to bring forward instead of taking the agent
-    /// over. The client runs its steps itself, in its own environment, and
-    /// keeps its terminal.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub focus: Option<PaneFocus>,
-}
-
-/// How to bring forward the multiplexer pane an agent runs in.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PaneFocus {
-    /// The multiplexer, such as `tuios`.
-    pub multiplexer: String,
-    /// The multiplexer's session that holds the pane, said for people.
-    pub session: String,
-    /// The commands to run, in order: each is a program and its arguments.
-    pub steps: Vec<Vec<String>>,
-    /// The command that shows the pane's session in a terminal, for when the
-    /// first step focused the pane but no client of the multiplexer shows
-    /// its session, such as `tuios attach work`; empty when unknown.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attach: Vec<String>,
-}
-
-method!(
-    /// How to take over an agent in the client's terminal, or bring forward
-    /// the multiplexer pane it runs in. Refused for an agent in a terminal
-    /// volee cannot address: switch to that terminal instead.
-    Attach,
-    "agents.attach",
-    AgentParams,
-    AttachCommand
-);
-
-/// Parameters of [`Open`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OpenParams {
-    /// The agent.
-    pub agent: AgentId,
-    /// The columns of the panel that will show its terminal.
-    pub cols: u16,
-    /// Its rows.
-    pub rows: u16,
-}
-
-/// The result of [`Open`]: where the client finds the agent's terminal.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Opened {
-    /// The socket of a volee host to connect to: the host the agent runs
-    /// in, or a host that shows its session through the session's own door
-    /// (ADR 0027). `None` when the agent's terminal cannot be shown inside
-    /// the client and [`Attach`] says how to reach it instead.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub socket: Option<std::path::PathBuf>,
-    /// Whether the host is a view: closing it ends nothing but the view,
-    /// and it ends by itself once nobody uses it.
-    #[serde(default)]
-    pub view: bool,
-}
-
-method!(
-    /// A terminal on the agent, for a client that shows it inside its own
-    /// screen: the agent's volee host, or a view on the session where it
-    /// runs (a Claude Code background session, a multiplexer pane). Nothing
-    /// is stopped, forked or resumed to get it (ADR 0027). Refused for an
-    /// agent in a terminal volee cannot reach.
-    Open,
-    "agents.open",
-    OpenParams,
-    Opened
-);
-
-method!(
-    /// Stops an agent's session; its conversation is kept and can be
-    /// resumed. Refused for agents volee did not launch (ADR 0011).
-    Stop,
-    "agents.stop",
-    AgentParams,
-    Empty
-);
-
-method!(
-    /// Moves an agent's conversation into a volee host (ADR 0023): stops its
-    /// background session if it runs, then resumes it in a host. Refused for
-    /// an agent that runs in someone's terminal, which must be quit there
-    /// first.
-    Adopt,
-    "agents.adopt",
-    AgentParams,
-    Empty
 );
 
 // ---- messages -------------------------------------------------------------
@@ -970,14 +691,7 @@ mod tests {
             Join::NAME,
             RecordActivity::NAME,
             Tidy::NAME,
-            Spawn::NAME,
-            Run::NAME,
-            Preview::NAME,
             Diff::NAME,
-            Attach::NAME,
-            Open::NAME,
-            Stop::NAME,
-            Adopt::NAME,
             SendMessage::NAME,
             MarkRead::NAME,
             HookIngest::NAME,
@@ -1013,40 +727,6 @@ mod tests {
             serde_json::from_value(serde_json::json!({ "agent": "ag_01jc5x8m3kq7v2c4b9e0f1g2h3" }))
                 .unwrap();
         assert!(!params.dry_run, "a request without dry_run removes");
-    }
-
-    #[test]
-    fn a_preview_says_what_was_read_and_an_older_daemon_says_nothing() {
-        // A daemon from before 0.12.2 sends the screen alone: a replay.
-        let old: PreviewText =
-            serde_json::from_value(serde_json::json!({ "screen": "hi" })).unwrap();
-        assert_eq!(
-            old,
-            PreviewText {
-                screen: "hi".into(),
-                exact: false,
-                size: None
-            }
-        );
-        assert_eq!(
-            serde_json::to_value(&old).unwrap(),
-            serde_json::json!({ "screen": "hi", "exact": false })
-        );
-        // A volee host's snapshot: the screen itself, with the host's size.
-        let held = PreviewText {
-            screen: "hi".into(),
-            exact: true,
-            size: Some(ScreenSize {
-                cols: 120,
-                rows: 60,
-            }),
-        };
-        let json = serde_json::to_value(&held).unwrap();
-        assert_eq!(
-            json,
-            serde_json::json!({ "screen": "hi", "exact": true, "size": { "cols": 120, "rows": 60 } })
-        );
-        assert_eq!(serde_json::from_value::<PreviewText>(json).unwrap(), held);
     }
 
     #[test]

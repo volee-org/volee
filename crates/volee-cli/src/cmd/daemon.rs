@@ -152,15 +152,6 @@ pub(crate) async fn status() -> Result<()> {
         }
     }
     println!("  forge    {}", forge_line(status.forge.as_ref()));
-    for multiplexer in &status.multiplexers {
-        let version = multiplexer.version.as_deref().unwrap_or("unknown version");
-        if multiplexer.available {
-            println!("  panes    {} {version}, available", multiplexer.name);
-        } else {
-            let reason = multiplexer.detail.as_deref().unwrap_or("unknown reason");
-            println!("  panes    {} unavailable: {reason}", multiplexer.name);
-        }
-    }
     Ok(())
 }
 
