@@ -139,7 +139,8 @@ flowchart LR
   never write Lua.
 - **UI (TypeScript web app served by the daemon).** A browser runs only
   JavaScript, so TypeScript here is forced by the platform, not by habit.
-  Monaco or CodeMirror (diff and in-place fix), diff2html (guided diff),
+  diff2html (guided diff), no imposed editor (the user's own editor opens
+  through a configured command; a small in-browser editor only as a fallback),
   Mermaid (diagram of the change), React Flow (later, agent graph, not v1).
   Tauri may wrap it later as a desktop app: the UI must not depend on it.
 - **Hooks are enough for v1** (section 7): permissions through a
@@ -172,7 +173,8 @@ of the change, guided diff (ordered by meaning, not by file name, with the
 review notes inline).
 
 **Actions:** merge according to the rules, ask for a fix (sent back to the
-agent), comment a line (becomes the fix request), fix in the embedded editor.
+agent), comment a line (becomes the fix request), fix in the user's own editor
+(opened by a Lua-configured command, see decision 7).
 
 **Risk-based validation.** Each change gets a risk level from the Lua rules
 (paths touched, size, migrations, dependencies, tests changed or not, review
@@ -231,7 +233,7 @@ interactive session.**
   timeout behaviour there; the multi-select answer format.
 - Design consequences: question cards are answered from the inbox for any
   session. Open point: while volee holds the question, the person at the
-  terminal sees nothing, so volee must warn them (open question 3) and have a
+  terminal sees nothing, so volee must warn them (decision 5) and have a
   fast "let the terminal ask" answer (a timeout or no-decision response) that
   leaves the normal dialog. Echo the questions array back unchanged.
 
@@ -314,25 +316,33 @@ build step (the web bundle is embedded in the binary).
    hooks-only. ADR 0004 is to be amended.
 4. **Merge:** automatic merge is allowed at low risk when a Lua rule says so,
    and it is visible in the journal. Otherwise, one click.
+5. **Held question:** volee holds an `AskUserQuestion` for a short delay,
+   configurable in Lua (a few minutes by default), then hands it back to the
+   normal terminal dialog. The right default is measured at step 5.
+6. **Lua surface:** a readable settings table by default (thresholds,
+   sensitive paths) plus Lua functions for special cases. One file per repo
+   plus a personal file outside the repo.
+7. **Editor:** no single embedded editor is imposed. The user chooses their
+   own (vim, neovim, WebStorm, VS Code...), configured in Lua as commands with
+   placeholders (`{file}`, `{line}`, `{dir}`, `{base}`). A TUI editor opens in
+   a terminal through an adapter (Rex floating pane, tmux, or a new terminal
+   window). A GUI editor opens as an external command (`open -a`,
+   `code -g {file}:{line}`...). The UI shows the change back once the file is
+   saved. A small in-browser editor may stay as a fallback only, to decide
+   later. Reuse the `[tui.tools]` "Open with" of 0.18 (PR #198), same idea.
 
 ## 10. Open questions for Jeff
 
 1. **Name and repo.** Keep `volee` and `volee-org/volee` for v2, or a new name
    to mark the break? (Recommendation: keep.)
-2. **Lua surface.** Start with a declarative default plus Lua escape hatch, or
-   Lua only? Who may write rules per developer (a user file outside the repo)?
-3. **Held questions.** While volee holds an `AskUserQuestion` (T2), the person
-   at the terminal sees nothing. How do we warn them (desktop notification, a
-   short hold before the hook answers, a per-repo "ask in terminal first"
-   rule)? And what is the right timeout before the terminal dialog takes over?
-   Later, separately: an opt-in SDK module at all, given the grey zone (T3)?
-4. **UI shell and editor.** Plain browser tab first, Tauri later: confirm.
-   Monaco (heavier, VS Code feel) or CodeMirror (lighter)?
-5. **Review model.** Haiku by default, two reviewers when risky: who decides
+2. **UI shell.** Plain browser tab first, Tauri later: confirm.
+3. **Review model.** Haiku by default, two reviewers when risky: who decides
    "risky", the Lua rules or the person per card?
-6. **First targets** for rules (slapeo, volee itself), and whether a Rex
+4. **First targets** for rules (slapeo, volee itself), and whether a Rex
    adapter alone is enough for v1.
-7. **License and public status** unchanged (MIT OR Apache-2.0, public)?
+5. **License and public status** unchanged (MIT OR Apache-2.0, public)?
+6. **SDK module, later.** Do we ever ship an opt-in module, given the grey
+   zone of the terms (T3)? Not for v1.
 
 ## 11. Staged plan
 
@@ -347,11 +357,11 @@ journeys (a release is not done until the proof passes on a real machine).
 | 2 | Agents and finished work: `claude agents --json` poller joined to hooks, worktree and git facts (ahead, dirty, merged) | `volee agents` shows state and finished work with a diff summary | Journey: real worker finishes in a sandbox, card data matches git |
 | 3 | Minimal web UI: the inbox list over WebSocket, served by the daemon, bundle embedded in the binary | Browser tab shows live cards, `Open terminal` through one adapter (Rex) | Playwright journey against a real agent |
 | 4 | Permission cards: `PermissionRequest` http hook, allow and deny from the UI, long explicit timeout, stale reconciliation with the transcript | Approve a real tool call from the browser, no terminal touch | Journey: allow, deny, timeout fallback to the terminal dialog, answered-in-terminal first (card disappears) |
-| 5 | Question cards: `PreToolUse` on `AskUserQuestion`, answers and free text, the held-question warning chosen in open question 3 | Answer a real question from the browser | Journey: answer, deny, timeout; multi-select format measured first |
+| 5 | Question cards: `PreToolUse` on `AskUserQuestion`, answers and free text, hold delay from decision 5 (Lua, a few minutes by default) measured here | Answer a real question from the browser | Journey: answer, deny, timeout; multi-select format measured first |
 | 6 | Finished-work card screen: summary, plan from transcript, guided diff (diff2html), Mermaid diagram of the change | Open a finished worker and read it in layers | Journey on a real change; transcript parser tested against recorded real files, degrades to hooks-only on failure |
 | 7 | Pre-review: native `/code-review` as an opinion on the card | Review notes inline in the diff | Journey; review never blocks a merge by itself |
 | 8 | Lua engine and rules: sandboxed mlua, config file, risk function per repo and per developer, layers shown by risk, load error falls back to the safest rule | Same change shown as a glance or a full read depending on the rules | Rust unit tests of the sandbox limits; journey with two rule files |
-| 9 | Actions: merge according to the rules, ask for a fix, comment a line, fix in the embedded editor (CodeMirror or Monaco) | A finished change merged from the browser | Journey: merge with delivery evidence (ADR 0011), fix request reaches the agent as a message |
+| 9 | Actions: merge according to the rules, ask for a fix, comment a line, fix in the user's own editor (Lua command with `{file}`, `{line}`, `{dir}`, `{base}`; TUI editor through an adapter, GUI editor as an external command; the UI shows the change once saved) | A finished change merged from the browser; a line opened in nvim and in a GUI editor | Journey: merge with delivery evidence (ADR 0011), fix request reaches the agent as a message, the saved edit appears on the card |
 | 10 | v1 release: docs rebuilt, `ask_human` over MCP kept, installer, `v2.0.0` after Jeff's explicit go | `curl ... installer \| sh`, then the inbox on a real day of work | The whole journey set on a real machine, then a day of daily use before the tag |
 
 Order rationale: steps 1 to 3 prove the observe-only pipeline end to end before
