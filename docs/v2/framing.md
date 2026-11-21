@@ -17,8 +17,8 @@ volee 0.18 is judged badly designed, for three reasons:
   schema of a change or a plan is not a terminal job. The TUI is 56 000 lines
   and the largest crate by far.
 
-Decision of 2026-11-21: restart from scratch as a new major version, built
-after and with rex-cockpit (the lab).
+Direction of 2026-11-21: a new major version, built after and with
+rex-cockpit (the lab). How to restart is not decided: see section 10.
 
 ## 2. Goals and non-goals (v1 scope)
 
@@ -74,7 +74,7 @@ never types into a terminal. Where a decision must come back to an interactive
 session, it goes through a hook response (T1, T2). The SDK is not used in v1 (T3).
 
 AGENTS.md and ADR 0004 forbid parsing Claude Code internal files. Transcripts
-are the one exception (decision 3, section 9): they are the only source of
+are the one exception (decision 2, section 9): they are the only source of
 "what the AI did and why". They are read through one tolerant module that
 degrades to hooks-only when parsing fails, and ADR 0004 is to be amended.
 
@@ -174,7 +174,7 @@ review notes inline).
 
 **Actions:** merge according to the rules, ask for a fix (sent back to the
 agent), comment a line (becomes the fix request), fix in the user's own editor
-(opened by a Lua-configured command, see decision 7).
+(opened by a Lua-configured command, see decision 6).
 
 **Risk-based validation.** Each change gets a risk level from the Lua rules
 (paths touched, size, migrations, dependencies, tests changed or not, review
@@ -233,7 +233,7 @@ interactive session.**
   timeout behaviour there; the multi-select answer format.
 - Design consequences: question cards are answered from the inbox for any
   session. Open point: while volee holds the question, the person at the
-  terminal sees nothing, so volee must warn them (decision 5) and have a
+  terminal sees nothing, so volee must warn them (decision 4) and have a
   fast "let the terminal ask" answer (a timeout or no-decision response) that
   leaves the normal dialog. Echo the questions array back unchanged.
 
@@ -306,23 +306,21 @@ build step (the web bundle is embedded in the binary).
 
 ## 9. Decisions (Jeff, 2026-11-21)
 
-1. **Restart:** option A of section 12. Same repo, history kept, `legacy/0.x`
-   on the current `main` head, then reviewable commits on `v2`.
-2. **ADRs and docs:** as proposed in section 8. All ADRs are kept as history,
+1. **ADRs and docs:** as proposed in section 8. All ADRs are kept as history,
    superseded ones marked, the listed ones kept or adapted. New ADRs for Lua,
    observe-only, web UI and SDK policy. The mdBook site is kept and rebuilt
    around the inbox.
-3. **Transcripts:** yes, read through one tolerant module that degrades to
+2. **Transcripts:** yes, read through one tolerant module that degrades to
    hooks-only. ADR 0004 is to be amended.
-4. **Merge:** automatic merge is allowed at low risk when a Lua rule says so,
+3. **Merge:** automatic merge is allowed at low risk when a Lua rule says so,
    and it is visible in the journal. Otherwise, one click.
-5. **Held question:** volee holds an `AskUserQuestion` for a short delay,
+4. **Held question:** volee holds an `AskUserQuestion` for a short delay,
    configurable in Lua (a few minutes by default), then hands it back to the
    normal terminal dialog. The right default is measured at step 5.
-6. **Lua surface:** a readable settings table by default (thresholds,
+5. **Lua surface:** a readable settings table by default (thresholds,
    sensitive paths) plus Lua functions for special cases. One file per repo
    plus a personal file outside the repo.
-7. **Editor:** no single embedded editor is imposed. The user chooses their
+6. **Editor:** no single embedded editor is imposed. The user chooses their
    own (vim, neovim, WebStorm, VS Code...), configured in Lua as commands with
    placeholders (`{file}`, `{line}`, `{dir}`, `{base}`). A TUI editor opens in
    a terminal through an adapter (Rex floating pane, tmux, or a new terminal
@@ -333,6 +331,10 @@ build step (the web bundle is embedded in the binary).
 
 ## 10. Open questions for Jeff
 
+0. **Restart from scratch.** Not decided. Which of options A, B or C of
+   section 12 (recommendation: A), and when. Until Jeff agrees explicitly, no
+   old code, ADR or doc is removed or marked, and each removal is asked
+   separately.
 1. **Name and repo.** Keep `volee` and `volee-org/volee` for v2, or a new name
    to mark the break? (Recommendation: keep.)
 2. **UI shell.** Plain browser tab first, Tauri later: confirm.
@@ -352,12 +354,12 @@ journeys (a release is not done until the proof passes on a real machine).
 
 | # | Step | Demo | Proof |
 | --- | --- | --- | --- |
-| 0 | Clean slate: `legacy/0.x`, remove host, term, tui and TUI journeys, workspace builds, CI and release green | `cargo build` of a near-empty workspace, CI green | CI on the branch; `dist plan` still passes |
+| 0 | **Not started, needs Jeff's agreement.** Clean slate: `legacy/0.x`, remove host, term, tui and TUI journeys, workspace builds, CI and release green | `cargo build` of a near-empty workspace, CI green | CI on the branch; `dist plan` still passes |
 | 1 | Hook server: daemon on 127.0.0.1 with token, receives every Claude Code http hook, stores events in SQLite, `volee doctor` writes the per-install hook settings | `volee` run, a real Claude session, events listed by a CLI | Journey: real Claude in a sandbox repo, assert the stored event sequence |
 | 2 | Agents and finished work: `claude agents --json` poller joined to hooks, worktree and git facts (ahead, dirty, merged) | `volee agents` shows state and finished work with a diff summary | Journey: real worker finishes in a sandbox, card data matches git |
 | 3 | Minimal web UI: the inbox list over WebSocket, served by the daemon, bundle embedded in the binary | Browser tab shows live cards, `Open terminal` through one adapter (Rex) | Playwright journey against a real agent |
 | 4 | Permission cards: `PermissionRequest` http hook, allow and deny from the UI, long explicit timeout, stale reconciliation with the transcript | Approve a real tool call from the browser, no terminal touch | Journey: allow, deny, timeout fallback to the terminal dialog, answered-in-terminal first (card disappears) |
-| 5 | Question cards: `PreToolUse` on `AskUserQuestion`, answers and free text, hold delay from decision 5 (Lua, a few minutes by default) measured here | Answer a real question from the browser | Journey: answer, deny, timeout; multi-select format measured first |
+| 5 | Question cards: `PreToolUse` on `AskUserQuestion`, answers and free text, hold delay from decision 4 (Lua, a few minutes by default) measured here | Answer a real question from the browser | Journey: answer, deny, timeout; multi-select format measured first |
 | 6 | Finished-work card screen: summary, plan from transcript, guided diff (diff2html), Mermaid diagram of the change | Open a finished worker and read it in layers | Journey on a real change; transcript parser tested against recorded real files, degrades to hooks-only on failure |
 | 7 | Pre-review: native `/code-review` as an opinion on the card | Review notes inline in the diff | Journey; review never blocks a merge by itself |
 | 8 | Lua engine and rules: sandboxed mlua, config file, risk function per repo and per developer, layers shown by risk, load error falls back to the safest rule | Same change shown as a glance or a full read depending on the rules | Rust unit tests of the sandbox limits; journey with two rule files |
@@ -368,7 +370,7 @@ Order rationale: steps 1 to 3 prove the observe-only pipeline end to end before
 any decision is taken; 4 and 5 are the two risky checks of section 7 turned into
 features; 8 comes before 9 so merges are never unruled.
 
-## 12. Way to restart from scratch on branch `v2` (option A decided)
+## 12. Way to restart from scratch on branch `v2` (open, see section 10)
 
 Options:
 
@@ -388,4 +390,15 @@ event log, git, merge flow and MCP; (3) the new skeleton (hook server,
 `claude agents --json` poller, Lua engine). Before commit 1, a maintainer
 creates `legacy/0.x` on the current `main` head so 0.18 stays maintainable.
 `main` keeps shipping 0.18 until v2 reaches the inbox, then v2 is merged and
-released as `v2.0.0`. This note applies none of it.
+released as `v2.0.0`. This note applies none of it, and nothing is removed or marked before Jeff
+agrees, removal by removal.
+
+## 13. Working rules
+
+- Commits and pushes are allowed on `v2` and its work branches.
+- Merge into `main` only when Jeff validates, even with green CI.
+- No publication of any kind: no tag, release, package, binary, installer or
+  docs site update.
+- A step is done only after local tests and real trials in the sandbox.
+- No old code, ADR or doc is removed or marked without Jeff's explicit
+  agreement, asked separately for each removal.
