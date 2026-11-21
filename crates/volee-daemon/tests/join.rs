@@ -118,9 +118,6 @@ fn start(log: Vec<Event>) -> Running {
         max_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
-        volee_bin: None,
-        multiplexers: Vec::new(),
-        hosts: false,
         processes: None,
     };
     tokio::spawn(Daemon::serve(listener, config));

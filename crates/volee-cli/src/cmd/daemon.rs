@@ -12,7 +12,6 @@ use volee_daemon::{
 };
 use volee_git::{GhCli, GitCli};
 use volee_harness::{ClaudeCode, Harness};
-use volee_mux::{Multiplexer, Tmux, Tuios};
 use volee_proto::client::Client;
 use volee_proto::methods::{Empty, ForgeStatus, HarnessStatus, Shutdown, Status, StatusParams};
 use volee_proto::paths::Paths;
@@ -27,7 +26,6 @@ pub(crate) async fn run() -> Result<()> {
         .with_context(|| format!("cannot create {}", paths.state_dir.display()))?;
     let log = SqliteLog::open(&paths.database())
         .with_context(|| format!("cannot open {}", paths.database().display()))?;
-    let volee_bin = std::env::current_exe().ok();
     let (harness, status) = detect_claude_code().await;
     if harness.is_some() {
         tracing::info!(version = ?status.version, "using Claude Code");
@@ -53,34 +51,11 @@ pub(crate) async fn run() -> Result<()> {
         max_discovery_interval: DEFAULT_MAX_DISCOVERY_INTERVAL,
         idle_discovery_interval: DEFAULT_IDLE_DISCOVERY_INTERVAL,
         evidence,
-        volee_bin,
-        multiplexers: multiplexers(),
-        hosts: true,
         processes: Some(Arc::new(volee_harness::SystemRunner)),
     };
     Daemon::run(config)
         .await
         .context("the daemon stopped with an error")
-}
-
-/// The terminal multiplexers whose panes agents are looked for in
-/// (ADR 0015): tmux and tuios, when they are installed. None is required.
-///
-/// tmux comes first: a session in tmux inside a tuios pane runs in tmux's
-/// pane, even when tuios's hooks, through the variables it inherited, place
-/// it in the tuios pane; the first multiplexer that finds a session keeps it.
-fn multiplexers() -> Vec<Arc<dyn Multiplexer>> {
-    let path = std::env::var("PATH").ok();
-    let mut found: Vec<Arc<dyn Multiplexer>> = Vec::new();
-    if crate::tools::on_path("tmux", path.as_deref()) {
-        tracing::info!("looking for agents in tmux panes");
-        found.push(Arc::new(Tmux::new()));
-    }
-    if crate::tools::on_path("tuios", path.as_deref()) {
-        tracing::info!("looking for agents in tuios panes");
-        found.push(Arc::new(Tuios::new()));
-    }
-    found
 }
 
 /// Finds Claude Code and checks that its version has what volee needs.

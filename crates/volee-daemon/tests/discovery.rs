@@ -109,9 +109,6 @@ fn start_reading(
         max_discovery_interval: longest,
         idle_discovery_interval: idle,
         evidence: EvidenceSources::default(),
-        volee_bin: None,
-        multiplexers: Vec::new(),
-        hosts: false,
         processes,
     };
     tokio::spawn(Daemon::serve(listener, config));
@@ -694,9 +691,6 @@ async fn without_a_harness_a_refresh_answers_at_once() {
         max_discovery_interval: HOUR,
         idle_discovery_interval: HOUR,
         evidence: EvidenceSources::default(),
-        volee_bin: None,
-        multiplexers: Vec::new(),
-        hosts: false,
         processes: None,
     };
     tokio::spawn(Daemon::serve(listener, config));

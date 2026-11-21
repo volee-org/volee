@@ -29,7 +29,7 @@ use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     AbortMission, AbortParams, AgentParams, ApprovalParams, CloseMission, CloseParams,
     CreateMission, CreateMissionParams, EventsSince, Forget, HookIngest, HookParams,
-    RequestApproval, SendMessage, SendParams, SinceParams, Stop,
+    RequestApproval, SendMessage, SendParams, SinceParams,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
@@ -182,9 +182,6 @@ fn start_with(events: Vec<Event>, harness: Option<Arc<dyn Harness>>) -> Running 
         max_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
-        volee_bin: None,
-        multiplexers: Vec::new(),
-        hosts: false,
         processes: None,
     };
     let task = tokio::spawn(Daemon::serve(listener, config));
@@ -264,34 +261,6 @@ async fn a_mission_starts_in_planning_with_its_own_thread() {
     let thread = registry.thread(created.thread).unwrap();
     assert_eq!(thread.mission, Some(created.mission));
     assert_eq!(thread.participants, [Party::Human]);
-}
-
-#[tokio::test]
-async fn without_claude_code_a_mission_is_refused_and_nothing_is_recorded() {
-    let daemon = start(vec![]);
-    let client = connect(&daemon).await;
-    let error = rpc_error(
-        client
-            .call::<CreateMission>(CreateMissionParams {
-                title: "Invoicing".into(),
-                kind: MissionKind::Change,
-                goal: "Add invoices to billing.".into(),
-                repos: vec!["billing".into()],
-                requested_by: None,
-            })
-            .await
-            .unwrap_err(),
-    );
-    assert_eq!(error.code, rpc::UNAVAILABLE, "{}", error.message);
-    assert!(
-        error.message.contains("needs Claude Code")
-            && error.message.contains("volee daemon status"),
-        "{}",
-        error.message
-    );
-    let registry = registry(&client).await;
-    assert_eq!(registry.missions().count(), 0);
-    assert_eq!(registry.threads().count(), 0, "no thread either");
 }
 
 #[tokio::test]
@@ -612,36 +581,6 @@ async fn aborting_tells_every_live_agent_and_holds_them_all() {
         .await
         .unwrap_err();
     assert_eq!(rpc_error(again).code, rpc::REFUSED);
-}
-
-#[tokio::test]
-async fn stopping_a_worker_tells_the_coordinator_once() {
-    let mut events = mission_with_workers();
-    events.push(at(EventKind::StateChanged {
-        agent: agent(API),
-        state: AgentState::Stopped,
-        detail: None,
-    }));
-    let daemon = start_with(events, Some(Arc::new(common::FakeHarness::default())));
-    let client = connect(&daemon).await;
-    for _ in 0..2 {
-        client
-            .call::<Stop>(AgentParams { agent: agent(API) })
-            .await
-            .unwrap();
-    }
-    let registry_now = registry(&client).await;
-    let notes: Vec<_> = registry_now
-        .pending_for(agent(COORDINATOR))
-        .into_iter()
-        .filter(|m| m.kind == MessageKind::Note && m.body.contains("The human stopped api"))
-        .collect();
-    assert_eq!(notes.len(), 1, "told once");
-    assert_eq!(notes[0].thread, thread_id(), "in the mission's thread");
-    assert!(matches!(
-        registry_now.agent(agent(API)).unwrap().hold,
-        Some(Hold::StoppedByHuman { .. })
-    ));
 }
 
 #[tokio::test]

@@ -149,20 +149,6 @@ impl State {
         ThreadId::from_ulid(self.new_ulid())
     }
 
-    /// Remembers that the session the harness calls `handle` belongs to
-    /// `agent`, until a hook or a listing links it.
-    pub(crate) fn expect_session(&mut self, handle: String, agent: AgentId, origin: SessionOrigin) {
-        let since = self.now();
-        self.expected.insert(
-            handle,
-            Expected {
-                agent,
-                origin,
-                since,
-            },
-        );
-    }
-
     /// The agent waiting for the session the harness calls `handle`.
     pub(crate) fn take_expected(&mut self, handle: &str) -> Option<(AgentId, SessionOrigin)> {
         self.expected
@@ -183,17 +169,6 @@ impl State {
     /// Stops waiting for the sessions of `agent`.
     pub(crate) fn forget_expected(&mut self, agent: AgentId) {
         self.expected.retain(|_, expected| expected.agent != agent);
-    }
-
-    /// The handle of the session the daemon started or resumed for `agent`
-    /// and no listing has shown yet. When a launch and a resume both wait,
-    /// the resume (the newer session) wins.
-    pub(crate) fn expected_handle(&self, agent: AgentId) -> Option<&str> {
-        self.expected
-            .iter()
-            .filter(|(_, expected)| expected.agent == agent)
-            .max_by_key(|(handle, expected)| (expected.origin != SessionOrigin::Started, *handle))
-            .map(|(handle, _)| handle.as_str())
     }
 
     /// A new agent identifier.
@@ -311,13 +286,6 @@ impl State {
         (self.next_token, receiver)
     }
 
-    /// Whether a hook of `agent` waits for its messages.
-    pub(crate) fn waits(&self, agent: AgentId) -> bool {
-        self.waiters
-            .get(&agent)
-            .is_some_and(|waiter| !waiter.sender.is_closed())
-    }
-
     /// Removes a waiter that gave up, unless another one replaced it.
     pub(crate) fn cancel_waiter(&mut self, agent: AgentId, token: u64) {
         if self.waiters.get(&agent).is_some_and(|w| w.token == token) {
@@ -370,24 +338,5 @@ mod tests {
         let last = ids.last().unwrap().to_string();
         // Different kinds share one sequence, after their prefix.
         assert!(thread["th_".len()..] > last["msg_".len()..]);
-    }
-
-    #[test]
-    fn the_expected_session_of_an_agent_prefers_its_resume() {
-        let mut state = State::load(
-            Box::new(MemoryLog::with(vec![])),
-            Arc::new(ManualClock::at(1_000)),
-        )
-        .unwrap();
-        let agent = state.new_agent_id();
-        let other = state.new_agent_id();
-        assert_eq!(state.expected_handle(agent), None);
-        state.expect_session("aaaa1111".into(), agent, SessionOrigin::Started);
-        state.expect_session("ffff9999".into(), other, SessionOrigin::Started);
-        assert_eq!(state.expected_handle(agent), Some("aaaa1111"));
-        state.expect_session("0000beef".into(), agent, SessionOrigin::Forked);
-        assert_eq!(state.expected_handle(agent), Some("0000beef"));
-        state.take_expected("0000beef");
-        assert_eq!(state.expected_handle(agent), Some("aaaa1111"));
     }
 }

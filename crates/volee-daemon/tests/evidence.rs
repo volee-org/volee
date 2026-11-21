@@ -325,9 +325,6 @@ fn start(events: Vec<Event>, clock: Arc<ManualClock>, evidence: EvidenceSources)
         max_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence,
-        volee_bin: None,
-        multiplexers: Vec::new(),
-        hosts: false,
         processes: None,
     };
     Running {

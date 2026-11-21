@@ -179,8 +179,6 @@ struct Listed {
     succeeded: bool,
     /// It linked a session or changed the registry.
     changed: bool,
-    /// Its live interactive sessions, which may run in a multiplexer pane.
-    hosted: Vec<volee_mux::Hosted>,
 }
 
 /// Lists `harness` at once, then again after each wait the cadence gives,
@@ -237,25 +235,6 @@ pub(crate) async fn run(
             .progress
             .send_modify(|progress| progress.started += 1);
         let listed = list(&shared, &harness, &mut failing).await;
-        // Hosts and the process table do not depend on Claude Code's
-        // listing.
-        let others = if shared.hosts {
-            crate::screens::round(&shared).await
-        } else {
-            Some(Vec::new())
-        };
-        // One search of the panes, with every session that may run in one,
-        // whatever its harness. Asked apart, each listing would take the
-        // other's agents for sessions that ended, and move them out of
-        // their panes at every round. A listing that failed says nothing of
-        // its sessions: the search waits for the next round.
-        if listed.succeeded
-            && let Some(others) = others
-        {
-            let mut live = listed.hosted.clone();
-            live.extend(others);
-            crate::panes::locate(&shared, &live).await;
-        }
         shared.refreshes.progress.send_modify(|progress| {
             progress.finished = progress.started;
             progress.succeeded = listed.succeeded;
@@ -300,16 +279,6 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
     listing
         .sessions
         .retain(|session| !session.cwd.starts_with(&shared.paths.state_dir));
-    // A session whose program runs in the host of an agent started with
-    // `volee run` is that agent: the host's own record comes first
-    // (ADR 0023), and the listing does not make a second agent of it.
-    let in_hosts = crate::launch::run_programs(shared).await;
-    if !in_hosts.is_empty() {
-        listing
-            .sessions
-            .retain(|session| session.pid.is_none_or(|pid| !in_hosts.contains(&pid)));
-    }
-    let hosted = crate::panes::hosted(&listing.sessions);
     // Read before the state is locked again: it asks the process table.
     let left = left_running(shared, &listing).await;
     let mut state = shared.state.lock().await;
@@ -343,10 +312,7 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
         }
     }
     state.sessions_mut().record(&listing);
-    let mut events = reconcile(state.registry(), &listing, now, || state.new_agent_id());
-    // An agent whose volee host runs stays in it, even when Claude Code moved
-    // its conversation to a background process that the host shows (ADR 0026).
-    events.retain(|event| !leaves_running_host(shared, state.registry(), event));
+    let events = reconcile(state.registry(), &listing, now, || state.new_agent_id());
     let mut changed = linked;
     if !events.is_empty() {
         let count = events.len();
@@ -360,7 +326,6 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
                 return Listed {
                     succeeded: false,
                     changed: linked,
-                    hosted: Vec::new(),
                 };
             }
         }
@@ -385,7 +350,6 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
     Listed {
         succeeded: true,
         changed,
-        hosted,
     }
 }
 
@@ -474,18 +438,6 @@ fn stalled_launches(
         ));
     }
     events
-}
-
-/// Whether `event` moves an agent out of a volee host that still runs.
-fn leaves_running_host(shared: &Shared, registry: &volee_core::Registry, event: &Event) -> bool {
-    let EventKind::LocationChanged { agent, location } = &event.kind else {
-        return false;
-    };
-    location.host().is_none()
-        && registry
-            .agent(*agent)
-            .and_then(|record| record.location.host())
-            .is_some_and(|host| crate::launch::host_runs(shared, host))
 }
 
 /// Links the sessions the daemon started or resumed, recognized by the

@@ -15,7 +15,6 @@ use volee_harness::Completion;
 use volee_proto::methods::{SummarizeParams, ThreadSummary};
 
 use crate::error::DaemonError;
-use crate::launch;
 use crate::server::Shared;
 
 /// The most recent messages a summary covers.
@@ -75,7 +74,7 @@ pub(super) async fn summarize(
         system_prompt: SYSTEM_PROMPT.to_owned(),
         prompt,
     };
-    let summary = launch::blocking(move || harness.complete(&request)).await??;
+    let summary = crate::support::blocking(move || harness.complete(&request)).await??;
     Ok(ThreadSummary {
         summary,
         messages,

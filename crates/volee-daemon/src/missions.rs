@@ -22,7 +22,7 @@ use volee_core::role::Role;
 use volee_core::supervisor::{Notice, supervise};
 use volee_core::{Agent, AgentId, Event, EventKind, MissionId, Registry};
 use volee_git::MergeMethod;
-use volee_proto::methods::{AgentParams, SeqEvent, TidyOutcome, TidyParams};
+use volee_proto::methods::{SeqEvent, TidyOutcome, TidyParams};
 
 use crate::error::DaemonError;
 use crate::server::Shared;
@@ -36,9 +36,6 @@ const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long the wind-down lets the coordinator finish the turn the person's
 /// approval woke.
 const LAST_TURN: Duration = Duration::from_secs(90);
-
-/// How long a stopped coordinator has to be seen stopped.
-const STOPPING: Duration = Duration::from_secs(20);
 
 /// Supervises the missions concerned by `committed` and commits the result.
 pub(crate) fn follow_up(state: &mut State, committed: &[SeqEvent]) -> Vec<SeqEvent> {
@@ -316,9 +313,9 @@ async fn merge(shared: &Arc<Shared>, work: &Work) -> Result<(), String> {
         if work.branch.is_empty() || work.base.is_empty() {
             return Err("volee does not know its branch or its base branch".to_owned());
         }
-        let git = crate::launch::git(shared).map_err(|error| error.to_string())?;
+        let git = crate::support::git(shared).map_err(|error| error.to_string())?;
         let (repo, branch, base) = (work.repo.clone(), work.branch.clone(), work.base.clone());
-        return crate::launch::blocking(move || git.merge(&repo, &branch, &base))
+        return crate::support::blocking(move || git.merge(&repo, &branch, &base))
             .await
             .map_err(|error| error.to_string())?
             .map(drop)
@@ -346,7 +343,7 @@ async fn merge(shared: &Arc<Shared>, work: &Work) -> Result<(), String> {
             volee_config::MergeMethod::Rebase => MergeMethod::Rebase,
         });
     let repo = work.repo.clone();
-    crate::launch::blocking(move || forge.merge(&repo, &pull_request, method))
+    crate::support::blocking(move || forge.merge(&repo, &pull_request, method))
         .await
         .map_err(|error| error.to_string())?
         .map(drop)
@@ -565,16 +562,6 @@ fn landed(agent: &Agent) -> Option<String> {
 async fn retire(shared: &Arc<Shared>, agent: AgentId, last_turn: bool) -> bool {
     if last_turn {
         settled(shared, agent, |state| !state.is_busy(), LAST_TURN).await;
-    }
-    match crate::control::stop(shared, AgentParams { agent }).await {
-        // Stopped: its state follows within a few seconds.
-        Ok(_) => {
-            settled(shared, agent, |state| !state.is_live(), STOPPING).await;
-        }
-        // An agent volee cannot stop is not waited for.
-        Err(error) => {
-            tracing::debug!(%error, %agent, "cannot stop the coordinator of a closed mission");
-        }
     }
     let mut state = shared.state.lock().await;
     let registry = state.registry();

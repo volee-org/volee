@@ -4,13 +4,11 @@
 //! printing is allowed in this crate and only here.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
-mod background;
 mod cmd;
 mod connect;
 mod resolve;
 mod table;
 mod text;
-mod tools;
 
 use std::process::ExitCode;
 
@@ -19,19 +17,13 @@ use volee_core::AgentId;
 use volee_core::message::MessageKind;
 use volee_core::mission::MissionKind;
 
-/// See, launch and coordinate every coding agent on your machine. Without a
-/// command, opens the interface.
+/// See what your coding agents did and decide, with as little reading as the
+/// risk allows.
 #[derive(Debug, Parser)]
 #[command(name = "volee", version = volee_core::VERSION, about, long_about = None)]
 struct Cli {
-    /// The interface's theme, instead of the one in the configuration: a
-    /// built-in one or a file in ~/.config/volee/themes. Without it and
-    /// without a configured theme, volee picks a light or a dark one to
-    /// match your terminal.
-    #[arg(long, value_name = "NAME")]
-    theme: Option<String>,
     #[command(subcommand)]
-    command: Option<Command>,
+    command: Command,
 }
 
 #[derive(Debug, Subcommand)]
@@ -48,61 +40,6 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Launch an agent on a new branch, in its own worktree.
-    Spawn {
-        /// The repository: a name from the configuration, or a directory.
-        repo: String,
-        /// The branch to create for the agent.
-        branch: String,
-        /// The task, as the agent's first prompt.
-        task: String,
-        /// The branch to start from; the repository's default branch when
-        /// absent.
-        #[arg(long)]
-        base: Option<String>,
-        /// The model; the configured one, else Claude Code's default.
-        #[arg(long)]
-        model: Option<String>,
-        /// A display name; derived from the repository and branch when
-        /// absent.
-        #[arg(long)]
-        name: Option<String>,
-        /// The harness: claude-code (the default) or opencode.
-        #[arg(long)]
-        harness: Option<String>,
-    },
-    /// Start a lead here and talk to it: it launches agents and missions
-    /// for you, and never codes; Ctrl+Space then q leaves it running.
-    Lead {
-        /// What you ask of it at once; without it, the lead waits for you.
-        task: Option<String>,
-        /// A display name; `lead-<this directory>` when absent.
-        #[arg(long)]
-        name: Option<String>,
-        /// The model; the configured one, else Claude Code's default.
-        #[arg(long)]
-        model: Option<String>,
-    },
-    /// Run any program as an agent, in this terminal; Ctrl+Space then q leaves it
-    /// running.
-    Run {
-        /// The agent's name; the name of this directory when absent.
-        #[arg(long)]
-        name: Option<String>,
-        /// The command line, after `--`.
-        #[arg(last = true, required = true)]
-        command: Vec<String>,
-    },
-    /// Take an agent over in this terminal; Ctrl+Space then q comes back.
-    Attach {
-        /// The agent: its name, short id or id.
-        agent: String,
-    },
-    /// Print an agent's screen as it looks now, as plain text.
-    Logs {
-        /// The agent: its name, short id or id.
-        agent: String,
-    },
     /// Show an agent's changes against the branch it started from.
     Diff {
         /// The agent: its name, short id or id.
@@ -110,17 +47,6 @@ enum Command {
         /// The full patch instead of a summary by file.
         #[arg(long)]
         full: bool,
-    },
-    /// Stop an agent volee launched; its conversation is kept.
-    Stop {
-        /// The agent: its name, short id or id.
-        agent: String,
-    },
-    /// Move an agent volee does not host (a background session, or one that
-    /// ended) into a volee host, so that you can take it over.
-    Adopt {
-        /// The agent: its name, short id or id.
-        agent: String,
     },
     /// Stop listing an agent that no longer runs; its sessions, worktree and
     /// branch stay as they are.
@@ -179,16 +105,6 @@ enum Command {
         /// The shell.
         shell: clap_complete::Shell,
     },
-    /// Open the interface on a simulated team of agents, to try volee.
-    Demo {
-        /// The theme, instead of the one in the configuration: a built-in
-        /// one or a file in ~/.config/volee/themes.
-        #[arg(long)]
-        theme: Option<String>,
-    },
-    /// Run any command line in a volee host, watch hosts on a wall, take
-    /// them over (ADR 0019). The daemon starts every agent in a host.
-    Host(HostArgs),
     /// Called by the hooks of agents volee launched. Not for people.
     #[command(hide = true)]
     Hook {
@@ -201,14 +117,6 @@ enum Command {
         #[arg(long, default_value_t = 3_600)]
         timeout: u64,
     },
-    /// The status line of agents volee launched: reports the context the
-    /// agent uses, then prints the person's own status line. Not for people.
-    #[command(hide = true)]
-    StatusLine {
-        /// The agent the status line belongs to.
-        #[arg(long)]
-        agent: AgentId,
-    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -219,100 +127,6 @@ enum ConfigCommand {
     Init,
     /// Check the file and summarize what it sets.
     Check,
-}
-
-#[derive(Debug, clap::Args)]
-struct HostArgs {
-    /// The directory of hosts; `<state>/hosts` when absent.
-    #[arg(long, global = true)]
-    dir: Option<std::path::PathBuf>,
-    #[command(subcommand)]
-    command: HostCommand,
-}
-
-#[derive(Debug, Subcommand)]
-enum HostCommand {
-    /// Start a program in a new host, detached from this terminal, and print
-    /// the host's id.
-    Spawn {
-        /// The host's id; a new agent id when absent.
-        #[arg(long)]
-        id: Option<String>,
-        /// The program's directory; this one when absent.
-        #[arg(long)]
-        cwd: Option<std::path::PathBuf>,
-        /// Columns before anyone takes it over; this terminal's when absent.
-        #[arg(long, requires = "rows")]
-        cols: Option<u16>,
-        /// Rows before anyone takes it over; this terminal's when absent.
-        #[arg(long, requires = "cols")]
-        rows: Option<u16>,
-        /// The harness profile (ADR 0022).
-        #[arg(long, default_value = "generic")]
-        profile: String,
-        /// A display name for the host's clients.
-        #[arg(long)]
-        name: Option<String>,
-        /// Seconds the last screen stays after the program ends.
-        #[arg(long, default_value_t = 600)]
-        linger: u64,
-        /// End the program once nobody has held the host's input for this
-        /// many seconds: for a host that only exists while someone uses it.
-        #[arg(long)]
-        idle_exit: Option<u64>,
-        /// The command line, after `--`.
-        #[arg(last = true, required = true)]
-        command: Vec<String>,
-    },
-    /// List hosts, running or ended.
-    Ls {
-        /// Print JSON instead of a table.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Print a host's screen as plain text.
-    Peek {
-        /// The host's id.
-        id: String,
-    },
-    /// Take a host over in this terminal; Ctrl+Space then q comes back.
-    Attach {
-        /// The host's id.
-        id: String,
-    },
-    /// Ask a host to end its program.
-    Stop {
-        /// The host's id.
-        id: String,
-    },
-    /// Show every running host as a wall of live screens.
-    Wall {
-        /// Only these hosts, by id, separated by commas.
-        #[arg(long, value_delimiter = ',')]
-        ids: Vec<String>,
-    },
-    /// Run a host in this process. `spawn` starts this; not for people.
-    #[command(hide = true)]
-    Run {
-        #[arg(long)]
-        id: String,
-        #[arg(long)]
-        cwd: std::path::PathBuf,
-        #[arg(long)]
-        cols: u16,
-        #[arg(long)]
-        rows: u16,
-        #[arg(long)]
-        profile: String,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        linger: u64,
-        #[arg(long)]
-        idle_exit: Option<u64>,
-        #[arg(last = true, required = true)]
-        command: Vec<String>,
-    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -453,43 +267,20 @@ impl From<Kind> for MessageKind {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    if let Err(error) = check_theme_flag(&cli) {
-        error.exit();
-    }
-    let theme = cli.theme;
     match cli.command {
         // Hooks run dozens of times per turn: no async runtime, no logging setup.
-        Some(Command::Hook {
+        Command::Hook {
             event,
             agent,
             timeout,
-        }) => cmd::hook::run(&event, agent, timeout),
-        // As often as a hook: no async runtime either.
-        Some(Command::StatusLine { agent }) => cmd::status_line::run(agent),
-        Some(Command::Config(command)) => report(match command {
+        } => cmd::hook::run(&event, agent, timeout),
+        Command::Config(command) => report(match command {
             ConfigCommand::Path => cmd::config::path(),
             ConfigCommand::Init => cmd::config::init(),
             ConfigCommand::Check => cmd::config::check(),
         }),
-        // Hosts run without the async runtime: a host is plain threads.
-        Some(Command::Host(args)) => report(host(args)),
-        Some(Command::Demo { theme: own }) => block_on(cmd::demo::run(own.or(theme).as_deref())),
-        Some(command) => async_main(command),
-        None => block_on(cmd::interface::run(theme.as_deref())),
+        command => async_main(command),
     }
-}
-
-/// `--theme` belongs to the interface and to `demo`; anywhere else it would
-/// be silently ignored.
-fn check_theme_flag(cli: &Cli) -> Result<(), clap::Error> {
-    use clap::CommandFactory;
-    if cli.theme.is_some() && !matches!(cli.command, None | Some(Command::Demo { .. })) {
-        return Err(Cli::command().error(
-            clap::error::ErrorKind::ArgumentConflict,
-            "`--theme` only applies to the interface (`volee --theme <NAME>`) and to `volee demo`",
-        ));
-    }
-    Ok(())
 }
 
 /// Runs a command on a multi-threaded runtime and reports how it ended.
@@ -517,13 +308,7 @@ fn async_main(command: Command) -> ExitCode {
             Command::Daemon(DaemonCommand::Install { print }) => cmd::login::install(print),
             Command::Daemon(DaemonCommand::Uninstall) => cmd::login::uninstall(),
             Command::Ls { json } => cmd::ls::run(json).await,
-            Command::Attach { agent } => cmd::agent::attach(&agent).await,
-            Command::Logs { agent } => cmd::agent::logs(&agent).await,
-            Command::Run { name, command } => cmd::run::run(name, command).await,
-            Command::Lead { task, name, model } => cmd::lead::run(task, name, model).await,
             Command::Diff { agent, full } => cmd::agent::diff(&agent, full).await,
-            Command::Stop { agent } => cmd::agent::stop(&agent).await,
-            Command::Adopt { agent } => cmd::agent::adopt(&agent).await,
             Command::Forget { agent } => cmd::agent::forget(&agent).await,
             Command::Tidy {
                 agent,
@@ -539,26 +324,6 @@ fn async_main(command: Command) -> ExitCode {
             }
             Command::Mission(command) => mission(command).await,
             Command::Summary { target } => cmd::summary::run(&target).await,
-            Command::Spawn {
-                repo,
-                branch,
-                task,
-                base,
-                model,
-                name,
-                harness,
-            } => {
-                cmd::spawn::run(cmd::spawn::SpawnRequest {
-                    repo,
-                    branch,
-                    task,
-                    base,
-                    model,
-                    name,
-                    harness,
-                })
-                .await
-            }
             Command::Mcp {
                 agent,
                 join,
@@ -574,76 +339,11 @@ fn async_main(command: Command) -> ExitCode {
                 Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
                 result => result.map_err(Into::into),
             },
-            Command::Demo { theme } => cmd::demo::run(theme.as_deref()).await,
-            Command::Hook { .. }
-            | Command::StatusLine { .. }
-            | Command::Config(_)
-            | Command::Host(_) => {
+            Command::Hook { .. } | Command::Config(_) => {
                 unreachable!("these commands run without the async runtime")
             }
         }
     })
-}
-
-fn host(args: HostArgs) -> anyhow::Result<()> {
-    let dir = match args.dir {
-        Some(dir) => volee_host::HostDir::new(dir),
-        None => cmd::host::host_dir()?,
-    };
-    match args.command {
-        HostCommand::Spawn {
-            id,
-            cwd,
-            cols,
-            rows,
-            profile,
-            name,
-            linger,
-            idle_exit,
-            command,
-        } => cmd::host::spawn(
-            &dir,
-            cmd::host::Spawn {
-                id,
-                cwd,
-                size: cols.zip(rows),
-                profile,
-                name,
-                linger,
-                idle_exit,
-                command,
-            },
-        ),
-        HostCommand::Ls { json } => cmd::host::list(&dir, json),
-        HostCommand::Peek { id } => cmd::host::peek(&dir, &id),
-        HostCommand::Attach { id } => cmd::host::attach(&dir, &id),
-        HostCommand::Stop { id } => cmd::host::stop(&dir, &id),
-        HostCommand::Wall { ids } => cmd::host::wall(&dir, &ids),
-        HostCommand::Run {
-            id,
-            cwd,
-            cols,
-            rows,
-            profile,
-            name,
-            linger,
-            idle_exit,
-            command,
-        } => cmd::host::run(volee_host::HostConfig {
-            id,
-            dir,
-            command,
-            cwd,
-            env: Vec::new(),
-            env_remove: Vec::new(),
-            size: volee_host::Size { cols, rows },
-            profile,
-            name,
-            scrollback: 1_000,
-            linger: std::time::Duration::from_secs(linger),
-            idle_exit: idle_exit.map(std::time::Duration::from_secs),
-        }),
-    }
 }
 
 async fn mission(command: MissionCommand) -> anyhow::Result<()> {
@@ -711,66 +411,24 @@ mod tests {
         let cli = Cli::try_parse_from(["volee", "completions", "fish"]).unwrap();
         assert!(matches!(
             cli.command,
-            Some(Command::Completions {
+            Command::Completions {
                 shell: clap_complete::Shell::Fish
-            })
+            }
         ));
         let mut script = Vec::new();
         super::completions(clap_complete::Shell::Fish, &mut script).unwrap();
         let script = String::from_utf8(script).unwrap();
-        for command in ["spawn", "mission", "forget", "completions"] {
+        for command in ["mission", "forget", "completions"] {
             assert!(script.contains(command), "{command}");
         }
     }
 
-    #[test]
-    fn demo_takes_an_optional_theme() {
-        let cli = Cli::try_parse_from(["volee", "demo", "--theme", "terminal"]).unwrap();
-        assert!(
-            matches!(cli.command, Some(Command::Demo { theme: Some(ref t) }) if t == "terminal")
-        );
-        let cli = Cli::try_parse_from(["volee", "demo"]).unwrap();
-        assert!(matches!(cli.command, Some(Command::Demo { theme: None })));
-    }
-
-    #[test]
-    fn the_interface_takes_an_optional_theme() {
-        let cli = Cli::try_parse_from(["volee", "--theme", "catppuccin-latte"]).unwrap();
-        assert_eq!(cli.theme.as_deref(), Some("catppuccin-latte"));
-        assert!(cli.command.is_none());
-        assert!(super::check_theme_flag(&cli).is_ok());
-        let cli = Cli::try_parse_from(["volee"]).unwrap();
-        assert_eq!(cli.theme, None);
-    }
-
-    #[test]
-    fn the_theme_flag_is_refused_where_it_would_do_nothing() {
-        let cli = Cli::try_parse_from(["volee", "--theme", "terminal", "ls"]).unwrap();
-        assert!(super::check_theme_flag(&cli).is_err());
-        let cli = Cli::try_parse_from(["volee", "--theme", "terminal", "demo"]).unwrap();
-        assert!(super::check_theme_flag(&cli).is_ok());
-    }
-
-    #[test]
-    fn no_command_opens_the_interface() {
-        let cli = Cli::try_parse_from(["volee"]).unwrap();
-        assert!(cli.command.is_none());
-    }
-
     fn parse(args: &[&str]) -> Command {
-        Cli::try_parse_from(args).unwrap().command.unwrap()
+        Cli::try_parse_from(args).unwrap().command
     }
 
     #[test]
     fn agent_commands_take_an_agent_as_people_type_it() {
-        assert!(matches!(
-            parse(&["volee", "attach", "alpha-feat-x"]),
-            Command::Attach { agent } if agent == "alpha-feat-x"
-        ));
-        assert!(matches!(
-            parse(&["volee", "logs", "ag_x7k2pq"]),
-            Command::Logs { agent } if agent == "ag_x7k2pq"
-        ));
         assert!(matches!(
             parse(&["volee", "diff", "alpha"]),
             Command::Diff { agent, full: false } if agent == "alpha"
@@ -779,11 +437,7 @@ mod tests {
             parse(&["volee", "diff", "alpha", "--full"]),
             Command::Diff { full: true, .. }
         ));
-        assert!(matches!(
-            parse(&["volee", "stop", "alpha"]),
-            Command::Stop { agent } if agent == "alpha"
-        ));
-        assert!(Cli::try_parse_from(["volee", "attach"]).is_err());
+        assert!(Cli::try_parse_from(["volee", "diff"]).is_err());
     }
 
     #[test]

@@ -62,16 +62,6 @@ pub struct Config {
     /// Where workspaces and delivery evidence are read from:
     /// [`EvidenceSources::default()`] reads nothing.
     pub evidence: EvidenceSources,
-    /// The volee program, which the hooks and MCP servers of launched agents
-    /// run. Without it, the daemon cannot launch agents.
-    pub volee_bin: Option<PathBuf>,
-    /// The terminal multiplexers whose panes interactive sessions are looked
-    /// for in (ADR 0015); none means agents in panes are only listed.
-    pub multiplexers: Vec<Arc<dyn volee_mux::Multiplexer>>,
-    /// Launch agents in volee hosts (ADR 0019), through `volee_bin host
-    /// spawn`. Off, agents run as background sessions of their harness, as
-    /// before hosts; tests with a fake harness turn it off.
-    pub hosts: bool,
     /// What reads the process table (`ps`, then `lsof`) to find the agents
     /// of other harnesses that run outside volee's hosts (ADR 0023). `None`:
     /// the table is not read, and such agents are not found.
@@ -101,24 +91,15 @@ pub(crate) struct Shared {
     /// carried out once.
     pub(crate) concluding: std::sync::Mutex<std::collections::HashSet<volee_core::MissionId>>,
     pub(crate) settings: volee_config::Config,
-    pub(crate) volee_bin: Option<PathBuf>,
-    pub(crate) hosts: bool,
     /// What reads the process table, when it is read.
     pub(crate) processes: Option<Arc<dyn volee_harness::CommandRunner>>,
-    pub(crate) screens: crate::screens::Screens,
     pub(crate) paths: Paths,
     /// The interactive subscriptions open now, which set discovery's pace.
     pub(crate) watchers: Watchers,
     /// Requests for a listing now, and how listings progress.
     pub(crate) refreshes: Refreshes,
-    /// Agents being launched for each mission, counted against its limit.
-    pub(crate) slots: crate::launch::Slots,
-    /// The multiplexers whose panes agents are looked for in.
-    pub(crate) panes: crate::panes::Panes,
     /// The connections that joined for agents of other harnesses (ADR 0014).
     pub(crate) presence: crate::join::Presence,
-    /// The terminals open on sessions that run elsewhere (ADR 0027).
-    pub(crate) views: crate::views::Views,
     /// Requests to read an agent's delivery evidence again now.
     pub(crate) checks: crate::evidence::Checks,
     /// What the evidence refresher learned about the forge, once it checked.
@@ -128,31 +109,6 @@ pub(crate) struct Shared {
     /// between must not take them for launches that stalled.
     launches: std::sync::Mutex<std::collections::HashSet<AgentId>>,
     shutdown: watch::Sender<bool>,
-}
-
-/// An agent being launched, until this guard drops; see
-/// [`Shared::begin_launch`].
-pub(crate) struct LaunchGuard {
-    shared: Arc<Shared>,
-    agent: AgentId,
-}
-
-impl std::fmt::Debug for LaunchGuard {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LaunchGuard")
-            .field("agent", &self.agent)
-            .finish_non_exhaustive()
-    }
-}
-
-impl Drop for LaunchGuard {
-    fn drop(&mut self) {
-        self.shared
-            .launches
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&self.agent);
-    }
 }
 
 impl Shared {
@@ -167,34 +123,6 @@ impl Shared {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
-    }
-
-    /// Marks `agent` as being launched until the guard drops. Taken before
-    /// the agent is registered, so that no listing sees it unguarded.
-    pub(crate) fn begin_launch(self: &Arc<Self>, agent: AgentId) -> LaunchGuard {
-        self.launches
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(agent);
-        LaunchGuard {
-            shared: Arc::clone(self),
-            agent,
-        }
-    }
-
-    /// Like [`Shared::begin_launch`], unless `agent` is already being
-    /// launched or resumed: `None` then, so that two paths never start two
-    /// hosts for one conversation.
-    pub(crate) fn try_begin_launch(self: &Arc<Self>, agent: AgentId) -> Option<LaunchGuard> {
-        let inserted = self
-            .launches
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(agent);
-        inserted.then(|| LaunchGuard {
-            shared: Arc::clone(self),
-            agent,
-        })
     }
 
     /// The agents being launched now.
@@ -216,17 +144,6 @@ impl Shared {
 /// The volee daemon.
 #[derive(Debug)]
 pub struct Daemon;
-
-/// Without Claude Code, hosts and the agents of the process table still
-/// need following, and placing in their panes.
-async fn follow_without_harness(shared: Arc<Shared>) {
-    loop {
-        if let Some(live) = crate::screens::round(&shared).await {
-            crate::panes::locate(&shared, &live).await;
-        }
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    }
-}
 
 impl Daemon {
     /// Runs the daemon until a client asks it to stop or the process
@@ -256,8 +173,6 @@ impl Daemon {
             Ok(count) => tracing::info!(count, "joined agents wait for their MCP server"),
             Err(error) => tracing::warn!(%error, "cannot stop the joined agents"),
         }
-        // No view of an earlier daemon outlived it.
-        crate::views::clear(&config.paths);
         // What agents that left before this daemon started left behind.
         let swept = crate::files::sweep(&config.paths, state.registry());
         if swept > 0 {
@@ -274,25 +189,15 @@ impl Daemon {
             forge_client: config.evidence.forge.clone(),
             concluding: std::sync::Mutex::default(),
             settings: config.evidence.settings.clone(),
-            volee_bin: config.volee_bin,
-            hosts: config.hosts,
             processes: config.processes,
-            screens: crate::screens::Screens::default(),
             paths: config.paths,
             watchers: Watchers::new(),
             refreshes: Refreshes::new(),
-            slots: crate::launch::Slots::default(),
-            panes: crate::panes::Panes::new(config.multiplexers),
             presence: crate::join::Presence::default(),
-            views: crate::views::Views::default(),
             checks: crate::evidence::Checks::default(),
             forge: std::sync::Mutex::new(None),
             launches: std::sync::Mutex::default(),
             shutdown,
-        });
-        tokio::spawn({
-            let shared = Arc::clone(&shared);
-            async move { crate::panes::check(&shared).await }
         });
         if let Some(dir) = config.spool {
             replay_spool(&shared, dir).await;
@@ -309,19 +214,12 @@ impl Daemon {
                 cadence,
                 stop.clone(),
             ));
-        } else if shared.hosts {
-            tokio::spawn(follow_without_harness(Arc::clone(&shared)));
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
         // A mission the person approved while the daemon was stopping, or
         // whose merge it could not finish, is carried out now.
         crate::missions::resume_approved(&shared).await;
-        let resumer = crate::resume::spawn(&shared);
-        // Messages for agents that rest at their prompt with no hook waiting.
-        let typist = crate::typist::spawn(&shared);
         let files = crate::files::spawn(&shared, removals);
-        // Agents a reboot interrupted come back in new hosts (ADR 0024).
-        tokio::spawn(crate::resume::resume_interrupted(Arc::clone(&shared)));
         tracing::info!(socket = ?listener.local_addr().ok(), "volee daemon ready");
         let mut connections = JoinSet::new();
         loop {
@@ -338,13 +236,7 @@ impl Daemon {
         }
         tracing::info!("volee daemon stopping");
         connections.abort_all();
-        // The views end with the daemon; the sessions they showed go on.
-        let closing = Arc::clone(&shared);
-        let _ = tokio::task::spawn_blocking(move || closing.views.close_all(&closing.paths)).await;
-        for task in [refresher, resumer, Some(files), Some(typist)]
-            .into_iter()
-            .flatten()
-        {
+        for task in [refresher, Some(files)].into_iter().flatten() {
             task.abort();
         }
         Ok(())

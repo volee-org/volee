@@ -21,8 +21,8 @@ use volee_harness::{Harness, HarnessError, WorktreeRemoval};
 use volee_proto::methods::{TidyOutcome, TidyParams};
 
 use crate::error::DaemonError;
-use crate::launch::{blocking, git};
 use crate::server::Shared;
+use crate::support::{blocking, git};
 
 /// What tidying an agent needs, read from the registry once the verdict
 /// allows it.
@@ -61,7 +61,6 @@ pub(crate) async fn tidy(
         });
     }
     let git = git(shared)?;
-    stop_host(shared, params.agent).await;
 
     let harness = shared.harness.clone();
     let deleted = match (&harness, &plan.session) {
@@ -104,31 +103,6 @@ pub(crate) async fn tidy(
     })
 }
 
-/// Ends the program of an agent whose host still runs it, idle, before its
-/// worktree goes: nothing should run in a removed directory. Best effort.
-async fn stop_host(shared: &Arc<Shared>, agent: AgentId) {
-    let host = {
-        let state = shared.state.lock().await;
-        state
-            .registry()
-            .agent(agent)
-            .and_then(|record| record.location.host().map(str::to_owned))
-    };
-    let Some(host) = host else {
-        return;
-    };
-    let socket = crate::launch::hosts_dir(shared).join(format!("{host}.sock"));
-    let _ = blocking(move || {
-        if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
-            let _ = volee_host::stop(&socket, "volee daemon tidy");
-            // Give the program a moment to end before git looks at the
-            // worktree.
-            std::thread::sleep(std::time::Duration::from_millis(500));
-        }
-    })
-    .await;
-}
-
 /// The verdict and, when it allows tidying, what tidying needs.
 async fn plan(
     shared: &Arc<Shared>,
@@ -146,10 +120,11 @@ async fn plan(
     let Some(repo_root) = record.workspace.repo_root.clone() else {
         return Ok(Err(vec![TidyRefusal::NotAVoleeWorktree]));
     };
-    let session = state
-        .sessions()
-        .session_for(record, state.expected_handle(agent))
-        .ok();
+    let session = record
+        .current_session()
+        .and_then(|link| state.sessions().listed(&link.key))
+        .filter(|session| session.handle.is_some())
+        .cloned();
     Ok(Ok(Plan {
         worktree,
         repo_root,
