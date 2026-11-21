@@ -71,7 +71,7 @@ Claude Code 2.1.330 already provides:
 
 Not provided: any public API to type into a session open in a terminal. v2
 never types into a terminal. Where a decision must come back to an interactive
-session, it goes through a hook response (T1, T2) or an SDK session (T3).
+session, it goes through a hook response (T1, T2). The SDK is not used in v1 (T3).
 
 AGENTS.md and ADR 0004 forbid parsing Claude Code internal files. Transcripts
 are the one exception to decide (question 2): they are the only source of
@@ -118,7 +118,7 @@ flowchart LR
   M --> API
   API <--> I
   I --- C
-  SDK -. only if hooks are not enough .-> API
+  SDK -. later option, not v1 .-> API
   API -. open this terminal .-> AD
 ```
 
@@ -142,10 +142,14 @@ flowchart LR
   Monaco or CodeMirror (diff and in-place fix), diff2html (guided diff),
   Mermaid (diagram of the change), React Flow (later, agent graph, not v1).
   Tauri may wrap it later as a desktop app: the UI must not depend on it.
-- **SDK module (TypeScript, optional).** The Agent SDK exists only in
-  TypeScript and Python: no SDK in Lua or Rust. Only if checks show hooks are
-  not enough AND the SDK is usable under the terms (see T3). Never
-  reimplement the SDK internal protocol in Rust.
+- **Hooks are enough for v1** (section 7): permissions through a
+  `PermissionRequest` http hook, questions through a `PreToolUse` http hook on
+  `AskUserQuestion`, finished work through `Notification` and `Stop`.
+- **SDK module (TypeScript): not in v1, a later option.** The Agent SDK exists
+  only in TypeScript and Python: no SDK in Lua or Rust. Its sessions are
+  invisible to `claude agents`, and the subscription terms forbid offering
+  claude.ai login in a third-party product. Never reimplement the SDK internal
+  protocol in Rust.
 - **Adapters (optional).** "Open this agent's terminal": Rex, tmux,
   `claude attach`. They locate and focus; they never read or type.
 
@@ -185,9 +189,10 @@ worker is its checkout branch or its remote, whichever is furthest ahead;
 from the card. What the lab could not do and v2 must: decide a permission or a
 question without typing into the terminal.
 
-## 7. Pending checks
+## 7. Check results
 
-**T1 and T3 are answered; T2 is still running.**
+Three technical checks, all done on 2026-11-21. Each result is marked verified
+(measured on Claude Code 2.1.330) or assumed (from the docs).
 
 **T1. PermissionRequest `http` hook.** Does it wait for the local server
 answer, what is the maximum delay, are allow and deny applied?
@@ -213,10 +218,22 @@ answer, what is the maximum delay, are allow and deny applied?
 
 **T2. PreToolUse hook on AskUserQuestion answering in place of the user, in an
 interactive session.**
-- Result: _pending_.
-- If yes: question cards are answered from the inbox for any session.
-- If no: questions are observed only (card + "open terminal"); answering needs
-  sessions started through the SDK, or `ask_human` over MCP.
+- Result (2026-11-21, Claude Code 2.1.330, interactive session, auto and
+  default modes, verified): **yes**, as a command or http hook. Working body:
+  `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"questions":[<original array echoed back>],"answers":{"<exact question text>":"<option label or free text>"}}}}`.
+  No dialog appears and the model receives the answer. Free text works.
+- `deny` plus `permissionDecisionReason`: no dialog, the model gets the reason
+  as a hook error. `allow` without `updatedInput` fails ("Invalid tool
+  parameters"), then the normal dialog shows.
+- The hook input includes `tool_use_id` (unlike `PermissionRequest`).
+- **Untested:** what the terminal shows while a blocking http hook waits for a
+  slow human (likely nothing, since `PreToolUse` runs before the dialog); the
+  timeout behaviour there; the multi-select answer format.
+- Design consequences: question cards are answered from the inbox for any
+  session. Open point: while volee holds the question, the person at the
+  terminal sees nothing, so volee must warn them (see questions) and have a
+  fast "let the terminal ask" answer (a timeout or no-decision response) that
+  leaves the normal dialog. Echo the questions array back unchanged.
 
 **T3. Agent SDK with the subscription.** Result (2026-11-21):
 - It works with the subscription login, without API key, and `canUseTool`
@@ -229,13 +246,19 @@ interactive session.**
   themselves is a grey zone. volee is public and open source, so the SDK
   module must not offer or handle login: it would only use the login the user
   already has, and we should get the exact terms confirmed before shipping it.
-- Consequence: the SDK is a fallback, not a foundation. Decision rule: if T1
-  and T2 pass, no SDK module in v1. If one fails, the SDK module is opt-in,
-  off by default, for sessions volee itself starts, with the licensing risk
-  documented. Otherwise accept observation-only for what hooks cannot answer.
+- Consequence: the SDK is NOT needed for v1 (T1 and T2 passed). It stays a
+  later option, opt-in and off by default, for sessions volee itself starts,
+  once the terms are confirmed.
 
-Best case (T1 passed, T2 to pass): no SDK, no terminal typing, Rust daemon
+**Outcome.** Hooks are enough for v1: no SDK, no terminal typing, Rust daemon
 plus web UI only.
+
+| Card | Mechanism | Status |
+| --- | --- | --- |
+| Permission | `PermissionRequest` http hook, concurrent decider, explicit long timeout, stale-answer reconciliation | verified (T1) |
+| Question | `PreToolUse` http hook on `AskUserQuestion`, `allow` with `updatedInput` | verified (T2), see open points |
+| Finished work | `Notification` (`agent_completed`), `Stop`, plus git and transcript | documented, to prove in stage 2 |
+| Agent list | `claude agents --json` | documented |
 
 ## 8. Keep, adapt, drop (from 0.18)
 
@@ -289,8 +312,11 @@ build step (the web bundle is embedded in the binary).
    automatically at low risk. Acceptable, or always one click?
 4. **Lua surface.** Start with a declarative default plus Lua escape hatch, or
    Lua only? Who may write rules per developer (a user file outside the repo)?
-5. **SDK and terms.** Given T3 (grey zone for an open source tool), do we ship
-   an opt-in SDK module at all, or wait for T1 and T2 and decide then?
+5. **Held questions.** While volee holds an `AskUserQuestion` (T2), the person
+   at the terminal sees nothing. How do we warn them (desktop notification, a
+   short hold before the hook answers, a per-repo "ask in terminal first"
+   rule)? And what is the right timeout before the terminal dialog takes over?
+   Later, separately: an opt-in SDK module at all, given the grey zone (T3)?
 6. **UI shell and editor.** Plain browser tab first, Tauri later: confirm.
    Monaco (heavier, VS Code feel) or CodeMirror (lighter)?
 7. **Review model.** Haiku by default, two reviewers when risky: who decides
@@ -299,7 +325,31 @@ build step (the web bundle is embedded in the binary).
    adapter alone is enough for v1.
 9. **License and public status** unchanged (MIT OR Apache-2.0, public)?
 
-## 10. Proposed way to restart from scratch on branch `v2`
+## 10. Staged plan
+
+Small steps from the empty `v2` branch to the v1 inbox. Each ends with
+something to demo and a proof that is run for real, in the spirit of the
+journeys (a release is not done until the proof passes on a real machine).
+
+| # | Step | Demo | Proof |
+| --- | --- | --- | --- |
+| 0 | Clean slate: `legacy/0.x`, remove host, term, tui and TUI journeys, workspace builds, CI and release green | `cargo build` of a near-empty workspace, CI green | CI on the branch; `dist plan` still passes |
+| 1 | Hook server: daemon on 127.0.0.1 with token, receives every Claude Code http hook, stores events in SQLite, `volee doctor` writes the per-install hook settings | `volee` run, a real Claude session, events listed by a CLI | Journey: real Claude in a sandbox repo, assert the stored event sequence |
+| 2 | Agents and finished work: `claude agents --json` poller joined to hooks, worktree and git facts (ahead, dirty, merged) | `volee agents` shows state and finished work with a diff summary | Journey: real worker finishes in a sandbox, card data matches git |
+| 3 | Minimal web UI: the inbox list over WebSocket, served by the daemon, bundle embedded in the binary | Browser tab shows live cards, `Open terminal` through one adapter (Rex) | Playwright journey against a real agent |
+| 4 | Permission cards: `PermissionRequest` http hook, allow and deny from the UI, long explicit timeout, stale reconciliation with the transcript | Approve a real tool call from the browser, no terminal touch | Journey: allow, deny, timeout fallback to the terminal dialog, answered-in-terminal first (card disappears) |
+| 5 | Question cards: `PreToolUse` on `AskUserQuestion`, answers and free text, the held-question warning chosen in question 5 | Answer a real question from the browser | Journey: answer, deny, timeout; multi-select format measured first |
+| 6 | Finished-work card screen: summary, plan from transcript, guided diff (diff2html), Mermaid diagram of the change | Open a finished worker and read it in layers | Journey on a real change; transcript parser tested against recorded real files, degrades to hooks-only on failure |
+| 7 | Pre-review: native `/code-review` as an opinion on the card | Review notes inline in the diff | Journey; review never blocks a merge by itself |
+| 8 | Lua engine and rules: sandboxed mlua, config file, risk function per repo and per developer, layers shown by risk, load error falls back to the safest rule | Same change shown as a glance or a full read depending on the rules | Rust unit tests of the sandbox limits; journey with two rule files |
+| 9 | Actions: merge according to the rules, ask for a fix, comment a line, fix in the embedded editor (CodeMirror or Monaco) | A finished change merged from the browser | Journey: merge with delivery evidence (ADR 0011), fix request reaches the agent as a message |
+| 10 | v1 release: docs rebuilt, `ask_human` over MCP kept, installer, `v2.0.0` after Jeff's explicit go | `curl ... installer \| sh`, then the inbox on a real day of work | The whole journey set on a real machine, then a day of daily use before the tag |
+
+Order rationale: steps 1 to 3 prove the observe-only pipeline end to end before
+any decision is taken; 4 and 5 are the two risky checks of section 7 turned into
+features; 8 comes before 9 so merges are never unruled.
+
+## 11. Proposed way to restart from scratch on branch `v2`
 
 Options:
 
