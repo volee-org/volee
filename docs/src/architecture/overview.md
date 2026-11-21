@@ -1,228 +1,150 @@
 # Architecture overview
 
-This page explains how volee is built and why. Each significant choice has an
-architecture decision record (ADR) in [Decisions](../adr/README.md).
+This page describes volee v2 as it is built, stage by stage. The plan and the
+reasons for the restart are in `docs/v2/framing.md` in the repository; each
+significant choice has an architecture decision record (ADR) in
+[Decisions](../adr/README.md). Decisions of 0.x that the restart superseded
+stay in the list, marked as such.
 
-## What volee is for
+> [!NOTE]
+> v2 is under construction on the `v2` branch. This page covers what exists:
+> **stage 1, the hook server**. Parts of the 0.x daemon (the registry, the
+> messages, the missions, the merge flow) are still in the code and are
+> adapted in later stages; the pages of the user guide and the other
+> architecture pages still describe 0.x.
 
-Developers now run many coding agents at once: several Claude Code sessions,
-each in its own git worktree, sometimes coordinated by another agent. volee
-answers four questions at a glance, from a terminal:
+## What volee v2 is for
 
-1. **Who is running?** Every agent on the machine, with its state, its repo,
-   its branch and its worktree.
-2. **Who needs me?** Permission prompts, questions and finished work, sorted
-   by urgency.
-3. **What did they do?** Commits, diffs, pushed or not, pull request and checks.
-4. **Who talks to whom?** Messages between agents and with you, as threads and
-   as a living graph.
+A person runs several Claude Code agents at once, across repositories. The
+scarce resource is no longer typing but attention: every agent produces work
+to read, questions to answer and permissions to grant, at unpredictable
+moments. volee is a control tower against that fatigue. It **observes**
+Claude Code, tells the person what needs a decision, and lets them decide with
+as little reading as the risk allows.
 
-It also runs **missions**: a goal that spans one or more repositories, split
-by a coordinator agent and delivered by worker agents.
+The first version of the product is a decision inbox with three kinds of
+cards: finished work, a question, a permission.
 
 ## Principles
 
-- **An agent is not a pane.** An agent is a unit of work done by one or more
-  harness sessions. Panes, tabs and terminals are only places where an agent
-  can be shown. See [ADR 0001](../adr/0001-agent-identity.md).
-- **A host holds each agent's terminal.** Every agent volee launches runs
-  in a volee host: one small process per agent that holds its
-  pseudo-terminal and its exact screen, and survives the interface, the
-  daemon and the terminal that started it. Any number of watchers read the
-  screen without changing it, and one person at a time takes the agent
-  over. See [Hosts](hosts.md) and
-  [ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md), which
-  supersedes ADR 0002.
-- **Every agent on the machine, opened where it runs.** Agents started
-  elsewhere are found through their harness and the process table, and
-  shown: one row per session the harness lists, gone when the session is.
-  Opening one puts a terminal on its own door (`claude attach`, `tuios
-  pane-view`) in a view, a host the daemon runs for as long as someone
-  uses it; volee never stops, forks or restarts a session it did not
-  start. Adopting one, which moves its conversation into a host, is a
-  choice. See [ADR 0023](../adr/0023-every-agent-on-the-machine.md) and
-  [ADR 0027](../adr/0027-open-without-owning.md).
-- **One source of truth.** A small daemon (`volee daemon`) keeps the registry, the
-  event log, the messages and the missions in SQLite. Every client (the TUI,
-  the CLI, the MCP server used by agents) reads and writes through it. See
-  [ADR 0003](../adr/0003-daemon-and-event-log.md).
-- **Evidence before action.** volee never removes a worktree, stops a session
-  or closes a mission on a guess. Cleanup needs delivery evidence (a merged
-  branch, a merged pull request, a delivered report). See
+- **Observe, never own.** volee does not start agents, hold their terminals
+  or type into them. Claude Code tells volee what happens, through its own
+  hooks. Where a decision has to go back to a session, it goes through a hook
+  response, never through a terminal.
+- **Never get in the way.** A session must not depend on volee being up. Every
+  hook has a short timeout, and an unreachable daemon is a non-blocking error
+  for Claude Code (see [When the daemon is down](#when-the-daemon-is-down)).
+- **Keep what was said, raw.** Each event is stored exactly as it arrived;
+  what it means is decided later, from the raw text, so that a better reading
+  never needs the event again.
+- **Local and authenticated.** The daemon listens on the loopback interface
+  only, and every request carries a per-install token.
+- **Evidence before action.** Destructive actions (removing a worktree,
+  merging) need delivery evidence. See
   [ADR 0011](../adr/0011-safety-and-delivery-evidence.md).
-- **Your tools, not ours.** Multiplexers, editors and git clients are optional
-  integrations. volee works in any terminal and never asks you to install
-  lazygit, a specific editor or a specific multiplexer.
 
 ## Components
 
 ```mermaid
 flowchart LR
-  subgraph Hosts [in volee hosts]
-    A1[Claude Code<br/>worker]
-    A2[Claude Code<br/>coordinator]
-    A4[OpenCode<br/>worker]
+  subgraph CC[Claude Code sessions]
+    A1[session 1]
+    A2[session 2]
   end
-  subgraph Elsewhere [started elsewhere]
-    A3[Claude Code session<br/>started by hand]
-    A5[OpenCode<br/>started by hand]
+  subgraph D[volee daemon]
+    H[hook server<br/>127.0.0.1]
+    DB[(SQLite<br/>hook_events)]
   end
-  subgraph volee
-    D[(volee daemon<br/>registry, events,<br/>messages, missions)]
-    T[volee TUI]
-    C[volee CLI]
-    M[volee mcp<br/>stdio server]
-    H[volee hook]
-  end
-  A1 -->|hooks| H --> D
-  A2 -->|hooks| H
-  A1 -->|MCP tools| M --> D
-  A2 -->|MCP tools| M
-  D -->|"screen snapshots"| A4
-  D -->|"claude agents --json"| A3
-  D -->|"ps, lsof"| A5
-  D -->|"git, gh"| R[(repositories<br/>and worktrees)]
-  T <-->|JSON-RPC over a Unix socket| D
-  C <--> D
-  T -->|"take over, watch"| A1
+  CLI[volee events]
+  DOC[volee doctor]
+  A1 -- http hooks --> H
+  A2 -- http hooks --> H
+  H --> DB
+  CLI -- reads --> DB
+  DOC -. writes hook settings .-> CC
 ```
 
-Everything ships as **one binary**, `volee`, with subcommands:
+| Part | Where | Does |
+| --- | --- | --- |
+| Hook server | `volee-daemon`, `hook_server.rs` | Receives `POST /hooks/<event>`, checks the token, stores the event, answers with an empty `200`. Decides nothing. |
+| Store | `volee-store` | Keeps each hook event in the `hook_events` table: arrival time, event name, session id, working directory and the raw payload. Append-only. |
+| `volee doctor` | `volee-cli` | Writes the hook settings that make Claude Code post to the daemon, and says whether the daemon answers. |
+| `volee events` | `volee-cli` | Lists the stored events, oldest first, optionally for one session. Reads the database directly, so it works with the daemon stopped. |
 
-| Command | Role |
+## The hook server
+
+The daemon starts the hook server with the rest of itself. It listens on
+`127.0.0.1` at the port set under `[hooks]` in the configuration (47835 by
+default) and refuses to bind any other interface.
+
+| Request | Answer |
 | --- | --- |
-| `volee` | Opens the TUI. Starts the daemon if needed. |
-| `volee daemon run` | Runs the daemon in the foreground (other commands start it in the background when needed). |
-| `volee daemon install` | Starts the daemon at login, on request only. |
-| `volee spawn`, `volee mission ...` | Launch agents and missions. |
-| `volee ls`, `volee msg send`, `volee diff`, `volee tidy` | Scriptable views, messaging and cleanup. |
-| `volee attach`, `volee adopt` | Open an agent in this terminal, where it runs; move a session volee did not start into a host. |
-| `volee run -- <command>` | Run any program as an agent: the command starts a host here, the daemon records its program as an agent, and this terminal is on it ([ADR 0029](../adr/0029-volee-run.md)). |
-| `volee host ...` | Run any command line in a host, list, watch, take over and stop hosts. The daemon starts every agent through `volee host spawn`, which runs `volee host run` detached. |
-| `volee hook <event>` | Called by Claude Code hooks of the agents volee launched. |
-| `volee mcp` | MCP server over stdio, used by agents to talk to each other. |
+| `POST /hooks/<event>` with the right token and a JSON object body | The event is stored; `200` with an empty body. Claude Code reads that as "no opinion" and goes on as if the hook did not exist. |
+| The same without the right token | `401`; nothing is stored. |
+| A body that is not a JSON object, or an event name that is not a plain word | `400`; nothing is stored. |
+| `GET /healthz` | `200 ok`, with no token: what `volee doctor` uses to check the daemon. |
 
-## Sources of truth
+The event name comes from the payload's `hook_event_name`, the path being the
+fallback. The session id and the working directory come from the payload's
+`session_id` and `cwd`. The body is limited to 8 MiB.
 
-The daemon merges these sources into one model. Each source is authoritative
-for one kind of fact:
+The token is 32 random bytes in hex, created by the first command that needs
+it in `hook-token` in the state directory, readable by its owner only. The
+daemon compares it in constant time.
 
-| Source | Authoritative for | How |
-| --- | --- | --- |
-| volee hosts | The screen of every agent volee runs, whether its program still runs and how it ended; the state of hosted agents whose harness has no hooks (OpenCode) | The daemon knows each agent's host from its launch, reads the host's record, and takes screen snapshots through its socket ([Hosts](hosts.md)). |
-| Hooks of agents volee launched | Fine-grained state, tools in use, last message, files touched | Per-agent `--settings` file whose hooks call `volee hook`. User settings are never edited. |
-| The status line of agents volee launched | The share of its context window the agent's conversation uses | The same settings file's status line runs `volee status-line`, which reports it, then runs the person's own status line ([ADR 0035](../adr/0035-the-context-an-agent-uses-comes-from-its-status-line.md)). |
-| `claude agents --json --all` | Every Claude Code session on the machine, including the ones volee did not launch | Polled and reconciled. Documented by Claude Code as the supported way to read session state. |
-| The process table | OpenCode agents started elsewhere, with their directory | `ps`, then `lsof` for the directories, once per discovery round ([ADR 0023](../adr/0023-every-agent-on-the-machine.md)). |
-| tuios and tmux (optional) | Which pane shows a session started by hand in it, and that pane's screen | Matched by the session id the multiplexer recorded or by process ancestry, never by title ([ADR 0015](../adr/0015-tuios-location-adapter.md)). |
-| tuios (optional) | The agents of harnesses volee has no listing for (Codex CLI, Gemini CLI, Aider...), while they run in a tuios pane | `list-agents` names the harness tuios recognizes in each pane; the agent is the process in the foreground of the pane's terminal ([ADR 0030](../adr/0030-a-multiplexer-may-say-which-panes-run-an-agent.md)). |
-| git | Worktrees, branches, commits, diffs, push state | `git` CLI behind a trait, triggered by events and a slow timer. |
-| GitHub CLI (`gh`, optional) | Pull requests and checks | Polled slowly, only for branches with agents. |
+## The hook settings
 
-Hook events are written to an append-only event log first, then folded into
-the current state. When the daemon is not running, `volee hook` appends to a
-spool file that the daemon ingests at start, so no event is lost.
+`volee doctor` merges these entries into **one** settings file:
 
-## Talking to agents
+- the project's `.claude/settings.local.json` (the current directory, or
+  `--project DIR`), which Claude Code keeps out of version control; or
+- `~/.claude/settings.json`, only with `--user`.
 
-volee hands messages to Claude Code agents through three documented
-mechanisms, never by typing into their terminal, even when it hosts them.
-All three were verified on Claude Code 2.1.319 (see
-[ADR 0006](../adr/0006-messaging.md)):
+It never touches any other file. Everything else in the file is kept, and so
+is every hook that is not volee's; a rerun replaces volee's entries instead of
+adding more, and `--remove` takes them out. A file that is not valid JSON is
+never overwritten. It prints what it wrote.
 
-| Agent is | volee delivers by | Effect |
-| --- | --- | --- |
-| Working | A `Stop` hook that returns `decision: "block"` with the pending messages | The agent reads them at the end of its turn and continues. |
-| Idle, process alive | An `asyncRewake` hook (on `Stop`, and on `SessionStart` for a session that waits at its prompt) that waits for a message, then exits with status 2 | The idle agent wakes up with the message, same session. |
-| Stopped (its program ended, or Claude Code reaped an idle background session after about an hour) | `claude --resume=<session>` with the message, in a new volee host | The conversation continues in a new host, in the agent's worktree, linked to the same agent. Never for an agent you stopped (until you write to it) or whose mission is over. |
+Sixteen events are subscribed: `SessionStart`, `SessionEnd`,
+`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+`PermissionRequest`, `PermissionDenied`, `Notification`, `Stop`,
+`StopFailure`, `SubagentStart`, `SubagentStop`, `TaskCreated`,
+`TaskCompleted` and `PreCompact`. Each entry is an `http` hook:
 
-OpenCode has no hooks: a message waits until the agent stops, then volee
-resumes it in a new host with `opencode --session <id> --prompt <messages>`.
+```json
+{
+  "type": "http",
+  "url": "http://127.0.0.1:47835/hooks/PreToolUse",
+  "headers": { "Authorization": "Bearer <token>" },
+  "timeout": 5
+}
+```
 
-Agents send messages through the `volee` MCP server (`send_message`,
-`read_messages`, `list_agents`...), which works for any harness that speaks
-MCP. That is how an agent of one AI can talk to an agent of another.
+Two facts about Claude Code's hooks shape this:
 
-## After a reboot
+- **The token is written in the file.** Claude Code only interpolates
+  environment variables that the hook lists in `allowedEnvVars`, and the
+  variable would have to exist in every environment that starts Claude Code.
+  The file is created readable by its owner only.
+- **`SessionStart` takes no `http` hook** (Claude Code accepts only `command`
+  and `mcp_tool` hooks there). For that one event `volee doctor` writes a
+  `command` hook that runs a silent `curl` to the same URL, ends in `|| true`
+  and prints nothing, since the output of a `SessionStart` hook goes to the
+  model.
 
-A reboot ends every host, but the harness has saved the conversation and
-the worktree is on disk. When the daemon starts, it looks for agents whose
-host is gone without recording an end, and resumes each one in a new host
-with its harness's resume command: a working agent with a first prompt that
-says the machine restarted, an idle one at its prompt. Agents you stopped,
-agents of a mission that is over, agents that were done or failed, and
-agents whose host died again soon after such a resume (a crash, not a
-reboot) stay down. The
-daemon starts the first time volee is used, or at login after
-`volee daemon install`. See
-[ADR 0024](../adr/0024-agents-come-back-after-a-reboot.md).
+### When the daemon is down
 
-## Missions
+Claude Code treats a refused connection, a timeout and any non-`2xx` answer
+from an `http` hook alike: a non-blocking error, and the action goes ahead.
+volee does not set `onFailure: "block"`. Measured on Claude Code 2.1.330 with
+the daemon stopped: the session ran its tool, answered and exited with status
+0 in about the same time as with the daemon up (8 s against 7 s), and `-p` mode printed one line for
+the `SessionEnd` hook (`connect ECONNREFUSED 127.0.0.1:<port>`). The events
+of that session are not recorded: nothing replays them later.
 
-A mission has a **coordinator** and **workers**. The coordinator is split in
-two on purpose (see [ADR 0007](../adr/0007-missions.md)):
+## What is still 0.x
 
-- a **supervisor program** inside the daemon waits, retries and checks delivery
-  evidence. It costs no tokens while it waits.
-- a **coordinator agent** (an LLM) splits the goal, spawns workers through MCP,
-  answers their questions and presents its report to the person. It never
-  merges: once the person approved, the daemon merges the work itself and
-  closes the mission
-  ([ADR 0032](../adr/0032-a-mission-is-merged-only-after-the-person-approved.md)).
-  It is woken by messages; it never polls.
-
-Missions are of two kinds: **change** missions deliver branches and pull
-requests; **analysis** missions deliver reports.
-
-## Crates
-
-| Crate | Responsibility | Depends on |
-| --- | --- | --- |
-| `volee-core` | Domain model and pure logic: agents, roles, states, messages, missions, delivery verdicts. No IO. | none |
-| `volee-config` | The configuration file: parsing, defaults and checks. | none |
-| `volee-proto` | IPC messages and JSON-RPC framing shared by the daemon and its clients. | core |
-| `volee-store` | SQLite storage, migrations, event log and projections. | core |
-| `volee-git` | Git queries behind a trait (CLI implementation). | core |
-| `volee-harness` | Harness profiles ([ADR 0022](../adr/0022-harness-profiles.md)). Claude Code: launch and resume in a host, discover, hooks, logs of background sessions, stop, wake. OpenCode: launch and resume in a host, find its processes. | core |
-| `volee-term` | Terminal emulation with libghostty-vt ([ADR 0020](../adr/0020-libghostty-vt-emulates-terminals.md)): a screen fed with bytes, rendered back as VT sequences, answering terminal queries, drawn into a ratatui buffer. | none |
-| `volee-host` | The volee host ([ADR 0019](../adr/0019-a-host-process-holds-each-agent-terminal.md)): the process that holds an agent's terminal, its socket protocol, its record, watchers, and taking over with Ctrl+Space then q. | term |
-| `volee-mux` | Location adapters ([ADR 0015](../adr/0015-tuios-location-adapter.md)): the multiplexer panes agents run in. tuios and tmux: find, capture, focus. | core, harness |
-| `volee-daemon` | The daemon: reconcilers, message router, mission supervisor, launches and their setup commands, views on sessions started elsewhere, adoption, resumes after a reboot. | core, config, proto, store, git, harness, host, mux |
-| `volee-mcp` | MCP server exposed to agents. | core, proto |
-| `volee-tui` | The ratatui interface, and the wall of screens. | core, proto, host, term |
-| `volee-cli` | The `volee` binary and its subcommands. | all |
-
-The dependency graph points inward: `volee-core` knows nothing about Claude
-Code, SQLite, git or terminals. That keeps the domain testable without IO and
-leaves room for more harnesses.
-
-## Files on disk
-
-volee follows the XDG base directory layout on every platform:
-
-| Path | Content |
-| --- | --- |
-| `~/.config/volee/config.toml` | Agent defaults, repositories, summaries, theme, keymap |
-| `~/.config/volee/themes/*.toml` | Your themes |
-| `~/.local/state/volee/volee.db` | Registry, events, messages, missions (SQLite, WAL) |
-| `~/.local/state/volee/logs/` | Daemon logs |
-| `~/.local/state/volee/agents/<id>/` | Per-agent hook settings and MCP config |
-| `~/.local/state/volee/hosts/` | One socket, record and log per host (`<id>.sock`, `<id>.json`, `<id>.log`), user-only permissions ([Hosts](hosts.md)) |
-| `<repository>/.claude/worktrees/<name>` | Worktrees created by volee, inside each repository ([ADR 0013](../adr/0013-worktrees-live-in-their-repository.md)) |
-| `$XDG_RUNTIME_DIR/volee.sock` (or the state directory) | Daemon socket, user-only permissions |
-
-## Performance budget
-
-- Daemon idle: under 1 % CPU and under 30 MB of memory. Measured on the
-  0.1 release build: 9.4 MB, and 0.03 s of CPU in two minutes.
-- Session discovery: each `claude agents --json --all` costs about 0.17 s
-  of CPU and starts a Node process of about 150 MB. Listing every two
-  seconds would cost about 8.5 % of a core for as long as the interface is
-  open, so the daemon lists every two seconds only after a listing that
-  changed something, backs off to every ten seconds (about 1.7 % of a core)
-  while nothing changes, and lists every thirty seconds (about 0.6 %) when
-  no interface is open.
-- TUI frame: under 5 ms at 200x60. Animation ticks only run while something
-  moves.
-- Git is never polled more than once a minute per worktree, unless an event
-  (an edit, a commit, a push) asks for it.
+The registry, event log (`events` table), messages, missions and merge flow of
+0.x still run in the daemon and are reached over its Unix socket. They are
+reworked in the following stages, as the inbox needs them; until then they are
+not part of what this page describes.
