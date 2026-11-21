@@ -102,6 +102,7 @@ fn write(target: &Path, port: u16, token: &str, user: bool) -> Result<()> {
     println!("Wrote volee's hooks to {}", target.display());
     println!("  events   {}", EVENTS.join(", "));
     println!("  url      http://127.0.0.1:{port}/hooks/<event>");
+    println!("  note     SessionStart takes no http hook: it runs a silent curl to the same url");
     println!("  auth     Authorization: Bearer <token> (written in that file in clear)");
     println!("  timeout  {HOOK_TIMEOUT} s; a daemon that is down never blocks a session");
     if user {
@@ -186,20 +187,51 @@ fn save(target: &Path, settings: &Value) -> Result<()> {
     Ok(())
 }
 
-/// Whether a hook entry (`{"matcher": ..., "hooks": [...]}`) is volee's: it
+/// Whether a hook entry (`{"matcher": ..., "hooks": [...]}`) is volee's: an
+/// `http` hook, or the `curl` command used where `http` is not accepted, that
 /// posts to a `/hooks/` path on the loopback interface.
 fn is_volee(entry: &Value) -> bool {
     entry
         .get("hooks")
         .and_then(Value::as_array)
-        .is_some_and(|hooks| {
-            hooks.iter().any(|hook| {
-                hook.get("type").and_then(Value::as_str) == Some("http")
-                    && hook.get("url").and_then(Value::as_str).is_some_and(|url| {
-                        url.starts_with("http://127.0.0.1:") && url.contains("/hooks/")
-                    })
-            })
-        })
+        .is_some_and(|hooks| hooks.iter().any(is_volee_hook))
+}
+
+fn is_volee_hook(hook: &Value) -> bool {
+    let target = match hook.get("type").and_then(Value::as_str) {
+        Some("http") => hook.get("url"),
+        Some("command") => hook.get("command"),
+        _ => None,
+    };
+    target
+        .and_then(Value::as_str)
+        .is_some_and(|text| text.contains("http://127.0.0.1:") && text.contains("/hooks/"))
+}
+
+/// The hook for `event`. Claude Code accepts `http` hooks on every event but
+/// `SessionStart` (which takes `command` and `mcp_tool` only): there a `curl`
+/// command posts the same request. It exits 0 whatever happens and prints
+/// nothing, since a `SessionStart` hook's output goes to the model.
+fn hook_for(event: &str, port: u16, token: &str) -> Value {
+    let url = format!("http://127.0.0.1:{port}/hooks/{event}");
+    if event == "SessionStart" {
+        return json!({
+            "type": "command",
+            "command": format!(
+                "curl --silent --show-error --max-time {HOOK_TIMEOUT} --output /dev/null \
+                 --request POST --header 'Content-Type: application/json' \
+                 --header 'Authorization: Bearer {token}' --data-binary @- {url} \
+                 2>/dev/null || true"
+            ),
+            "timeout": HOOK_TIMEOUT + 2,
+        });
+    }
+    json!({
+        "type": "http",
+        "url": url,
+        "headers": { "Authorization": format!("Bearer {token}") },
+        "timeout": HOOK_TIMEOUT,
+    })
 }
 
 /// `settings` with volee's hooks for `port` and `token`, replacing any
@@ -215,14 +247,7 @@ fn with_hooks(settings: Value, port: u16, token: &str) -> Result<Value> {
         .as_object_mut()
         .context("`hooks` in the settings must be an object")?;
     for event in EVENTS {
-        let entry = json!({
-            "hooks": [{
-                "type": "http",
-                "url": format!("http://127.0.0.1:{port}/hooks/{event}"),
-                "headers": { "Authorization": format!("Bearer {token}") },
-                "timeout": HOOK_TIMEOUT,
-            }]
-        });
+        let entry = json!({ "hooks": [hook_for(event, port, token)] });
         hooks
             .entry((*event).to_owned())
             .or_insert_with(|| Value::Array(Vec::new()))
@@ -314,7 +339,7 @@ mod tests {
     #[test]
     fn every_event_posts_to_its_own_path_with_the_token_and_a_short_timeout() {
         let settings = with_hooks(json!({}), 4000, TOKEN).unwrap();
-        for event in EVENTS {
+        for event in EVENTS.iter().filter(|event| **event != "SessionStart") {
             assert_eq!(
                 urls(&settings, event),
                 [format!("http://127.0.0.1:4000/hooks/{event}")]
@@ -328,6 +353,35 @@ mod tests {
             hook.get("onFailure").is_none(),
             "never asks to block on failure"
         );
+    }
+
+    #[test]
+    fn session_start_takes_no_http_hook_so_it_gets_a_silent_curl_that_never_fails() {
+        let settings = with_hooks(json!({}), 4000, TOKEN).unwrap();
+        let hook = &settings["hooks"]["SessionStart"][0]["hooks"][0];
+        assert_eq!(hook["type"], "command");
+        let command = hook["command"].as_str().unwrap();
+        assert!(
+            command.contains("http://127.0.0.1:4000/hooks/SessionStart"),
+            "{command}"
+        );
+        assert!(command.contains("Authorization: Bearer t0k3n"), "{command}");
+        assert!(
+            command.contains("--data-binary @-"),
+            "the payload is on stdin: {command}"
+        );
+        assert!(command.ends_with("|| true"), "never a failure: {command}");
+        assert!(
+            command.contains("--output /dev/null"),
+            "no output reaches the model"
+        );
+        let (without, removed) = without_hooks(settings).unwrap();
+        assert_eq!(
+            removed,
+            EVENTS.len(),
+            "the curl entry is recognized as volee's"
+        );
+        assert_eq!(without, json!({}));
     }
 
     #[test]
@@ -434,7 +488,7 @@ mod tests {
             0o600
         );
         let written: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
-        assert_eq!(urls(&written, "SessionStart").len(), 1);
+        assert_eq!(urls(&written, "Stop").len(), 1);
         remove(&file).unwrap();
         let after: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(after, json!({}));
