@@ -384,6 +384,7 @@ fn serve(running: &mut Running, name: &str, events: Vec<Event>, merge: Option<&s
             ..EvidenceSources::default()
         },
         processes: None,
+        hook_server: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
 }

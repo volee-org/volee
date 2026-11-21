@@ -40,6 +40,7 @@ pub(crate) async fn run() -> Result<()> {
         settings: settings(&paths),
         ..EvidenceSources::default()
     };
+    let hook_server = hook_server(&paths)?;
     let config = Config {
         spool: Some(paths.spool_dir()),
         paths,
@@ -52,10 +53,26 @@ pub(crate) async fn run() -> Result<()> {
         idle_discovery_interval: DEFAULT_IDLE_DISCOVERY_INTERVAL,
         evidence,
         processes: Some(Arc::new(volee_harness::SystemRunner)),
+        hook_server: Some(hook_server),
     };
     Daemon::run(config)
         .await
         .context("the daemon stopped with an error")
+}
+
+/// Where the daemon receives Claude Code's `http` hooks: the configured port
+/// on the loopback interface, with the per-install token.
+fn hook_server(paths: &Paths) -> Result<volee_daemon::HookServerConfig> {
+    let token = crate::hook_token::read_or_create(&paths.hook_token_file())
+        .with_context(|| format!("cannot read {}", paths.hook_token_file().display()))?;
+    Ok(volee_daemon::HookServerConfig {
+        addr: std::net::SocketAddr::from((
+            std::net::Ipv4Addr::LOCALHOST,
+            settings(paths).hooks.port,
+        )),
+        token,
+        database: paths.database(),
+    })
 }
 
 /// Finds Claude Code and checks that its version has what volee needs.

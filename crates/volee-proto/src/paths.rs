@@ -93,6 +93,13 @@ impl Paths {
         self.state_dir.join("volee.db")
     }
 
+    /// The token that authenticates Claude Code's `http` hooks to the
+    /// daemon: created by the first command that needs it, readable by the
+    /// owner only.
+    pub fn hook_token_file(&self) -> PathBuf {
+        self.state_dir.join("hook-token")
+    }
+
     /// The spool used by hooks when the daemon is unreachable.
     pub fn spool_dir(&self) -> PathBuf {
         self.state_dir.join("spool")

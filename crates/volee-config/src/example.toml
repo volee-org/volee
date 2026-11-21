@@ -50,3 +50,7 @@ wake_timeout = 3600
 # "all" (also those of sessions volee only discovered) or "never".
 # fetch = "launched"
 
+[hooks]
+# The port on 127.0.0.1 where the daemon receives Claude Code's `http` hooks.
+# `volee doctor` writes it into the hook settings: run it again after a change.
+# port = 47835

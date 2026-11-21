@@ -134,9 +134,7 @@ mod tests {
             ("Stop", Some("s1"), 4),
             ("Notification", None, 5),
         ] {
-            store
-                .append_hook_event(&event(name, session, at))
-                .unwrap();
+            store.append_hook_event(&event(name, session, at)).unwrap();
         }
         let one = store
             .hook_events(&HookFilter {

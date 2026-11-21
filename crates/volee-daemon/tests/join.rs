@@ -119,6 +119,7 @@ fn start(log: Vec<Event>) -> Running {
         idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
         processes: None,
+        hook_server: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running { socket, _dir: dir }

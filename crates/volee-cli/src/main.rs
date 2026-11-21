@@ -6,6 +6,7 @@
 
 mod cmd;
 mod connect;
+mod hook_token;
 mod resolve;
 mod table;
 mod text;
@@ -47,6 +48,33 @@ enum Command {
         /// The full patch instead of a summary by file.
         #[arg(long)]
         full: bool,
+    },
+    /// Write the hook settings that make Claude Code post its events to the
+    /// daemon, and check that the daemon answers.
+    Doctor {
+        /// The project to write `.claude/settings.local.json` in; the
+        /// current directory when absent.
+        #[arg(long, value_name = "DIR", conflicts_with = "user")]
+        project: Option<std::path::PathBuf>,
+        /// Write `~/.claude/settings.json` instead: every Claude Code session
+        /// of this user then reports to the daemon.
+        #[arg(long)]
+        user: bool,
+        /// Remove volee's hooks from that file instead of writing them.
+        #[arg(long)]
+        remove: bool,
+    },
+    /// List the hook events the daemon stored, oldest first.
+    Events {
+        /// Only this Claude Code session.
+        #[arg(long, value_name = "ID")]
+        session: Option<String>,
+        /// Only the newest N events.
+        #[arg(long, value_name = "N")]
+        limit: Option<u32>,
+        /// Print JSON, with each raw payload, instead of a table.
+        #[arg(long)]
+        json: bool,
     },
     /// Stop listing an agent that no longer runs; its sessions, worktree and
     /// branch stay as they are.
@@ -279,6 +307,20 @@ fn main() -> ExitCode {
             ConfigCommand::Init => cmd::config::init(),
             ConfigCommand::Check => cmd::config::check(),
         }),
+        Command::Doctor {
+            project,
+            user,
+            remove,
+        } => report(cmd::doctor::run(&cmd::doctor::Options {
+            project,
+            user,
+            remove,
+        })),
+        Command::Events {
+            session,
+            limit,
+            json,
+        } => report(cmd::events::run(session, limit, json)),
         command => async_main(command),
     }
 }
@@ -339,7 +381,10 @@ fn async_main(command: Command) -> ExitCode {
                 Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
                 result => result.map_err(Into::into),
             },
-            Command::Hook { .. } | Command::Config(_) => {
+            Command::Hook { .. }
+            | Command::Config(_)
+            | Command::Doctor { .. }
+            | Command::Events { .. } => {
                 unreachable!("these commands run without the async runtime")
             }
         }

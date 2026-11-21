@@ -102,6 +102,7 @@ fn start_with(worker: bool) -> Running {
             ..EvidenceSources::default()
         },
         processes: None,
+        hook_server: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

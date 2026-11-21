@@ -83,6 +83,7 @@ fn start(summaries: bool) -> Running {
             ..EvidenceSources::default()
         },
         processes: None,
+        hook_server: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

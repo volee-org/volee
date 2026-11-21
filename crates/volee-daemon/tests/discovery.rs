@@ -110,6 +110,7 @@ fn start_reading(
         idle_discovery_interval: idle,
         evidence: EvidenceSources::default(),
         processes,
+        hook_server: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -692,6 +693,7 @@ async fn without_a_harness_a_refresh_answers_at_once() {
         idle_discovery_interval: HOUR,
         evidence: EvidenceSources::default(),
         processes: None,
+        hook_server: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     let asked = tokio::time::Instant::now();

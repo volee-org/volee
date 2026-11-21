@@ -67,6 +67,28 @@ pub struct Config {
     pub missions: Missions,
     /// What the daemon does with git in the background.
     pub git: GitSettings,
+    /// Where the daemon receives Claude Code's hooks.
+    pub hooks: Hooks,
+}
+
+/// Where the daemon receives Claude Code's `http` hooks. It listens on the
+/// loopback interface only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Hooks {
+    /// The TCP port on 127.0.0.1.
+    pub port: u16,
+}
+
+/// The default hook port.
+pub const DEFAULT_HOOK_PORT: u16 = 47835;
+
+impl Default for Hooks {
+    fn default() -> Self {
+        Self {
+            port: DEFAULT_HOOK_PORT,
+        }
+    }
 }
 
 /// What the daemon does with git in the background.
@@ -419,6 +441,39 @@ mod tests {
     fn the_example_parses_to_the_defaults() {
         let config = parse(EXAMPLE).unwrap();
         assert_eq!(config, Config::default());
+    }
+
+    #[test]
+    fn the_hook_port_has_a_default_and_can_be_set() {
+        assert_eq!(Config::default().hooks.port, DEFAULT_HOOK_PORT);
+        assert_eq!(
+            parse(
+                "[hooks]
+port = 4000
+"
+            )
+            .unwrap()
+            .hooks
+            .port,
+            4000
+        );
+        assert!(
+            parse(
+                "[hooks]
+port = 70000
+"
+            )
+            .is_err()
+        );
+        assert!(
+            parse(
+                "[hooks]
+host = \"0.0.0.0\"
+"
+            )
+            .is_err(),
+            "loopback only"
+        );
     }
 
     #[test]

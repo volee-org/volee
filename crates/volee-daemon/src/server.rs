@@ -66,6 +66,9 @@ pub struct Config {
     /// of other harnesses that run outside volee's hosts (ADR 0023). `None`:
     /// the table is not read, and such agents are not found.
     pub processes: Option<Arc<dyn volee_harness::CommandRunner>>,
+    /// The hook server that receives Claude Code's `http` hooks; `None`
+    /// starts none.
+    pub hook_server: Option<crate::hook_server::HookServerConfig>,
 }
 
 impl std::fmt::Debug for Config {
@@ -203,6 +206,23 @@ impl Daemon {
             ));
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
+        let hooks = match config.hook_server {
+            Some(hook_config) => {
+                let listener = crate::hook_server::bind(&hook_config).await?;
+                let store = volee_store::Store::open(&hook_config.database).map_err(|error| {
+                    DaemonError::Unavailable(format!("cannot open the hook database: {error}"))
+                })?;
+                tracing::info!(addr = ?listener.local_addr().ok(), "hook server ready");
+                Some(tokio::spawn(async move {
+                    if let Err(error) =
+                        crate::hook_server::serve(listener, hook_config.token, store).await
+                    {
+                        tracing::error!(%error, "the hook server stopped");
+                    }
+                }))
+            }
+            None => None,
+        };
         // A mission the person approved while the daemon was stopping, or
         // whose merge it could not finish, is carried out now.
         crate::missions::resume_approved(&shared).await;
@@ -223,7 +243,7 @@ impl Daemon {
         }
         tracing::info!("volee daemon stopping");
         connections.abort_all();
-        for task in [refresher, Some(files)].into_iter().flatten() {
+        for task in [refresher, Some(files), hooks].into_iter().flatten() {
             task.abort();
         }
         Ok(())

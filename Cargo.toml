@@ -26,6 +26,7 @@ volee-store = { path = "crates/volee-store", version = "0.18.0" }
 
 # External crates. Keep this list sorted.
 anyhow = "1.0.104"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
 clap = { version = "4.6.7", features = ["derive", "wrap_help"] }
 clap_complete = "4.6.11"
 insta = { version = "1.49.0", features = ["json"] }
