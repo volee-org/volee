@@ -13,12 +13,14 @@
 //! meaning of an event stays in `volee-core`.
 
 mod error;
+mod hooks;
 mod migrations;
 mod seq;
 pub mod spool;
 mod store;
 
 pub use error::StoreError;
+pub use hooks::{HookEvent, HookFilter, NewHookEvent};
 pub use seq::Seq;
 pub use spool::{Drained, Spool};
 pub use store::Store;

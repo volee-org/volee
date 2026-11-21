@@ -22,7 +22,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// exist to filter and index (`kind`, `agent`, `at`).
 #[derive(Debug)]
 pub struct Store {
-    connection: Connection,
+    pub(crate) connection: Connection,
 }
 
 impl Store {

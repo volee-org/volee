@@ -30,6 +30,19 @@ const MIGRATIONS: &[&str] = &[
         value TEXT NOT NULL
     );
     ",
+    // 2: the hook events Claude Code posts to the daemon (v2).
+    "
+    CREATE TABLE hook_events (
+        seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+        received_at INTEGER NOT NULL,
+        event       TEXT    NOT NULL,
+        session_id  TEXT,
+        cwd         TEXT,
+        payload     TEXT    NOT NULL
+    );
+    CREATE INDEX hook_events_session ON hook_events (session_id, seq)
+        WHERE session_id IS NOT NULL;
+    ",
 ];
 
 /// The newest schema version this build understands.
