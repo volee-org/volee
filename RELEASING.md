@@ -68,30 +68,11 @@ The commands below release `0.2.0`: replace it with your version.
 
 ### 0. Run the journeys
 
-A release ships only what a person can do with it. Before anything else, on
-the commit of `main` you are about to release, run the
-[journeys](journeys/README.md): the real interface, driven by keyboard, with a
-real agent.
-
-```sh
-cargo build --release --locked -p volee-cli
-python3 journeys/open.py --volee target/release/volee --sandbox <trusted repository>
-python3 journeys/pane.py --volee target/release/volee --sandbox <trusted repository>
-python3 journeys/terminal.py --volee target/release/volee --sandbox <trusted repository>
-python3 journeys/edit_mode.py --volee target/release/volee --sandbox <trusted repository>
-python3 journeys/wall.py --volee target/release/volee --sandbox <trusted repository>
-python3 journeys/other_ai.py --volee target/release/volee --sandbox <trusted repository>
-python3 journeys/other_ai.py --stand-in codex --volee target/release/volee --sandbox <trusted repository>
-python3 journeys/run.py --volee target/release/volee --sandbox <trusted repository>
-python3 journeys/question.py --volee target/release/volee --sandbox <trusted repository>
-python3 journeys/deliver.py --volee target/release/volee --sandbox <trusted repository>
-python3 journeys/mission.py --volee target/release/volee --sandbox <trusted repository> --other-sandbox <a second one>
-python3 journeys/old_host.py --volee target/release/volee --old-volee <an older volee> --sandbox <trusted repository>
-```
-
-Every check must pass. A failed check is a bug to fix on `main` first, never
-a note in the release. A pull request that changes what a person does in the
-interface adds or updates the journey that covers it.
+A release ships only what a person can do with it. The 0.x journeys drove the
+TUI through tuios and were removed with the v2 restart
+([docs/v2/framing.md](docs/v2/framing.md)); the browser journeys that replace
+them come with the stages of the v2 plan. Until they exist, nothing on this
+branch can be released: there is no gate to pass.
 
 ### 1. Choose the version
 
@@ -221,13 +202,6 @@ docker run --rm ubuntu:24.04 sh -c '
   apt-get update -qq && apt-get install -y -qq ca-certificates curl xz-utils >/dev/null &&
   curl --proto "=https" --tlsv1.2 -LsSf https://github.com/volee-org/volee/releases/download/v0.2.0/volee-cli-installer.sh | sh &&
   ~/.local/bin/volee --version'
-```
-
-Then run the journey of the installed version, which uses your own daemon and
-your own list of agents:
-
-```sh
-python3 journeys/installed.py --sandbox <trusted repository> --expect 0.2.0
 ```
 
 Finally, check that the [installation guide](docs/src/guide/installation.md)
