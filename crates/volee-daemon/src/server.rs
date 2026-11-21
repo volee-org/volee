@@ -104,10 +104,6 @@ pub(crate) struct Shared {
     pub(crate) checks: crate::evidence::Checks,
     /// What the evidence refresher learned about the forge, once it checked.
     forge: std::sync::Mutex<Option<ForgeStatus>>,
-    /// The agents being launched now, from just before their registration
-    /// until their session started or their launch failed: a listing in
-    /// between must not take them for launches that stalled.
-    launches: std::sync::Mutex<std::collections::HashSet<AgentId>>,
     shutdown: watch::Sender<bool>,
 }
 
@@ -120,14 +116,6 @@ impl Shared {
         // A plain value that is never left half-written: a poisoned lock
         // still holds a valid one.
         self.forge
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-
-    /// The agents being launched now.
-    pub(crate) fn launches_in_flight(&self) -> std::collections::HashSet<AgentId> {
-        self.launches
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
@@ -196,7 +184,6 @@ impl Daemon {
             presence: crate::join::Presence::default(),
             checks: crate::evidence::Checks::default(),
             forge: std::sync::Mutex::new(None),
-            launches: std::sync::Mutex::default(),
             shutdown,
         });
         if let Some(dir) = config.spool {

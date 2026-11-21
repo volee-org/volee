@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 use tokio::sync::{broadcast, oneshot};
 use ulid::Ulid;
-use volee_core::harness::SessionOrigin;
 use volee_core::ids::{MessageId, MissionId, ThreadId};
 use volee_core::message::Party;
 use volee_core::time::Timestamp;
@@ -44,21 +43,9 @@ pub(crate) struct State {
     started_at: Timestamp,
     /// The last identifier handed out, so that the next one sorts after it.
     last_id: Cell<Ulid>,
-    /// Sessions the daemon started or resumed and no event linked yet, by
-    /// the harness's handle, with the agent they belong to.
-    expected: HashMap<String, Expected>,
     /// The harness sessions the daemon can act on. Not persisted: rebuilt by
     /// the next listing.
     sessions: Sessions,
-}
-
-/// A session the daemon started or resumed and no event linked yet.
-#[derive(Clone, Copy, Debug)]
-struct Expected {
-    agent: AgentId,
-    origin: SessionOrigin,
-    /// When the daemon started it.
-    since: Timestamp,
 }
 
 impl std::fmt::Debug for State {
@@ -88,7 +75,6 @@ impl State {
             waiters: HashMap::new(),
             next_token: 0,
             last_id: Cell::new(Ulid::nil()),
-            expected: HashMap::new(),
             clock,
             started_at,
             sessions: Sessions::default(),
@@ -147,28 +133,6 @@ impl State {
     /// A new thread identifier.
     pub(crate) fn new_thread_id(&self) -> ThreadId {
         ThreadId::from_ulid(self.new_ulid())
-    }
-
-    /// The agent waiting for the session the harness calls `handle`.
-    pub(crate) fn take_expected(&mut self, handle: &str) -> Option<(AgentId, SessionOrigin)> {
-        self.expected
-            .remove(handle)
-            .map(|expected| (expected.agent, expected.origin))
-    }
-
-    /// The newest session the daemon started or resumed for `agent` that no
-    /// listing has shown yet, and when it started it.
-    pub(crate) fn expected_since(&self, agent: AgentId) -> Option<(String, Timestamp)> {
-        self.expected
-            .iter()
-            .filter(|(_, expected)| expected.agent == agent)
-            .max_by_key(|(_, expected)| expected.since)
-            .map(|(handle, expected)| (handle.clone(), expected.since))
-    }
-
-    /// Stops waiting for the sessions of `agent`.
-    pub(crate) fn forget_expected(&mut self, agent: AgentId) {
-        self.expected.retain(|_, expected| expected.agent != agent);
     }
 
     /// A new agent identifier.

@@ -22,24 +22,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use std::collections::HashSet;
 use tokio::sync::watch;
 use tokio::time::Instant;
 
-use volee_core::harness::HarnessKind;
 use volee_core::reconcile::{
     ListedSession, Listing, continued, moved_to_background, reconcile, settling,
 };
-use volee_core::role::LaunchedBy;
-use volee_core::state::AgentState;
-use volee_core::time::Timestamp;
-use volee_core::{AgentId, Event, EventKind};
 use volee_harness::Harness;
 use volee_proto::methods::{RefreshParams, Refreshed};
 
 use crate::error::DaemonError;
 use crate::server::Shared;
-use crate::state::State;
 use crate::watchers::Watching;
 
 /// How long a refresh waits for its listing when the request says nothing.
@@ -283,14 +276,7 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
     let left = left_running(shared, &listing).await;
     let mut state = shared.state.lock().await;
     let now = state.now();
-    let claimed = claim_expected(&mut state, &listing, now);
     let mut linked = false;
-    if !claimed.is_empty() {
-        match state.commit(claimed) {
-            Ok(_) => linked = true,
-            Err(error) => tracing::error!(%error, "cannot link sessions started by volee"),
-        }
-    }
     // Before the listing replaces the previous one: a session that changed
     // its id inside the same process keeps its agent.
     let moved = continued(state.registry(), state.sessions().all(), &listing, now);
@@ -328,20 +314,6 @@ async fn list(shared: &Arc<Shared>, harness: &Arc<dyn Harness>, failing: &mut bo
                     changed: linked,
                 };
             }
-        }
-    }
-    // After the listing linked what it could: launches that will never
-    // start their session.
-    let stalled = stalled_launches(
-        &mut state,
-        &listing.harness,
-        &shared.launches_in_flight(),
-        now,
-    );
-    if !stalled.is_empty() {
-        match state.commit(stalled) {
-            Ok(_) => changed = true,
-            Err(error) => tracing::error!(%error, "cannot record stalled launches"),
         }
     }
     // A session that waits to become an agent is a change under way: the
@@ -384,89 +356,6 @@ async fn left_running(shared: &Arc<Shared>, listing: &Listing) -> Vec<ListedSess
     left.into_iter()
         .filter(|session| session.pid.is_some_and(|pid| running.contains(&pid)))
         .collect()
-}
-
-/// How long a session the daemon started may take to appear in a listing
-/// before its launch counts as stalled.
-const STALLED_AFTER_MS: u64 = 120_000;
-
-/// Launches that will never start their session: agents volee launched,
-/// still launching, that never had a session, are not being launched now,
-/// and wait for no session started less than two minutes ago. A daemon that
-/// stopped during a launch leaves such agents, and so does a harness that
-/// reports a session it never lists. They are marked failed: a stop would
-/// find no session and a forget would refuse an agent still launching, while
-/// a failed launch is one the same command reuses (ADR 0016).
-fn stalled_launches(
-    state: &mut State,
-    harness: &HarnessKind,
-    in_flight: &HashSet<AgentId>,
-    now: Timestamp,
-) -> Vec<Event> {
-    let stuck: Vec<AgentId> = state
-        .registry()
-        .agents()
-        .filter(|agent| {
-            agent.harness == *harness
-                && agent.launched_by != LaunchedBy::Outside
-                && agent.state == AgentState::Launching
-                && agent.sessions.is_empty()
-                && !in_flight.contains(&agent.id)
-        })
-        .map(|agent| agent.id)
-        .collect();
-    let mut events = Vec::new();
-    for agent in stuck {
-        let detail = match state.expected_since(agent) {
-            Some((_, since)) if since.millis_until(now) < STALLED_AFTER_MS => continue,
-            Some((handle, _)) => format!(
-                "Claude Code started session {handle} but never listed it: run the same launch \
-                 again"
-            ),
-            None => "the launch stopped before its session started, as when the daemon stops: \
-                     run the same launch again"
-                .to_owned(),
-        };
-        state.forget_expected(agent);
-        events.push(Event::new(
-            now,
-            EventKind::StateChanged {
-                agent,
-                state: AgentState::Failed,
-                detail: Some(detail),
-            },
-        ));
-    }
-    events
-}
-
-/// Links the sessions the daemon started or resumed, recognized by the
-/// harness's handle, to their agent. A resumed session is often a fork with a
-/// new id: without this, a listing that sees it before its first hook would
-/// take it for a stranger.
-fn claim_expected(state: &mut State, listing: &Listing, now: Timestamp) -> Vec<Event> {
-    let mut events = Vec::new();
-    for session in &listing.sessions {
-        let Some(handle) = session.handle.as_deref() else {
-            continue;
-        };
-        let owned = state.registry().agent_for_session(&session.key).is_some();
-        let Some((agent, origin)) = state.take_expected(handle) else {
-            continue;
-        };
-        if owned || state.registry().agent(agent).is_none() {
-            continue;
-        }
-        events.push(Event::new(
-            now,
-            EventKind::SessionLinked {
-                agent,
-                session: session.key.clone(),
-                origin,
-            },
-        ));
-    }
-    events
 }
 
 #[cfg(test)]
