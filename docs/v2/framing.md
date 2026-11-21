@@ -74,9 +74,9 @@ never types into a terminal. Where a decision must come back to an interactive
 session, it goes through a hook response (T1, T2). The SDK is not used in v1 (T3).
 
 AGENTS.md and ADR 0004 forbid parsing Claude Code internal files. Transcripts
-are the one exception to decide (question 2): they are the only source of
-"what the AI did and why". Proposal: one tolerant module, degrading to
-hooks-only when parsing fails.
+are the one exception (decision 3, section 9): they are the only source of
+"what the AI did and why". They are read through one tolerant module that
+degrades to hooks-only when parsing fails, and ADR 0004 is to be amended.
 
 Pre-review: Open Code Review in delegation mode was tested on PR #185, no net
 gain at equal model. Decision: native `/code-review`.
@@ -231,7 +231,7 @@ interactive session.**
   timeout behaviour there; the multi-select answer format.
 - Design consequences: question cards are answered from the inbox for any
   session. Open point: while volee holds the question, the person at the
-  terminal sees nothing, so volee must warn them (see questions) and have a
+  terminal sees nothing, so volee must warn them (open question 3) and have a
   fast "let the terminal ask" answer (a timeout or no-decision response) that
   leaves the normal dialog. Echo the questions array back unchanged.
 
@@ -302,30 +302,39 @@ Playwright). Keep `journey.py` structure and the sandbox convention.
 **Release.** Keep dist, git-cliff, `RELEASING.md`, CI and cargo-deny. Add a UI
 build step (the web bundle is embedded in the binary).
 
-## 9. Open questions for Jeff
+## 9. Decisions (Jeff, 2026-11-21)
+
+1. **Restart:** option A of section 12. Same repo, history kept, `legacy/0.x`
+   on the current `main` head, then reviewable commits on `v2`.
+2. **ADRs and docs:** as proposed in section 8. All ADRs are kept as history,
+   superseded ones marked, the listed ones kept or adapted. New ADRs for Lua,
+   observe-only, web UI and SDK policy. The mdBook site is kept and rebuilt
+   around the inbox.
+3. **Transcripts:** yes, read through one tolerant module that degrades to
+   hooks-only. ADR 0004 is to be amended.
+4. **Merge:** automatic merge is allowed at low risk when a Lua rule says so,
+   and it is visible in the journal. Otherwise, one click.
+
+## 10. Open questions for Jeff
 
 1. **Name and repo.** Keep `volee` and `volee-org/volee` for v2, or a new name
    to mark the break? (Recommendation: keep.)
-2. **Transcripts.** OK to read them despite ADR 0004, behind one tolerant
-   module, hooks-only as fallback?
-3. **Merge authority.** v1 merges according to the Lua rules, including
-   automatically at low risk. Acceptable, or always one click?
-4. **Lua surface.** Start with a declarative default plus Lua escape hatch, or
+2. **Lua surface.** Start with a declarative default plus Lua escape hatch, or
    Lua only? Who may write rules per developer (a user file outside the repo)?
-5. **Held questions.** While volee holds an `AskUserQuestion` (T2), the person
+3. **Held questions.** While volee holds an `AskUserQuestion` (T2), the person
    at the terminal sees nothing. How do we warn them (desktop notification, a
    short hold before the hook answers, a per-repo "ask in terminal first"
    rule)? And what is the right timeout before the terminal dialog takes over?
    Later, separately: an opt-in SDK module at all, given the grey zone (T3)?
-6. **UI shell and editor.** Plain browser tab first, Tauri later: confirm.
+4. **UI shell and editor.** Plain browser tab first, Tauri later: confirm.
    Monaco (heavier, VS Code feel) or CodeMirror (lighter)?
-7. **Review model.** Haiku by default, two reviewers when risky: who decides
+5. **Review model.** Haiku by default, two reviewers when risky: who decides
    "risky", the Lua rules or the person per card?
-8. **First targets** for rules (slapeo, volee itself), and whether a Rex
+6. **First targets** for rules (slapeo, volee itself), and whether a Rex
    adapter alone is enough for v1.
-9. **License and public status** unchanged (MIT OR Apache-2.0, public)?
+7. **License and public status** unchanged (MIT OR Apache-2.0, public)?
 
-## 10. Staged plan
+## 11. Staged plan
 
 Small steps from the empty `v2` branch to the v1 inbox. Each ends with
 something to demo and a proof that is run for real, in the spirit of the
@@ -338,7 +347,7 @@ journeys (a release is not done until the proof passes on a real machine).
 | 2 | Agents and finished work: `claude agents --json` poller joined to hooks, worktree and git facts (ahead, dirty, merged) | `volee agents` shows state and finished work with a diff summary | Journey: real worker finishes in a sandbox, card data matches git |
 | 3 | Minimal web UI: the inbox list over WebSocket, served by the daemon, bundle embedded in the binary | Browser tab shows live cards, `Open terminal` through one adapter (Rex) | Playwright journey against a real agent |
 | 4 | Permission cards: `PermissionRequest` http hook, allow and deny from the UI, long explicit timeout, stale reconciliation with the transcript | Approve a real tool call from the browser, no terminal touch | Journey: allow, deny, timeout fallback to the terminal dialog, answered-in-terminal first (card disappears) |
-| 5 | Question cards: `PreToolUse` on `AskUserQuestion`, answers and free text, the held-question warning chosen in question 5 | Answer a real question from the browser | Journey: answer, deny, timeout; multi-select format measured first |
+| 5 | Question cards: `PreToolUse` on `AskUserQuestion`, answers and free text, the held-question warning chosen in open question 3 | Answer a real question from the browser | Journey: answer, deny, timeout; multi-select format measured first |
 | 6 | Finished-work card screen: summary, plan from transcript, guided diff (diff2html), Mermaid diagram of the change | Open a finished worker and read it in layers | Journey on a real change; transcript parser tested against recorded real files, degrades to hooks-only on failure |
 | 7 | Pre-review: native `/code-review` as an opinion on the card | Review notes inline in the diff | Journey; review never blocks a merge by itself |
 | 8 | Lua engine and rules: sandboxed mlua, config file, risk function per repo and per developer, layers shown by risk, load error falls back to the safest rule | Same change shown as a glance or a full read depending on the rules | Rust unit tests of the sandbox limits; journey with two rule files |
@@ -349,7 +358,7 @@ Order rationale: steps 1 to 3 prove the observe-only pipeline end to end before
 any decision is taken; 4 and 5 are the two risky checks of section 7 turned into
 features; 8 comes before 9 so merges are never unruled.
 
-## 11. Proposed way to restart from scratch on branch `v2`
+## 12. Way to restart from scratch on branch `v2` (option A decided)
 
 Options:
 
