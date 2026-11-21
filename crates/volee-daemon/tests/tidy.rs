@@ -12,22 +12,19 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use common::{FakeHarness, git, repository};
+use common::{FakeHarness, WorkedFor, git, recorded_worker, repository};
 use tokio::net::UnixListener;
 use ulid::Ulid;
 use volee_core::delivery::TidyRefusal;
 use volee_core::harness::SessionKey;
 use volee_core::reconcile::ListedSession;
-use volee_core::role::Role;
 use volee_core::state::AgentState;
 use volee_core::{AgentId, Event, Registry};
 use volee_daemon::{Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
 use volee_git::GitCli;
 use volee_harness::Harness;
 use volee_proto::client::{Client, ClientError};
-use volee_proto::methods::{
-    EventsSince, SinceParams, Spawn, SpawnParams, Spawned, Tidy, TidyOutcome, TidyParams,
-};
+use volee_proto::methods::{EventsSince, SinceParams, Tidy, TidyOutcome, TidyParams};
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
 
@@ -35,17 +32,41 @@ struct Running {
     socket: PathBuf,
     harness: Arc<FakeHarness>,
     repo: PathBuf,
+    /// The worker recorded in the log at the start, when the test asked
+    /// for one: its agent and its worktree.
+    worker: Option<(AgentId, PathBuf)>,
     _dir: tempfile::TempDir,
 }
 
 /// A daemon with a repository named `alpha`, git evidence read every few
 /// milliseconds, and a fake harness listed as often.
 fn start() -> Running {
+    start_with(false)
+}
+
+/// The same, whose log already records a worker on `feat/invoices` with its
+/// worktree, as volee records a launch (nothing is launched).
+fn start_with_worker() -> Running {
+    start_with(true)
+}
+
+fn start_with(worker: bool) -> Running {
     let dir = tempfile::tempdir().unwrap();
     // Canonical, so that paths compare equal to what git reports.
     let root = dir.path().canonicalize().unwrap();
     let repo = root.join("alpha");
     repository(&repo);
+    let recorded = worker.then(|| {
+        recorded_worker(
+            &repo,
+            "alpha",
+            AgentId::from_ulid(Ulid::from_parts(100, 1)),
+            "alpha-feat-invoices",
+            "feat/invoices",
+            1,
+            &WorkedFor::default(),
+        )
+    });
     let paths = Paths::rooted(root.join("volee"));
     std::fs::create_dir_all(&paths.state_dir).unwrap();
     let socket = paths.socket.clone();
@@ -62,7 +83,11 @@ fn start() -> Running {
         .env("GIT_CONFIG_NOSYSTEM", "1");
     let config = Config {
         paths,
-        log: Box::new(MemoryLog::with(vec![])),
+        log: Box::new(MemoryLog::with(
+            recorded
+                .as_ref()
+                .map_or_else(Vec::new, |worker| worker.events.clone()),
+        )),
         clock: Arc::new(ManualClock::at(10_000)),
         harnesses: vec![],
         spool: None,
@@ -83,6 +108,7 @@ fn start() -> Running {
         socket,
         harness,
         repo,
+        worker: recorded.map(|worker| (worker.agent, worker.worktree)),
         _dir: dir,
     }
 }
@@ -102,22 +128,11 @@ fn launched_session(state: AgentState, cwd: &Path) -> ListedSession {
     }
 }
 
-async fn spawn_worker(client: &Client) -> Spawned {
-    client
-        .call::<Spawn>(SpawnParams {
-            repo: "alpha".into(),
-            branch: "feat/invoices".into(),
-            base: None,
-            task: "Add invoices to the billing module.".into(),
-            role: Role::Worker,
-            parent: None,
-            mission: None,
-            model: None,
-            name: None,
-            harness: None,
-        })
-        .await
-        .unwrap()
+impl Running {
+    /// The recorded worker and its worktree.
+    fn worker(&self) -> (AgentId, PathBuf) {
+        self.worker.clone().unwrap()
+    }
 }
 
 async fn registry(client: &Client) -> Registry {
@@ -160,8 +175,7 @@ fn reasons(outcome: TidyOutcome) -> Vec<TidyRefusal> {
 /// A worker that committed on its branch and finished its turn, whose
 /// evidence volee has read: one commit not merged yet.
 async fn finished_worker(daemon: &Running, client: &Client) -> (AgentId, PathBuf) {
-    let spawned = spawn_worker(client).await;
-    let worktree = PathBuf::from(&spawned.worktree);
+    let (agent, worktree) = daemon.worker();
     std::fs::write(worktree.join("invoices.rs"), "pub fn total() {}\n").unwrap();
     git(&worktree, &["add", "invoices.rs"]);
     git(&worktree, &["commit", "--quiet", "-m", "Add invoices"]);
@@ -169,14 +183,14 @@ async fn finished_worker(daemon: &Running, client: &Client) -> (AgentId, PathBuf
         .harness
         .set(vec![launched_session(AgentState::Done, &worktree)]);
     until(client, |r| {
-        r.agent(spawned.agent).is_some_and(|agent| {
+        r.agent(agent).is_some_and(|agent| {
             agent.state == AgentState::Done
                 && agent.delivery.commits == 1
                 && agent.delivery.checked_at.is_some()
         })
     })
     .await;
-    (spawned.agent, worktree)
+    (agent, worktree)
 }
 
 /// Merges the worker's branch into `main` and waits for the evidence to say
@@ -220,9 +234,8 @@ fn locked(repo: &Path, worktree: &Path) -> bool {
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn a_merged_branch_is_tidied_and_its_branch_kept() {
-    let daemon = start();
+    let daemon = start_with_worker();
     let client = Client::connect(&daemon.socket).await.unwrap();
     let (agent, worktree) = finished_worker(&daemon, &client).await;
     merge(&daemon, &client, agent).await;
@@ -265,9 +278,8 @@ async fn a_merged_branch_is_tidied_and_its_branch_kept() {
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn an_unmerged_branch_is_kept_with_its_reason() {
-    let daemon = start();
+    let daemon = start_with_worker();
     let client = Client::connect(&daemon.socket).await.unwrap();
     let (agent, worktree) = finished_worker(&daemon, &client).await;
     assert_eq!(
@@ -280,9 +292,8 @@ async fn an_unmerged_branch_is_kept_with_its_reason() {
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn uncommitted_changes_keep_the_worktree() {
-    let daemon = start();
+    let daemon = start_with_worker();
     let client = Client::connect(&daemon.socket).await.unwrap();
     let (agent, worktree) = finished_worker(&daemon, &client).await;
     merge(&daemon, &client, agent).await;
@@ -298,30 +309,27 @@ async fn uncommitted_changes_keep_the_worktree() {
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn a_running_agent_is_kept() {
-    let daemon = start();
+    let daemon = start_with_worker();
     let client = Client::connect(&daemon.socket).await.unwrap();
-    let spawned = spawn_worker(&client).await;
-    let worktree = PathBuf::from(&spawned.worktree);
+    let (agent, worktree) = daemon.worker();
     daemon
         .harness
         .set(vec![launched_session(AgentState::Working, &worktree)]);
     until(&client, |r| {
-        r.agent(spawned.agent)
+        r.agent(agent)
             .is_some_and(|agent| agent.state == AgentState::Working)
     })
     .await;
-    let kept = reasons(tidy(&client, spawned.agent, false).await);
+    let kept = reasons(tidy(&client, agent, false).await);
     assert!(kept.contains(&TidyRefusal::Busy), "{kept:?}");
     assert!(worktree.is_dir());
     assert_eq!(daemon.harness.actions(), []);
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn a_locked_worktree_is_unlocked_only_when_the_evidence_allows() {
-    let daemon = start();
+    let daemon = start_with_worker();
     let client = Client::connect(&daemon.socket).await.unwrap();
     let (agent, worktree) = finished_worker(&daemon, &client).await;
     // Claude Code locks the worktrees its sessions use, and keeps a session

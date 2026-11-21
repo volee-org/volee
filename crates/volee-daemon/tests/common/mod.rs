@@ -297,3 +297,107 @@ pub(crate) fn repository(dir: &Path) {
     git(dir, &["add", "README.md"]);
     git(dir, &["commit", "--quiet", "-m", "Initial commit"]);
 }
+
+/// A worker as volee records one it launched, with nothing launched: a real
+/// worktree of `repo` on a new `branch` off `main`, and the events that
+/// register the agent and link the session of launch number `launch`
+/// (`launch_handle`). Put the events in the log a daemon starts on.
+#[derive(Debug)]
+pub(crate) struct RecordedWorker {
+    pub(crate) agent: AgentId,
+    pub(crate) worktree: std::path::PathBuf,
+    pub(crate) events: Vec<volee_core::Event>,
+}
+
+/// Who a recorded worker works for.
+#[derive(Debug, Default)]
+pub(crate) struct WorkedFor {
+    pub(crate) parent: Option<AgentId>,
+    pub(crate) mission: Option<volee_core::MissionId>,
+}
+
+pub(crate) fn recorded_worker(
+    repo: &Path,
+    repo_name: &str,
+    agent: AgentId,
+    name: &str,
+    branch: &str,
+    launch: usize,
+    for_whom: &WorkedFor,
+) -> RecordedWorker {
+    use volee_core::role::{LaunchedBy, Role};
+    use volee_core::time::Timestamp;
+    use volee_core::workspace::{Location, Workspace};
+    use volee_core::{Event, EventKind};
+
+    let slug: String = branch
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let worktree = repo.join(".claude/worktrees").join(slug);
+    git(
+        repo,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            branch,
+            worktree.to_str().unwrap(),
+            "main",
+        ],
+    );
+    // Keep the worktrees out of the status of the main checkout, as a launch
+    // does.
+    let exclude = repo.join(".git/info/exclude");
+    let mut rules = std::fs::read_to_string(&exclude).unwrap_or_default();
+    if !rules
+        .lines()
+        .any(|line| line.trim() == ".claude/worktrees/")
+    {
+        rules.push_str(".claude/worktrees/\n");
+        std::fs::write(&exclude, rules).unwrap();
+    }
+    let start_commit = git(repo, &["rev-parse", "main"]);
+    let at = Timestamp::from_millis(2);
+    let events = vec![
+        Event::new(
+            at,
+            EventKind::AgentRegistered {
+                agent,
+                name: name.into(),
+                role: Role::Worker,
+                harness: HarnessKind::ClaudeCode,
+                launched_by: for_whom.parent.map_or(LaunchedBy::Human, LaunchedBy::Agent),
+                parent: for_whom.parent,
+                mission: for_whom.mission,
+                workspace: Workspace {
+                    repo: Some(repo_name.into()),
+                    repo_root: Some(repo.to_path_buf()),
+                    worktree: Some(worktree.clone()),
+                    branch: Some(branch.into()),
+                    base: Some("main".into()),
+                    start_commit: Some(start_commit),
+                    ..Workspace::at(&worktree)
+                },
+                location: Location::Background,
+            },
+        ),
+        Event::new(
+            at,
+            EventKind::SessionLinked {
+                agent,
+                session: SessionKey::claude(format!(
+                    "{}-5b60-4cdc-8cf3-000000000001",
+                    launch_handle(launch)
+                )),
+                origin: SessionOrigin::Started,
+            },
+        ),
+    ];
+    RecordedWorker {
+        agent,
+        worktree,
+        events,
+    }
+}

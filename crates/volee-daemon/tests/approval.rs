@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use common::{FakeHarness, git, launch_handle, repository};
+use common::{FakeHarness, WorkedFor, git, launch_handle, recorded_worker, repository};
 use tokio::net::UnixListener;
 use ulid::Ulid;
 use volee_core::delivery::{ChecksState, PrState, PullRequest};
@@ -36,7 +36,7 @@ use volee_harness::Harness;
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{
     ApprovalParams, CloseMission, CloseParams, Empty, EventsSince, HookIngest, HookParams,
-    RequestApproval, SendMessage, SendParams, Shutdown, SinceParams, Spawn, SpawnParams,
+    RequestApproval, SendMessage, SendParams, Shutdown, SinceParams,
 };
 use volee_proto::paths::Paths;
 use volee_proto::rpc;
@@ -165,6 +165,9 @@ struct Running {
     root: PathBuf,
     /// Whether `alpha` has a remote, and the daemon a forge client.
     remote: bool,
+    /// The workers the coordinator launched before the test begins, by name:
+    /// recorded in the log with their worktree, nothing is launched.
+    workers: Vec<(String, AgentId, PathBuf)>,
     _dir: tempfile::TempDir,
 }
 
@@ -231,25 +234,64 @@ fn mission(repo: &Path, kind: MissionKind) -> Vec<Event> {
     ]
 }
 
-/// A daemon with a change mission in a repository that has no remote.
+/// A daemon with a change mission in a repository that has no remote, whose
+/// coordinator launched the worker `billing` on `feat/invoices`.
 fn start() -> Running {
-    start_kind(MissionKind::Change)
+    start_workers(
+        MissionKind::Change,
+        false,
+        None,
+        &[("billing", "feat/invoices")],
+    )
 }
 
-/// The same, for a mission of `kind`.
+/// The same, for a mission of `kind`, with the worker `audit` on
+/// `audit/invoices`.
 fn start_kind(kind: MissionKind) -> Running {
-    let mut running = sandbox(false);
-    let events = mission(&running.repo, kind);
-    serve(&mut running, "volee", events, None);
-    running
+    start_workers(kind, false, None, &[("audit", "audit/invoices")])
 }
 
 /// A daemon with a change mission in a repository that pushes to a remote
 /// and whose pull requests the daemon's forge client merges with `merge`
-/// (the repository's `merge` setting).
+/// (the repository's `merge` setting), with the worker `billing`.
 fn start_with_remote(merge: Option<&str>) -> Running {
-    let mut running = sandbox(true);
-    let events = mission(&running.repo, MissionKind::Change);
+    start_workers(
+        MissionKind::Change,
+        true,
+        merge,
+        &[("billing", "feat/invoices")],
+    )
+}
+
+/// A daemon whose log holds a mission and the `workers` its coordinator
+/// launched, each a (name, branch) pair, as volee records a launch.
+fn start_workers(
+    kind: MissionKind,
+    remote: bool,
+    merge: Option<&str>,
+    workers: &[(&str, &str)],
+) -> Running {
+    let mut running = sandbox(remote);
+    let mut events = mission(&running.repo, kind);
+    let for_whom = WorkedFor {
+        parent: Some(agent(COORDINATOR)),
+        mission: Some(mission_id()),
+    };
+    for (index, (name, branch)) in workers.iter().enumerate() {
+        let recorded = recorded_worker(
+            &running.repo,
+            "alpha",
+            agent(100 + index as u128),
+            name,
+            branch,
+            index + 1,
+            &for_whom,
+        );
+        events.extend(recorded.events);
+        running
+            .workers
+            .push(((*name).to_owned(), recorded.agent, recorded.worktree));
+    }
     serve(&mut running, "volee", events, merge);
     running
 }
@@ -290,6 +332,7 @@ fn sandbox(remote: bool) -> Running {
         repo,
         root,
         remote,
+        workers: Vec::new(),
         _dir: dir,
     }
 }
@@ -419,24 +462,15 @@ async fn until_status(client: &Client, status: MissionStatus) -> Registry {
     .await
 }
 
-/// The coordinator launches a worker named `name` on `branch`.
-async fn launched(client: &Client, name: &str, branch: &str) -> (AgentId, PathBuf) {
-    let spawned = client
-        .call::<Spawn>(SpawnParams {
-            repo: "alpha".into(),
-            branch: branch.into(),
-            base: None,
-            task: "Add invoices to the billing module.".into(),
-            role: Role::Worker,
-            parent: Some(agent(COORDINATOR)),
-            mission: Some(mission_id()),
-            model: None,
-            name: Some(name.into()),
-            harness: None,
-        })
-        .await
-        .unwrap();
-    (spawned.agent, PathBuf::from(&spawned.worktree))
+impl Running {
+    /// The worker the coordinator launched under `name`, and its worktree.
+    fn launched(&self, name: &str) -> (AgentId, PathBuf) {
+        self.workers
+            .iter()
+            .find(|(worker, _, _)| worker == name)
+            .map(|(_, agent, worktree)| (*agent, worktree.clone()))
+            .unwrap()
+    }
 }
 
 /// The worker in `worktree` commits `file`.
@@ -466,8 +500,8 @@ fn ended(worktree: &Path, n: usize) -> ListedSession {
 /// The coordinator launches its worker, which commits its work (and, with
 /// a remote, pushes it and opens a draft pull request, as its instructions
 /// say) and ends its turn. Returns the worker and its worktree.
-async fn delivered_worker(daemon: &Running, client: &Client) -> (AgentId, PathBuf) {
-    let (worker, worktree) = launched(client, "billing", "feat/invoices").await;
+fn delivered_worker(daemon: &Running) -> (AgentId, PathBuf) {
+    let (worker, worktree) = daemon.launched("billing");
     commits(&worktree, "invoices.rs", "pub fn total() {}\n");
     if daemon.remote {
         git(
@@ -650,12 +684,11 @@ async fn wound_down(client: &Client) -> Registry {
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 #[allow(clippy::too_many_lines)] // One mission, from its delivery to its end, reads best as one trip.
 async fn a_mission_without_a_remote_is_merged_by_volee_after_ok_merge_then_closed_and_tidied() {
     let daemon = start();
     let client = Client::connect(&daemon.socket).await.unwrap();
-    let (worker, worktree) = delivered_worker(&daemon, &client).await;
+    let (worker, worktree) = delivered_worker(&daemon);
 
     // Committed work on a clean worktree is all a repository without a
     // remote can ask of a worker: it is delivered, the mission reports.
@@ -818,11 +851,10 @@ async fn a_mission_without_a_remote_is_merged_by_volee_after_ok_merge_then_close
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn a_main_checkout_with_uncommitted_changes_is_left_alone_until_the_person_cleaned_it() {
     let daemon = start();
     let client = Client::connect(&daemon.socket).await.unwrap();
-    let (worker, worktree) = delivered_worker(&daemon, &client).await;
+    let (worker, worktree) = delivered_worker(&daemon);
     let asked = presented(&client).await;
     // The person is in the middle of something in the main checkout.
     std::fs::write(daemon.repo.join("README.md"), "alpha, by hand\n").unwrap();
@@ -869,11 +901,10 @@ async fn a_main_checkout_with_uncommitted_changes_is_left_alone_until_the_person
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn a_main_checkout_on_another_branch_is_not_merged_into() {
     let daemon = start();
     let client = Client::connect(&daemon.socket).await.unwrap();
-    let (_, worktree) = delivered_worker(&daemon, &client).await;
+    let (_, worktree) = delivered_worker(&daemon);
     let asked = presented(&client).await;
     git(&daemon.repo, &["switch", "--quiet", "-c", "wip"]);
     let main = git(&daemon.repo, &["rev-parse", "main"]);
@@ -892,11 +923,10 @@ async fn a_main_checkout_on_another_branch_is_not_merged_into() {
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn a_conflict_abandons_the_merge_and_leaves_the_main_checkout_as_it_was() {
     let daemon = start();
     let client = Client::connect(&daemon.socket).await.unwrap();
-    let (_, worktree) = delivered_worker(&daemon, &client).await;
+    let (_, worktree) = delivered_worker(&daemon);
     let asked = presented(&client).await;
     // Meanwhile `main` got a file of the same name, written differently.
     commits(&daemon.repo, "invoices.rs", "pub fn total() -> u32 { 0 }\n");
@@ -922,14 +952,18 @@ async fn a_conflict_abandons_the_merge_and_leaves_the_main_checkout_as_it_was() 
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn what_was_merged_stays_merged_when_another_merge_fails() {
-    let daemon = start();
+    let daemon = start_workers(
+        MissionKind::Change,
+        false,
+        None,
+        &[("billing", "feat/invoices"), ("taxes", "feat/taxes")],
+    );
     let client = Client::connect(&daemon.socket).await.unwrap();
     // Two workers add the same file, each its own way: whichever is merged
     // second conflicts with the first.
-    let (billing, billing_tree) = launched(&client, "billing", "feat/invoices").await;
-    let (taxes, taxes_tree) = launched(&client, "taxes", "feat/taxes").await;
+    let (billing, billing_tree) = daemon.launched("billing");
+    let (taxes, taxes_tree) = daemon.launched("taxes");
     commits(&billing_tree, "invoices.rs", "// by billing\n");
     commits(&taxes_tree, "invoices.rs", "// by taxes\n");
     daemon
@@ -987,11 +1021,10 @@ async fn what_was_merged_stays_merged_when_another_merge_fails() {
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn a_pull_request_is_merged_on_the_forge_with_the_repository_s_method() {
     let daemon = start_with_remote(Some("squash"));
     let client = Client::connect(&daemon.socket).await.unwrap();
-    let (worker, worktree) = delivered_worker(&daemon, &client).await;
+    let (worker, worktree) = delivered_worker(&daemon);
     let ready = until_status(&client, MissionStatus::Reporting).await;
     assert_eq!(
         ready.mission(mission_id()).unwrap().assessments[&worker].evidence,
@@ -1037,11 +1070,10 @@ async fn a_pull_request_is_merged_on_the_forge_with_the_repository_s_method() {
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn without_a_setting_the_forge_chooses_among_the_methods_the_repository_allows() {
     let daemon = start_with_remote(None);
     let client = Client::connect(&daemon.socket).await.unwrap();
-    delivered_worker(&daemon, &client).await;
+    delivered_worker(&daemon);
     let asked = presented(&client).await;
     answers(&client, asked, "ok merge").await;
     wound_down(&client).await;
@@ -1049,11 +1081,10 @@ async fn without_a_setting_the_forge_chooses_among_the_methods_the_repository_al
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn a_pull_request_the_person_merged_themselves_is_not_merged_again() {
     let daemon = start_with_remote(None);
     let client = Client::connect(&daemon.socket).await.unwrap();
-    let (worker, _) = delivered_worker(&daemon, &client).await;
+    let (worker, _) = delivered_worker(&daemon);
     let asked = presented(&client).await;
     // They read the report, merge on the forge, then answer. Nothing has
     // read the forge since the worker stopped.
@@ -1080,11 +1111,10 @@ async fn a_pull_request_the_person_merged_themselves_is_not_merged_again() {
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn a_merge_the_evidence_does_not_show_is_not_a_merge() {
     let daemon = start_with_remote(None);
     let client = Client::connect(&daemon.socket).await.unwrap();
-    let (worker, worktree) = delivered_worker(&daemon, &client).await;
+    let (worker, worktree) = delivered_worker(&daemon);
     let asked = presented(&client).await;
     // The forge answers that it merged, and the pull request stays open.
     daemon.forge.accept_and_do_nothing();
@@ -1102,11 +1132,10 @@ async fn a_merge_the_evidence_does_not_show_is_not_a_merge() {
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn an_approved_mission_the_daemon_did_not_finish_is_merged_when_it_starts_again() {
     let mut daemon = start();
     let client = Client::connect(&daemon.socket).await.unwrap();
-    let (worker, worktree) = delivered_worker(&daemon, &client).await;
+    let (worker, worktree) = delivered_worker(&daemon);
     let asked = presented(&client).await;
     // The daemon stops as the person answers: their answer and what it
     // decides are recorded, and nothing was merged.
@@ -1166,11 +1195,10 @@ async fn an_approved_mission_the_daemon_did_not_finish_is_merged_when_it_starts_
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn a_worker_whose_work_did_not_land_is_kept_when_the_person_closes_its_mission() {
     let daemon = start();
     let client = Client::connect(&daemon.socket).await.unwrap();
-    let (worker, worktree) = delivered_worker(&daemon, &client).await;
+    let (worker, worktree) = delivered_worker(&daemon);
     until_status(&client, MissionStatus::Reporting).await;
     // It said that it is done: in a change mission, that proves nothing
     // about where its commits are.
@@ -1197,11 +1225,10 @@ async fn a_worker_whose_work_did_not_land_is_kept_when_the_person_closes_its_mis
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn the_person_who_merged_and_closes_themselves_gets_the_same_tidying() {
     let daemon = start();
     let client = Client::connect(&daemon.socket).await.unwrap();
-    let (worker, worktree) = delivered_worker(&daemon, &client).await;
+    let (worker, worktree) = delivered_worker(&daemon);
     until_status(&client, MissionStatus::Reporting).await;
     // No report presented, no coordinator involved: the person merges the
     // branch and closes the mission. Nothing has read the merge yet.
@@ -1247,11 +1274,10 @@ async fn the_person_who_merged_and_closes_themselves_gets_the_same_tidying() {
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn a_coordinator_in_a_turn_is_stopped_at_once_when_the_person_closes_by_hand() {
     let daemon = start();
     let client = Client::connect(&daemon.socket).await.unwrap();
-    delivered_worker(&daemon, &client).await;
+    delivered_worker(&daemon);
     until_status(&client, MissionStatus::Reporting).await;
     hook(&client, COORDINATOR, "user-prompt-submit").await;
     client
@@ -1268,12 +1294,11 @@ async fn a_coordinator_in_a_turn_is_stopped_at_once_when_the_person_closes_by_ha
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn an_analysis_mission_is_closed_by_volee_on_ok_close_and_tidied_on_its_reports() {
     let daemon = start_kind(MissionKind::Analysis);
     let client = Client::connect(&daemon.socket).await.unwrap();
     // The worker looks, changes nothing, and reports.
-    let (worker, worktree) = launched(&client, "audit", "audit/invoices").await;
+    let (worker, worktree) = daemon.launched("audit");
     reports(&client, worker).await;
     daemon.harness.set(vec![ended(&worktree, 1)]);
     until_status(&client, MissionStatus::Reporting).await;
@@ -1323,11 +1348,10 @@ async fn an_analysis_mission_is_closed_by_volee_on_ok_close_and_tidied_on_its_re
 }
 
 #[tokio::test]
-#[ignore = "needs a rewrite: its fixture launches workers through the removed agents.spawn (v2 restart, docs/v2/framing.md)"]
 async fn a_worker_that_just_started_is_not_judged_before_it_took_its_task() {
     let daemon = start();
     let client = Client::connect(&daemon.socket).await.unwrap();
-    let (worker, worktree) = launched(&client, "billing", "feat/invoices").await;
+    let (worker, worktree) = daemon.launched("billing");
     let listed = |state: AgentState| {
         daemon.harness.set(vec![ListedSession {
             state,
