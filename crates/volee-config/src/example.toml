@@ -50,36 +50,3 @@ wake_timeout = 3600
 # "all" (also those of sessions volee only discovered) or "never".
 # fetch = "launched"
 
-[tui]
-# "catppuccin-mocha" (default), "catppuccin-macchiato", "catppuccin-frappe",
-# "catppuccin-latte", "terminal", or the name of a file in
-# ~/.config/volee/themes/ without its .toml extension. Without it, volee
-# guesses from your terminal: "catppuccin-latte" on a light background,
-# "catppuccin-mocha" otherwise. The theme picker (Space t) saves it here, and
-# `volee --theme <name>` overrides it for one run.
-# theme = "catppuccin-mocha"
-
-# Stop animations: messages light up their line on the network instead of
-# travelling along it, and spinners stop.
-# reduced_motion = true
-
-# Key overrides, by action name: one key, a list, or [] to unbind. A
-# [tui.keys.<context>] table changes keys in one context only. Sequences
-# are written with spaces ("g g", "space n"). See the interface guide for
-# the actions and the contexts.
-# [tui.keys]
-# take-over = "ctrl-a"
-# new-agent = ["c", "space n"]
-#
-# [tui.keys.attached]
-# leave = "ctrl-g"                         # default: ctrl-q
-
-# Programs `o` offers to open an agent's worktree with. None is required:
-# volee only offers what it finds. Each is a command line run in the
-# worktree; {dir} is the worktree and {base} the branch the agent started
-# from. "" turns a tool off.
-# [tui.tools]
-# editor = "nvim"                          # default: $VISUAL, then $EDITOR
-# diff = "nvim -c 'DiffviewOpen {base}'"   # default: when diffview.nvim is installed
-# git = "lazygit"                          # default: when lazygit is installed
-# ide = "code {dir}"                       # default: when VS Code's `code` is installed

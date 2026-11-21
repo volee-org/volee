@@ -21,7 +21,6 @@ volee-daemon = { path = "crates/volee-daemon", version = "0.18.0" }
 volee-git = { path = "crates/volee-git", version = "0.18.0" }
 volee-harness = { path = "crates/volee-harness", version = "0.18.0" }
 volee-mcp = { path = "crates/volee-mcp", version = "0.18.0" }
-volee-mux = { path = "crates/volee-mux", version = "0.18.0" }
 volee-proto = { path = "crates/volee-proto", version = "0.18.0" }
 volee-store = { path = "crates/volee-store", version = "0.18.0" }
 
@@ -40,7 +39,6 @@ tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = "1.54.1"
 toml = "1.2.1"
-toml_edit = "0.25.19"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 ulid = "3.0.0"

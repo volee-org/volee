@@ -11,10 +11,6 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-mod save;
-
-pub use save::set_theme;
-
 /// A commented example configuration, also written by `volee config init`.
 pub const EXAMPLE: &str = include_str!("example.toml");
 
@@ -71,8 +67,6 @@ pub struct Config {
     pub missions: Missions,
     /// What the daemon does with git in the background.
     pub git: GitSettings,
-    /// Interface settings.
-    pub tui: Tui,
 }
 
 /// What the daemon does with git in the background.
@@ -252,104 +246,6 @@ pub enum MergeMethod {
     Rebase,
 }
 
-/// Interface settings.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Tui {
-    /// The theme name.
-    pub theme: Option<String>,
-    /// Key overrides (`[tui.keys]`): keys by action name for every context,
-    /// and `[tui.keys.<context>]` tables for one. Interpreted by the
-    /// interface.
-    pub keys: BTreeMap<String, KeySetting>,
-    /// Programs the interface offers to open an agent's worktree with.
-    pub tools: Tools,
-    /// No travelling animations: message pulses become short highlights
-    /// and spinners stop.
-    pub reduced_motion: bool,
-    /// Whose background the interface shows: the terminal's own (the
-    /// default) or the theme's.
-    pub background: Background,
-}
-
-/// Whose background the interface shows under its text.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Background {
-    /// The terminal's own, transparency included: the theme colors the
-    /// text, the borders and the badges only.
-    #[default]
-    Terminal,
-    /// The theme's own background color.
-    Theme,
-}
-
-/// The keys of one action: one key or sequence (`"ctrl-a"`, `"g g"`,
-/// `"space n"`), or a list of them; an empty list unbinds the action.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(untagged)]
-pub enum KeyList {
-    /// One key or sequence.
-    One(String),
-    /// Several, or none.
-    Many(Vec<String>),
-}
-
-impl KeyList {
-    /// The keys, as written.
-    pub fn keys(&self) -> Vec<String> {
-        match self {
-            Self::One(key) => vec![key.clone()],
-            Self::Many(keys) => keys.clone(),
-        }
-    }
-}
-
-/// An entry of `[tui.keys]`: the keys of an action in every context, or a
-/// `[tui.keys.<context>]` table of keys by action for one context.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(untagged)]
-pub enum KeySetting {
-    /// `action = "key"` or `action = ["key", ...]`.
-    Keys(KeyList),
-    /// `[tui.keys.agents]`, `[tui.keys.wall]`...
-    Context(BTreeMap<String, KeyList>),
-}
-
-/// Programs the interface offers to open an agent's worktree with, never
-/// required. Each is a command line run in the worktree, where `{dir}`
-/// stands for the worktree and `{base}` for the branch the agent started
-/// from. An empty string turns a tool off; an unset one is looked for on
-/// the machine.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Tools {
-    /// An editor that runs in the terminal; `$VISUAL`, then `$EDITOR`, when
-    /// unset.
-    pub editor: Option<String>,
-    /// A diff viewer that runs in the terminal; Neovim with diffview when
-    /// unset and both are installed.
-    pub diff: Option<String>,
-    /// A git interface that runs in the terminal; lazygit when unset and
-    /// installed.
-    pub git: Option<String>,
-    /// An editor with a window of its own, started in the background; VS
-    /// Code (`code`) when unset and installed.
-    pub ide: Option<String>,
-}
-
-impl Tools {
-    /// Every tool with its name, as written in the configuration.
-    pub fn entries(&self) -> [(&'static str, Option<&str>); 4] {
-        [
-            ("editor", self.editor.as_deref()),
-            ("diff", self.diff.as_deref()),
-            ("git", self.git.as_deref()),
-            ("ide", self.ide.as_deref()),
-        ]
-    }
-}
-
 /// Splits a command line into words the way a shell would for simple
 /// commands: spaces separate words, single quotes keep everything, double
 /// quotes keep everything but `\"` and `\\`, and a backslash outside quotes
@@ -471,12 +367,6 @@ impl Config {
             return Err(invalid(
                 "agents.wake_timeout must be at least 1 second".to_owned(),
             ));
-        }
-        for (name, line) in self.tui.tools.entries() {
-            if let Some(line) = line {
-                split_command(line)
-                    .map_err(|error| invalid(format!("tui.tools.{name}: {error}")))?;
-            }
         }
         if self.missions.max_workers == 0 {
             return Err(invalid(
@@ -616,53 +506,6 @@ mod tests {
     }
 
     #[test]
-    fn keys_are_one_a_list_none_or_a_table_per_context() {
-        let config = parse(
-            r#"
-            [tui.keys]
-            take-over = "ctrl-a"
-            first = ["g g", "home"]
-            adopt = []
-
-            [tui.keys.wall]
-            take-over = "enter"
-            "#,
-        )
-        .unwrap();
-        let keys = &config.tui.keys;
-        assert_eq!(
-            keys["take-over"],
-            KeySetting::Keys(KeyList::One("ctrl-a".into()))
-        );
-        assert_eq!(
-            keys["first"],
-            KeySetting::Keys(KeyList::Many(vec!["g g".into(), "home".into()]))
-        );
-        assert_eq!(keys["adopt"], KeySetting::Keys(KeyList::Many(Vec::new())));
-        let KeySetting::Context(wall) = &keys["wall"] else {
-            panic!("a table per context");
-        };
-        assert_eq!(wall["take-over"].keys(), vec!["enter".to_owned()]);
-    }
-
-    #[test]
-    fn the_interface_can_stop_its_animations() {
-        assert!(!Config::default().tui.reduced_motion);
-        let config = parse("[tui]\nreduced_motion = true\n").unwrap();
-        assert!(config.tui.reduced_motion);
-    }
-
-    #[test]
-    fn the_interface_shows_the_terminals_background_unless_told_otherwise() {
-        assert_eq!(Config::default().tui.background, Background::Terminal);
-        let theme = parse("[tui]\nbackground = \"theme\"\n").unwrap();
-        assert_eq!(theme.tui.background, Background::Theme);
-        let terminal = parse("[tui]\nbackground = \"terminal\"\n").unwrap();
-        assert_eq!(terminal.tui.background, Background::Terminal);
-        assert!(parse("[tui]\nbackground = \"black\"\n").is_err());
-    }
-
-    #[test]
     fn setup_commands_keep_their_order_and_none_may_be_empty() {
         let config = parse(
             r#"
@@ -727,39 +570,6 @@ mod tests {
         // (ADR 0013), so the old `[worktrees]` table is an error, not a no-op.
         let error = parse("[worktrees]\nroot = \"~/wt\"\n").unwrap_err();
         assert!(error.to_string().contains("worktrees"), "{error}");
-    }
-
-    #[test]
-    fn tools_are_command_lines_checked_when_loaded() {
-        let config = parse(
-            r#"
-            [tui.tools]
-            editor = "hx"
-            diff = "nvim -c 'DiffviewOpen {base}'"
-            git = ""
-            "#,
-        )
-        .unwrap();
-        let tools = &config.tui.tools;
-        assert_eq!(tools.editor.as_deref(), Some("hx"));
-        assert_eq!(
-            tools.git.as_deref(),
-            Some(""),
-            "an empty tool is turned off"
-        );
-        assert_eq!(tools.ide, None);
-        let error = parse(
-            "[tui.tools]
-diff = \"nvim -c 'DiffviewOpen\"\n",
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("tui.tools.diff"), "{error}");
-        let error = parse(
-            "[tui.tools]
-pager = \"less\"\n",
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("pager"), "{error}");
     }
 
     #[test]
