@@ -54,6 +54,17 @@ wake_timeout = 3600
 # "all" (also those of sessions volee only discovered) or "never".
 # fetch = "launched"
 
+[review]
+# The AI pre-review of finished work: Claude Code's native /code-review, run
+# read-only in the agent's worktree. The model and the number of reviewers
+# come from the rules (rules.lua: review.model, review.reviewers). Its
+# findings are an opinion on the card, never a gate. A tip is reviewed once.
+# enabled = true
+# auto = true          # false: only when asked (POST /api/agents/{id}/review)
+# timeout = 300        # seconds one reviewer may run
+# concurrency = 1      # reviews running at once
+# command = "claude"
+
 [hooks]
 # The port on 127.0.0.1 where the daemon receives Claude Code's `http` hooks.
 # `volee doctor` writes it into the hook settings: run it again after a change.

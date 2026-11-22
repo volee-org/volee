@@ -69,6 +69,40 @@ pub struct Config {
     pub git: GitSettings,
     /// Where the daemon receives Claude Code's hooks.
     pub hooks: Hooks,
+    /// The AI pre-review of finished work.
+    pub review: Review,
+}
+
+/// The AI pre-review of finished work: Claude Code's native `/code-review`,
+/// run in the agent's worktree. Its findings are an opinion, never a gate.
+/// The model and the number of reviewers come from the Lua rules
+/// (`review.model`, `review.reviewers`), which know the risk of the change.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Review {
+    /// Whether the daemon reviews at all.
+    pub enabled: bool,
+    /// Whether a finished-work card is reviewed as soon as it appears
+    /// (`true`) or only when asked (`POST /api/agents/{id}/review`).
+    pub auto: bool,
+    /// How long, in seconds, one reviewer may run.
+    pub timeout: u64,
+    /// How many reviews run at once.
+    pub concurrency: usize,
+    /// The Claude Code program to run.
+    pub command: String,
+}
+
+impl Default for Review {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto: true,
+            timeout: 300,
+            concurrency: 1,
+            command: "claude".to_owned(),
+        }
+    }
 }
 
 /// Where the daemon receives Claude Code's `http` hooks. It listens on the
@@ -420,6 +454,11 @@ impl Config {
                     .to_owned(),
             ));
         }
+        if self.review.timeout == 0 || self.review.concurrency == 0 {
+            return Err(invalid(
+                "review.timeout and review.concurrency must be at least 1".to_owned(),
+            ));
+        }
         if self.missions.max_workers == 0 {
             return Err(invalid(
                 "missions.max_workers must be at least 1".to_owned(),
@@ -532,6 +571,18 @@ host = \"0.0.0.0\"
         assert_eq!(Config::default().agents.wake_timeout, 3_600);
         assert_eq!(Config::default().missions.max_workers, 8);
         assert_eq!(Config::default().git.fetch, Fetch::Launched);
+    }
+
+    #[test]
+    fn the_review_is_on_by_default_and_can_be_tuned_or_switched_off() {
+        let defaults = Config::default().review;
+        assert!(defaults.enabled && defaults.auto);
+        assert_eq!(defaults.concurrency, 1);
+        let tuned = parse("[review]\nenabled = false\nauto = false\ntimeout = 9\n").unwrap();
+        assert!(!tuned.review.enabled && !tuned.review.auto);
+        assert_eq!(tuned.review.timeout, 9);
+        assert!(parse("[review]\nconcurrency = 0\n").is_err());
+        assert!(parse("[review]\ntimeout = 0\n").is_err());
     }
 
     #[test]
