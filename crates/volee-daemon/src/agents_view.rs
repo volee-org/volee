@@ -560,7 +560,14 @@ fn git_facts(
         base: base.clone(),
         base_source: guess.map(|guess| guess.source.label().to_owned()),
     };
-    let (Some(branch), Some(base)) = (&info.branch, &base) else {
+    // The default branch has no base; what it holds beyond its remote is
+    // still told, so it is compared with itself (its remote copy).
+    let compare = base.clone().or_else(|| {
+        let branch = info.branch.as_ref()?;
+        let default = git.default_branch(&info.main_checkout).ok().flatten()?;
+        (&default == branch).then_some(default)
+    });
+    let (Some(branch), Some(base)) = (&info.branch, &compare) else {
         return Ok(Some((repo, None)));
     };
     let key = (info.main_checkout.clone(), branch.clone());

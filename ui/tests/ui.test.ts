@@ -163,6 +163,7 @@ describe("where the agent works", () => {
     expect(landing("master", "master", "default").onBase).toBe(true);
     expect(landing("feat/x", "main", "reflog").onBase).toBe(false);
     expect(landing(null, "main", null).onBase).toBe(false);
+    expect(landing("main", null, null).onBase).toBe(true);
   });
   it("marks a guessed base discreetly, and only a guess", () => {
     expect(landing("feat/x", "main", "nearest").guessed).toBe(true);

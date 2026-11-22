@@ -106,6 +106,39 @@ fn a_tie_between_branches_goes_to_the_default_branch() {
 }
 
 #[test]
+fn the_default_branch_has_no_base() {
+    let sandbox = Sandbox::new();
+    let repo = with_develop(&sandbox);
+    assert_eq!(
+        sandbox.cli().base_of(&repo, "main").unwrap(),
+        None,
+        "main is what the others are made from, even with develop ahead of it"
+    );
+}
+
+#[test]
+fn a_branch_that_contains_the_branch_is_never_its_base() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    // `develop` is one commit past the first commit, `main` three.
+    sandbox.git(&repo, &["branch", "develop"]);
+    sandbox.git(&repo, &["switch", "--quiet", "develop"]);
+    sandbox.commit(&repo, "one.rs", "one\n", "Add one");
+    sandbox.git(&repo, &["switch", "--quiet", "main"]);
+    for name in ["a", "b", "c"] {
+        sandbox.commit(&repo, &format!("{name}.rs"), "x\n", &format!("Add {name}"));
+    }
+    // `topic` sits on the first commit: both branches are ahead of it, and
+    // the reflog names no branch.
+    sandbox.git(&repo, &["branch", "topic", "main~3"]);
+    assert_eq!(
+        sandbox.cli().base_of(&repo, "topic").unwrap(),
+        guess("main", BaseSource::Default),
+        "develop is ahead of topic: it is not what topic was made from"
+    );
+}
+
+#[test]
 fn a_branch_that_does_not_exist_falls_back_to_the_default() {
     let sandbox = Sandbox::new();
     let repo = sandbox.repo("volee");

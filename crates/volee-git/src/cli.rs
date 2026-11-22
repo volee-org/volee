@@ -174,7 +174,9 @@ impl GitCli {
 
     /// Whether `name` is a branch of the repository: local, or on `origin`.
     fn branch_exists(&self, dir: &Path, name: &str) -> Result<bool, GitError> {
-        if name.is_empty() {
+        // A revision such as `main~3` or `HEAD^` is not a branch, although
+        // rev-parse resolves it behind `refs/heads/`.
+        if name.is_empty() || name.contains(['~', '^', ':', '@', ' ']) || name.contains("..") {
             return Ok(false);
         }
         Ok(self
@@ -281,6 +283,11 @@ impl GitCli {
             }
             let ahead = self.count_commits(dir, tip, Some(&candidate))?;
             let behind = self.count_commits(dir, &candidate, Some(tip))?;
+            // A branch that contains this one (nothing of ours missing from
+            // it, and more besides) is a descendant, never a base.
+            if ahead == 0 && behind > 0 {
+                continue;
+            }
             let key = (ahead, behind, default != Some(name));
             if best.as_ref().is_none_or(|(known, _)| key < *known) {
                 best = Some((key, name.to_owned()));
@@ -1142,6 +1149,10 @@ impl Git for GitCli {
             return Ok(Some(guess(base, BaseSource::Reflog)));
         }
         let default = self.default_branch(repo)?;
+        if default.as_deref() == Some(branch) {
+            // The default branch is what the others are made from.
+            return Ok(None);
+        }
         if let Some(base) = self.nearest_branch(repo, branch, &tip, default.as_deref())? {
             return Ok(Some(guess(base, BaseSource::Nearest)));
         }

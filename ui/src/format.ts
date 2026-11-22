@@ -52,7 +52,7 @@ export function landing(branch: string | null, base: string | null, source: stri
       : source === "default"
         ? "Base guessed: the repository's default branch"
         : "";
-  return { onBase: branch !== null && branch === base, guessed: guessed && base !== null, why };
+  return { onBase: branch !== null && (base === null || branch === base), guessed: guessed && base !== null, why };
 }
 
 /** "1:45", "12 min", "1 h 5 min": how long is left before the terminal takes over. */

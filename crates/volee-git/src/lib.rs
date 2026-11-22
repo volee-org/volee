@@ -286,10 +286,12 @@ pub trait Git: Send + Sync {
     /// 3. [`BaseSource::Nearest`]: the local branch the branch is closest to:
     ///    the fewest commits that the branch has and the candidate lacks,
     ///    then the fewest that the candidate has and the branch lacks, the
-    ///    default branch winning a tie.
+    ///    default branch winning a tie. A branch that contains the branch
+    ///    (more commits, none of the branch's missing) is never chosen.
     /// 4. [`BaseSource::Default`]: the [default branch](Git::default_branch).
     ///
-    /// `None` when nothing is known: no branch of that name and no default.
+    /// `None` when nothing is known (no branch of that name and no default),
+    /// and for the default branch itself, which has no base.
     fn base_of(&self, repo: &Path, branch: &str) -> Result<Option<BaseGuess>, GitError>;
 
     /// What a working tree looks like right now, from one cheap command: the
