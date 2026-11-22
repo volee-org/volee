@@ -1,0 +1,18 @@
+@import "diff2html/bundles/css/diff2html.min.css";
+
+/* Fit the viewer into the card: its own frame and heading are not needed,
+   the file header above it says the same. */
+.patch .d2h-wrapper {
+  margin: 0;
+}
+.patch .d2h-file-wrapper {
+  border: 0;
+  margin: 0;
+  border-radius: 0;
+}
+.patch .d2h-file-header {
+  display: none;
+}
+.patch .d2h-code-line-ctn {
+  font-size: 12px;
+}

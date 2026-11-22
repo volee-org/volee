@@ -8,12 +8,24 @@
     now: number;
     terminal: string | null;
     onopen: (card: Card) => void;
+    /** Opens the screen of a finished card; waiting cards have none. */
+    onread?: (card: Card) => void;
     note?: string;
   }
-  let { card, now, terminal, onopen, note = "" }: Props = $props();
+  let { card, now, terminal, onopen, onread, note = "" }: Props = $props();
+
+  const readable = $derived(card.kind === "finished" && onread !== undefined);
+
+  /** A click anywhere on a finished card reads it, except on its own buttons. */
+  function onclick(event: MouseEvent) {
+    if (!readable || (event.target as HTMLElement).closest("button")) return;
+    onread?.(card);
+  }
 </script>
 
-<article class="card {card.kind}" data-kind={card.kind} data-id={card.id}>
+<!-- The "Read the work" button is the keyboard way in; the click is a shortcut. -->
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+<article class="card {card.kind}" class:readable data-kind={card.kind} data-id={card.id} {onclick}>
   <header>
     <h3>{title(card)}</h3>
     <span class="since" title="Since when">
@@ -45,9 +57,14 @@
     {/if}
   </p>
 
-  {#if terminal}
+  {#if terminal || readable}
     <footer>
-      <button type="button" onclick={() => onopen(card)}>Open terminal</button>
+      {#if readable}
+        <button type="button" class="read" onclick={() => onread?.(card)}>Read the work</button>
+      {/if}
+      {#if terminal}
+        <button type="button" onclick={() => onopen(card)}>Open terminal</button>
+      {/if}
       {#if note}<span class="note">{note}</span>{/if}
     </footer>
   {/if}
@@ -61,6 +78,12 @@
     border-radius: 10px;
     padding: 14px 18px;
     box-shadow: var(--shadow);
+  }
+  .card.readable {
+    cursor: pointer;
+  }
+  .card.readable:hover {
+    border-color: var(--accent);
   }
   .card.waiting {
     border-left-color: var(--waiting);

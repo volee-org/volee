@@ -3,8 +3,10 @@
 
   import Card from "./Card.svelte";
   import DecisionCard from "./DecisionCard.svelte";
+  import { workIdFromHash } from "./work";
+  import WorkScreen from "./Work.svelte";
   import { decide, type DecisionBody, follow, openTerminal, readToken, type Status } from "./live";
-  import { type Card as CardData, emptyInbox, type Inbox, split } from "./model";
+  import { type Card as CardData, emptyInbox, type Inbox, split, title } from "./model";
 
   type Theme = "auto" | "light" | "dark";
 
@@ -25,6 +27,27 @@
   let refs = $state<Record<string, { shortcut: (key: string) => boolean } | undefined>>({});
   let message = $state("");
 
+  /** The finished work being read, when its screen is open. */
+  let workId = $state<string | null>(null);
+  /** Whether this page pushed the screen's address, so Back can undo it. */
+  let pushed = false;
+  let workCard = $derived(inbox.cards.find((card) => card.id === workId) ?? null);
+
+  function readWork(card: CardData) {
+    pushed = true;
+    location.hash = `work/${encodeURIComponent(card.id)}`;
+  }
+
+  function leaveWork() {
+    if (pushed) {
+      pushed = false;
+      history.back();
+    } else {
+      history.replaceState(null, "", location.pathname);
+      workId = null;
+    }
+  }
+
   async function decideCard(id: string, body: DecisionBody): Promise<string> {
     if (!token) return "no token";
     const result = await decide(token, id, body);
@@ -37,9 +60,15 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    if (workId) return; // the work screen has its own keys
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+    if (event.key === "r" && groups.finished[0]) {
+      readWork(groups.finished[0]);
+      event.preventDefault();
+      return;
+    }
     if (event.key === "n" && inbox.decisions.length > 1) {
       activeIndex = (activeIndex + 1) % inbox.decisions.length;
       event.preventDefault();
@@ -84,7 +113,10 @@
     }
     const found = readToken(location.hash, sessionStorage);
     token = found.token;
+    workId = workIdFromHash(location.hash);
     if (found.fromHash) history.replaceState(null, "", location.pathname);
+    const onhash = () => (workId = workIdFromHash(location.hash));
+    window.addEventListener("hashchange", onhash);
     if (!token) {
       status = "unauthorized";
       return;
@@ -96,6 +128,7 @@
     );
     const tick = setInterval(() => (now = Date.now()), 1_000);
     return () => {
+      window.removeEventListener("hashchange", onhash);
       connection.close();
       clearInterval(tick);
     };
@@ -121,6 +154,15 @@
       <h2>This page needs its link</h2>
       <p>Run <span class="mono">volee ui</span> to open the inbox with the right token.</p>
     </section>
+  {:else if workId && token}
+    <WorkScreen
+      {token}
+      id={workId}
+      title={workCard ? title(workCard) : workId.slice(0, 8)}
+      terminal={inbox.terminal}
+      onback={leaveWork}
+      onterminal={openById}
+    />
   {:else}
     {#if inbox.error}
       <p class="error" role="alert">Claude Code's sessions cannot be listed: {inbox.error}</p>
@@ -165,7 +207,7 @@
         <section data-section="finished">
           <h2>Finished work <span class="count">{groups.finished.length}</span></h2>
           {#each groups.finished as card (card.id)}
-            <Card {card} {now} terminal={inbox.terminal} onopen={open} note={notes[card.id] ?? ""} />
+            <Card {card} {now} terminal={inbox.terminal} onopen={open} onread={readWork} note={notes[card.id] ?? ""} />
           {/each}
         </section>
       {/if}
