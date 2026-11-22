@@ -199,7 +199,18 @@ main checkouts, never their directory names.
 | `auto` | `true` | `true`: a branch is reviewed as soon as its agent has finished work. `false`: only when asked (`POST /api/agents/{id}/review`). |
 | `timeout` | `300` | Seconds one reviewer may run before it is stopped. |
 | `concurrency` | `1` | Reviews running at once. |
-| `command` | `"claude"` | The Claude Code program to run. |
+
+The program that runs the review is the one set under `claude` (below).
+
+## `claude`
+
+```lua
+claude = { command = "/Users/me/.local/bin/claude" }
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `command` | `"claude"` | The Claude Code program volee runs itself: the review, and the `claude --bg --resume` of a fix request for a stopped session. Set it when `claude` is not on the daemon's `PATH`. (It was `review.command` before: that key is gone.) |
 
 The review is Claude Code's `/code-review`, run read-only in the agent's
 worktree. Its findings are an opinion on the card, never a gate. The model

@@ -80,6 +80,8 @@ pub struct Config {
     pub hooks: Hooks,
     /// The AI pre-review of finished work.
     pub review: Review,
+    /// The Claude Code program volee runs itself (`review`, fix requests).
+    pub claude: Claude,
 }
 
 /// The AI pre-review of finished work: Claude Code's native `/code-review`,
@@ -98,8 +100,6 @@ pub struct Review {
     pub timeout: u64,
     /// How many reviews run at once.
     pub concurrency: usize,
-    /// The Claude Code program to run.
-    pub command: String,
 }
 
 impl Default for Review {
@@ -109,6 +109,23 @@ impl Default for Review {
             auto: true,
             timeout: 300,
             concurrency: 1,
+        }
+    }
+}
+
+/// The Claude Code program volee runs itself: the pre-review and the fix
+/// requests that resume a stopped session. One setting for both, so that a
+/// `claude` outside the daemon's `PATH` is named once.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Claude {
+    /// The program, a name found on `PATH` or a path.
+    pub command: String,
+}
+
+impl Default for Claude {
+    fn default() -> Self {
+        Self {
             command: "claude".to_owned(),
         }
     }

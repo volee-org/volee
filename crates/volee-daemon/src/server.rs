@@ -267,7 +267,7 @@ fn open_reviews(
     }
     let database = &hook_server?.database;
     let reviewer = Arc::new(crate::review::ClaudeReviewer::new(
-        settings.command.clone(),
+        shared.settings.claude.command.clone(),
         Duration::from_secs(settings.timeout),
     ));
     match crate::review::Reviews::open(settings, Arc::clone(rules), database, reviewer) {
@@ -338,7 +338,7 @@ async fn start_hook_server(
             forge: shared.forge_client.clone(),
             methods,
             resumer: Arc::new(crate::actions::fix::ClaudeCli {
-                program: shared.settings.review.command.clone(),
+                program: shared.settings.claude.command.clone(),
             }),
             timing: {
                 let mut timing = crate::actions::fix::Timing::default();
