@@ -219,7 +219,7 @@ impl Daemon {
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
         let polling = crate::agents_view::spawn_poll(config.agents_view.as_ref(), agents, &stop);
-        let hooks = start_hook_server(config.hook_server).await?;
+        let hooks = start_hook_server(config.hook_server, shared.agents.clone()).await?;
         // A mission the person approved while the daemon was stopping, or
         // whose merge it could not finish, is carried out now.
         crate::missions::resume_approved(&shared).await;
@@ -254,6 +254,7 @@ impl Daemon {
 /// already in use stops the daemon with a message instead of failing later.
 async fn start_hook_server(
     config: Option<crate::hook_server::HookServerConfig>,
+    agents: Option<Arc<crate::agents_view::Agents>>,
 ) -> Result<Option<tokio::task::JoinHandle<()>>, DaemonError> {
     let Some(hook_config) = config else {
         return Ok(None);
@@ -263,8 +264,12 @@ async fn start_hook_server(
         DaemonError::Unavailable(format!("cannot open the hook database: {error}"))
     })?;
     tracing::info!(addr = ?listener.local_addr().ok(), "hook server ready");
+    // The web interface shares the listener, when there are agents to show.
+    let web = agents.map(crate::web::Web::detect);
     Ok(Some(tokio::spawn(async move {
-        if let Err(error) = crate::hook_server::serve(listener, hook_config.token, store).await {
+        if let Err(error) =
+            crate::hook_server::serve_with_web(listener, hook_config.token, store, web).await
+        {
             tracing::error!(%error, "the hook server stopped");
         }
     })))

@@ -72,7 +72,7 @@ pub(crate) fn run(options: &Options) -> Result<()> {
     Ok(())
 }
 
-fn settings_port(paths: &Paths) -> u16 {
+pub(crate) fn settings_port(paths: &Paths) -> u16 {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
@@ -298,7 +298,7 @@ fn report_daemon(port: u16) {
     }
 }
 
-fn health(addr: SocketAddr) -> std::result::Result<(), String> {
+pub(crate) fn health(addr: SocketAddr) -> std::result::Result<(), String> {
     let timeout = Duration::from_secs(1);
     let mut stream = TcpStream::connect_timeout(&addr, timeout).map_err(|e| e.to_string())?;
     stream

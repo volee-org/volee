@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 use volee_core::delivery::PrState;
 use volee_core::finished::{Activity, BranchWork, HookKind, classify_hook, is_finished_work};
 use volee_core::reconcile::ListedSession;
@@ -30,6 +30,10 @@ use volee_store::{CachedPullRequest, HookFilter, Store};
 /// How many of a session's newest hook events are read to find its last
 /// activity and its last stop.
 const HOOK_WINDOW: u32 = 500;
+
+/// How long a nudged poller waits before reading, so that the burst of hook
+/// events around a stop is read once.
+const NUDGE_DELAY: Duration = Duration::from_millis(300);
 
 /// How the agents view is set up.
 #[derive(Clone, Debug)]
@@ -100,6 +104,10 @@ pub(crate) struct Agents {
     harness: Arc<dyn Harness>,
     sources: Arc<Sources>,
     inner: tokio::sync::Mutex<Inner>,
+    /// Counts the readings that changed what a person sees.
+    revision: watch::Sender<u64>,
+    /// Asks the poller to read now, because a hook event just arrived.
+    nudge: Notify,
 }
 
 impl std::fmt::Debug for Agents {
@@ -115,6 +123,8 @@ struct Inner {
     /// Whether the last listing failed, so that a failure is logged once.
     failing: bool,
     memory: Memory,
+    /// How many readings succeeded, so that the first one always counts.
+    read_count: u64,
 }
 
 impl Agents {
@@ -140,7 +150,26 @@ impl Agents {
                 forge_usable: OnceLock::new(),
             }),
             inner: tokio::sync::Mutex::default(),
+            revision: watch::channel(0).0,
+            nudge: Notify::new(),
         }
+    }
+
+    /// A receiver that wakes each time a reading changed the cards or the
+    /// error. The value is a counter: only the change matters.
+    pub(crate) fn subscribe(&self) -> watch::Receiver<u64> {
+        self.revision.subscribe()
+    }
+
+    /// Asks the poller for a reading as soon as it can (hook events often
+    /// mean that a session just changed state).
+    pub(crate) fn nudge(&self) {
+        self.nudge.notify_one();
+    }
+
+    /// The last reading, without reading again unless there is none yet.
+    pub(crate) async fn latest(&self) -> AgentsView {
+        self.get(Duration::MAX).await
     }
 
     /// The agents, read again first when the last reading is older than
@@ -159,11 +188,11 @@ impl Agents {
         let listing = match listed {
             Ok(Ok(listing)) => listing,
             Ok(Err(error)) => {
-                Self::fail(inner, format!("cannot list sessions: {error}"));
+                self.fail(inner, format!("cannot list sessions: {error}"));
                 return;
             }
             Err(error) => {
-                Self::fail(inner, format!("the listing task failed: {error}"));
+                self.fail(inner, format!("the listing task failed: {error}"));
                 return;
             }
         };
@@ -191,25 +220,33 @@ impl Agents {
             Ok((mut cards, memory)) => {
                 sort(&mut cards);
                 inner.memory = memory;
+                let changed = inner.view.agents != cards || inner.view.error.is_some();
                 inner.view = AgentsView {
                     updated_at: Some(now()),
                     error: None,
                     agents: cards,
                 };
                 inner.read_at = Some(Instant::now());
+                if changed || inner.read_count == 0 {
+                    self.revision.send_modify(|revision| *revision += 1);
+                }
+                inner.read_count += 1;
             }
-            Err(error) => Self::fail(inner, format!("reading the agents failed: {error}")),
+            Err(error) => self.fail(inner, format!("reading the agents failed: {error}")),
         }
     }
 
     /// Records a failed reading: the previous cards stay, with the reason.
-    fn fail(inner: &mut Inner, why: String) {
+    fn fail(&self, inner: &mut Inner, why: String) {
         if inner.failing {
             tracing::debug!(%why, "listing Claude Code's sessions still fails");
         } else {
             tracing::warn!(%why, "listing Claude Code's sessions fails");
         }
         inner.failing = true;
+        if inner.view.error.as_deref() != Some(why.as_str()) {
+            self.revision.send_modify(|revision| *revision += 1);
+        }
         inner.view.error = Some(why);
         // Try again at the next request or tick, not at every request.
         inner.read_at = Some(Instant::now());
@@ -247,6 +284,10 @@ pub(crate) async fn poll(agents: Arc<Agents>, interval: Duration, mut stop: watc
         agents.get(Duration::ZERO).await;
         tokio::select! {
             () = tokio::time::sleep(interval) => {}
+            () = agents.nudge.notified() => {
+                // A burst of hook events is read once.
+                tokio::time::sleep(NUDGE_DELAY).await;
+            }
             _ = stop.changed() => return,
         }
     }

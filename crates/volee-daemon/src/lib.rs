@@ -26,6 +26,7 @@ mod state;
 mod support;
 mod tidy;
 mod watchers;
+mod web;
 
 pub use agents_view::AgentsViewConfig;
 pub use clock::{Clock, ManualClock, SystemClock};

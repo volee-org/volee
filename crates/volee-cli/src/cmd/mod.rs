@@ -15,3 +15,4 @@ pub(crate) mod mission;
 pub(crate) mod msg;
 pub(crate) mod summary;
 pub(crate) mod tidy;
+pub(crate) mod ui;

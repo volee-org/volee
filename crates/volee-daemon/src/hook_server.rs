@@ -60,25 +60,44 @@ pub async fn bind(config: &HookServerConfig) -> Result<TcpListener, DaemonError>
 
 /// Serves hook requests on `listener` until the future is dropped.
 pub async fn serve(listener: TcpListener, token: String, store: Store) -> std::io::Result<()> {
-    axum::serve(listener, router(token, store)).await
+    axum::serve(listener, router(token, store, None)).await
+}
+
+/// Serves hook requests and, when `web` is given, the web interface and its
+/// API on the same listener.
+pub(crate) async fn serve_with_web(
+    listener: TcpListener,
+    token: String,
+    store: Store,
+    web: Option<crate::web::Web>,
+) -> std::io::Result<()> {
+    axum::serve(listener, router(token, store, web)).await
 }
 
 #[derive(Clone)]
 struct Shared {
     token: Arc<str>,
     store: Arc<Mutex<Store>>,
+    /// Told when an event is stored, so that the agents are read again now.
+    agents: Option<Arc<crate::agents_view::Agents>>,
 }
 
-fn router(token: String, store: Store) -> Router {
+fn router(token: String, store: Store, web: Option<crate::web::Web>) -> Router {
+    let token: Arc<str> = token.into();
     let shared = Shared {
-        token: token.into(),
+        token: Arc::clone(&token),
         store: Arc::new(Mutex::new(store)),
+        agents: web.as_ref().map(crate::web::Web::agents),
     };
-    Router::new()
+    let hooks = Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/hooks/{event}", post(hook))
         .layer(DefaultBodyLimit::max(MAX_BODY))
-        .with_state(shared)
+        .with_state(shared);
+    match web {
+        Some(web) => hooks.merge(crate::web::router(token, web)),
+        None => hooks,
+    }
 }
 
 async fn hook(
@@ -103,7 +122,12 @@ async fn hook(
     })
     .await;
     match stored {
-        Ok(Ok(_)) => StatusCode::OK,
+        Ok(Ok(_)) => {
+            if let Some(agents) = &shared.agents {
+                agents.nudge();
+            }
+            StatusCode::OK
+        }
         Ok(Err(error)) => {
             tracing::error!(%error, "cannot store a hook event");
             StatusCode::INTERNAL_SERVER_ERROR
@@ -142,7 +166,7 @@ fn describe(path_event: &str, payload: &str) -> Option<NewHookEvent> {
     })
 }
 
-fn authorized(headers: &HeaderMap, token: &str) -> bool {
+pub(crate) fn authorized(headers: &HeaderMap, token: &str) -> bool {
     let Some(value) = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -156,7 +180,7 @@ fn authorized(headers: &HeaderMap, token: &str) -> bool {
 }
 
 /// Compares two byte strings without stopping at the first difference.
-fn same(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn same(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }

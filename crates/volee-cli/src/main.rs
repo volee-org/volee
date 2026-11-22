@@ -52,6 +52,15 @@ enum Command {
         #[arg(long)]
         all: bool,
     },
+    /// Open the web interface (the decision inbox) in the browser.
+    ///
+    /// It prints a link whose fragment carries the access token, so the page
+    /// can talk to the daemon. The link only works on this machine.
+    Ui {
+        /// Print the link without opening the browser.
+        #[arg(long)]
+        no_open: bool,
+    },
     /// Show an agent's changes against the branch it started from.
     Diff {
         /// The agent: its name, short id or id.
@@ -332,6 +341,7 @@ fn main() -> ExitCode {
             limit,
             json,
         } => report(cmd::events::run(session, limit, json)),
+        Command::Ui { no_open } => report(cmd::ui::run(no_open)),
         command => async_main(command),
     }
 }
@@ -396,6 +406,7 @@ fn async_main(command: Command) -> ExitCode {
             Command::Hook { .. }
             | Command::Config(_)
             | Command::Doctor { .. }
+            | Command::Ui { .. }
             | Command::Events { .. } => {
                 unreachable!("these commands run without the async runtime")
             }
