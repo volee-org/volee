@@ -124,7 +124,44 @@ impl Web {
             .as_ref()
             .filter(|terminal| terminal.available())
             .map(|terminal| terminal.name());
-        inbox::build_with(&view, name, &self.decisions.cards())
+        let mut inbox = inbox::build_with(&view, name, &self.decisions.cards());
+        self.add_reviews(&view, &mut inbox).await;
+        inbox
+    }
+
+    /// Puts each finished card's review brief on it.
+    async fn add_reviews(&self, view: &volee_proto::methods::AgentsView, inbox: &mut inbox::Inbox) {
+        let Some(reviews) = self.reviews.clone() else {
+            return;
+        };
+        let targets: Vec<(String, ReviewTarget)> = inbox
+            .cards
+            .iter()
+            .filter(|card| card.kind == inbox::Kind::Finished)
+            .filter_map(|card| {
+                let agent = view
+                    .agents
+                    .iter()
+                    .find(|agent| agent.session_id == card.id)?;
+                Some((card.id.clone(), ReviewTarget::of(agent)?))
+            })
+            .collect();
+        if targets.is_empty() {
+            return;
+        }
+        let briefs = tokio::task::spawn_blocking(move || {
+            targets
+                .into_iter()
+                .filter_map(|(id, target)| Some((id, reviews.brief(&target)?)))
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
+        for (id, brief) in briefs {
+            if let Some(card) = inbox.cards.iter_mut().find(|card| card.id == id) {
+                card.review = Some(brief);
+            }
+        }
     }
 }
 
@@ -237,13 +274,21 @@ async fn events(
 fn inbox_stream(web: Web) -> impl Stream<Item = Result<Event, Infallible>> {
     let agents = web.agents.subscribe();
     let decisions = web.decisions.subscribe();
+    let reviews = web.reviews.as_ref().map(|reviews| reviews.subscribe());
     futures_util::stream::unfold(
-        (web, agents, decisions, true),
-        |(web, mut agents, mut decisions, first)| async move {
+        (web, agents, decisions, reviews, true),
+        |(web, mut agents, mut decisions, mut reviews, first)| async move {
             if !first {
                 tokio::select! {
                     changed = agents.changed() => if changed.is_err() { return None; },
                     changed = decisions.changed() => if changed.is_err() { return None; },
+                    // A review that starts, finishes or fails is told at once.
+                    changed = async {
+                        match reviews.as_mut() {
+                            Some(reviews) => reviews.changed().await,
+                            None => std::future::pending().await,
+                        }
+                    } => if changed.is_err() { return None; },
                 }
             }
             let inbox = web.inbox().await;
@@ -251,7 +296,7 @@ fn inbox_stream(web: Web) -> impl Stream<Item = Result<Event, Infallible>> {
                 .event("inbox")
                 .json_data(&inbox)
                 .unwrap_or_else(|_| Event::default().comment("the inbox could not be encoded"));
-            Some((Ok(event), (web, agents, decisions, false)))
+            Some((Ok(event), (web, agents, decisions, reviews, false)))
         },
     )
 }

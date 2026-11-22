@@ -52,6 +52,22 @@ pub(crate) struct InboxCard {
     pub(crate) diff: Option<Diff>,
     pub(crate) ahead: u32,
     pub(crate) dirty: bool,
+    /// What the AI pre-review says of the branch's current tip, in short.
+    /// Filled by the web layer, which knows the reviews; `None` when nobody
+    /// asked for one or reviews are off.
+    pub(crate) review: Option<ReviewBrief>,
+}
+
+/// The pre-review of a card in a few words: enough for a badge, and for the
+/// interface to know when to read the whole review again.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct ReviewBrief {
+    /// `pending`, `running`, `done` or `failed`.
+    pub(crate) status: String,
+    /// How many findings it has.
+    pub(crate) findings: usize,
+    /// The reviewed commit.
+    pub(crate) tip: String,
 }
 
 /// The inbox as the interface receives it.
@@ -193,6 +209,7 @@ fn card(agent: &AgentCard, kind: Kind) -> InboxCard {
         }),
         ahead: agent.git.as_ref().map_or(0, |git| git.ahead),
         dirty: agent.git.as_ref().is_some_and(|git| git.dirty),
+        review: None,
     }
 }
 

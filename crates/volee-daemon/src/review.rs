@@ -435,6 +435,9 @@ fn git(cwd: &Path, args: &[&str]) -> Option<String> {
 // ---------------------------------------------------------------------------
 // The service
 
+/// What the reviewers said: the raw text, the cost and the findings, or why they failed.
+type Reviewed = Result<(String, Option<f64>, Vec<NewFinding>), String>;
+
 /// A branch to review, from an agent's card.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Target {
@@ -502,6 +505,9 @@ pub(crate) struct Reviews {
     store: Arc<Mutex<Store>>,
     reviewer: Arc<dyn Reviewer>,
     slots: Arc<Semaphore>,
+    /// Counts the changes of any review (queued, started, finished, failed),
+    /// so that the web interface is told as it happens.
+    revision: watch::Sender<u64>,
 }
 
 impl std::fmt::Debug for Reviews {
@@ -539,6 +545,26 @@ impl Reviews {
             config_dir,
             store: Arc::new(Mutex::new(store)),
             reviewer,
+            revision: watch::channel(0).0,
+        })
+    }
+
+    /// A receiver that wakes each time a review changes.
+    pub(crate) fn subscribe(&self) -> watch::Receiver<u64> {
+        self.revision.subscribe()
+    }
+
+    fn changed(&self) {
+        self.revision.send_modify(|revision| *revision += 1);
+    }
+
+    /// The review of the branch's current tip in a few words.
+    pub(crate) fn brief(&self, target: &Target) -> Option<crate::web::inbox::ReviewBrief> {
+        let review = self.current(target)?;
+        Some(crate::web::inbox::ReviewBrief {
+            status: review.status,
+            findings: review.findings.len(),
+            tip: review.tip,
         })
     }
 
@@ -624,6 +650,7 @@ impl Reviews {
                 }
             }
         };
+        self.changed();
         let service = Arc::clone(self);
         let target = target.clone();
         handle.spawn(async move {
@@ -639,13 +666,16 @@ impl Reviews {
         let service = Arc::clone(&self);
         let outcome = tokio::task::spawn_blocking(move || {
             service.lock().start_review(id, now()).ok();
+            service.changed();
             service.run_reviewers(&target, &tip, &plan)
         })
         .await;
-        let store = Arc::clone(&self.store);
-        let mut store = store
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.settle(id, outcome);
+        self.changed();
+    }
+
+    fn settle(&self, id: i64, outcome: Result<Reviewed, tokio::task::JoinError>) {
+        let mut store = self.lock();
         match outcome {
             Ok(Ok((raw, cost, findings))) => {
                 if let Err(error) = store.finish_review(id, now(), &raw, cost, &findings) {
@@ -666,12 +696,7 @@ impl Reviews {
 
     /// Runs the reviewers one after the other (frugal: never two models at
     /// once) and merges what they found.
-    fn run_reviewers(
-        &self,
-        target: &Target,
-        tip: &str,
-        plan: &Plan,
-    ) -> Result<(String, Option<f64>, Vec<NewFinding>), String> {
+    fn run_reviewers(&self, target: &Target, tip: &str, plan: &Plan) -> Reviewed {
         let mut raw = Vec::new();
         let mut cost: Option<f64> = None;
         let mut groups = Vec::new();
@@ -1046,5 +1071,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ask(&reviews, &target, false).await, Requested::Skipped);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_web_interface_is_told_of_each_step_and_gets_a_brief() {
+        let fake = Arc::new(Fake::default());
+        let (_db, reviews) = service(&fake, 1, true);
+        let (_repo, target) = repo("feat");
+        let mut changes = reviews.subscribe();
+        assert!(reviews.brief(&target).is_none());
+        ask(&reviews, &target, false).await;
+        // Queued: told at once, and the brief says so.
+        changes.changed().await.unwrap();
+        let queued = reviews.brief(&target).unwrap();
+        assert!(["pending", "running"].contains(&queued.status.as_str()));
+        let done = settled(&reviews, &target).await;
+        // Running and finished each told it too (the counter is monotonic).
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(*changes.borrow_and_update() >= 3);
+        let brief = reviews.brief(&target).unwrap();
+        assert_eq!(brief.status, "done");
+        assert_eq!(brief.findings, done.findings.len());
+        assert_eq!(brief.tip, done.tip);
     }
 }
