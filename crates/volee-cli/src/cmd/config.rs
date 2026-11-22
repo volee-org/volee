@@ -46,6 +46,9 @@ pub(crate) fn check() -> Result<()> {
     let home = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_default();
+    if let Some(legacy) = volee_config::legacy_file(&paths.config_dir) {
+        println!("warning: {}", volee_config::legacy_warning(&legacy));
+    }
     let config = Config::load(&file, &home)?;
     if file.exists() {
         println!("{} is valid.", file.display());
@@ -66,7 +69,7 @@ pub(crate) fn check() -> Result<()> {
     println!("  worktrees         inside each repository, in .claude/worktrees");
     println!("  background fetch  {}", config.git.fetch);
     if config.repos.is_empty() {
-        println!("  repositories      none (add [repos.<name>] tables)");
+        println!("  repositories      none (add entries to `repos`)");
     }
     for line in repository_lines(&config, std::path::Path::is_dir) {
         println!("{line}");
@@ -116,9 +119,10 @@ mod tests {
     #[test]
     fn repositories_align_on_the_longest_name() {
         let config = Config::parse(
-            "[repos.shop]\npath = \"/srv/shop\"\nsetup = [\"bun install\"]\n\
-             [repos.simulateur-freelance]\npath = \"/srv/sim\"\n",
-            Path::new("config.toml"),
+            "return { repos = {\
+             shop = { path = '/srv/shop', setup = { 'bun install' } },\
+             ['simulateur-freelance'] = { path = '/srv/sim' } } }",
+            Path::new("config.lua"),
             Path::new("/home/ada"),
         )
         .unwrap();

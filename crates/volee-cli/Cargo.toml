@@ -27,6 +27,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 ulid.workspace = true
 volee-config.workspace = true
+volee-rules.workspace = true
 volee-core.workspace = true
 volee-daemon.workspace = true
 volee-git.workspace = true

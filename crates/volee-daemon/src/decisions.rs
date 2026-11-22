@@ -44,7 +44,7 @@ impl Default for HoldSettings {
     fn default() -> Self {
         Self {
             permission_timeout: Duration::from_secs(volee_config::DEFAULT_PERMISSION_TIMEOUT),
-            question_delay: Duration::from_secs(volee_config::DEFAULT_QUESTION_DELAY),
+            question_delay: volee_rules::Settings::default().held_question_timeout(),
         }
     }
 }

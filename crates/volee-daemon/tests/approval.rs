@@ -345,13 +345,13 @@ fn serve(running: &mut Running, name: &str, events: Vec<Event>, merge: Option<&s
     std::fs::create_dir_all(&paths.state_dir).unwrap();
     running.socket.clone_from(&paths.socket);
     let listener = UnixListener::bind(&running.socket).unwrap();
-    let merge = merge.map_or_else(String::new, |method| format!("merge = \"{method}\"\n"));
+    let merge = merge.map_or_else(String::new, |method| format!(", merge = '{method}'"));
     let settings = volee_config::Config::parse(
         &format!(
-            "[repos.alpha]\npath = \"{}\"\n{merge}",
+            "return {{ repos = {{ alpha = {{ path = '{}'{merge} }} }} }}",
             running.repo.display()
         ),
-        Path::new("config.toml"),
+        Path::new("config.lua"),
         Path::new("/home/nobody"),
     )
     .unwrap();

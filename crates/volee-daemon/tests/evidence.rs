@@ -363,10 +363,10 @@ async fn eventually<T>(
 
 fn settings(clone: &Path) -> volee_config::Config {
     let text = format!(
-        "[repos.billing]\npath = \"{}\"\nbase = \"main\"\n",
+        "return {{ repos = {{ billing = {{ path = '{}', base = 'main' }} }} }}",
         clone.display()
     );
-    volee_config::Config::parse(&text, Path::new("config.toml"), Path::new("/nowhere")).unwrap()
+    volee_config::Config::parse(&text, Path::new("config.lua"), Path::new("/nowhere")).unwrap()
 }
 
 /// A program the person runs under volee, in `cwd` (`volee run`).

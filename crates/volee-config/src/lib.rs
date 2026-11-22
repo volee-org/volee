@@ -1,8 +1,11 @@
-//! The configuration file of volee, `~/.config/volee/config.toml`.
+//! The configuration file of volee, `~/.config/volee/config.lua`.
 //!
-//! Every setting is optional, a missing file means the defaults, and unknown
-//! keys are errors: a typo becomes a clear message with a line number instead
-//! of a setting that silently does nothing.
+//! The file is Lua that returns a table (ADR 0037, amended in step 8), run in
+//! the same sandbox as the rules files. Every setting is optional, a missing
+//! file means the defaults, and unknown keys are errors: a typo becomes a
+//! clear message instead of a setting that silently does nothing. The
+//! decisions about changes (risk, layers, merge, the held question delay)
+//! are not here: they live in the rules files.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -12,7 +15,13 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 /// A commented example configuration, also written by `volee config init`.
-pub const EXAMPLE: &str = include_str!("example.toml");
+pub const EXAMPLE: &str = include_str!("example.lua");
+
+/// The name of the configuration file inside volee's config directory.
+pub const CONFIG_FILE: &str = "config.lua";
+
+/// The name of the TOML file of volee 0.x, which is not read any more.
+pub const LEGACY_CONFIG_FILE: &str = "config.toml";
 
 /// Why the configuration could not be loaded.
 #[derive(Debug, thiserror::Error)]
@@ -35,12 +44,12 @@ pub enum ConfigError {
         #[source]
         source: io::Error,
     },
-    /// The file is not valid TOML or has unknown or ill-typed keys.
+    /// The file does not run, or has unknown or ill-typed keys.
     #[error("{path}: {message}")]
     Parse {
         /// The file.
         path: PathBuf,
-        /// The parser's message, with the line and column.
+        /// What Lua or the reader said, with the line when there is one.
         message: String,
     },
     /// A value is well-formed but unusable.
@@ -116,16 +125,10 @@ pub struct Hooks {
     /// decide in the browser. `volee doctor` writes it as the hook's timeout;
     /// when it runs out, Claude Code asks in the terminal as usual.
     pub permission_timeout: u64,
-    /// How long, in seconds, a question (`AskUserQuestion`) is held for the
-    /// person to answer in the browser before the terminal asks it.
-    pub question_delay: u64,
 }
 
 /// The default hold of a permission request, in seconds.
 pub const DEFAULT_PERMISSION_TIMEOUT: u64 = 3600;
-
-/// The default hold of a question, in seconds.
-pub const DEFAULT_QUESTION_DELAY: u64 = 120;
 
 /// The default hook port.
 pub const DEFAULT_HOOK_PORT: u16 = 47835;
@@ -135,7 +138,6 @@ impl Default for Hooks {
         Self {
             port: DEFAULT_HOOK_PORT,
             permission_timeout: DEFAULT_PERMISSION_TIMEOUT,
-            question_delay: DEFAULT_QUESTION_DELAY,
         }
     }
 }
@@ -404,12 +406,14 @@ impl Config {
         Self::parse(&text, path, home)
     }
 
-    /// Parses configuration text. `path` only names the file in errors.
+    /// Runs configuration text. `path` only names the file in errors.
     pub fn parse(text: &str, path: &Path, home: &Path) -> Result<Self, ConfigError> {
-        let mut config: Self = toml::from_str(text).map_err(|error| ConfigError::Parse {
-            path: path.to_owned(),
-            message: error.to_string().trim_end().to_owned(),
-        })?;
+        let source = volee_rules::Source::new(path.display().to_string(), text);
+        let mut config: Self = volee_rules::load_data(&source, volee_rules::Limits::default())
+            .map_err(|error| ConfigError::Parse {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
         config.resolve(path, home)?;
         Ok(config)
     }
@@ -448,10 +452,9 @@ impl Config {
                 "agents.poll_interval must be at least 1 second".to_owned(),
             ));
         }
-        if self.hooks.permission_timeout == 0 || self.hooks.question_delay == 0 {
+        if self.hooks.permission_timeout == 0 {
             return Err(invalid(
-                "hooks.permission_timeout and hooks.question_delay must be at least 1 second"
-                    .to_owned(),
+                "hooks.permission_timeout must be at least 1 second".to_owned(),
             ));
         }
         if self.review.timeout == 0 || self.review.concurrency == 0 {
@@ -483,6 +486,21 @@ impl Config {
     }
 }
 
+/// The TOML file of volee 0.x in `config_dir`, if one is still there. volee
+/// never reads it and never converts it.
+pub fn legacy_file(config_dir: &Path) -> Option<PathBuf> {
+    let path = config_dir.join(LEGACY_CONFIG_FILE);
+    path.is_file().then_some(path)
+}
+
+/// The one-line warning for a leftover TOML file.
+pub fn legacy_warning(legacy: &Path) -> String {
+    format!(
+        "{} is ignored: volee reads {CONFIG_FILE} now (see `volee config init`)",
+        legacy.display()
+    )
+}
+
 /// Expands a leading `~` with `home`.
 fn expand(path: &Path, home: &Path) -> PathBuf {
     match path.strip_prefix("~") {
@@ -503,11 +521,11 @@ mod tests {
     use super::*;
 
     fn parse(text: &str) -> Result<Config, ConfigError> {
-        Config::parse(text, Path::new("config.toml"), Path::new("/home/ada"))
+        Config::parse(text, Path::new("config.lua"), Path::new("/home/ada"))
     }
 
     #[test]
-    fn the_example_parses_to_the_defaults() {
+    fn the_example_runs_to_the_defaults() {
         let config = parse(EXAMPLE).unwrap();
         assert_eq!(config, Config::default());
     }
@@ -516,58 +534,43 @@ mod tests {
     fn the_agents_poll_interval_has_a_default_and_a_floor() {
         assert_eq!(Config::default().agents.poll_interval, 5);
         assert_eq!(
-            parse("[agents]\npoll_interval = 2\n")
+            parse("return { agents = { poll_interval = 2 } }")
                 .unwrap()
                 .agents
                 .poll_interval,
             2
         );
-        assert!(parse("[agents]\npoll_interval = 0\n").is_err());
+        assert!(parse("return { agents = { poll_interval = 0 } }").is_err());
     }
 
     #[test]
     fn the_hook_port_has_a_default_and_can_be_set() {
         assert_eq!(Config::default().hooks.port, DEFAULT_HOOK_PORT);
         assert_eq!(
-            parse(
-                "[hooks]
-port = 4000
-"
-            )
-            .unwrap()
-            .hooks
-            .port,
+            parse("return { hooks = { port = 4000 } }")
+                .unwrap()
+                .hooks
+                .port,
             4000
         );
-        assert!(
-            parse(
-                "[hooks]
-port = 70000
-"
-            )
-            .is_err()
-        );
-        assert!(parse("[hooks]\nquestion_delay = 0\n").is_err());
-        assert!(parse("[hooks]\npermission_timeout = 0\n").is_err());
-        let held = parse("[hooks]\npermission_timeout = 30\nquestion_delay = 9\n").unwrap();
+        assert!(parse("return { hooks = { port = 70000 } }").is_err());
+        assert!(parse("return { hooks = { permission_timeout = 0 } }").is_err());
+        let held = parse("return { hooks = { permission_timeout = 30 } }").unwrap();
         assert_eq!(held.hooks.permission_timeout, 30);
-        assert_eq!(held.hooks.question_delay, 9);
-        assert_eq!(Config::default().hooks.question_delay, 120);
         assert_eq!(Config::default().hooks.permission_timeout, 3600);
         assert!(
-            parse(
-                "[hooks]
-host = \"0.0.0.0\"
-"
-            )
-            .is_err(),
+            parse("return { hooks = { host = '0.0.0.0' } }").is_err(),
             "loopback only"
+        );
+        assert!(
+            parse("return { hooks = { question_delay = 9 } }").is_err(),
+            "the held question delay is a rule now (held_question_timeout)"
         );
     }
 
     #[test]
     fn an_empty_file_is_the_defaults() {
-        assert_eq!(parse("").unwrap(), Config::default());
+        assert_eq!(parse("return {}").unwrap(), Config::default());
         assert_eq!(Config::default().agents.wake_timeout, 3_600);
         assert_eq!(Config::default().missions.max_workers, 8);
         assert_eq!(Config::default().git.fetch, Fetch::Launched);
@@ -578,40 +581,43 @@ host = \"0.0.0.0\"
         let defaults = Config::default().review;
         assert!(defaults.enabled && defaults.auto);
         assert_eq!(defaults.concurrency, 1);
-        let tuned = parse("[review]\nenabled = false\nauto = false\ntimeout = 9\n").unwrap();
+        let tuned =
+            parse("return { review = { enabled = false, auto = false, timeout = 9 } }").unwrap();
         assert!(!tuned.review.enabled && !tuned.review.auto);
         assert_eq!(tuned.review.timeout, 9);
-        assert!(parse("[review]\nconcurrency = 0\n").is_err());
-        assert!(parse("[review]\ntimeout = 0\n").is_err());
+        assert!(parse("return { review = { concurrency = 0 } }").is_err());
+        assert!(parse("return { review = { timeout = 0 } }").is_err());
     }
 
     #[test]
     fn background_fetches_follow_the_setting() {
-        let fetch = |text: &str| parse(text).unwrap().git.fetch;
-        assert_eq!(fetch("[git]\nfetch = \"all\""), Fetch::All);
-        assert_eq!(fetch("[git]\nfetch = \"never\""), Fetch::Never);
-        assert_eq!(fetch("[git]\nfetch = \"launched\""), Fetch::Launched);
+        let fetch = |word: &str| {
+            parse(&format!("return {{ git = {{ fetch = '{word}' }} }}"))
+                .unwrap()
+                .git
+                .fetch
+        };
+        assert_eq!(fetch("all"), Fetch::All);
+        assert_eq!(fetch("never"), Fetch::Never);
+        assert_eq!(fetch("launched"), Fetch::Launched);
         // Repositories of agents volee launched, and only those, by default.
         assert!(Fetch::Launched.allows(true));
         assert!(!Fetch::Launched.allows(false));
         assert!(Fetch::All.allows(false));
         assert!(!Fetch::Never.allows(true));
-        let error = parse("[git]\nfetch = \"sometimes\"")
+        let error = parse("return { git = { fetch = 'sometimes' } }")
             .unwrap_err()
             .to_string();
         assert!(error.contains("sometimes"), "{error}");
-        assert!(parse("[git]\nfetch = true").is_err());
+        assert!(parse("return { git = { fetch = true } }").is_err());
     }
 
     #[test]
     fn repositories_expand_the_home_directory() {
         let config = parse(
-            r#"
-            [repos.billing]
-            path = "~/code/billing"
-            base = "develop"
-            model = "sonnet"
-            "#,
+            r#"return { repos = { billing = {
+                path = "~/code/billing", base = "develop", model = "sonnet",
+            } } }"#,
         )
         .unwrap();
         let repo = &config.repos["billing"];
@@ -630,12 +636,10 @@ host = \"0.0.0.0\"
     #[test]
     fn repository_models_override_the_default() {
         let config = parse(
-            r#"
-            [agents]
-            model = "opus"
-            [repos.docs]
-            path = "/srv/docs"
-            "#,
+            r#"return {
+                agents = { model = "opus" },
+                repos = { docs = { path = "/srv/docs" } },
+            }"#,
         )
         .unwrap();
         assert_eq!(config.model_for(Some("docs")), Some("opus"));
@@ -643,42 +647,64 @@ host = \"0.0.0.0\"
     }
 
     #[test]
-    fn unknown_keys_are_errors_with_a_location() {
-        let error = parse("[agents]\nunknown_setting = \"opus\"\n").unwrap_err();
+    fn lua_can_compute_a_setting() {
+        let config = parse(
+            r#"local root = "/srv"
+            local repos = {}
+            for _, name in ipairs({ "a", "b" }) do
+              repos[name] = { path = root .. "/" .. name }
+            end
+            return { repos = repos }"#,
+        )
+        .unwrap();
+        assert_eq!(config.repos["b"].path, PathBuf::from("/srv/b"));
+    }
+
+    #[test]
+    fn unknown_keys_and_broken_files_are_errors_that_say_where() {
+        let error = parse("return { agents = { unknown_setting = 'opus' } }").unwrap_err();
         let message = error.to_string();
         assert!(message.contains("unknown_setting"), "{message}");
-        assert!(message.contains("line 2"), "{message}");
+        let error = parse("return {\n agents = nil .. 'x'\n}").unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("config.lua") && message.contains('2'),
+            "{message}"
+        );
+        assert!(parse("return 3").is_err());
+        assert!(parse("return { agents = function() end }").is_err());
     }
 
     #[test]
     fn permission_modes_use_the_harness_spelling() {
-        let config = parse("[agents]\npermission_mode = \"acceptEdits\"\n").unwrap();
+        let config = parse("return { agents = { permission_mode = 'acceptEdits' } }").unwrap();
         assert_eq!(
             config.agents.permission_mode,
             Some(PermissionMode::AcceptEdits)
         );
         assert_eq!(PermissionMode::DontAsk.as_flag(), "dontAsk");
-        assert!(parse("[agents]\npermission_mode = \"bypassPermissions\"\n").is_err());
+        assert!(parse("return { agents = { permission_mode = 'bypassPermissions' } }").is_err());
     }
 
     #[test]
     fn setup_commands_keep_their_order_and_none_may_be_empty() {
         let config = parse(
-            r#"
-            [repos.shop]
-            path = "/srv/shop"
-            setup = ["cp \"$VOLEE_REPO_ROOT/.env.local\" .", "bun install"]
-            "#,
+            r#"return { repos = { shop = {
+                path = "/srv/shop",
+                setup = { "cp \"$VOLEE_REPO_ROOT/.env.local\" .", "bun install" },
+            } } }"#,
         )
         .unwrap();
         assert_eq!(
             config.repos["shop"].setup,
             ["cp \"$VOLEE_REPO_ROOT/.env.local\" .", "bun install"]
         );
-        let docs = parse("[repos.docs]\npath = \"/srv/docs\"\n").unwrap();
+        let docs = parse("return { repos = { docs = { path = '/srv/docs' } } }").unwrap();
         assert_eq!(docs.repos["docs"].setup, Vec::<String>::new());
-        let error = parse("[repos.shop]\npath = \"/srv/shop\"\nsetup = [\"bun install\", \" \"]\n")
-            .unwrap_err();
+        let error = parse(
+            "return { repos = { shop = { path = '/srv/shop', setup = { 'bun install', ' ' } } } }",
+        )
+        .unwrap_err();
         assert!(
             error
                 .to_string()
@@ -691,7 +717,7 @@ host = \"0.0.0.0\"
     fn a_repository_says_how_its_pull_requests_are_merged() {
         let method = |written: &str| {
             parse(&format!(
-                "[repos.shop]\npath = \"/srv/shop\"\nmerge = \"{written}\"\n"
+                "return {{ repos = {{ shop = {{ path = '/srv/shop', merge = '{written}' }} }} }}"
             ))
             .map(|config| config.repos["shop"].merge)
         };
@@ -699,32 +725,32 @@ host = \"0.0.0.0\"
         assert_eq!(method("squash").unwrap(), Some(MergeMethod::Squash));
         assert_eq!(method("rebase").unwrap(), Some(MergeMethod::Rebase));
         // Unset: the forge is asked what the repository allows.
-        let unset = parse("[repos.shop]\npath = \"/srv/shop\"\n").unwrap();
+        let unset = parse("return { repos = { shop = { path = '/srv/shop' } } }").unwrap();
         assert_eq!(unset.repos["shop"].merge, None);
         // Anything else is a mistake said at once, not a default.
         for wrong in ["fast-forward", "Squash", ""] {
             let error = method(wrong).unwrap_err();
-            assert!(error.to_string().contains("merge"), "{wrong}: {error}");
+            assert!(error.to_string().contains(wrong), "{wrong}: {error}");
         }
     }
 
     #[test]
     fn relative_repository_paths_are_refused() {
-        let error = parse("[repos.app]\npath = \"code/app\"\n").unwrap_err();
+        let error = parse("return { repos = { app = { path = 'code/app' } } }").unwrap_err();
         assert!(error.to_string().contains("must be absolute"), "{error}");
     }
 
     #[test]
     fn repository_names_are_checked() {
-        let error = parse("[repos.\"my app\"]\npath = \"/srv/app\"\n").unwrap_err();
+        let error = parse("return { repos = { ['my app'] = { path = '/srv/app' } } }").unwrap_err();
         assert!(error.to_string().contains("my app"), "{error}");
     }
 
     #[test]
     fn worktrees_cannot_be_moved_out_of_the_repository() {
         // Claude Code never trusts a worktree started outside its repository
-        // (ADR 0013), so the old `[worktrees]` table is an error, not a no-op.
-        let error = parse("[worktrees]\nroot = \"~/wt\"\n").unwrap_err();
+        // (ADR 0013), so a `worktrees` table is an error, not a no-op.
+        let error = parse("return { worktrees = { root = '~/wt' } }").unwrap_err();
         assert!(error.to_string().contains("worktrees"), "{error}");
     }
 
@@ -752,7 +778,24 @@ host = \"0.0.0.0\"
     #[test]
     fn a_missing_file_is_the_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::load(&dir.path().join("none.toml"), dir.path()).unwrap();
+        let config = Config::load(&dir.path().join("none.lua"), dir.path()).unwrap();
+        assert_eq!(config, Config::default());
+    }
+
+    #[test]
+    fn a_leftover_toml_file_is_noticed_and_never_read() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(legacy_file(dir.path()), None);
+        std::fs::write(dir.path().join(LEGACY_CONFIG_FILE), "[agents]\n").unwrap();
+        let found = legacy_file(dir.path()).unwrap();
+        assert!(found.ends_with(LEGACY_CONFIG_FILE));
+        let warning = legacy_warning(&found);
+        assert!(
+            warning.contains("config.lua") && warning.contains("ignored"),
+            "{warning}"
+        );
+        assert!(!warning.contains('\n'), "one line");
+        let config = Config::load(&dir.path().join(CONFIG_FILE), dir.path()).unwrap();
         assert_eq!(config, Config::default());
     }
 }

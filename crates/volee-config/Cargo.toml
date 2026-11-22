@@ -14,7 +14,7 @@ categories = ["config", "development-tools"]
 [dependencies]
 serde.workspace = true
 thiserror.workspace = true
-toml.workspace = true
+volee-rules.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

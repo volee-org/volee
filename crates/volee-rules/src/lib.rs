@@ -26,6 +26,7 @@
 //! ([`RuleError`]) and none is silent. See the ADR "Lua config and rules" and
 //! `docs/src/reference/rules.md`.
 
+mod data;
 mod defaults;
 mod editor;
 mod engine;
@@ -36,6 +37,7 @@ mod sandbox;
 mod settings;
 mod types;
 
+pub use data::load_data;
 pub use editor::{Editor, EditorError, EditorKind, EditorTarget};
 pub use engine::{Evaluated, Evaluation, PERSONAL_RULES_FILE, REPO_RULES_PATH, Rules, Source};
 pub use error::RuleError;

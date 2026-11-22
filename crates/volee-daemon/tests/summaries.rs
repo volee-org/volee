@@ -49,8 +49,8 @@ fn start(summaries: bool) -> Running {
     let listener = UnixListener::bind(&socket).unwrap();
     let harness = Arc::new(FakeHarness::default());
     let settings = volee_config::Config::parse(
-        &format!("[messages]\nsummaries = {summaries}\n"),
-        Path::new("config.toml"),
+        &format!("return {{ messages = {{ summaries = {summaries} }} }}"),
+        Path::new("config.lua"),
         Path::new("/home/nobody"),
     )
     .unwrap();

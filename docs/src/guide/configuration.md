@@ -1,43 +1,73 @@
 # Configuration
 
-volee reads `~/.config/volee/config.toml` (or `$XDG_CONFIG_HOME/volee`, or
-`$VOLEE_CONFIG_DIR`). Every setting is optional and a missing file means the
-defaults.
+volee is configured in Lua, in two files in `~/.config/volee/` (or
+`$XDG_CONFIG_HOME/volee`, or `$VOLEE_CONFIG_DIR`):
+
+| File | Holds | Read |
+| --- | --- | --- |
+| `config.lua` | The machine's settings: repositories, the hook port, the review service, git fetching. | When the daemon starts. Restart it after a change. |
+| `rules.lua` | How much care a change needs: risk, the layers a card opens with, the review plan, merge, how long a question is held. | Live: the daemon reloads it when it changes. |
+
+They are two files on purpose. The settings are read once and apply to the
+whole machine; the rules are decisions about a change, change often, and a
+repository can bring its own (`<repo>/.volee/rules.lua`, see
+[Rules files](../reference/rules.md)), so they must never be mixed with the
+settings a repository file is not allowed to touch. Both run in the same
+sandbox (no `io`, no `require`, no network, limited time and memory); a
+configuration file that fails to run is an error that says the file and the
+line, and the daemon starts with the defaults.
+
+Every setting is optional and a missing file means the defaults. Unknown
+keys are errors, so a typo never becomes a setting that silently does
+nothing.
 
 ```sh
-volee config init    # write a commented example
-volee config check   # validate the file and show what it sets
+volee config init    # write a commented example config.lua
+volee config check   # run the file and show what it sets
 volee config path    # print where the file is
+volee doctor         # also reports errors in the rules files
 ```
 
-Unknown keys are errors, reported with their line, so a typo never turns into
-a setting that silently does nothing.
+A leftover `config.toml` from volee 0.x is not read and not converted: volee
+prints a one-line warning that it is ignored.
 
 ## Example
 
-```toml
-[agents]
-model = "opus"
-permission_mode = "auto"
-wake_timeout = 3600
+```lua
+return {
+  agents = {
+    model = "opus",
+    permission_mode = "auto",
+    wake_timeout = 3600,
+  },
 
-[repos.billing]
-path = "~/code/billing"
-base = "develop"
-model = "sonnet"
-setup = ["bun install"]
+  repos = {
+    billing = {
+      path = "~/code/billing",
+      base = "develop",
+      model = "sonnet",
+      setup = { "bun install" },
+    },
+  },
 
-[tui]
-theme = "catppuccin-mocha"
-
-[tui.keys]
-take-over = "ctrl-a"
-
-[tui.tools]
-git = "gitui"
+  hooks = { port = 47835 },
+}
 ```
 
-## `[agents]`
+Because it is Lua, a value can be computed:
+
+```lua
+local repos = {}
+for _, name in ipairs({ "api", "web", "docs" }) do
+  repos[name] = { path = "~/code/" .. name }
+end
+return { repos = repos }
+```
+
+The file is data: a function in it is an error. Decisions belong in
+`rules.lua`.
+
+## `agents`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -58,9 +88,9 @@ from a repository you trust, and never a worktree elsewhere
 (see [ADR 0013](../adr/0013-worktrees-live-in-their-repository.md)). Run
 `claude` once in each repository you list below and accept its trust prompt.
 
-## `[repos.<name>]`
+## `repos`
 
-One table per repository volee may launch agents in. `<name>` is what you type
+One entry per repository volee may launch agents in. The key is what you type
 on the command line and what agents see; it uses letters, digits, `-`, `_`
 and `.`.
 
@@ -78,13 +108,14 @@ A new worktree holds the tracked files only: no dependencies, and none of
 the files git ignores. `setup` prepares it before the agent starts
 ([ADR 0017](../adr/0017-setup-commands-for-new-worktrees.md)):
 
-```toml
-[repos.shop]
-path = "~/code/shop"
-setup = [
-  "cp \"$VOLEE_REPO_ROOT/.env.local\" .",
-  "bun install",
-]
+```lua
+return { repos = { shop = {
+  path = "~/code/shop",
+  setup = {
+    'cp "$VOLEE_REPO_ROOT/.env.local" .',
+    "bun install",
+  },
+} } }
 ```
 
 The daemon runs the commands in order, each with `/bin/sh -c`, in the new
@@ -111,21 +142,21 @@ in the main checkout and runs no setup.
 
 Some setups, each checked with `volee config check`:
 
-```toml
-# Bun, and a .env.local that git ignores, from the main checkout.
-setup = ['cp "$VOLEE_REPO_ROOT/.env.local" .', "bun install"]
+```lua
+-- Bun, and a .env.local that git ignores, from the main checkout.
+setup = { 'cp "$VOLEE_REPO_ROOT/.env.local" .', "bun install" }
 
-# npm, exactly as the lockfile says.
-setup = ["npm ci"]
+-- npm, exactly as the lockfile says.
+setup = { "npm ci" }
 
-# Python with uv.
-setup = ["uv sync"]
+-- Python with uv.
+setup = { "uv sync" }
 
-# A monorepo with a .env.local in several apps and packages.
-setup = [
-  '''cd "$VOLEE_REPO_ROOT" && find apps packages -maxdepth 2 -name .env.local | while read -r file; do mkdir -p "$VOLEE_WORKTREE/${file%/*}" && cp "$file" "$VOLEE_WORKTREE/$file"; done''',
+-- A monorepo with a .env.local in several apps and packages.
+setup = {
+  [[cd "$VOLEE_REPO_ROOT" && find apps packages -maxdepth 2 -name .env.local | while read -r file; do mkdir -p "$VOLEE_WORKTREE/${file%/*}" && cp "$file" "$VOLEE_WORKTREE/$file"; done]],
   "bun install",
-]
+}
 ```
 
 Package managers also run scripts: the project's own and its dependencies'
@@ -136,7 +167,7 @@ checkout of the repository. If that matters, skip the scripts
 (`bun install --ignore-scripts`, `npm ci --ignore-scripts`) and run the ones
 you need as setup commands of their own.
 
-## `[messages]`
+## `messages`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -147,7 +178,7 @@ A summary runs `claude -p` with no tools, no MCP server, none of your hooks
 and no saved session, in a directory of volee's own: the model reads the
 thread and nothing else.
 
-## `[missions]`
+## `missions`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -160,7 +191,7 @@ coordinator that reaches the limit gets a refusal that tells it to ask you.
 Workers also stay in the repositories the mission names: volee compares their
 main checkouts, never their directory names.
 
-## `[review]`
+## `review`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -177,7 +208,7 @@ and the number of reviewers come from the rules (`review.model`,
 from this table. A branch tip is reviewed once; see
 [ADR 0039](../adr/0039-the-pre-review-is-claude-codes-code-review-and-an-opinion.md).
 
-## `[git]`
+## `git`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -199,90 +230,14 @@ example on a metered connection, or with remotes that need a hardware key).
 With fetches off, push states and merges are as current as your last fetch,
 and new agents start from `origin/<base>` as that fetch left it.
 
-## `[tui]`
+## `hooks`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `theme` | light or dark, matching the terminal | A built-in theme or a file in `~/.config/volee/themes/`; see [Themes](themes.md). Without it, volee uses `catppuccin-latte` on a light terminal and `catppuccin-mocha` otherwise. The theme picker (`Space t`) writes it for you, and `volee --theme <name>` overrides it for one run. |
-| `background` | `"terminal"` | Whose background shows under volee's text: `"terminal"`, your terminal's own (its color and its transparency), or `"theme"`, the theme's color. The theme colors the text, the borders and what fills a cell on purpose (a selection, a badge, a notice) either way; see [Themes](themes.md#the-background). |
-| `reduced_motion` | `false` | Stop animations: a new message lights up its line on the [network](interface.md#the-network) instead of travelling along it, and spinners stop. |
-| `keys` | none | Key overrides; see below. |
-| `tools` | found on the machine | Programs `o` opens an agent's worktree with; see below. |
+| `port` | `47835` | The port on `127.0.0.1` where the daemon receives Claude Code's `http` hooks. `volee doctor` writes it into the hook settings: run it again after a change. |
+| `permission_timeout` | `3600` | Seconds a permission request waits for your decision in the browser. Written as the hook's timeout by `volee doctor`; afterwards Claude Code asks in the terminal as usual. |
 
-### `[tui.keys]`
-
-Every key of the interface, the wall and a take over can be changed. Name
-the action (the [interface guide](interface.md#keys) lists them by
-context) and give it one key, a list of keys, or an empty list to unbind
-it. At the top of `[tui.keys]`, the keys replace the action's keys in
-every context where it has some; in a `[tui.keys.<context>]` table, only
-there:
-
-```toml
-[tui.keys]
-take-over = ["enter", "ctrl-a"]   # opening an agent
-new-agent = ["c", "space n"]
-adopt = []
-
-[tui.keys.agents]
-first = "home"
-
-[tui.keys.wall]
-take-over = "enter"
-
-[tui.keys.attached]
-leave = "ctrl-g q"     # the menu key ctrl-g, then q
-```
-
-A key is written like `q`, `G`, `ctrl-c`, `alt-x`, `shift-tab`, `enter`,
-`esc`, `space`, `home`, `pgdn` or `f5`; a sequence of up to three keys
-with spaces between them, like `g g` or `space n` (`gg` works too). volee
-refuses, naming the action, an unknown action or context, two actions on
-the same key where both apply, and a key that both acts and starts a
-longer sequence. `leave` takes a menu key then a letter, like the default
-`ctrl-space q`, or Control and a letter for a single key that leaves at
-once, like `ctrl-q`; the Control key is Space or a letter other than `h`,
-`i`, `j` or `m`. The other keys of the edit-mode menu are `diff`,
-`next-agent`, `previous-agent` and `send-prefix`.
-
-### `[tui.tools]`
-
-The interface can open an agent's worktree in your own tools. None is
-required and none is forced: volee offers the ones it finds, and each key
-below replaces what it would find.
-
-| Key | Found when unset | Runs |
-| --- | --- | --- |
-| `editor` | `$VISUAL`, then `$EDITOR`, with `.` | in this terminal |
-| `diff` | `nvim -c 'DiffviewOpen {base}'`, when diffview.nvim is installed | in this terminal |
-| `git` | `lazygit`, when installed | in this terminal |
-| `ide` | `code {dir}`, when VS Code's `code` is installed | in a window of its own, in the background |
-
-Each value is a command line, split like a shell would (quotes, no
-variables or pipes) and run in the agent's worktree. `{dir}` stands for
-the worktree and `{base}` for the branch the agent started from, each
-passed as one argument. Keep them out of `sh -c '...'`: the base may come
-from a coordinator agent (volee only accepts a plain branch name, but a
-shell is still the wrong place for text an agent chose). An empty string
-turns a tool off, even when it is installed:
-
-```toml
-[tui.tools]
-editor = "hx"                   # instead of $EDITOR
-diff = "git difftool -d {base}"
-git = ""                        # never offer lazygit
-ide = "zed {dir}"
-```
-
-On macOS, an application with no command of its own opens with `open -a`,
-and the menu names the tool after the application:
-
-```toml
-[tui.tools]
-editor = "nvim ."                         # LazyVim, or any Neovim
-diff = "nvim -c 'DiffviewOpen {base}'"
-ide = "open -a WebStorm {dir}"            # shown as WebStorm
-```
-
-Tools that run in the terminal take it over, as taking over an agent does,
-and the interface comes back when they exit.
+How long a **question** (`AskUserQuestion`) is held is not here any more: it
+is the `held_question_timeout` setting of the rules, so a repository or you
+can set it per project. `volee doctor` writes it, plus a margin, as the hook's
+timeout, so run it again after changing it.

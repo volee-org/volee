@@ -85,7 +85,7 @@ impl Paths {
 
     /// The configuration file.
     pub fn config_file(&self) -> PathBuf {
-        self.config_dir.join("config.toml")
+        self.config_dir.join("config.lua")
     }
 
     /// The event database.

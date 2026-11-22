@@ -71,7 +71,9 @@ fn hook_server(paths: &Paths) -> Result<volee_daemon::HookServerConfig> {
         database: paths.database(),
         hold: volee_daemon::HoldSettings {
             permission_timeout: std::time::Duration::from_secs(hooks.permission_timeout),
-            question_delay: std::time::Duration::from_secs(hooks.question_delay),
+            question_delay: volee_rules::Rules::load(None, Some(&paths.config_dir))
+                .settings()
+                .held_question_timeout(),
         },
     })
 }
@@ -199,6 +201,9 @@ fn settings(paths: &Paths) -> volee_config::Config {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
+    if let Some(legacy) = volee_config::legacy_file(&paths.config_dir) {
+        tracing::warn!("{}", volee_config::legacy_warning(&legacy));
+    }
     volee_config::Config::load(&paths.config_file(), &home).unwrap_or_else(|error| {
         tracing::warn!(%error, "ignoring the configuration file");
         volee_config::Config::default()

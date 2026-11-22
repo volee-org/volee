@@ -60,7 +60,9 @@ impl Default for Holds {
     fn default() -> Self {
         Self {
             permission_timeout: volee_config::DEFAULT_PERMISSION_TIMEOUT,
-            question_delay: volee_config::DEFAULT_QUESTION_DELAY,
+            question_delay: volee_rules::Settings::default()
+                .held_question_timeout()
+                .as_secs(),
         }
     }
 }
@@ -83,16 +85,44 @@ pub(crate) struct Options {
 
 pub(crate) fn run(options: &Options) -> Result<()> {
     let paths = paths()?;
-    let (port, holds) = settings(&paths);
+    let (port, mut holds) = settings(&paths);
     let target = settings_file(options)?;
     if options.remove {
         return remove(&target);
+    }
+    // How long a question is held is a rule (`held_question_timeout`): the
+    // project's own, then the personal one. A user-wide file has no project.
+    let project = if options.user {
+        None
+    } else {
+        target.parent().and_then(Path::parent)
+    };
+    let rules = volee_rules::Rules::load(project, Some(&paths.config_dir));
+    holds.question_delay = rules.settings().held_question_timeout().as_secs();
+    report_rules(&rules);
+    if let Some(legacy) = volee_config::legacy_file(&paths.config_dir) {
+        println!("warning: {}", volee_config::legacy_warning(&legacy));
     }
     let token = hook_token::read_or_create(&paths.hook_token_file())
         .with_context(|| format!("cannot create {}", paths.hook_token_file().display()))?;
     write(&target, port, holds, &token, options.user)?;
     report_daemon(port);
     Ok(())
+}
+
+/// Says what is wrong with the rules files, one line each, with file and
+/// line: a broken file makes every answer the safest one, and that must
+/// never go unnoticed.
+fn report_rules(rules: &volee_rules::Rules) {
+    for error in rules.errors() {
+        println!("rules error: {error}");
+    }
+    for warning in rules.warnings() {
+        println!("rules warning: {warning}");
+    }
+    if rules.is_degraded() {
+        println!("  until fixed, every change is treated as high risk with no automatic merge");
+    }
 }
 
 pub(crate) fn settings_port(paths: &Paths) -> u16 {
@@ -112,7 +142,7 @@ fn settings(paths: &Paths) -> (u16, Holds) {
                 config.hooks.port,
                 Holds {
                     permission_timeout: config.hooks.permission_timeout,
-                    question_delay: config.hooks.question_delay,
+                    ..Holds::default()
                 },
             )
         },

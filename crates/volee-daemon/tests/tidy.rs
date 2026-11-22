@@ -73,8 +73,11 @@ fn start_with(worker: bool) -> Running {
     let listener = UnixListener::bind(&socket).unwrap();
     let harness = Arc::new(FakeHarness::default());
     let settings = volee_config::Config::parse(
-        &format!("[repos.alpha]\npath = \"{}\"\n", repo.display()),
-        Path::new("config.toml"),
+        &format!(
+            "return {{ repos = {{ alpha = {{ path = '{}' }} }} }}",
+            repo.display()
+        ),
+        Path::new("config.lua"),
         Path::new("/home/nobody"),
     )
     .unwrap();
