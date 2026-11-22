@@ -26,5 +26,18 @@ What the docs and the runs say:
 - Read-only: `--permission-mode plan` with `--disallowedTools
   Edit,Write,NotebookEdit`; never `--fix`.
 
-Not done here: the UI part (the review block of the card). It waits for the
-card screen of step 6; the API is `GET /api/agents/{id}/review`.
+## The interface
+
+Real trial (isolated daemon, `[review] auto = false`, a haiku agent in
+`cockpit-sandbox/alpha` on a throwaway branch with two deliberate bugs, headless
+Chrome driven by Playwright): the card showed no badge; on the work screen the
+review layer offered "Run review"; the click showed the running state, then the
+two findings, pushed over the events stream with no reload; the guided diff
+showed both under their lines; the card ended with "Review: 2 findings".
+
+| | |
+| --- | --- |
+| Running | ![running](screenshots/pre-review-2-review-layer-running.png) |
+| Done | ![done](screenshots/pre-review-3-review-layer-done.png) |
+| Inline in the guided diff | ![inline](screenshots/pre-review-4-guided-diff-inline-finding.png) |
+| Badge on the card | ![badge](screenshots/pre-review-5-finished-card-badge.png) |

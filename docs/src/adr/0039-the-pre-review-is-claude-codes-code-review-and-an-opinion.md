@@ -54,6 +54,14 @@ What had to be measured (Claude Code 2.1.330, a two-bug branch, Haiku):
 - `GET /api/agents/{id}/review` serves the status (`none`, `pending`,
   `running`, `done`, `failed`, `disabled`) and the findings;
   `POST` asks for a review now (`?retry=1` redoes a failed one).
+- The web interface is told as it happens: the inbox frame of the events
+  stream carries a `review` brief on each finished card and is sent again each
+  time a review changes. The finished-work screen reads the whole review again
+  when its card's brief changes. The review is labelled as an opinion, and the
+  Run / Retry button shows only when nobody asked yet or the last try failed.
+- A finding is shown at its file and line in the guided diff; one whose line
+  the diff does not show, or that has no line, goes on the file's header. Its
+  text is model output and is only ever inserted as text.
 
 ## Consequences
 

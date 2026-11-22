@@ -284,6 +284,13 @@ interface only.
 runs Claude Code's `/code-review` in the agent's worktree when finished work
 appears: read-only, no hooks, a session named `volee-review-...` that the
 agents view ignores, results kept in SQLite per `(repo, branch, tip)`.
+Each finished card of the inbox carries a short `review` (`status`,
+`findings`, `tip`), and the events stream sends a new inbox frame each time a
+review is queued, starts, finishes or fails, so the interface never polls. On
+the finished-work screen the **AI review** layer (after the summary) shows the
+status, who reviewed, the findings by severity and a Run / Retry button; the
+guided diff shows each finding under its line, or on the file's header when the
+diff does not show that line.
 
 A request whose `Host` is not a loopback name is refused, and the page is
 served with a Content-Security-Policy that allows only its own files.
