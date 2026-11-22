@@ -147,6 +147,9 @@ mod tests {
         let repo = root.join("alpha");
         std::fs::create_dir_all(&repo).unwrap();
         run(&repo, &["init", "-q", "-b", "main"]);
+        // The merge commit made by GitCli needs an identity: not every machine has one.
+        run(&repo, &["config", "user.name", "t"]);
+        run(&repo, &["config", "user.email", "t@t"]);
         std::fs::write(repo.join("a.txt"), "one\n").unwrap();
         run(&repo, &["add", "."]);
         run(&repo, &["commit", "-q", "-m", "init"]);
