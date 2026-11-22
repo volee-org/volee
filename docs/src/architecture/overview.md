@@ -274,6 +274,7 @@ interface only.
 | `GET /` and the bundle's files | no | The page. It reads the token from the link's fragment, keeps it for the tab and clears the address bar. |
 | `GET /api/inbox` | yes | The inbox as JSON, once. |
 | `GET /api/events` | yes | Server-sent events: the inbox at once, then again each time it changes (the token may be passed as `?token=`, since `EventSource` sets no header). |
+| `GET /api/agents/{id}/work` | yes | The layers of an agent's finished work ([ADR 0040](../adr/0040-a-finished-change-is-read-in-layers.md)): summary, plan, open points, files with the reason, commands and tests, a Mermaid diagram, the diff per file. Always answers for a known agent; what could not be read is said inside. |
 | `POST /api/agents/{id}/terminal` | yes | Focuses the agent's terminal through the terminal adapter. |
 | `POST /api/decisions/{id}` | yes | Decides a held permission or question (see below): `404` when it is gone, `422` when the decision does not fit the card. |
 | `GET /api/agents/{id}/review` | yes | The AI pre-review of the agent's branch tip: `status` (`none`, `pending`, `running`, `done`, `failed`, `disabled`) and the findings (file, line, severity, summary, failure scenario). An opinion, never a gate. |
