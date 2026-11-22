@@ -63,6 +63,36 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (repo, branch, tip)
     );
     ",
+    // 4: the AI pre-reviews of a branch tip and their findings (v2).
+    "
+    CREATE TABLE reviews (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        repo         TEXT    NOT NULL,
+        branch       TEXT    NOT NULL,
+        tip          TEXT    NOT NULL,
+        base         TEXT    NOT NULL,
+        status       TEXT    NOT NULL,
+        reviewers    INTEGER NOT NULL,
+        model        TEXT    NOT NULL,
+        requested_at INTEGER NOT NULL,
+        started_at   INTEGER,
+        finished_at  INTEGER,
+        error        TEXT,
+        raw          TEXT,
+        cost_usd     REAL,
+        UNIQUE (repo, branch, tip)
+    );
+    CREATE TABLE review_findings (
+        review_id        INTEGER NOT NULL REFERENCES reviews (id) ON DELETE CASCADE,
+        position         INTEGER NOT NULL,
+        file             TEXT    NOT NULL,
+        line             INTEGER,
+        severity         TEXT    NOT NULL,
+        summary          TEXT    NOT NULL,
+        failure_scenario TEXT,
+        PRIMARY KEY (review_id, position)
+    );
+    ",
 ];
 
 /// The newest schema version this build understands.
