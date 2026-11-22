@@ -79,11 +79,7 @@ fn start() -> Running {
         harnesses: vec![],
         spool: None,
         harness: None,
-        discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
-        max_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
-        idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
-        processes: None,
         hook_server: None,
         agents_view: None,
     };
@@ -108,11 +104,7 @@ fn empty(paths: Paths) -> Config {
         harnesses: vec![],
         spool: None,
         harness: None,
-        discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
-        max_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
-        idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
-        processes: None,
         hook_server: None,
         agents_view: None,
     }

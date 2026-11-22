@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use volee_core::delivery::{TidyRefusal, tidy_check};
+use volee_core::harness::SessionKey;
 use volee_core::reconcile::ListedSession;
 use volee_core::workspace::Workspace;
 use volee_core::{AgentId, Event, EventKind};
@@ -30,6 +31,9 @@ struct Plan {
     worktree: PathBuf,
     repo_root: PathBuf,
     branch: Option<String>,
+    /// The agent's session, to look up in a fresh listing before the harness
+    /// is asked to delete it.
+    session_key: Option<SessionKey>,
     session: Option<ListedSession>,
 }
 
@@ -50,7 +54,7 @@ pub(crate) async fn tidy(
     shared: &Arc<Shared>,
     params: TidyParams,
 ) -> Result<TidyOutcome, DaemonError> {
-    let plan = match plan(shared, params.agent).await? {
+    let mut plan = match plan(shared, params.agent).await? {
         Ok(plan) => plan,
         Err(reasons) => return Ok(TidyOutcome::Kept { reasons }),
     };
@@ -63,6 +67,9 @@ pub(crate) async fn tidy(
     let git = git(shared)?;
 
     let harness = shared.harness.clone();
+    if let (Some(harness), Some(key)) = (&harness, plan.session_key.take()) {
+        plan.session = listed_session(harness, key).await?;
+    }
     let deleted = match (&harness, &plan.session) {
         (Some(harness), Some(session)) => match delete_session(harness, session).await? {
             Ok(deleted) => deleted,
@@ -120,16 +127,29 @@ async fn plan(
     let Some(repo_root) = record.workspace.repo_root.clone() else {
         return Ok(Err(vec![TidyRefusal::NotAVoleeWorktree]));
     };
-    let session = record
-        .current_session()
-        .and_then(|link| state.sessions().listed(&link.key))
-        .filter(|session| session.handle.is_some())
-        .cloned();
+    let session_key = record.current_session().map(|link| link.key.clone());
     Ok(Ok(Plan {
         worktree,
         repo_root,
         branch: record.workspace.branch.clone(),
-        session,
+        session_key,
+        session: None,
+    }))
+}
+
+/// The agent's session as the harness lists it now, when it can be deleted.
+/// Listed on demand: nothing keeps a listing between two requests.
+async fn listed_session(
+    harness: &Arc<dyn Harness>,
+    key: SessionKey,
+) -> Result<Option<ListedSession>, DaemonError> {
+    let harness = Arc::clone(harness);
+    let listing = blocking(move || harness.list()).await?;
+    Ok(listing.ok().and_then(|listing| {
+        listing
+            .sessions
+            .into_iter()
+            .find(|session| session.key == key && session.handle.is_some())
     }))
 }
 

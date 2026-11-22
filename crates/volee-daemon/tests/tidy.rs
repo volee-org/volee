@@ -81,6 +81,7 @@ fn start_with(worker: bool) -> Running {
     let git = GitCli::new()
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1");
+    let database = paths.database();
     let config = Config {
         paths,
         log: Box::new(MemoryLog::with(
@@ -92,18 +93,17 @@ fn start_with(worker: bool) -> Running {
         harnesses: vec![],
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
-        discovery_interval: Duration::from_millis(10),
-        max_discovery_interval: Duration::from_millis(10),
-        idle_discovery_interval: Duration::from_millis(10),
         evidence: EvidenceSources {
             git: Some(Arc::new(git)),
             settings,
             refresh_interval: Duration::from_millis(20),
             ..EvidenceSources::default()
         },
-        processes: None,
         hook_server: None,
-        agents_view: None,
+        agents_view: Some(volee_daemon::AgentsViewConfig {
+            poll_interval: Duration::from_millis(10),
+            database,
+        }),
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -369,30 +369,6 @@ async fn a_locked_worktree_is_unlocked_only_when_the_evidence_allows() {
             ("remove-delivered".to_owned(), "abcd1234".to_owned()),
         ]
     );
-}
-
-#[tokio::test]
-async fn an_agent_volee_did_not_launch_is_never_tidied() {
-    let daemon = start();
-    let client = Client::connect(&daemon.socket).await.unwrap();
-    let found = ListedSession {
-        name: Some("by hand".into()),
-        alive: true,
-        background: true,
-        handle: Some("feed5678".into()),
-        ..ListedSession::new(
-            SessionKey::claude("feed5678-0000-4000-8000-000000000002"),
-            &daemon.repo,
-            AgentState::Done,
-        )
-    };
-    daemon.harness.set(vec![found]);
-    let registry = until(&client, |r| r.agents().count() == 1).await;
-    let agent = registry.agents().next().unwrap().id;
-    let kept = reasons(tidy(&client, agent, false).await);
-    assert!(kept.contains(&TidyRefusal::NotLaunchedByVolee), "{kept:?}");
-    assert!(kept.contains(&TidyRefusal::NotAVoleeWorktree), "{kept:?}");
-    assert!(daemon.repo.is_dir());
 }
 
 #[tokio::test]

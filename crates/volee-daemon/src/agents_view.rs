@@ -17,7 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Notify, watch};
 use volee_core::delivery::PrState;
 use volee_core::finished::{Activity, BranchWork, HookKind, classify_hook, is_finished_work};
-use volee_core::reconcile::ListedSession;
+use volee_core::reconcile::{ListedSession, Listing};
 use volee_core::state::{AgentState, InputRequest, StateCategory};
 use volee_core::time::Timestamp;
 use volee_git::{BaseGuess, BaseSource, BranchHead, DeliveryQuery, Fingerprint, Forge, Git};
@@ -112,6 +112,9 @@ pub(crate) struct Agents {
     /// (the listing and git), and whoever only wants the last one must not
     /// wait for it.
     published: Mutex<Option<AgentsView>>,
+    /// The last successful listing, for the agents a mission knows: they
+    /// follow it (see [`follow_listings`]), so Claude Code is asked once.
+    listings: watch::Sender<Option<Arc<Listing>>>,
 }
 
 impl std::fmt::Debug for Agents {
@@ -157,7 +160,13 @@ impl Agents {
             revision: watch::channel(0).0,
             nudge: Notify::new(),
             published: Mutex::new(None),
+            listings: watch::channel(None).0,
         }
+    }
+
+    /// A receiver of the listings the poller reads.
+    pub(crate) fn listings(&self) -> watch::Receiver<Option<Arc<Listing>>> {
+        self.listings.subscribe()
     }
 
     /// A receiver that wakes each time a reading changed the cards or the
@@ -221,6 +230,7 @@ impl Agents {
             tracing::info!("listing Claude Code's sessions works again");
         }
         inner.failing = false;
+        self.listings.send_replace(Some(Arc::new(listing.clone())));
         let sources = Arc::clone(&self.sources);
         let memory = std::mem::take(&mut inner.memory);
         let built = tokio::task::spawn_blocking(move || {
@@ -314,6 +324,40 @@ pub(crate) async fn poll(agents: Arc<Agents>, interval: Duration, mut stop: watc
                 tokio::time::sleep(NUDGE_DELAY).await;
             }
             _ = stop.changed() => return,
+        }
+    }
+}
+
+/// Applies each listing the agents view reads to the agents a mission knows
+/// (the registry), until `stop` says so. It creates no agent: the view is
+/// the one list of sessions.
+pub(crate) async fn follow_listings(
+    shared: Arc<crate::server::Shared>,
+    agents: Arc<Agents>,
+    mut stop: watch::Receiver<bool>,
+) {
+    let mut listings = agents.listings();
+    loop {
+        tokio::select! {
+            changed = listings.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+            }
+            _ = stop.changed() => return,
+        }
+        let Some(listing) = listings.borrow_and_update().clone() else {
+            continue;
+        };
+        let mut state = shared.state.lock().await;
+        let events = volee_core::reconcile::reconcile(state.registry(), &listing, state.now());
+        if events.is_empty() {
+            continue;
+        }
+        let count = events.len();
+        match state.commit(events) {
+            Ok(_) => tracing::debug!(events = count, "the listing moved the agents of missions"),
+            Err(error) => tracing::error!(%error, "cannot apply the listing to the agents"),
         }
     }
 }

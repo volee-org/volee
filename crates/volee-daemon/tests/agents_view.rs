@@ -246,16 +246,12 @@ fn start_with(view: bool, forge: Option<Arc<FakeForge>>, remote: bool) -> Runnin
         harnesses: vec![],
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
-        discovery_interval: Duration::from_secs(3_600),
-        max_discovery_interval: Duration::from_secs(3_600),
-        idle_discovery_interval: Duration::from_secs(3_600),
         evidence: EvidenceSources {
             git: Some(Arc::clone(&counting) as Arc<dyn Git>),
             forge: forge.map(|forge| forge as Arc<dyn Forge>),
             refresh_interval: Duration::from_secs(3_600),
             ..EvidenceSources::default()
         },
-        processes: None,
         hook_server: None,
         agents_view: view.then(|| AgentsViewConfig {
             poll_interval: Duration::from_secs(3_600),

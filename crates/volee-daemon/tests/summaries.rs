@@ -68,6 +68,7 @@ fn start(summaries: bool) -> Running {
             location: Location::Background,
         },
     );
+    let database = paths.database();
     let config = Config {
         paths: paths.clone(),
         log: Box::new(MemoryLog::with(vec![registered])),
@@ -75,16 +76,15 @@ fn start(summaries: bool) -> Running {
         harnesses: vec![],
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
-        discovery_interval: Duration::from_millis(20),
-        max_discovery_interval: Duration::from_millis(20),
-        idle_discovery_interval: Duration::from_millis(20),
         evidence: EvidenceSources {
             settings,
             ..EvidenceSources::default()
         },
-        processes: None,
         hook_server: None,
-        agents_view: None,
+        agents_view: Some(volee_daemon::AgentsViewConfig {
+            poll_interval: Duration::from_millis(10),
+            database,
+        }),
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

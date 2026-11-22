@@ -23,13 +23,11 @@ use volee_proto::paths::Paths;
 use volee_proto::rpc::{self, Id, Notification, Outcome, Request, Response, RpcError, Version2};
 
 use crate::clock::Clock;
-use crate::discovery::{Cadence, Refreshes};
 use crate::error::DaemonError;
 use crate::evidence::EvidenceSources;
 use crate::handlers::{dispatch, parse, respond};
 use crate::log::EventLog;
 use crate::state::State;
-use crate::watchers::Watchers;
 
 /// What the daemon needs to run.
 pub struct Config {
@@ -44,28 +42,12 @@ pub struct Config {
     /// The spool written by hooks while the daemon was down; drained and
     /// replayed at start.
     pub spool: Option<PathBuf>,
-    /// The harness whose sessions the daemon discovers, when one is
+    /// The harness the agents view lists, when one is
     /// installed.
     pub harness: Option<Arc<dyn Harness>>,
-    /// While at least one interactive client (the interface) is subscribed:
-    /// the wait between two listings after one that changed something,
-    /// after a new interactive client and after a refresh request.
-    pub discovery_interval: Duration,
-    /// While at least one interactive client is subscribed: the longest
-    /// wait, which the wait doubles towards after each listing that changed
-    /// nothing. Equal to `discovery_interval` for a fixed cadence.
-    pub max_discovery_interval: Duration,
-    /// How often the harness is listed while no interactive client is
-    /// subscribed. Agents volee launched report through their hooks either
-    /// way; only sessions started elsewhere show up later.
-    pub idle_discovery_interval: Duration,
     /// Where workspaces and delivery evidence are read from:
     /// [`EvidenceSources::default()`] reads nothing.
     pub evidence: EvidenceSources,
-    /// What reads the process table (`ps`, then `lsof`) to find the agents
-    /// of other harnesses that run outside volee's hosts (ADR 0023). `None`:
-    /// the table is not read, and such agents are not found.
-    pub processes: Option<Arc<dyn volee_harness::CommandRunner>>,
     /// The hook server that receives Claude Code's `http` hooks; `None`
     /// starts none.
     pub hook_server: Option<crate::hook_server::HookServerConfig>,
@@ -97,15 +79,9 @@ pub(crate) struct Shared {
     /// carried out once.
     pub(crate) concluding: std::sync::Mutex<std::collections::HashSet<volee_core::MissionId>>,
     pub(crate) settings: volee_config::Config,
-    /// What reads the process table, when it is read.
-    pub(crate) processes: Option<Arc<dyn volee_harness::CommandRunner>>,
     pub(crate) paths: Paths,
     /// The agents view, when configured and Claude Code is available.
     pub(crate) agents: Option<Arc<crate::agents_view::Agents>>,
-    /// The interactive subscriptions open now, which set discovery's pace.
-    pub(crate) watchers: Watchers,
-    /// Requests for a listing now, and how listings progress.
-    pub(crate) refreshes: Refreshes,
     /// The connections that joined for agents of other harnesses (ADR 0014).
     pub(crate) presence: crate::join::Presence,
     /// Requests to read an agent's delivery evidence again now.
@@ -191,11 +167,8 @@ impl Daemon {
             forge_client: config.evidence.forge.clone(),
             concluding: std::sync::Mutex::default(),
             settings: config.evidence.settings.clone(),
-            processes: config.processes,
             paths: config.paths,
             agents: agents.clone(),
-            watchers: Watchers::new(),
-            refreshes: Refreshes::new(),
             presence: crate::join::Presence::default(),
             checks: crate::evidence::Checks::default(),
             forge: std::sync::Mutex::new(None),
@@ -204,20 +177,14 @@ impl Daemon {
         if let Some(dir) = config.spool {
             replay_spool(&shared, dir).await;
         }
-        if let Some(harness) = config.harness {
-            let cadence = Cadence {
-                watched: config.discovery_interval,
-                watched_max: config.max_discovery_interval,
-                idle: config.idle_discovery_interval,
-            };
-            tokio::spawn(crate::discovery::run(
-                Arc::clone(&shared),
-                harness,
-                cadence,
-                stop.clone(),
-            ));
-        }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
+        let following = shared.agents.clone().map(|agents| {
+            tokio::spawn(crate::agents_view::follow_listings(
+                Arc::clone(&shared),
+                agents,
+                stop.clone(),
+            ))
+        });
         let polling = crate::agents_view::spawn_poll(config.agents_view.as_ref(), agents, &stop);
         let reviews = open_reviews(&shared, config.hook_server.as_ref());
         let reviewing = reviews
@@ -251,7 +218,7 @@ impl Daemon {
         }
         tracing::info!("volee daemon stopping");
         connections.abort_all();
-        for task in [refresher, Some(files), hooks, polling, reviewing]
+        for task in [refresher, Some(files), hooks, polling, following, reviewing]
             .into_iter()
             .flatten()
         {
@@ -583,7 +550,6 @@ async fn subscribe(
     };
     // The guard lives in the forwarding task: it is dropped when the
     // subscription ends, or when its connection closes and aborts the task.
-    let watcher = params.interactive.then(|| shared.watchers.watch());
     let batch = EventBatch { events, last_seq };
     let value = serde_json::to_value(&batch)
         .map_err(|error| RpcError::new(rpc::INTERNAL_ERROR, error.to_string()));
@@ -591,7 +557,6 @@ async fn subscribe(
     let floor = last_seq.unwrap_or(0);
     let outgoing = outgoing.clone();
     tasks.spawn(async move {
-        let _watcher = watcher;
         loop {
             match receiver.recv().await {
                 Ok(event) if event.seq > floor => {

@@ -6,10 +6,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use volee_core::harness::HarnessKind;
 use volee_core::time::Elapsed;
-use volee_daemon::{
-    Clock, Config, DEFAULT_DISCOVERY_INTERVAL, DEFAULT_IDLE_DISCOVERY_INTERVAL,
-    DEFAULT_MAX_DISCOVERY_INTERVAL, Daemon, EvidenceSources, SqliteLog, SystemClock,
-};
+use volee_daemon::{Clock, Config, Daemon, EvidenceSources, SqliteLog, SystemClock};
 use volee_git::{GhCli, GitCli};
 use volee_harness::{ClaudeCode, Harness};
 use volee_proto::client::Client;
@@ -50,11 +47,7 @@ pub(crate) async fn run() -> Result<()> {
         clock: Arc::new(SystemClock),
         harnesses: vec![status],
         harness,
-        discovery_interval: DEFAULT_DISCOVERY_INTERVAL,
-        max_discovery_interval: DEFAULT_MAX_DISCOVERY_INTERVAL,
-        idle_discovery_interval: DEFAULT_IDLE_DISCOVERY_INTERVAL,
         evidence,
-        processes: Some(Arc::new(volee_harness::SystemRunner)),
         hook_server: Some(hook_server),
         agents_view: Some(volee_daemon::AgentsViewConfig {
             poll_interval,

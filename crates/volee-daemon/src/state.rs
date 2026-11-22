@@ -20,7 +20,6 @@ use volee_harness::hooks::format_messages_for_agent;
 use volee_proto::methods::SeqEvent;
 
 use crate::clock::Clock;
-use crate::control::Sessions;
 use crate::error::DaemonError;
 use crate::log::EventLog;
 
@@ -43,9 +42,6 @@ pub(crate) struct State {
     started_at: Timestamp,
     /// The last identifier handed out, so that the next one sorts after it.
     last_id: Cell<Ulid>,
-    /// The harness sessions the daemon can act on. Not persisted: rebuilt by
-    /// the next listing.
-    sessions: Sessions,
 }
 
 impl std::fmt::Debug for State {
@@ -77,23 +73,11 @@ impl State {
             last_id: Cell::new(Ulid::nil()),
             clock,
             started_at,
-            sessions: Sessions::default(),
         })
     }
 
     pub(crate) fn registry(&self) -> &Registry {
         &self.registry
-    }
-
-    /// The harness sessions the daemon can act on.
-    pub(crate) fn sessions(&self) -> &Sessions {
-        &self.sessions
-    }
-
-    /// The harness sessions the daemon can act on, to record a listing or a
-    /// launch.
-    pub(crate) fn sessions_mut(&mut self) -> &mut Sessions {
-        &mut self.sessions
     }
 
     pub(crate) fn now(&self) -> Timestamp {

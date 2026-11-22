@@ -178,11 +178,7 @@ fn start_with(events: Vec<Event>, harness: Option<Arc<dyn Harness>>) -> Running 
         harnesses: vec![],
         spool: None,
         harness,
-        discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
-        max_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
-        idle_discovery_interval: volee_daemon::DEFAULT_DISCOVERY_INTERVAL,
         evidence: EvidenceSources::default(),
-        processes: None,
         hook_server: None,
         agents_view: None,
     };

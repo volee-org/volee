@@ -362,6 +362,7 @@ fn serve(running: &mut Running, name: &str, events: Vec<Event>, merge: Option<&s
         .env("GIT_AUTHOR_EMAIL", "volee@example.com")
         .env("GIT_COMMITTER_NAME", "volee")
         .env("GIT_COMMITTER_EMAIL", "volee@example.com");
+    let database = paths.database();
     let config = Config {
         paths,
         log: Box::new(MemoryLog::with(events)),
@@ -369,9 +370,6 @@ fn serve(running: &mut Running, name: &str, events: Vec<Event>, merge: Option<&s
         harnesses: vec![],
         spool: None,
         harness: Some(Arc::clone(&running.harness) as Arc<dyn Harness>),
-        discovery_interval: Duration::from_millis(10),
-        max_discovery_interval: Duration::from_millis(10),
-        idle_discovery_interval: Duration::from_millis(10),
         evidence: EvidenceSources {
             git: Some(Arc::new(cli)),
             forge: running
@@ -383,9 +381,11 @@ fn serve(running: &mut Running, name: &str, events: Vec<Event>, merge: Option<&s
             refresh_interval: Duration::from_secs(3_600),
             ..EvidenceSources::default()
         },
-        processes: None,
         hook_server: None,
-        agents_view: None,
+        agents_view: Some(volee_daemon::AgentsViewConfig {
+            poll_interval: Duration::from_millis(10),
+            database,
+        }),
     };
     tokio::spawn(Daemon::serve(listener, config));
 }

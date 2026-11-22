@@ -48,14 +48,10 @@ async fn start(permission_ms: u64, question_ms: u64) -> Running {
         harnesses: vec![],
         spool: None,
         harness: Some(Arc::clone(&harness) as Arc<dyn Harness>),
-        discovery_interval: Duration::from_secs(3_600),
-        max_discovery_interval: Duration::from_secs(3_600),
-        idle_discovery_interval: Duration::from_secs(3_600),
         evidence: EvidenceSources {
             refresh_interval: Duration::from_secs(3_600),
             ..EvidenceSources::default()
         },
-        processes: None,
         hook_server: Some(HookServerConfig {
             addr,
             token: TOKEN.into(),
