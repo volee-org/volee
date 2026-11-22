@@ -165,6 +165,7 @@ mod tests {
                 worktree: None,
                 branch: Some("feat/x".to_owned()),
                 base: Some("main".to_owned()),
+                base_source: None,
             }),
             git: Some(GitFacts {
                 ahead: 2,
@@ -178,6 +179,9 @@ mod tests {
                     deletions: 5,
                 },
                 push: PushState::default(),
+                merge_source: None,
+                merge_unknown: None,
+                pull_request: None,
             }),
             git_error: None,
             hooks: HookFacts::default(),
