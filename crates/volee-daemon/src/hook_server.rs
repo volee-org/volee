@@ -7,8 +7,9 @@
 //! not exist. Two requests are the exception when the web interface is
 //! served: a `PermissionRequest` (`/hooks/PermissionRequest`) and the
 //! `PreToolUse` of `AskUserQuestion` (`/decide/AskUserQuestion`) are held
-//! until the person decides in the browser (see [`crate::decisions`]). A request without the token is refused with `401`, a body that is
-//! not a JSON object with `400`. Claude Code treats any non-2xx answer, a
+//! until the person decides in the browser (see `decisions.rs`). A request
+//! without the token is refused with `401`, a body that is not a JSON object
+//! with `400`. Claude Code treats any non-2xx answer, a
 //! refused connection and a timeout alike as a non-blocking error for these
 //! hooks, so a failure here never stops a session.
 //!
