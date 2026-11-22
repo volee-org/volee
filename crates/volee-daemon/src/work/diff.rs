@@ -81,8 +81,36 @@ pub(crate) struct Diff {
     pub(crate) truncated: bool,
 }
 
-/// Runs `git diff base...branch` in `cwd` (the merge base, so only what the
-/// branch changed).
+/// The output of `git <args>` in `cwd`, trimmed, when it succeeds.
+fn git_line(cwd: &Path, args: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(args)
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .filter(|line| !line.is_empty())
+}
+
+/// What the diff is taken against: `base...branch` (the merge base, so only
+/// what the branch changed), and, when `cwd` has the branch checked out, the
+/// merge base itself, so that what the working tree holds on top of the
+/// commits (a file the person saved in their editor) shows too.
+fn revisions(cwd: &Path, base: &str, branch: &str) -> String {
+    let on_branch = git_line(cwd, &["symbolic-ref", "--short", "HEAD"]).as_deref() == Some(branch);
+    if on_branch && let Some(merge_base) = git_line(cwd, &["merge-base", base, "HEAD"]) {
+        return merge_base;
+    }
+    format!("{base}...{branch}")
+}
+
+/// Runs the diff of `branch` against `base` in `cwd`: what the branch
+/// changed, plus uncommitted changes to tracked files when it is checked out
+/// there.
 pub(crate) fn run(cwd: &Path, base: &str, branch: &str) -> Result<Diff, String> {
     let output = Command::new("git")
         .arg("-C")
@@ -96,7 +124,7 @@ pub(crate) fn run(cwd: &Path, base: &str, branch: &str) -> Result<Diff, String> 
             "-M",
             "--end-of-options",
         ])
-        .arg(format!("{base}...{branch}"))
+        .arg(revisions(cwd, base, branch))
         .output()
         .map_err(|error| format!("git could not run: {error}"))?;
     if !output.status.success() {
@@ -381,6 +409,49 @@ diff --git a/img.png b/img.png\nnew file mode 100644\nBinary files /dev/null and
         assert!(file.patch.len() <= MAX_PATCH);
         assert!(file.patch.ends_with('\n'));
         assert_eq!(file.insertions, 30_000, "counts come from the whole diff");
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+
+    #[test]
+    fn a_file_saved_in_the_checked_out_worktree_shows_in_the_diff() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().canonicalize().unwrap();
+        run_git(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "init"]);
+        run_git(&repo, &["switch", "-q", "-c", "feat"]);
+        std::fs::write(repo.join("b.txt"), "two\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "add b"]);
+        let committed = run(&repo, "main", "feat").unwrap();
+        assert_eq!(committed.files.len(), 1);
+        assert_eq!(committed.files[0].insertions, 1);
+        // The person saves a line in their editor: tracked, not committed.
+        std::fs::write(repo.join("b.txt"), "two\nthree\n").unwrap();
+        let saved = run(&repo, "main", "feat").unwrap();
+        assert_eq!(saved.files[0].insertions, 2, "the saved line shows");
+        assert!(saved.files[0].patch.contains("+three"));
+        // From another checkout (the branch is not checked out here) only commits count.
+        run_git(&repo, &["stash", "-q"]);
+        run_git(&repo, &["switch", "-q", "main"]);
+        std::fs::write(repo.join("a.txt"), "dirty\n").unwrap();
+        let elsewhere = run(&repo, "main", "feat").unwrap();
+        assert_eq!(elsewhere.files.len(), 1);
+        assert_eq!(elsewhere.files[0].path, "b.txt");
+        assert_eq!(elsewhere.files[0].insertions, 1);
     }
 
     #[test]
