@@ -1715,6 +1715,7 @@ dependencies = [
  "volee-git",
  "volee-harness",
  "volee-proto",
+ "volee-rules",
  "volee-store",
 ]
 

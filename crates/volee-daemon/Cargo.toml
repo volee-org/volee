@@ -25,6 +25,7 @@ volee-core.workspace = true
 volee-git.workspace = true
 volee-harness.workspace = true
 volee-proto.workspace = true
+volee-rules.workspace = true
 volee-store.workspace = true
 
 [dev-dependencies]

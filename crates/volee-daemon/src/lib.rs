@@ -21,6 +21,7 @@ pub mod hook_server;
 mod join;
 mod log;
 mod missions;
+mod review;
 mod server;
 mod sqlite;
 mod state;

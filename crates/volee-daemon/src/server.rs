@@ -219,7 +219,18 @@ impl Daemon {
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
         let polling = crate::agents_view::spawn_poll(config.agents_view.as_ref(), agents, &stop);
-        let hooks = start_hook_server(config.hook_server, shared.agents.clone()).await?;
+        let reviews = open_reviews(&shared, config.hook_server.as_ref());
+        let reviewing = reviews
+            .as_ref()
+            .zip(shared.agents.clone())
+            .map(|(reviews, agents)| {
+                tokio::spawn(crate::review::watch_finished(
+                    Arc::clone(reviews),
+                    agents,
+                    stop.clone(),
+                ))
+            });
+        let hooks = start_hook_server(config.hook_server, shared.agents.clone(), reviews).await?;
         // A mission the person approved while the daemon was stopping, or
         // whose merge it could not finish, is carried out now.
         crate::missions::resume_approved(&shared).await;
@@ -240,7 +251,7 @@ impl Daemon {
         }
         tracing::info!("volee daemon stopping");
         connections.abort_all();
-        for task in [refresher, Some(files), hooks, polling]
+        for task in [refresher, Some(files), hooks, polling, reviewing]
             .into_iter()
             .flatten()
         {
@@ -250,11 +261,41 @@ impl Daemon {
     }
 }
 
+/// The AI pre-review service, when it is on and there is a database to keep
+/// it in (the hook server's).
+fn open_reviews(
+    shared: &Shared,
+    hook_server: Option<&crate::hook_server::HookServerConfig>,
+) -> Option<Arc<crate::review::Reviews>> {
+    let settings = shared.settings.review.clone();
+    if !settings.enabled {
+        return None;
+    }
+    let database = &hook_server?.database;
+    let reviewer = Arc::new(crate::review::ClaudeReviewer::new(
+        settings.command.clone(),
+        Duration::from_secs(settings.timeout),
+    ));
+    match crate::review::Reviews::open(
+        settings,
+        shared.paths.config_dir.clone(),
+        database,
+        reviewer,
+    ) {
+        Ok(reviews) => Some(Arc::new(reviews)),
+        Err(error) => {
+            tracing::warn!(%error, "the AI pre-review is unavailable");
+            None
+        }
+    }
+}
+
 /// Starts the hook server when one is configured: binds first, so that a port
 /// already in use stops the daemon with a message instead of failing later.
 async fn start_hook_server(
     config: Option<crate::hook_server::HookServerConfig>,
     agents: Option<Arc<crate::agents_view::Agents>>,
+    reviews: Option<Arc<crate::review::Reviews>>,
 ) -> Result<Option<tokio::task::JoinHandle<()>>, DaemonError> {
     let Some(hook_config) = config else {
         return Ok(None);
@@ -266,7 +307,7 @@ async fn start_hook_server(
     tracing::info!(addr = ?listener.local_addr().ok(), "hook server ready");
     // The web interface shares the listener, when there are agents to show.
     let decisions = crate::decisions::Decisions::new(hook_config.hold);
-    let web = agents.map(|agents| crate::web::Web::detect(agents, decisions));
+    let web = agents.map(|agents| crate::web::Web::detect(agents, decisions).with_reviews(reviews));
     Ok(Some(tokio::spawn(async move {
         if let Err(error) =
             crate::hook_server::serve_with_web(listener, hook_config.token, store, web).await

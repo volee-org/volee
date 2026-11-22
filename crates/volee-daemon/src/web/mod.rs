@@ -8,6 +8,8 @@
 //! | `GET /api/events` | yes | the inbox now, then again each time it changes |
 //! | `POST /api/agents/{id}/terminal` | yes | focuses the agent's terminal |
 //! | `POST /api/decisions/{id}` | yes | decides a held permission or question |
+//! | `GET /api/agents/{id}/review` | yes | the AI pre-review of the agent's branch tip (an opinion) |
+//! | `POST /api/agents/{id}/review[?retry=1]` | yes | asks for it now; `retry` redoes a failed one |
 //!
 //! The token is the hook token. A browser's `EventSource` cannot set a
 //! header, so the events stream also takes it as `?token=`. Requests whose
@@ -34,6 +36,7 @@ use serde_json::json;
 
 use crate::agents_view::Agents;
 use crate::decisions::{DecideError, Decision, Decisions};
+use crate::review::{Requested, Reviews, Target as ReviewTarget};
 use terminal::{Target, Terminal};
 
 /// What the web routes need besides the token.
@@ -42,6 +45,7 @@ pub(crate) struct Web {
     agents: Arc<Agents>,
     terminal: Option<Arc<dyn Terminal>>,
     decisions: Arc<Decisions>,
+    reviews: Option<Arc<Reviews>>,
 }
 
 impl Web {
@@ -72,7 +76,14 @@ impl Web {
             agents,
             terminal,
             decisions,
+            reviews: None,
         }
+    }
+
+    /// The same interface, serving the AI pre-review too.
+    pub(crate) fn with_reviews(mut self, reviews: Option<Arc<Reviews>>) -> Self {
+        self.reviews = reviews;
+        self
     }
 
     /// The held permission requests and questions.
@@ -113,6 +124,10 @@ pub(crate) fn router(token: Arc<str>, web: Web) -> Router {
         .route("/api/events", get(events))
         .route("/api/agents/{id}/terminal", post(open_terminal))
         .route("/api/decisions/{id}", post(decide))
+        .route(
+            "/api/agents/{id}/review",
+            get(get_review).post(request_review),
+        )
         .fallback(get(assets::serve))
         .layer(middleware::from_fn(guard))
         .with_state(Shared { token, web })
@@ -285,6 +300,139 @@ async fn open_terminal(
         Ok(Err(message)) => reply(StatusCode::UNPROCESSABLE_ENTITY, false, message),
         Err(error) => reply(StatusCode::INTERNAL_SERVER_ERROR, false, error.to_string()),
     }
+}
+
+/// The review of the agent's branch at its current tip. `status` is one of
+/// `none` (nobody asked yet), `pending`, `running`, `done`, `failed`, or
+/// `disabled`.
+async fn get_review(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !allowed(&shared, &headers, None) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(reviews) = shared.web.reviews.clone() else {
+        return Json(json!({ "status": "disabled", "findings": [] })).into_response();
+    };
+    let target = match review_target(&shared, &id).await {
+        Ok(target) => target,
+        Err(response) => return *response,
+    };
+    let enabled = reviews.enabled();
+    let stored = tokio::task::spawn_blocking(move || reviews.current(&target))
+        .await
+        .ok()
+        .flatten();
+    Json(review_json(stored, enabled)).into_response()
+}
+
+/// Asks for a review now. `202` when one was queued, `200` with the
+/// existing review when the tip has one, `409` when reviews are off or the
+/// rules skip this change.
+async fn request_review(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(query): Query<RetryQuery>,
+) -> Response {
+    if !allowed(&shared, &headers, None) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(reviews) = shared.web.reviews.clone() else {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "ok": false, "message": "reviews are switched off ([review] enabled)" })),
+        )
+            .into_response();
+    };
+    let target = match review_target(&shared, &id).await {
+        Ok(target) => target,
+        Err(response) => return *response,
+    };
+    let retry = query.retry.is_some_and(|value| value != "0");
+    let handle = tokio::runtime::Handle::current();
+    let asked = Arc::clone(&reviews);
+    let requested = tokio::task::spawn_blocking(move || {
+        let requested = asked.request(&handle, &target, retry);
+        (requested, asked.current(&target))
+    })
+    .await;
+    let Ok((requested, stored)) = requested else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let (status, message) = match requested {
+        Requested::Queued => (StatusCode::ACCEPTED, "queued"),
+        Requested::Exists => (StatusCode::OK, "this tip has a review already"),
+        Requested::Skipped => (
+            StatusCode::CONFLICT,
+            "the rules skip the review of this change (0 reviewers)",
+        ),
+        Requested::Disabled => (
+            StatusCode::CONFLICT,
+            "reviews are switched off ([review] enabled)",
+        ),
+        Requested::NoTip => (StatusCode::UNPROCESSABLE_ENTITY, "the branch has no tip"),
+    };
+    let mut body = review_json(stored, reviews.enabled());
+    body["message"] = json!(message);
+    (status, Json(body)).into_response()
+}
+
+#[derive(Deserialize)]
+struct RetryQuery {
+    retry: Option<String>,
+}
+
+/// The branch of an agent, or the response that says why it has none.
+async fn review_target(shared: &Shared, id: &str) -> Result<ReviewTarget, Box<Response>> {
+    let view = shared.web.agents.latest().await;
+    let Some(agent) = view.agents.iter().find(|agent| agent.session_id == id) else {
+        return Err(Box::new(
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "ok": false, "message": "this agent is gone" })),
+            )
+                .into_response(),
+        ));
+    };
+    ReviewTarget::of(agent).ok_or_else(|| {
+        Box::new(
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "ok": false, "message": "this agent has no branch and base to review" })),
+            )
+                .into_response(),
+        )
+    })
+}
+
+fn review_json(stored: Option<volee_store::StoredReview>, enabled: bool) -> serde_json::Value {
+    let Some(review) = stored else {
+        let status = if enabled { "none" } else { "disabled" };
+        return json!({ "status": status, "findings": [] });
+    };
+    json!({
+        "status": review.status,
+        "tip": review.tip,
+        "base": review.base,
+        "model": review.model,
+        "reviewers": review.reviewers,
+        "requested_at": review.requested_at,
+        "started_at": review.started_at,
+        "finished_at": review.finished_at,
+        "error": review.error,
+        "cost_usd": review.cost_usd,
+        "raw": review.raw,
+        "findings": review.findings.iter().map(|finding| json!({
+            "file": finding.file,
+            "line": finding.line,
+            "severity": finding.severity,
+            "summary": finding.summary,
+            "failure_scenario": finding.failure_scenario,
+        })).collect::<Vec<_>>(),
+    })
 }
 
 #[cfg(test)]

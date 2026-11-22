@@ -225,9 +225,11 @@ impl Agents {
         let memory = std::mem::take(&mut inner.memory);
         let built = tokio::task::spawn_blocking(move || {
             let mut memory = memory;
+            // The daemon's own review sessions are not agents.
             let cards: Vec<AgentCard> = listing
                 .sessions
                 .iter()
+                .filter(|session| !crate::review::is_review_session(session.name.as_deref()))
                 .map(|session| card(session, &sources, &mut memory))
                 .collect();
             // A directory no session is in any more costs nothing to forget.
