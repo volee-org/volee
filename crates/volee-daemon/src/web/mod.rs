@@ -601,7 +601,7 @@ async fn request_review(
     let Some(reviews) = shared.web.reviews.clone() else {
         return (
             StatusCode::CONFLICT,
-            Json(json!({ "ok": false, "message": "reviews are switched off ([review] enabled)" })),
+            Json(json!({ "ok": false, "message": "reviews are switched off (review.enabled in config.lua)" })),
         )
             .into_response();
     };
@@ -629,7 +629,7 @@ async fn request_review(
         ),
         Requested::Disabled => (
             StatusCode::CONFLICT,
-            "reviews are switched off ([review] enabled)",
+            "reviews are switched off (review.enabled in config.lua)",
         ),
         Requested::NoTip => (StatusCode::UNPROCESSABLE_ENTITY, "the branch has no tip"),
     };

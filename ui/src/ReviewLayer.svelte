@@ -31,7 +31,7 @@
   {#if !review}
     <p class="note">Reading the review…</p>
   {:else if review.status === "disabled"}
-    <p class="note">Reviews are switched off (<span class="mono">[review] enabled</span>).</p>
+    <p class="note">Reviews are switched off (<span class="mono">review.enabled</span> in config.lua).</p>
   {:else}
     <p class="state" data-status={review.status}>
       {#if busy(review)}
