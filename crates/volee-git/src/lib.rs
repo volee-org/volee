@@ -291,6 +291,24 @@ pub trait Git: Send + Sync {
     ///
     /// `None` when nothing is known: no branch of that name and no default.
     fn base_of(&self, repo: &Path, branch: &str) -> Result<Option<BaseGuess>, GitError>;
+
+    /// What a working tree looks like right now, from one cheap command: the
+    /// checked-out branch and commit, and whether anything is uncommitted
+    /// (changed tracked files, or untracked files that are not ignored).
+    /// Two equal fingerprints mean nothing a reader of the branch cares
+    /// about moved. `None` outside a working tree.
+    fn fingerprint(&self, dir: &Path) -> Result<Option<Fingerprint>, GitError>;
+}
+
+/// A cheap summary of a working tree: see [`Git::fingerprint`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fingerprint {
+    /// The checked-out branch; `None` when `HEAD` is detached.
+    pub branch: Option<String>,
+    /// The checked-out commit; `None` before the first commit.
+    pub head: Option<String>,
+    /// Whether anything is uncommitted.
+    pub dirty: bool,
 }
 
 /// A guess at the branch another branch was created from.

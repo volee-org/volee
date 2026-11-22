@@ -164,6 +164,18 @@ each session it builds a card from three sources:
 Hook payloads carry the session id but no process id, so the join is by
 session id alone.
 
+**What an agent costs.** A session whose directory has no `.git` above it is
+never given a git command. For one that has, the daemon runs a single cheap
+`git status` per reading (the *fingerprint*: branch, commit, whether anything
+is uncommitted) and compares it, with the modification time of the worktree's
+index, and to the modification times of the base branch's refs (a merge into
+the base, or a fetch, does not touch the agent's worktree). If everything is
+equal and the facts are less than a minute old, the facts read last time are
+reused; otherwise they are read again in full (repository, base branch, ahead
+and behind, diff summary). An idle agent therefore costs one `git status`
+every few seconds, and a full reading only when it commits, stages, switches
+branch or changes a file, when its base moves, or once a minute.
+
 Every source can fail without harm. A listing that fails or changes shape
 keeps the previous cards and says why (`volee agents` prints a warning, the
 daemon logs it once); an element of the listing that cannot be read is

@@ -13,8 +13,8 @@ use volee_core::delivery::{Delivery, DiffStat, PushState};
 use crate::command::{Completed, Request, Runner};
 use crate::parse::{self, StatusSummary};
 use crate::{
-    BaseGuess, BaseSource, DeliveryQuery, DeliveryReport, DiffFormat, DiffOutput, Git, GitError,
-    Head, MergeRefusal, NewWorktree, RemovalRefusal, RepoInfo, RepoSlug, WorktreeInfo,
+    BaseGuess, BaseSource, DeliveryQuery, DeliveryReport, DiffFormat, DiffOutput, Fingerprint, Git,
+    GitError, Head, MergeRefusal, NewWorktree, RemovalRefusal, RepoInfo, RepoSlug, WorktreeInfo,
 };
 
 /// The most untracked files [`Git::diff`] lists or shows. The others are
@@ -1146,6 +1146,22 @@ impl Git for GitCli {
             return Ok(Some(guess(base, BaseSource::Nearest)));
         }
         Ok(default.map(|branch| guess(branch, BaseSource::Default)))
+    }
+
+    fn fingerprint(&self, dir: &Path) -> Result<Option<Fingerprint>, GitError> {
+        match self.status(dir) {
+            Ok(status) => Ok(Some(Fingerprint {
+                dirty: status.is_dirty(),
+                branch: status.branch,
+                head: status.oid,
+            })),
+            Err(GitError::Failed { stderr, .. })
+                if parse::reports_no_repository(stderr.as_bytes()) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn origin(&self, repo: &Path) -> Result<Option<RepoSlug>, GitError> {

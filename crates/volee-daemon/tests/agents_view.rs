@@ -7,6 +7,7 @@
 mod common;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -17,12 +18,85 @@ use volee_core::harness::SessionKey;
 use volee_core::reconcile::ListedSession;
 use volee_core::state::{AgentState, InputRequest};
 use volee_daemon::{AgentsViewConfig, Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
-use volee_git::{BranchHead, Forge, ForgeStatus, GitCli, GitError, MergeMethod};
+use volee_git::{
+    BaseGuess, BranchHead, DeliveryQuery, DeliveryReport, DiffFormat, DiffOutput, Fingerprint,
+    Forge, ForgeStatus, Git, GitCli, GitError, MergeMethod, NewWorktree, RepoInfo, RepoSlug,
+    WorktreeInfo,
+};
 use volee_harness::Harness;
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{AgentCard, AgentsView, ViewAgents, ViewParams};
 use volee_proto::paths::Paths;
 use volee_store::{NewHookEvent, Store};
+
+/// The real git, counting the two questions only the agents view asks: how
+/// a branch was based (the costly, cached part) and what a tree looks like
+/// (the cheap part, asked at every reading).
+struct CountingGit {
+    inner: GitCli,
+    base_of: AtomicUsize,
+    fingerprints: AtomicUsize,
+}
+
+impl Git for CountingGit {
+    fn repo_info(&self, dir: &Path) -> Result<Option<RepoInfo>, GitError> {
+        self.inner.repo_info(dir)
+    }
+    fn worktrees(&self, repo: &Path) -> Result<Vec<WorktreeInfo>, GitError> {
+        self.inner.worktrees(repo)
+    }
+    fn default_branch(&self, repo: &Path) -> Result<Option<String>, GitError> {
+        self.inner.default_branch(repo)
+    }
+    fn add_worktree(
+        &self,
+        repo: &Path,
+        path: &Path,
+        branch: &str,
+        base: &str,
+    ) -> Result<NewWorktree, GitError> {
+        self.inner.add_worktree(repo, path, branch, base)
+    }
+    fn remove_worktree(&self, repo: &Path, path: &Path) -> Result<(), GitError> {
+        self.inner.remove_worktree(repo, path)
+    }
+    fn unlock_worktree(&self, repo: &Path, path: &Path) -> Result<(), GitError> {
+        self.inner.unlock_worktree(repo, path)
+    }
+    fn delivery(
+        &self,
+        worktree: &Path,
+        query: &DeliveryQuery<'_>,
+    ) -> Result<DeliveryReport, GitError> {
+        self.inner.delivery(worktree, query)
+    }
+    fn diff(
+        &self,
+        worktree: &Path,
+        base: &str,
+        format: DiffFormat,
+        max_bytes: usize,
+    ) -> Result<DiffOutput, GitError> {
+        self.inner.diff(worktree, base, format, max_bytes)
+    }
+    fn merge(&self, repo: &Path, branch: &str, base: &str) -> Result<String, GitError> {
+        self.inner.merge(repo, branch, base)
+    }
+    fn fetch(&self, repo: &Path) -> Result<(), GitError> {
+        self.inner.fetch(repo)
+    }
+    fn origin(&self, repo: &Path) -> Result<Option<RepoSlug>, GitError> {
+        self.inner.origin(repo)
+    }
+    fn base_of(&self, repo: &Path, branch: &str) -> Result<Option<BaseGuess>, GitError> {
+        self.base_of.fetch_add(1, Ordering::SeqCst);
+        self.inner.base_of(repo, branch)
+    }
+    fn fingerprint(&self, dir: &Path) -> Result<Option<Fingerprint>, GitError> {
+        self.fingerprints.fetch_add(1, Ordering::SeqCst);
+        self.inner.fingerprint(dir)
+    }
+}
 
 /// A forge that answers what the test says and counts the questions.
 struct FakeForge {
@@ -105,6 +179,8 @@ impl Forge for FakeForge {
 }
 
 struct Running {
+    /// The git the daemon uses, counting what the agents view asks.
+    counting: Arc<CountingGit>,
     socket: PathBuf,
     harness: Arc<FakeHarness>,
     store: Store,
@@ -156,9 +232,13 @@ fn start_with(view: bool, forge: Option<Arc<FakeForge>>, remote: bool) -> Runnin
     let socket = paths.socket.clone();
     let listener = UnixListener::bind(&socket).unwrap();
     let harness = Arc::new(FakeHarness::default());
-    let git_cli = GitCli::new()
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1");
+    let counting = Arc::new(CountingGit {
+        inner: GitCli::new()
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1"),
+        base_of: AtomicUsize::new(0),
+        fingerprints: AtomicUsize::new(0),
+    });
     let config = Config {
         paths,
         log: Box::new(MemoryLog::with(vec![])),
@@ -170,7 +250,7 @@ fn start_with(view: bool, forge: Option<Arc<FakeForge>>, remote: bool) -> Runnin
         max_discovery_interval: Duration::from_secs(3_600),
         idle_discovery_interval: Duration::from_secs(3_600),
         evidence: EvidenceSources {
-            git: Some(Arc::new(git_cli)),
+            git: Some(Arc::clone(&counting) as Arc<dyn Git>),
             forge: forge.map(|forge| forge as Arc<dyn Forge>),
             refresh_interval: Duration::from_secs(3_600),
             ..EvidenceSources::default()
@@ -184,6 +264,7 @@ fn start_with(view: bool, forge: Option<Arc<FakeForge>>, remote: bool) -> Runnin
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {
+        counting,
         socket,
         harness,
         store,
@@ -704,4 +785,111 @@ async fn a_forge_that_fails_is_unknown_and_is_not_asked_again_at_once() {
         1,
         "a failure is cached for a minute"
     );
+}
+
+fn costly_readings(daemon: &Running) -> usize {
+    daemon.counting.base_of.load(Ordering::SeqCst)
+}
+
+fn cheap_readings(daemon: &Running) -> usize {
+    daemon.counting.fingerprints.load(Ordering::SeqCst)
+}
+
+#[tokio::test]
+async fn an_agent_that_did_not_move_costs_one_cheap_reading_not_a_full_one() {
+    let daemon = start(true);
+    commit_in_worktree(&daemon);
+    daemon
+        .harness
+        .set(vec![session(ID, &daemon.worktree, AgentState::Idle)]);
+    let first = only_card(&daemon).await;
+    assert_eq!(costly_readings(&daemon), 1);
+    for _ in 0..5 {
+        let again = only_card(&daemon).await;
+        assert_eq!(again.git, first.git, "the cached facts are the same");
+        assert_eq!(again.repo, first.repo);
+    }
+    assert_eq!(
+        costly_readings(&daemon),
+        1,
+        "nothing moved: nothing read again"
+    );
+    // One cheap reading for each of the six requests (the poller's own first
+    // reading may add one if it came after the listing was set).
+    assert!(
+        (6..=7).contains(&cheap_readings(&daemon)),
+        "{}",
+        cheap_readings(&daemon)
+    );
+}
+
+#[tokio::test]
+async fn a_commit_or_an_uncommitted_change_makes_the_facts_read_again() {
+    let daemon = start(true);
+    daemon
+        .harness
+        .set(vec![session(ID, &daemon.worktree, AgentState::Idle)]);
+    assert_eq!(only_card(&daemon).await.git.unwrap().ahead, 0);
+    assert_eq!(costly_readings(&daemon), 1);
+
+    commit_in_worktree(&daemon);
+    let after_commit = only_card(&daemon).await.git.unwrap();
+    assert_eq!(after_commit.ahead, 1, "the new commit is seen at once");
+    assert_eq!(costly_readings(&daemon), 2);
+
+    std::fs::write(daemon.worktree.join("notes.txt"), "not added\n").unwrap();
+    let dirty = only_card(&daemon).await.git.unwrap();
+    assert!(dirty.dirty, "an untracked file is seen at once");
+    assert_eq!(costly_readings(&daemon), 3);
+
+    std::fs::remove_file(daemon.worktree.join("notes.txt")).unwrap();
+    assert!(!only_card(&daemon).await.git.unwrap().dirty);
+    assert_eq!(costly_readings(&daemon), 4);
+}
+
+#[tokio::test]
+async fn a_session_outside_any_repository_starts_no_git_command() {
+    let daemon = start(true);
+    let elsewhere = tempfile::tempdir().unwrap();
+    daemon.harness.set(vec![session(
+        ID,
+        &elsewhere.path().canonicalize().unwrap(),
+        AgentState::Idle,
+    )]);
+    let card = only_card(&daemon).await;
+    assert!(card.repo.is_none() && card.git.is_none() && card.git_error.is_none());
+    assert_eq!(cheap_readings(&daemon), 0, "not even the cheap one");
+    assert_eq!(costly_readings(&daemon), 0);
+}
+
+#[tokio::test]
+async fn a_session_in_a_subdirectory_of_a_repository_gets_its_facts() {
+    let daemon = start(true);
+    commit_in_worktree(&daemon);
+    let deep = daemon.worktree.join("deep/er");
+    std::fs::create_dir_all(&deep).unwrap();
+    daemon
+        .harness
+        .set(vec![session(ID, &deep, AgentState::Idle)]);
+    let card = only_card(&daemon).await;
+    assert_eq!(card.repo.unwrap().branch.as_deref(), Some("feat/invoices"));
+    assert_eq!(card.git.unwrap().ahead, 1);
+}
+
+#[tokio::test]
+async fn a_base_that_moves_is_seen_at_once_though_the_worktree_did_not_move() {
+    let daemon = start(true);
+    commit_in_worktree(&daemon);
+    daemon
+        .harness
+        .set(vec![session(ID, &daemon.worktree, AgentState::Idle)]);
+    assert_eq!(only_card(&daemon).await.git.unwrap().behind, 0);
+    assert_eq!(costly_readings(&daemon), 1);
+    // Someone commits on main, in the main checkout: the agent's worktree,
+    // index and branch are untouched.
+    std::fs::write(daemon.repo.join("theirs.rs"), "theirs\n").unwrap();
+    git(&daemon.repo, &["add", "theirs.rs"]);
+    git(&daemon.repo, &["commit", "--quiet", "-m", "Add theirs"]);
+    assert_eq!(only_card(&daemon).await.git.unwrap().behind, 1);
+    assert_eq!(costly_readings(&daemon), 2);
 }

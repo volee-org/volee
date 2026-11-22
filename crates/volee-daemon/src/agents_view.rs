@@ -20,7 +20,7 @@ use volee_core::finished::{Activity, BranchWork, HookKind, classify_hook, is_fin
 use volee_core::reconcile::ListedSession;
 use volee_core::state::{AgentState, InputRequest, StateCategory};
 use volee_core::time::Timestamp;
-use volee_git::{BaseGuess, BaseSource, BranchHead, DeliveryQuery, Forge, Git};
+use volee_git::{BaseGuess, BaseSource, BranchHead, DeliveryQuery, Fingerprint, Forge, Git};
 use volee_harness::Harness;
 use volee_proto::methods::{
     AgentCard, AgentsView, GitFacts, HookFacts, PullRequestFacts, RepoFacts,
@@ -47,6 +47,43 @@ const PULL_REQUEST_TTL_MS: i64 = 5 * 60 * 1_000;
 
 /// How long a failed question to the forge is not asked again.
 const ERROR_TTL_MS: i64 = 60 * 1_000;
+
+/// How long the git facts of a worktree are kept while nothing about it
+/// moves. What can change without moving the worktree itself (the base
+/// branch gaining commits, the remote) is picked up at the latest then.
+const FACTS_TTL: Duration = Duration::from_secs(60);
+
+/// What the poller keeps between two readings.
+#[derive(Default)]
+struct Memory {
+    /// For each branch, the last tip seen with commits of its own: the
+    /// memory that proves a merge once that commit is part of the base
+    /// branch (also kept in SQLite, which outlives the daemon).
+    tips: HashMap<(PathBuf, String), String>,
+    /// The git facts of each session's directory, while its fingerprint
+    /// holds.
+    facts: HashMap<PathBuf, CachedFacts>,
+}
+
+/// The git facts of a directory, and what they were read under.
+struct CachedFacts {
+    key: FactsKey,
+    /// When the refs of the base branch last changed, as read with the
+    /// facts: a merge into the base does not touch the agent's worktree.
+    base_refs: Vec<Option<SystemTime>>,
+    read_at: Instant,
+    repo: RepoFacts,
+    facts: Option<GitFacts>,
+}
+
+/// What must stay the same for cached facts to be reused: the tree's branch,
+/// commit and uncommitted state (one cheap `git status`) and when its index
+/// last changed.
+#[derive(PartialEq, Eq)]
+struct FactsKey {
+    fingerprint: Fingerprint,
+    index_modified: Option<SystemTime>,
+}
 
 /// Where the readings of a card come from.
 struct Sources {
@@ -77,9 +114,7 @@ struct Inner {
     read_at: Option<Instant>,
     /// Whether the last listing failed, so that a failure is logged once.
     failing: bool,
-    /// For each branch, the last tip seen with commits of its own: the memory
-    /// that proves a merge once that commit is part of the base branch.
-    unmerged: HashMap<(PathBuf, String), String>,
+    memory: Memory,
 }
 
 impl Agents {
@@ -137,7 +172,7 @@ impl Agents {
         }
         inner.failing = false;
         let sources = Arc::clone(&self.sources);
-        let memory = std::mem::take(&mut inner.unmerged);
+        let memory = std::mem::take(&mut inner.memory);
         let built = tokio::task::spawn_blocking(move || {
             let mut memory = memory;
             let cards: Vec<AgentCard> = listing
@@ -145,13 +180,17 @@ impl Agents {
                 .iter()
                 .map(|session| card(session, &sources, &mut memory))
                 .collect();
+            // A directory no session is in any more costs nothing to forget.
+            memory
+                .facts
+                .retain(|cwd, _| listing.sessions.iter().any(|s| &s.cwd == cwd));
             (cards, memory)
         })
         .await;
         match built {
             Ok((mut cards, memory)) => {
                 sort(&mut cards);
-                inner.unmerged = memory;
+                inner.memory = memory;
                 inner.view = AgentsView {
                     updated_at: Some(now()),
                     error: None,
@@ -223,11 +262,7 @@ fn now() -> Timestamp {
 }
 
 /// The card of one session.
-fn card(
-    session: &ListedSession,
-    sources: &Sources,
-    memory: &mut HashMap<(PathBuf, String), String>,
-) -> AgentCard {
+fn card(session: &ListedSession, sources: &Sources, memory: &mut Memory) -> AgentCard {
     let session_id = session.key.id.clone();
     let hooks = sources
         .store
@@ -249,10 +284,11 @@ fn card(
         hooks,
         finished_work: false,
     };
+    // Only a directory inside a git repository is worth a git command.
     if let Some(git) = sources.git.as_deref()
-        && session.cwd.is_dir()
+        && let Some(top) = git_root(&session.cwd)
     {
-        match git_facts(sources, git, &session.cwd, memory) {
+        match cached_git_facts(sources, git, &top, &session.cwd, memory) {
             Ok(Some((repo, facts))) => {
                 card.repo = Some(repo);
                 card.git = facts;
@@ -328,6 +364,102 @@ fn notification_type(payload: &str) -> Option<String> {
         .get("notification_type")?
         .as_str()
         .map(str::to_owned)
+}
+
+/// The top of the git working tree that holds `dir`, found by looking for a
+/// `.git` entry upwards: no process is started to tell a directory outside
+/// any repository.
+fn git_root(dir: &Path) -> Option<PathBuf> {
+    dir.ancestors()
+        .find(|ancestor| ancestor.join(".git").exists())
+        .map(Path::to_path_buf)
+}
+
+/// The git directory of the working tree at `top`, and the directory it
+/// shares with the repository's other worktrees. A linked worktree's `.git`
+/// is a file that points to its own git directory, which names the common
+/// one in `commondir`.
+fn git_dirs(top: &Path) -> Option<(PathBuf, PathBuf)> {
+    let dot_git = top.join(".git");
+    if dot_git.is_dir() {
+        return Some((dot_git.clone(), dot_git));
+    }
+    let pointer = std::fs::read_to_string(&dot_git).ok()?;
+    let git_dir = top.join(pointer.trim().strip_prefix("gitdir:")?.trim());
+    let common = std::fs::read_to_string(git_dir.join("commondir"))
+        .map_or_else(|_| git_dir.clone(), |text| git_dir.join(text.trim()));
+    Some((git_dir, common))
+}
+
+fn modified(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+}
+
+/// When the index of the working tree at `top` last changed.
+fn index_modified(top: &Path) -> Option<SystemTime> {
+    git_dirs(top).and_then(|(git_dir, _)| modified(&git_dir.join("index")))
+}
+
+/// When the refs of the base branch last changed: the local branch, its copy
+/// on `origin` and the packed refs. Moves when work is merged into the base
+/// or the base is fetched, which leaves the agent's worktree untouched.
+fn base_refs_modified(top: &Path, base: Option<&str>) -> Vec<Option<SystemTime>> {
+    let Some((_, common)) = git_dirs(top) else {
+        return Vec::new();
+    };
+    let mut stamps = vec![modified(&common.join("packed-refs"))];
+    if let Some(base) = base {
+        stamps.push(modified(&common.join("refs/heads").join(base)));
+        stamps.push(modified(&common.join("refs/remotes/origin").join(base)));
+    }
+    stamps
+}
+
+/// The git facts of `cwd`, read again only when the tree moved since they
+/// were read (or a minute passed): one `git status` is all an idle agent
+/// costs.
+fn cached_git_facts(
+    sources: &Sources,
+    git: &dyn Git,
+    top: &Path,
+    cwd: &Path,
+    memory: &mut Memory,
+) -> Result<Option<(RepoFacts, Option<GitFacts>)>, String> {
+    let Some(fingerprint) = git.fingerprint(top).map_err(|error| error.to_string())? else {
+        return Ok(None);
+    };
+    let key = FactsKey {
+        fingerprint,
+        index_modified: index_modified(top),
+    };
+    if let Some(cached) = memory.facts.get(cwd)
+        && cached.key == key
+        && cached.read_at.elapsed() < FACTS_TTL
+        && cached.base_refs == base_refs_modified(top, cached.repo.base.as_deref())
+    {
+        return Ok(Some((cached.repo.clone(), cached.facts.clone())));
+    }
+    let read = git_facts(sources, git, cwd, &mut memory.tips)?;
+    match &read {
+        Some((repo, facts)) => {
+            memory.facts.insert(
+                cwd.to_path_buf(),
+                CachedFacts {
+                    key,
+                    base_refs: base_refs_modified(top, repo.base.as_deref()),
+                    read_at: Instant::now(),
+                    repo: repo.clone(),
+                    facts: facts.clone(),
+                },
+            );
+        }
+        None => {
+            memory.facts.remove(cwd);
+        }
+    }
+    Ok(read)
 }
 
 /// Where `cwd` sits and what git says of its branch. `Ok(None)` outside a
@@ -692,7 +824,7 @@ mod tests {
 
     #[test]
     fn a_session_whose_directory_is_gone_still_gets_a_card_without_git_facts() {
-        let mut memory = HashMap::new();
+        let mut memory = Memory::default();
         let sources = no_sources(Some(Arc::new(volee_git::GitCli::new())));
         let card = card(
             &session("s1", AgentState::Idle, true),
@@ -724,7 +856,7 @@ mod tests {
             let mut card = card(
                 &session(id, state, alive),
                 &no_sources(None),
-                &mut HashMap::new(),
+                &mut Memory::default(),
             );
             card.name = Some(id.to_owned());
             card

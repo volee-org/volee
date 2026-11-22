@@ -114,3 +114,37 @@ fn a_branch_that_does_not_exist_falls_back_to_the_default() {
         guess("main", BaseSource::Default)
     );
 }
+
+#[test]
+fn a_fingerprint_changes_with_the_commit_the_branch_and_uncommitted_changes() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.repo("volee");
+    let cli = sandbox.cli();
+    let clean = cli.fingerprint(&repo).unwrap().unwrap();
+    assert_eq!(clean.branch.as_deref(), Some("main"));
+    assert!(!clean.dirty);
+    assert_eq!(cli.fingerprint(&repo).unwrap().unwrap(), clean, "stable");
+
+    sandbox.write(&repo.join("notes.txt"), "not added\n");
+    let dirty = cli.fingerprint(&repo).unwrap().unwrap();
+    assert!(dirty.dirty, "an untracked file counts");
+    assert_eq!((&dirty.branch, &dirty.head), (&clean.branch, &clean.head));
+
+    sandbox.git(&repo, &["add", "notes.txt"]);
+    sandbox.commit(&repo, "next.rs", "next\n", "Add next");
+    let moved = cli.fingerprint(&repo).unwrap().unwrap();
+    assert_ne!(moved.head, clean.head);
+
+    sandbox.git(&repo, &["switch", "--quiet", "-c", "feat"]);
+    assert_eq!(
+        cli.fingerprint(&repo).unwrap().unwrap().branch.as_deref(),
+        Some("feat")
+    );
+}
+
+#[test]
+fn a_directory_outside_any_repository_has_no_fingerprint() {
+    let sandbox = Sandbox::new();
+    let nowhere = sandbox.dir("not-a-repository");
+    assert_eq!(sandbox.cli().fingerprint(&nowhere).unwrap(), None);
+}
