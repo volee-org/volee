@@ -2,7 +2,8 @@
   import { onMount } from "svelte";
 
   import Card from "./Card.svelte";
-  import { follow, openTerminal, readToken, type Status } from "./live";
+  import DecisionCard from "./DecisionCard.svelte";
+  import { decide, type DecisionBody, follow, openTerminal, readToken, type Status } from "./live";
   import { type Card as CardData, emptyInbox, type Inbox, split } from "./model";
 
   type Theme = "auto" | "light" | "dark";
@@ -15,6 +16,37 @@
   let notes = $state<Record<string, string>>({});
 
   let groups = $derived(split(inbox.cards));
+  let waitingCount = $derived(inbox.decisions.length + groups.waiting.length);
+  let empty = $derived(inbox.cards.length === 0 && inbox.decisions.length === 0);
+
+  /** The held card the keyboard acts on; `n` moves to the next one. */
+  let activeIndex = $state(0);
+  let activeId = $derived(inbox.decisions[Math.min(activeIndex, inbox.decisions.length - 1)]?.id ?? null);
+  let refs = $state<Record<string, { shortcut: (key: string) => boolean } | undefined>>({});
+  let message = $state("");
+
+  async function decideCard(id: string, body: DecisionBody): Promise<string> {
+    if (!token) return "no token";
+    const result = await decide(token, id, body);
+    if (result.gone) {
+      message = "That request is gone: it was answered in the terminal or it expired.";
+      setTimeout(() => (message = ""), 6000);
+      return "";
+    }
+    return result.ok ? "" : result.message;
+  }
+
+  function onkeydown(event: KeyboardEvent) {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+    if (event.key === "n" && inbox.decisions.length > 1) {
+      activeIndex = (activeIndex + 1) % inbox.decisions.length;
+      event.preventDefault();
+      return;
+    }
+    if (activeId && refs[activeId]?.shortcut(event.key)) event.preventDefault();
+  }
 
   function applyTheme(value: Theme) {
     theme = value;
@@ -31,12 +63,16 @@
     applyTheme(theme === "auto" ? "light" : theme === "light" ? "dark" : "auto");
   }
 
-  async function open(card: CardData) {
+  async function openById(id: string) {
     if (!token) return;
-    notes[card.id] = "opening…";
-    const result = await openTerminal(token, card.id);
-    notes[card.id] = result.message || (result.ok ? "opened" : "could not open");
-    setTimeout(() => delete notes[card.id], 6000);
+    notes[id] = "opening…";
+    const result = await openTerminal(token, id);
+    notes[id] = result.message || (result.ok ? "opened" : "could not open");
+    setTimeout(() => delete notes[id], 6000);
+  }
+
+  function open(card: CardData) {
+    return openById(card.id);
   }
 
   onMount(() => {
@@ -58,13 +94,15 @@
       (next) => (inbox = next),
       (next) => (status = next),
     );
-    const tick = setInterval(() => (now = Date.now()), 15_000);
+    const tick = setInterval(() => (now = Date.now()), 1_000);
     return () => {
       connection.close();
       clearInterval(tick);
     };
   });
 </script>
+
+<svelte:window {onkeydown} />
 
 <main>
   <header class="top">
@@ -88,7 +126,11 @@
       <p class="error" role="alert">Claude Code's sessions cannot be listed: {inbox.error}</p>
     {/if}
 
-    {#if inbox.cards.length === 0}
+    {#if message}
+      <p class="error" role="status">{message}</p>
+    {/if}
+
+    {#if empty}
       <section class="empty" data-testid="empty">
         <h2>Nothing needs you</h2>
         <p>
@@ -100,9 +142,20 @@
         </p>
       </section>
     {:else}
-      {#if groups.waiting.length > 0}
+      {#if waitingCount > 0}
         <section data-section="waiting">
-          <h2>Waiting for you <span class="count">{groups.waiting.length}</span></h2>
+          <h2>Waiting for you <span class="count">{waitingCount}</span></h2>
+          {#each inbox.decisions as decision (decision.id)}
+            <DecisionCard
+              bind:this={refs[decision.id]}
+              {decision}
+              {now}
+              active={decision.id === activeId}
+              terminal={inbox.terminal}
+              ondecide={decideCard}
+              onopen={openById}
+            />
+          {/each}
           {#each groups.waiting as card (card.id)}
             <Card {card} {now} terminal={inbox.terminal} onopen={open} note={notes[card.id] ?? ""} />
           {/each}

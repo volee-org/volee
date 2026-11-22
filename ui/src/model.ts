@@ -22,10 +22,55 @@ export interface Card {
   repo: string | null;
   branch: string | null;
   base: string | null;
+  /** How the base is known: "upstream", "reflog", "nearest" or "default" (a guess). */
+  base_source: string | null;
   cwd: string;
   diff: DiffStat | null;
   ahead: number;
   dirty: boolean;
+}
+
+export interface Suggestion {
+  index: number;
+  /** "Always allow Bash(npm test) in this project (local)". */
+  label: string;
+}
+
+export interface QuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface Question {
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options: QuestionOption[];
+}
+
+export type DecisionKind = "permission" | "question";
+
+/** A request Claude Code is holding open until the person decides. */
+export interface Decision {
+  id: string;
+  kind: DecisionKind;
+  session_id: string;
+  tool_name: string;
+  /** One line that says what is asked (the command, the file). */
+  summary: string;
+  tool_input: unknown;
+  suggestions: Suggestion[];
+  /** The questions as the agent wrote them (null for a permission). */
+  questions: Question[] | null;
+  created_at: number;
+  /** When the hold ends and the terminal takes over. */
+  expires_at: number;
+  name: string | null;
+  repo: string | null;
+  branch: string | null;
+  base: string | null;
+  base_source: string | null;
+  cwd: string | null;
 }
 
 export interface Inbox {
@@ -36,6 +81,8 @@ export interface Inbox {
   terminal: string | null;
   /** Agents that do not need a decision now. */
   others: number;
+  /** Held permission requests and questions, oldest first. */
+  decisions: Decision[];
   cards: Card[];
 }
 
@@ -44,14 +91,24 @@ export const emptyInbox: Inbox = {
   error: null,
   terminal: null,
   others: 0,
+  decisions: [],
   cards: [],
 };
 
+/** What a title is made from. */
+export interface Titled {
+  name: string | null;
+  repo: string | null;
+  branch: string | null;
+  cwd: string | null;
+  id: string;
+}
+
 /** The card's title: its name, else the repository and branch. */
-export function title(card: Card): string {
+export function title(card: Titled): string {
   if (card.name) return card.name;
   if (card.repo && card.branch) return `${card.repo} · ${card.branch}`;
-  return card.repo ?? card.cwd.split("/").filter(Boolean).pop() ?? card.id.slice(0, 8);
+  return card.repo ?? card.cwd?.split("/").filter(Boolean).pop() ?? card.id.slice(0, 8);
 }
 
 export function split(cards: Card[]): { waiting: Card[]; finished: Card[] } {

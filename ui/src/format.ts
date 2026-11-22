@@ -33,3 +33,45 @@ export function diffSummary(files: number, insertions: number, deletions: number
 export function shortPath(path: string): string {
   return path.replace(/^\/(Users|home)\/[^/]+/, "~");
 }
+
+/** How a branch relates to its base, in words for a person. */
+export interface Landing {
+  /** "on master" when the agent works on the base itself, else "feat/x into main". */
+  onBase: boolean;
+  /** True when the base was guessed (nearest branch or repository default). */
+  guessed: boolean;
+  /** Why the base is a guess, for a tooltip. */
+  why: string;
+}
+
+export function landing(branch: string | null, base: string | null, source: string | null): Landing {
+  const guessed = source === "nearest" || source === "default";
+  const why =
+    source === "nearest"
+      ? "Base guessed: the nearest branch"
+      : source === "default"
+        ? "Base guessed: the repository's default branch"
+        : "";
+  return { onBase: branch !== null && branch === base, guessed: guessed && base !== null, why };
+}
+
+/** "1:45", "12 min", "1 h 5 min": how long is left before the terminal takes over. */
+export function remaining(expiresAt: number, now: number): string {
+  const seconds = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+  if (seconds < 600) return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const rest = minutes % 60;
+  return rest === 0 ? `${Math.floor(minutes / 60)} h` : `${Math.floor(minutes / 60)} h ${rest} min`;
+}
+
+/**
+ * The answer sent for one question: the chosen labels, and any text the
+ * person wrote under "Other". A multi-select answer joins its parts with a
+ * comma and a space, which is how Claude Code words it itself.
+ */
+export function answerText(selected: string[], other: string, multi: boolean): string {
+  const text = other.trim();
+  if (!multi) return text !== "" ? text : (selected[0] ?? "");
+  return [...selected, ...(text !== "" ? [text] : [])].join(", ");
+}

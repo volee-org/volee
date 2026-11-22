@@ -90,3 +90,34 @@ export async function openTerminal(
     return { ok: false, message: String(error) };
   }
 }
+
+/** What the person chose on a held card; the daemon turns it into Claude Code's answer. */
+export type DecisionBody =
+  | { action: "allow"; suggestion?: number }
+  | { action: "deny"; message?: string }
+  | { action: "answer"; answers: Record<string, string> }
+  | { action: "terminal" };
+
+/** Sends a decision. `gone` means the terminal answered first, or the hold ran out. */
+export async function decide(
+  token: string,
+  id: string,
+  body: DecisionBody,
+  fetcher: typeof fetch = fetch,
+): Promise<{ ok: boolean; gone: boolean; message: string }> {
+  try {
+    const response = await fetcher(`api/decisions/${encodeURIComponent(id)}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const reply = (await response.json().catch(() => ({}))) as { message?: string };
+    return {
+      ok: response.ok,
+      gone: response.status === 404,
+      message: reply.message ?? (response.ok ? "" : `refused (${response.status})`),
+    };
+  } catch (error) {
+    return { ok: false, gone: false, message: String(error) };
+  }
+}

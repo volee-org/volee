@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { diffSummary, shortPath, sinceText, waitingText } from "./format";
+  import { diffSummary, sinceText, waitingText } from "./format";
+  import Place from "./Place.svelte";
   import { type Card, title } from "./model";
 
   interface Props {
@@ -32,18 +33,13 @@
   {/if}
 
   <p class="where">
-    {#if card.repo}
-      <span class="chip">{card.repo}</span>
-    {/if}
-    {#if card.branch}
-      <span class="mono">{card.branch}</span>
-      {#if card.base}
-        <span class="arrow">into</span> <span class="mono">{card.base}</span>
-      {/if}
-    {/if}
-    {#if !card.repo}
-      <span class="mono">{shortPath(card.cwd)}</span>
-    {/if}
+    <Place
+      repo={card.repo}
+      branch={card.branch}
+      base={card.base}
+      baseSource={card.base_source}
+      cwd={card.cwd}
+    />
     {#if card.dirty}
       <span class="chip warn">uncommitted changes</span>
     {/if}
@@ -103,9 +99,6 @@
     flex-wrap: wrap;
     gap: 4px 8px;
     align-items: center;
-  }
-  .arrow {
-    font-size: 0.85rem;
   }
   .chip {
     background: var(--bg);
