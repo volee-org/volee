@@ -30,12 +30,27 @@ pub(crate) trait Terminal: Send + Sync + Debug {
     /// Focuses the terminal of `target`. Blocking: call it off the async
     /// threads. The answer is a sentence for the person.
     fn open(&self, target: &Target) -> Result<String, String>;
+    /// Runs `argv` (no shell) in `cwd` in a new floating pane next to the
+    /// agent's terminal: how a terminal editor opens. Blocking. The default
+    /// is for adapters that cannot.
+    fn open_command(
+        &self,
+        _target: &Target,
+        _cwd: &Path,
+        _argv: &[String],
+    ) -> Result<String, String> {
+        Err(format!("{} cannot open a command in a pane", self.name()))
+    }
 }
 
 /// Runs the Rex command line. A trait so that tests need no Rex.
 pub(crate) trait RexRunner: Send + Sync + Debug {
     /// Runs `rex <args>` and returns its standard output.
     fn run(&self, args: &[String]) -> Result<String, String>;
+    /// The same, with `input` on its standard input.
+    fn run_stdin(&self, _args: &[String], _input: &str) -> Result<String, String> {
+        Err("this runner has no standard input".to_owned())
+    }
 }
 
 /// The real command line.
@@ -47,11 +62,27 @@ pub(crate) struct RexCli {
 
 impl RexRunner for RexCli {
     fn run(&self, args: &[String]) -> Result<String, String> {
-        let output = Command::new(&self.bin)
+        self.run_stdin(args, "")
+    }
+
+    fn run_stdin(&self, args: &[String], input: &str) -> Result<String, String> {
+        use std::io::Write;
+        use std::process::Stdio;
+        let mut child = Command::new(&self.bin)
             .arg("-S")
             .arg(&self.server)
             .args(args)
-            .output()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("cannot run rex: {error}"))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            // A command that reads nothing may exit first: not an error.
+            let _ = stdin.write_all(input.as_bytes());
+        }
+        let output = child
+            .wait_with_output()
             .map_err(|error| format!("cannot run rex: {error}"))?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -231,7 +262,88 @@ impl Terminal for Rex {
         self.bin.as_os_str().is_empty() || (self.bin.is_file() && self.socket.exists())
     }
 
+    fn open_command(&self, target: &Target, cwd: &Path, argv: &[String]) -> Result<String, String> {
+        if argv.is_empty() {
+            return Err("nothing to run".to_owned());
+        }
+        let pane = self.locate(target)?;
+        let inspected = self.json(&[
+            "block",
+            "inspect",
+            "-s",
+            &pane.session,
+            &pane.block,
+            "--json",
+        ])?;
+        let window = inspected
+            .pointer("/block/window_id")
+            .and_then(Value::as_str)
+            .ok_or("Rex did not say the window of the pane")?
+            .to_owned();
+        // `env PATH=...` first: the Rex server's own PATH has neither Homebrew
+        // nor the person's tools.
+        let mut command = vec![
+            "/usr/bin/env".to_owned(),
+            format!(
+                "PATH={}",
+                std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".to_owned())
+            ),
+        ];
+        command.extend(argv.iter().cloned());
+        let layer = serde_json::json!({
+            "window_id": window,
+            "bounds": [0.05, 0.08, 0.9, 0.84],
+            "focus": true,
+            "layout": { "block": {
+                "flavor": "com.superlogical.terminal.shell",
+                "label": format!("edit {}", argv.last().map_or("", String::as_str)),
+                "options": { "cwd": cwd.to_string_lossy(), "command": command },
+            } },
+        });
+        self.runner.run_stdin(
+            &[
+                "api".to_owned(),
+                "call".to_owned(),
+                "-s".to_owned(),
+                pane.session.clone(),
+                "session.new_layer".to_owned(),
+                "-".to_owned(),
+            ],
+            &layer.to_string(),
+        )?;
+        // Best effort: bring the session to the person, as `open` does.
+        let _ = self.show_session(&pane);
+        Ok(format!(
+            "Opened {} in a floating pane of the Rex session \"{}\"",
+            argv.first().map_or("", String::as_str),
+            pane.session_label
+        ))
+    }
+
     fn open(&self, target: &Target) -> Result<String, String> {
+        let pane = self.locate(target)?;
+        self.runner.run(&[
+            "focus".to_owned(),
+            "-s".to_owned(),
+            pane.session.clone(),
+            pane.block.clone(),
+        ])?;
+        match self.show_session(&pane) {
+            Ok(()) => Ok(format!(
+                "Showing it in Rex (session {})",
+                pane.session_label
+            )),
+            Err(why) => Ok(format!(
+                "Focused its pane; open the Rex session \"{}\" to see it ({why})",
+                pane.session_label
+            )),
+        }
+    }
+}
+
+impl Rex {
+    /// The Rex terminal pane the agent of `target` runs in.
+    fn locate(&self, target: &Target) -> Result<Pane, String> {
         let mut panes = self.panes()?;
         // Rex's own record of the process wins: pids are exact. A directory
         // is only a guess and counts when exactly one pane has it.
@@ -262,23 +374,7 @@ impl Terminal for Rex {
                 _ => return Err("this agent does not run in a Rex terminal".to_owned()),
             }
         };
-        let pane = &panes[index];
-        self.runner.run(&[
-            "focus".to_owned(),
-            "-s".to_owned(),
-            pane.session.clone(),
-            pane.block.clone(),
-        ])?;
-        match self.show_session(pane) {
-            Ok(()) => Ok(format!(
-                "Showing it in Rex (session {})",
-                pane.session_label
-            )),
-            Err(why) => Ok(format!(
-                "Focused its pane; open the Rex session \"{}\" to see it ({why})",
-                pane.session_label
-            )),
-        }
+        Ok(panes.swap_remove(index))
     }
 }
 
@@ -383,6 +479,15 @@ mod tests {
                 .cloned()
                 .unwrap_or_else(|| Err(format!("no answer for {key}")))
         }
+
+        fn run_stdin(&self, args: &[String], input: &str) -> Result<String, String> {
+            self.0
+                .calls
+                .lock()
+                .unwrap()
+                .push(format!("{} <<{input}", args.join(" ")));
+            Ok("{}".to_owned())
+        }
     }
 
     const SESSIONS: &str = r#"{"sessions":[{"session_id":"S1","label":"Work"}]}"#;
@@ -463,6 +568,60 @@ mod tests {
             })
             .unwrap();
         assert!(said.starts_with("Showing it in Rex"), "{said}");
+    }
+
+    #[test]
+    fn a_terminal_editor_opens_in_a_floating_pane_with_its_exact_argv() {
+        let fake = base()
+            .on(
+                "block call -s S1 -b B1 program_status",
+                r#"{"records":[{"owner":{"pid":10}}]}"#,
+            )
+            .on(
+                "block call -s S1 -b B1 process",
+                r#"{"foreground":{"pid":10,"cwd":"/a"}}"#,
+            )
+            .on("block call -s S1 -b B2 program_status", r#"{"records":[]}"#)
+            .on("block call -s S1 -b B2 process", r"{}")
+            .on(
+                "block inspect -s S1 B1 --json",
+                r#"{"block":{"window_id":"W1"}}"#,
+            )
+            .failing("client ls --json", "no clients");
+        let (rex, fake) = rex(fake);
+        let said = rex
+            .open_command(
+                &Target {
+                    pid: Some(10),
+                    cwd: "/a".into(),
+                },
+                Path::new("/work/tree"),
+                &[
+                    "nvim".to_owned(),
+                    "+12".to_owned(),
+                    "/work/tree/a b.rs".to_owned(),
+                ],
+            )
+            .unwrap();
+        assert!(said.contains("floating pane"), "{said}");
+        let calls = fake.calls.lock().unwrap();
+        let call = calls
+            .iter()
+            .find(|call| call.contains("api call -s S1 session.new_layer -"))
+            .expect("the layer is created");
+        let (_, input) = call.split_once("<<").unwrap();
+        let layer: Value = serde_json::from_str(input).unwrap();
+        assert_eq!(layer["window_id"], "W1");
+        let options = &layer["layout"]["block"]["options"];
+        assert_eq!(options["cwd"], "/work/tree");
+        let command = options["command"].as_array().unwrap();
+        assert_eq!(command[0], "/usr/bin/env");
+        assert!(command[1].as_str().unwrap().starts_with("PATH="));
+        assert_eq!(command[2], "nvim");
+        assert_eq!(
+            command[4], "/work/tree/a b.rs",
+            "a path with a space stays one argument"
+        );
     }
 
     #[test]

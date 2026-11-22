@@ -1,5 +1,6 @@
 // The shapes the daemon sends (crates/volee-daemon/src/web/inbox.rs).
 
+import type { JournalEntry } from "./actions";
 import type { ReviewBrief } from "./review";
 import { emptyRules, type RiskView, type RulesStatus } from "./risk";
 
@@ -93,6 +94,8 @@ export interface Inbox {
   cards: Card[];
   /** What is wrong with the rules files; empty when they load. */
   rules: RulesStatus;
+  /** What was done on finished changes, newest first. */
+  journal: JournalEntry[];
 }
 
 export const emptyInbox: Inbox = {
@@ -103,6 +106,7 @@ export const emptyInbox: Inbox = {
   decisions: [],
   cards: [],
   rules: emptyRules,
+  journal: [],
 };
 
 /** What a title is made from. */

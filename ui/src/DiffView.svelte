@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import { annotate } from "./inline";
+  import type { EditorOption, LineComment } from "./actions";
+  import { annotate, mountComments } from "./inline";
   import { inline } from "./markdown";
   import { type Finding, findingsOf, placeFindings, SEVERITY_TEXT, whereText } from "./review";
   import { CATEGORY_TEXT, initialOpenFiles, patchOf, type WorkFile } from "./work";
@@ -11,8 +12,45 @@
     truncated: boolean;
     /** The AI review's findings: shown at their line, or on the file's header. */
     findings?: Finding[];
+    /** The person's comments on lines of this change. */
+    comments?: LineComment[];
+    /** The editors the person set (rules `editors`). */
+    editors?: EditorOption[];
+    oncomment?: (file: string, line: number, text: string) => Promise<void> | void;
+    ondeletecomment?: (id: number) => Promise<void> | void;
+    onedit?: (editor: string, file: string, line: number) => Promise<void> | void;
   }
-  let { files, truncated, findings = [] }: Props = $props();
+  let {
+    files,
+    truncated,
+    findings = [],
+    comments = [],
+    editors = [],
+    oncomment,
+    ondeletecomment,
+    onedit,
+  }: Props = $props();
+
+  const usable = $derived(editors.filter((editor) => editor.usable));
+  /** The line whose comment form is open. */
+  let composing = $state<{ path: string; line: number } | null>(null);
+
+  /** What the diff of one file needs to draw the person's comments and their form. */
+  function opsOf(path: string) {
+    return {
+      comments: comments.filter((comment) => comment.file === path),
+      composing: composing?.path === path ? composing.line : null,
+      editors: onedit ? usable : [],
+      onpick: (line: number) => (composing = { path, line }),
+      oncancel: () => (composing = null),
+      onsave: async (line: number, text: string) => {
+        await oncomment?.(path, line, text);
+        composing = null;
+      },
+      ondelete: (id: number) => void ondeletecomment?.(id),
+      onedit: (editor: string, line: number) => void onedit?.(editor, path, line),
+    };
+  }
 
   /** Where the findings of each file go, by file path. */
   const placed = $derived(
@@ -32,13 +70,14 @@
   });
 
   /** Puts the inline findings into the rendered diff; again when they change. */
-  function place(node: HTMLElement, params: { byLine: Map<number, Finding[]>; html: string }) {
-    annotate(node, params.byLine);
-    return {
-      update(next: { byLine: Map<number, Finding[]>; html: string }) {
-        annotate(node, next.byLine);
-      },
+  type Placing = { byLine: Map<number, Finding[]>; html: string; ops: ReturnType<typeof opsOf> | null };
+  function place(node: HTMLElement, params: Placing) {
+    const draw = (given: Placing) => {
+      annotate(node, given.byLine);
+      if (given.ops) mountComments(node, given.ops);
     };
+    draw(params);
+    return { update: draw };
   }
 
   function countOf(path: string): number {
@@ -113,6 +152,15 @@
           </span>
         {/if}
       </button>
+      {#if onedit && usable.length > 0 && file.status !== "deleted"}
+        <div class="tools" data-testid="file-editors">
+          {#each usable as editor (editor.name)}
+            <button type="button" class="open" onclick={() => onedit?.(editor.name, file.path, 1)}
+              >Open in {editor.name}</button
+            >
+          {/each}
+        </div>
+      {/if}
       {#if open[file.path]}
         {#if file.why}<!-- eslint-disable-next-line svelte/no-at-html-tags -->
           <p class="why">{@html inline(file.why)}</p>{/if}
@@ -135,7 +183,11 @@
           <p class="note">Not shown: the diff is too large.</p>
         {:else if render}
           <!-- diff2html escapes the code it shows. -->
-          <div class="patch" use:place={{ byLine: placed[file.path]?.inline ?? new Map(), html: file.patch }}>
+          <div class="patch" use:place={{
+              byLine: placed[file.path]?.inline ?? new Map(),
+              html: file.patch,
+              ops: oncomment ? opsOf(file.path) : null,
+            }}>
             <!-- eslint-disable-next-line svelte/no-at-html-tags -->
             {@html render(patchOf(file))}
           </div>
@@ -218,6 +270,76 @@
   }
   .patch {
     overflow-x: auto;
+  }
+  .tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tools .open,
+  .patch :global(.vc-box button) {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 1px 9px;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .tools .open:hover,
+  .patch :global(.vc-box button:hover) {
+    border-color: var(--accent);
+  }
+  /* The person's comments, inserted into the diff table by inline.ts. */
+  .patch :global(tr.volee-comment > td) {
+    padding: 6px 10px;
+    background: var(--bg);
+  }
+  .patch :global(.vc-item) {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    border-left: 4px solid var(--accent);
+    padding: 4px 10px;
+    margin: 2px 0;
+    font-family: system-ui, sans-serif;
+    font-size: 0.88rem;
+    color: var(--text);
+    white-space: normal;
+  }
+  .patch :global(.vc-label) {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    font-weight: 700;
+  }
+  .patch :global(.vc-text) {
+    flex: 1;
+    overflow-wrap: anywhere;
+  }
+  .patch :global(.vc-form) {
+    display: grid;
+    gap: 6px;
+    font-family: system-ui, sans-serif;
+  }
+  .patch :global(.vc-form textarea) {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: 0.88rem;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+  }
+  .patch :global(.vc-actions) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
   }
   .chip.review {
     color: var(--waiting);

@@ -110,6 +110,39 @@ The **facts** of `finished`: `stopped_last`, `busy`, `commits`,
 `unique_commits`, `merged`. The default rule is: not busy, stopped after its
 last activity, not merged, and at least one unique commit.
 
+### Automatic merge, and turning it off for one repository
+
+When `auto_merge` allows a change (low risk, trust rules respected), the
+daemon merges it **by itself once the agent finished**, once per branch tip,
+and the journal on the inbox says it was a rule and gives the reason you
+returned. There is no switch in the interface: turn it off where you set it.
+A function can look at the repository:
+
+```lua
+return {
+  auto_merge = function(change, risk)
+    if change.repo == "billing" then return false, "billing is always read" end
+    if risk == "low" and volee.touches(change, "docs/**") then
+      return true, "docs only, low risk"
+    end
+    return false
+  end,
+}
+```
+
+The merge itself is the one-click merge of the work screen: a pull request
+through `gh` when the repository's `origin` is on GitHub (method from the
+repository's `merge` in `config.lua`), else a merge commit into the base in
+the main checkout, which must be clean. See
+[ADR 0041](../adr/0041-actions-on-a-finished-change-and-how-a-fix-reaches-the-agent.md).
+
+### Editors
+
+`editors` feed the "Open in ..." buttons on a file header and on a diff line
+(click a line number). A `terminal` editor opens in a floating pane of the
+agent's Rex session (and is hidden when Rex is not there); an `external` one
+is just run, with the worktree as its working directory.
+
 ## Helpers
 
 | Helper | |

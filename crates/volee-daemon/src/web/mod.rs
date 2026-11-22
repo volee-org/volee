@@ -12,6 +12,11 @@
 //! | `POST /api/decisions/{id}` | yes | decides a held permission or question |
 //! | `GET /api/agents/{id}/review` | yes | the AI pre-review of the agent's branch tip (an opinion) |
 //! | `POST /api/agents/{id}/review[?retry=1]` | yes | asks for it now; `retry` redoes a failed one |
+//! | `POST /api/agents/{id}/merge` | yes | merges the finished work (the daemon does it, ADR 0041) |
+//! | `POST /api/agents/{id}/fix` | yes | sends a fix request (`{"text": ...}`) and says whether the agent took it |
+//! | `GET`/`POST /api/agents/{id}/comments`, `DELETE .../comments/{n}` | yes | the line comments of the branch tip |
+//! | `POST /api/agents/{id}/editor` | yes | opens a file in one of the person's editors (`{"editor", "file", "line"}`) |
+//! | `GET /api/journal[?limit=n]` | yes | what was done on finished changes, newest first |
 //!
 //! The token is the hook token. A browser's `EventSource` cannot set a
 //! header, so the events stream also takes it as `?token=`. Requests whose
@@ -53,6 +58,8 @@ pub(crate) struct Web {
     assessments: Option<Arc<Assessments>>,
     /// Claude Code's projects directory, where transcripts live.
     projects: Option<std::path::PathBuf>,
+    /// Merge, fix, comments and editors.
+    actions: Option<Arc<crate::actions::Actions>>,
 }
 
 impl Web {
@@ -99,7 +106,19 @@ impl Web {
             reviews: None,
             assessments: None,
             projects: None,
+            actions: None,
         }
+    }
+
+    /// The same interface, with the actions on finished changes.
+    pub(crate) fn with_actions(mut self, actions: Option<Arc<crate::actions::Actions>>) -> Self {
+        self.actions = actions;
+        self
+    }
+
+    /// The projects directory, where transcripts live.
+    pub(crate) fn projects(&self) -> Option<std::path::PathBuf> {
+        self.projects.clone()
     }
 
     /// The same interface, showing the risk of finished changes.
@@ -145,6 +164,11 @@ impl Web {
         let mut inbox = inbox::build_with(&view, name, &self.decisions.cards());
         self.add_reviews(&view, &mut inbox).await;
         self.add_risks(&view, &mut inbox).await;
+        if let Some(actions) = self.actions.clone() {
+            inbox.journal = tokio::task::spawn_blocking(move || actions.journal(30))
+                .await
+                .unwrap_or_default();
+        }
         inbox
     }
 
@@ -269,6 +293,18 @@ pub(crate) fn router(token: Arc<str>, web: Web) -> Router {
         .route("/api/agents/{id}/work", get(get_work))
         .route("/api/agents/{id}/terminal", post(open_terminal))
         .route("/api/agents/{id}/risk", post(set_risk))
+        .route("/api/agents/{id}/merge", post(merge_work))
+        .route("/api/agents/{id}/fix", post(ask_fix))
+        .route(
+            "/api/agents/{id}/comments",
+            get(list_comments).post(add_comment),
+        )
+        .route(
+            "/api/agents/{id}/comments/{comment}",
+            axum::routing::delete(delete_comment),
+        )
+        .route("/api/agents/{id}/editor", post(open_editor))
+        .route("/api/journal", get(get_journal))
         .route("/api/decisions/{id}", post(decide))
         .route(
             "/api/agents/{id}/review",
@@ -447,16 +483,54 @@ async fn get_work(
     };
     let projects = shared.web.projects.clone();
     let assessments = shared.web.assessments.clone();
+    let actions = shared.web.actions.clone();
+    let terminal_ready = shared.web.terminal.as_ref().is_some_and(|t| t.available());
     let built = tokio::task::spawn_blocking(move || {
         let risk =
             assessments.and_then(|assessments| assessments.assess(&ReviewTarget::of(&agent)?));
-        (crate::work::build(&agent, projects.as_deref()), risk)
+        let target = ReviewTarget::of(&agent);
+        let comments = actions
+            .as_ref()
+            .zip(target.as_ref())
+            .map(|(actions, target)| actions.comments(target))
+            .unwrap_or_default();
+        let editors: Vec<serde_json::Value> = actions
+            .as_ref()
+            .zip(agent.repo.as_ref())
+            .map(|(actions, repo)| actions.editors(&repo.root))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|editor| {
+                let terminal = editor.kind == volee_rules::EditorKind::Terminal;
+                json!({
+                    "name": editor.name,
+                    "kind": if terminal { "terminal" } else { "external" },
+                    // A terminal editor needs a terminal adapter: hidden without.
+                    "usable": !terminal || terminal_ready,
+                })
+            })
+            .collect();
+        let delivery = json!({
+            "alive": agent.alive,
+            "pid": agent.pid,
+            "finished_work": agent.finished_work,
+        });
+        (
+            crate::work::build(&agent, projects.as_deref()),
+            risk,
+            comments,
+            editors,
+            delivery,
+        )
     })
     .await;
     match built {
-        Ok((work, risk)) => {
+        Ok((work, risk, comments, editors, agent)) => {
             let mut body = serde_json::to_value(work).unwrap_or_default();
             body["risk"] = serde_json::to_value(risk).unwrap_or_default();
+            body["comments"] = serde_json::to_value(comments).unwrap_or_default();
+            body["editors"] = json!(editors);
+            body["agent"] = agent;
             Json(body).into_response()
         }
         Err(error) => (
@@ -664,6 +738,227 @@ async fn review_target(shared: &Shared, id: &str) -> Result<ReviewTarget, Box<Re
                 .into_response(),
         )
     })
+}
+
+fn reply(status: StatusCode, ok: bool, message: impl Into<String>) -> Response {
+    (status, Json(json!({ "ok": ok, "message": message.into() }))).into_response()
+}
+
+/// The card of an agent and the actions, or the response that says why not.
+async fn acting(
+    shared: &Shared,
+    headers: &HeaderMap,
+    id: &str,
+) -> Result<
+    (
+        volee_proto::methods::AgentCard,
+        Arc<crate::actions::Actions>,
+    ),
+    Box<Response>,
+> {
+    if !allowed(shared, headers, None) {
+        return Err(Box::new(StatusCode::UNAUTHORIZED.into_response()));
+    }
+    let Some(actions) = shared.web.actions.clone() else {
+        return Err(Box::new(reply(
+            StatusCode::CONFLICT,
+            false,
+            "the actions are unavailable (no database)",
+        )));
+    };
+    let view = shared.web.agents.latest().await;
+    match view.agents.into_iter().find(|agent| agent.session_id == id) {
+        Some(agent) => Ok((agent, actions)),
+        None => Err(Box::new(reply(
+            StatusCode::NOT_FOUND,
+            false,
+            "this agent is gone",
+        ))),
+    }
+}
+
+fn done_response(done: &crate::actions::Done) -> Response {
+    let status = if done.ok {
+        StatusCode::OK
+    } else {
+        StatusCode::UNPROCESSABLE_ENTITY
+    };
+    (
+        status,
+        Json(json!({ "ok": done.ok, "message": done.message, "delivered": done.delivered })),
+    )
+        .into_response()
+}
+
+/// Merges the agent's finished work, by the repository's method.
+async fn merge_work(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let (agent, actions) = match acting(&shared, &headers, &id).await {
+        Ok(found) => found,
+        Err(response) => return *response,
+    };
+    match tokio::task::spawn_blocking(move || actions.merge(&agent, None)).await {
+        Ok(done) => done_response(&done),
+        Err(error) => reply(StatusCode::INTERNAL_SERVER_ERROR, false, error.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct FixBody {
+    text: String,
+}
+
+/// Sends a fix request to the agent and says whether it arrived.
+async fn ask_fix(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<FixBody>,
+) -> Response {
+    let (agent, actions) = match acting(&shared, &headers, &id).await {
+        Ok(found) => found,
+        Err(response) => return *response,
+    };
+    let handle = tokio::runtime::Handle::current();
+    match tokio::task::spawn_blocking(move || actions.ask_fix(&handle, &agent, &body.text)).await {
+        Ok(done) => done_response(&done),
+        Err(error) => reply(StatusCode::INTERNAL_SERVER_ERROR, false, error.to_string()),
+    }
+}
+
+async fn list_comments(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let (agent, actions) = match acting(&shared, &headers, &id).await {
+        Ok(found) => found,
+        Err(response) => return *response,
+    };
+    let comments = tokio::task::spawn_blocking(move || {
+        ReviewTarget::of(&agent).map(|target| actions.comments(&target))
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_default();
+    Json(comments).into_response()
+}
+
+#[derive(Deserialize)]
+struct CommentBody {
+    file: String,
+    line: u32,
+    text: String,
+}
+
+async fn add_comment(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<CommentBody>,
+) -> Response {
+    let (agent, actions) = match acting(&shared, &headers, &id).await {
+        Ok(found) => found,
+        Err(response) => return *response,
+    };
+    let added = tokio::task::spawn_blocking(move || {
+        let target = ReviewTarget::of(&agent).ok_or("this agent has no branch to comment")?;
+        actions.add_comment(&target, &body.file, body.line, &body.text)
+    })
+    .await;
+    match added {
+        Ok(Ok(comment)) => Json(comment).into_response(),
+        Ok(Err(why)) => reply(StatusCode::UNPROCESSABLE_ENTITY, false, why),
+        Err(error) => reply(StatusCode::INTERNAL_SERVER_ERROR, false, error.to_string()),
+    }
+}
+
+async fn delete_comment(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path((id, comment)): Path<(String, i64)>,
+) -> Response {
+    let (agent, actions) = match acting(&shared, &headers, &id).await {
+        Ok(found) => found,
+        Err(response) => return *response,
+    };
+    let removed = tokio::task::spawn_blocking(move || {
+        ReviewTarget::of(&agent).is_some_and(|target| actions.delete_comment(&target, comment))
+    })
+    .await
+    .unwrap_or(false);
+    if removed {
+        reply(StatusCode::OK, true, "removed")
+    } else {
+        reply(
+            StatusCode::NOT_FOUND,
+            false,
+            "no such comment on this change",
+        )
+    }
+}
+
+#[derive(Deserialize)]
+struct EditorBody {
+    editor: String,
+    file: String,
+    #[serde(default)]
+    line: u32,
+}
+
+/// Opens a file of the agent's worktree in one of the person's editors.
+async fn open_editor(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<EditorBody>,
+) -> Response {
+    let (agent, actions) = match acting(&shared, &headers, &id).await {
+        Ok(found) => found,
+        Err(response) => return *response,
+    };
+    let terminal = shared.web.terminal.clone();
+    let opened = tokio::task::spawn_blocking(move || {
+        actions.open_editor(
+            &agent,
+            terminal.as_ref(),
+            &body.editor,
+            &body.file,
+            body.line,
+        )
+    })
+    .await;
+    match opened {
+        Ok(done) => done_response(&done),
+        Err(error) => reply(StatusCode::INTERNAL_SERVER_ERROR, false, error.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct JournalQuery {
+    limit: Option<u32>,
+}
+
+async fn get_journal(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Query(query): Query<JournalQuery>,
+) -> Response {
+    if !allowed(&shared, &headers, None) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(actions) = shared.web.actions.clone() else {
+        return Json(Vec::<volee_store::JournalEntry>::new()).into_response();
+    };
+    let limit = query.limit.unwrap_or(50).min(500);
+    let entries = tokio::task::spawn_blocking(move || actions.journal(limit))
+        .await
+        .unwrap_or_default();
+    Json(entries).into_response()
 }
 
 fn review_json(stored: Option<volee_store::StoredReview>, enabled: bool) -> serde_json::Value {

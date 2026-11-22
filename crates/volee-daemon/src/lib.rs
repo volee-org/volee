@@ -8,6 +8,7 @@
 //!
 //! Start it with [`Daemon::run`]; build its dependencies with [`Config`].
 
+mod actions;
 mod agents_view;
 mod assess;
 mod clock;
@@ -32,6 +33,7 @@ mod transcript;
 mod web;
 mod work;
 
+pub use actions::FixSources;
 pub use agents_view::AgentsViewConfig;
 pub use clock::{Clock, ManualClock, SystemClock};
 pub use decisions::HoldSettings;

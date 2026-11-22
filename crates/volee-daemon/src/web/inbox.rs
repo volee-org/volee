@@ -89,6 +89,9 @@ pub(crate) struct Inbox {
     pub(crate) cards: Vec<InboxCard>,
     /// What is wrong with the rules files, shown as a discreet banner.
     pub(crate) rules: RulesStatus,
+    /// What was done on finished changes (merges, fix requests, comments,
+    /// editor opens), newest first.
+    pub(crate) journal: Vec<volee_store::JournalEntry>,
 }
 
 /// The state of the rules files, for the banner.
@@ -166,6 +169,7 @@ pub(crate) fn build_with(
         decisions: held.iter().map(|card| decision_view(view, card)).collect(),
         cards: keyed.into_iter().map(|(_, card)| card).collect(),
         rules: RulesStatus::default(),
+        journal: Vec::new(),
     }
 }
 

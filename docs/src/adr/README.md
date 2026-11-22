@@ -46,6 +46,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0038](0038-a-permission-or-a-question-is-held-until-the-person-decides.md) | A permission or a question is held by its hook until the person decides | Accepted |
 | [0039](0039-the-pre-review-is-claude-codes-code-review-and-an-opinion.md) | The pre-review is Claude Code's `/code-review`, run read-only, and an opinion | Accepted |
 | [0040](0040-a-finished-change-is-read-in-layers.md) | A finished change is read in layers, from git first and the transcript second | Accepted |
+| [0041](0041-actions-on-a-finished-change-and-how-a-fix-reaches-the-agent.md) | Actions on a finished change, and how a fix request reaches the agent | Accepted |
 
 ## Not built yet
 

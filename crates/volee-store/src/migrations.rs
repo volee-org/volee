@@ -104,6 +104,32 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (repo, tip)
     );
     ",
+    // 6: what the person does on a finished change (v2, step 9): the line
+    // comments, per branch tip, and the journal of actions.
+    "
+    CREATE TABLE line_comments (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        repo       TEXT    NOT NULL,
+        tip        TEXT    NOT NULL,
+        file       TEXT    NOT NULL,
+        line       INTEGER NOT NULL,
+        text       TEXT    NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    CREATE INDEX line_comments_tip ON line_comments (repo, tip);
+    CREATE TABLE journal (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        at        INTEGER NOT NULL,
+        repo      TEXT    NOT NULL,
+        branch    TEXT    NOT NULL,
+        tip       TEXT    NOT NULL,
+        kind      TEXT    NOT NULL,
+        ok        INTEGER NOT NULL,
+        automatic INTEGER NOT NULL,
+        message   TEXT    NOT NULL
+    );
+    CREATE INDEX journal_tip ON journal (repo, tip, kind);
+    ",
 ];
 
 /// The newest schema version this build understands.

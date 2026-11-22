@@ -1745,6 +1745,7 @@ name = "volee-store"
 version = "0.18.0"
 dependencies = [
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",

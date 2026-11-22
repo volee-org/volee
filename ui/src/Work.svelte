@@ -1,9 +1,24 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
 
+  import {
+    addComment,
+    askFix,
+    autoMergeText,
+    deleteComment,
+    type EditorOption,
+    fixItems,
+    type JournalEntry,
+    journalOf,
+    type LineComment,
+    mergeWork,
+    openEditor,
+  } from "./actions";
   import Diagram from "./Diagram.svelte";
   import DiffView from "./DiffView.svelte";
+  import FixPanel from "./FixPanel.svelte";
   import { diffSummary } from "./format";
+  import Journal from "./Journal.svelte";
   import Layer from "./Layer.svelte";
   import { inline, renderMarkdown } from "./markdown";
   import { briefKey, fetchReview, requestReview, type Review, type ReviewBrief, reviewHint } from "./review";
@@ -29,15 +44,89 @@
     terminal: string | null;
     /** The card's review brief, pushed with the inbox: it changing is the cue to read the review again. */
     brief?: ReviewBrief | null;
+    /** Changes when the agent's change moved (a commit, a saved file): the diff is read again. */
+    stamp?: string;
+    /** What was done on finished changes, newest first. */
+    journal?: JournalEntry[];
+    now?: number;
     onback: () => void;
     onterminal: (id: string) => void;
   }
-  let { token, id, title, terminal, brief = null, onback, onterminal }: Props = $props();
+  let {
+    token,
+    id,
+    title,
+    terminal,
+    brief = null,
+    stamp = "",
+    journal = [],
+    now = Date.now(),
+    onback,
+    onterminal,
+  }: Props = $props();
+
+  let comments = $state<LineComment[]>([]);
+  let editors = $state<EditorOption[]>([]);
+  let fixOpen = $state(false);
+  let merging = $state(false);
+  let merged = $state(false);
+  /** `m` once arms the merge, `m` again does it: a key must not merge by accident. */
+  let armed = $state(false);
+  let armTimer: ReturnType<typeof setTimeout> | undefined;
+  let said = $state<{ ok: boolean; text: string } | null>(null);
+
+  async function merge() {
+    if (merging || merged) return;
+    armed = false;
+    merging = true;
+    said = null;
+    const result = await mergeWork(token, id);
+    merging = false;
+    merged = result.ok;
+    said = { ok: result.ok, text: result.message };
+  }
+
+  function armMerge() {
+    if (merging || merged) return;
+    if (armed) {
+      void merge();
+      return;
+    }
+    armed = true;
+    said = { ok: true, text: "Press m again to merge." };
+    clearTimeout(armTimer);
+    armTimer = setTimeout(() => {
+      armed = false;
+      if (said?.text === "Press m again to merge.") said = null;
+    }, 4000);
+  }
+
+  async function sendFix(text: string) {
+    return askFix(token, id, text);
+  }
+
+  async function saveComment(file: string, line: number, text: string) {
+    const result = await addComment(token, id, { file, line, text });
+    if (result.comment) comments = [...comments, result.comment];
+    else said = { ok: false, text: result.message };
+  }
+
+  async function removeComment(commentId: number) {
+    if (await deleteComment(token, id, commentId)) comments = comments.filter((comment) => comment.id !== commentId);
+  }
+
+  async function edit(editor: string, file: string, line: number) {
+    const result = await openEditor(token, id, { editor, file, line });
+    said = { ok: result.ok, text: result.message };
+  }
 
   let review = $state<Review | null>(null);
   let reviewProblem = $state("");
   let asking = $state(false);
   let reviewOpened = false;
+
+  const items = $derived(fixItems(review?.findings ?? [], comments));
+  const itemsKey = $derived(`${comments.map((comment) => comment.id).join(",")}|${review?.findings.length ?? 0}`);
 
   /** Reads the review again; the layer opens once, the first time there is something to show. */
   async function readReview() {
@@ -97,6 +186,15 @@
     open = initialOpen(work, review);
   }
 
+  /** Reads the work again after a change of the agent's tree; what is open stays open. */
+  async function reload() {
+    const result = await fetchWork(token, id);
+    if (!result.work) return;
+    work = result.work;
+    comments = result.work.comments ?? [];
+    editors = result.work.editors ?? [];
+  }
+
   onMount(async () => {
     const result = await fetchWork(token, id);
     if (!result.work) {
@@ -104,8 +202,17 @@
       return;
     }
     work = result.work;
+    comments = result.work.comments ?? [];
+    editors = result.work.editors ?? [];
     const initial = initialOpen(result.work, review);
     open = { ...initial, review: initial.review || open.review };
+  });
+
+  let seenStamp: string | null = null;
+  $effect(() => {
+    const current = stamp;
+    if (seenStamp !== null && seenStamp !== current && work) void reload();
+    seenStamp = current;
   });
 
   async function reveal(layer: LayerId) {
@@ -158,6 +265,12 @@
         break;
       case "t":
         if (terminal) onterminal(id);
+        break;
+      case "m":
+        armMerge();
+        break;
+      case "f":
+        fixOpen = true;
         break;
       case "Enter":
       case " ":
@@ -228,6 +341,36 @@
         {#if riskProblem}<p class="risknote failed" role="alert">{riskProblem}</p>{/if}
       </div>
     {/if}
+    <div class="actions" data-testid="actions">
+      <div class="buttons">
+        <button
+          type="button"
+          class="merge"
+          data-testid="merge"
+          disabled={merging || merged || work.agent?.finished_work === false}
+          onclick={merge}
+          title="The daemon merges it by the repository's method, with delivery evidence"
+          >{merged ? "Merged" : merging ? "Merging…" : `Merge into ${work.diff.base ?? "the base"}`}</button
+        >
+        <button type="button" data-testid="ask-fix" aria-expanded={fixOpen} onclick={() => (fixOpen = !fixOpen)}>
+          Ask for a fix{comments.length > 0 ? ` (${comments.length} ${comments.length === 1 ? "comment" : "comments"})` : ""}
+        </button>
+      </div>
+      {#if work.risk}<p class="automerge" data-testid="automerge">{autoMergeText(work.risk.auto_merge)}</p>{/if}
+      {#if said}
+        <p class="said-action {said.ok ? 'ok' : 'failed'}" role="status" data-testid="action-message">{said.text}</p>
+      {/if}
+      {#if fixOpen}
+        {#key itemsKey}
+          <FixPanel
+            {items}
+            onsend={sendFix}
+            onterminal={terminal ? () => onterminal(id) : null}
+            onclose={() => (fixOpen = false)}
+          />
+        {/key}
+      {/if}
+    </div>
     {#if !work.transcript.available}
       <p class="degraded" role="status" data-testid="degraded">
         Transcript unavailable ({work.transcript.reason}). Showing what git and the hooks know: no plan and no
@@ -382,14 +525,26 @@
         {#if work.files.length === 0}
           <p class="note">No diff to show.</p>
         {:else}
-          <DiffView files={work.files} truncated={work.diff.truncated} findings={review?.findings ?? []} />
+          <DiffView
+            files={work.files}
+            truncated={work.diff.truncated}
+            findings={review?.findings ?? []}
+            {comments}
+            {editors}
+            oncomment={saveComment}
+            ondeletecomment={removeComment}
+            onedit={edit}
+          />
         {/if}
       </Layer>
     </div>
 
+    <Journal entries={journalOf(journal, work.diff.branch)} {now} title="Done on this change" />
+
     <p class="keys">
       <kbd>j</kbd>/<kbd>k</kbd> layers · <kbd>Enter</kbd> fold · <kbd>n</kbd> next layer · <kbd>o</kbd> open all ·
-      <kbd>c</kbd> close all · {#if terminal}<kbd>t</kbd> terminal · {/if}<kbd>Esc</kbd> back
+      <kbd>c</kbd> close all · <kbd>m</kbd> <kbd>m</kbd> merge · <kbd>f</kbd> ask for a fix ·
+      {#if terminal}<kbd>t</kbd> terminal · {/if}<kbd>Esc</kbd> back
     </p>
   {/if}
 </div>
@@ -441,6 +596,52 @@
   .layers {
     display: grid;
     gap: 10px;
+  }
+  .actions {
+    display: grid;
+    gap: 8px;
+  }
+  .actions .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .actions button {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 7px;
+    padding: 5px 14px;
+    cursor: pointer;
+  }
+  .actions button.merge {
+    border-color: var(--finished);
+    color: var(--finished);
+    font-weight: 600;
+  }
+  .actions button:hover:not(:disabled),
+  .actions button:focus-visible {
+    border-color: var(--accent);
+    outline: none;
+  }
+  .actions button:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .automerge {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .said-action {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  .said-action.ok {
+    color: var(--finished);
+  }
+  .said-action.failed {
+    color: var(--danger);
   }
   .risk {
     display: flex;

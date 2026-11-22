@@ -68,6 +68,7 @@
   - [0038. Held permissions and questions](adr/0038-a-permission-or-a-question-is-held-until-the-person-decides.md)
   - [0039. The pre-review is `/code-review`, an opinion](adr/0039-the-pre-review-is-claude-codes-code-review-and-an-opinion.md)
   - [0040. A finished change is read in layers](adr/0040-a-finished-change-is-read-in-layers.md)
+  - [0041. Actions on a finished change](adr/0041-actions-on-a-finished-change-and-how-a-fix-reaches-the-agent.md)
   - [Template](adr/template.md)
 
 # Project

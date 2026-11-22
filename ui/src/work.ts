@@ -1,5 +1,6 @@
 // The layers of a finished change (crates/volee-daemon/src/work/mod.rs).
 
+import type { EditorOption, LineComment } from "./actions";
 import type { Review } from "./review";
 import type { RiskView, RuleLayer } from "./risk";
 
@@ -84,6 +85,12 @@ export interface Work {
   diagram: string;
   /** The risk of the change and the layers the rules open; absent when the daemon has no rules. */
   risk?: RiskView | null;
+  /** The person's comments on lines of this tip. */
+  comments?: LineComment[];
+  /** The person's editors, from the rules. */
+  editors?: EditorOption[];
+  /** What the agent is now: whether a message can reach it, and whether it has work to merge. */
+  agent?: { alive: boolean; pid: number | null; finished_work: boolean };
 }
 
 /** The layers, in the order a reader opens them. */

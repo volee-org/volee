@@ -69,6 +69,8 @@ pub(crate) struct Info {
     pub(crate) warnings: Vec<String>,
     /// The repository's file is present and not trusted.
     pub(crate) restricted: bool,
+    /// The person's editors (`editors` in the rules).
+    pub(crate) editors: Vec<volee_rules::Editor>,
 }
 
 enum Job {
@@ -162,6 +164,7 @@ impl Loaded {
                     errors: rules.errors().to_vec(),
                     warnings: rules.warnings().to_vec(),
                     restricted: rules.is_restricted(),
+                    editors: rules.editors().to_vec(),
                 });
             }
         }
@@ -404,6 +407,7 @@ impl RulesService {
             }],
             warnings: Vec::new(),
             restricted: false,
+            editors: Vec::new(),
         })
     }
 

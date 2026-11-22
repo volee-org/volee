@@ -65,6 +65,9 @@ pub struct EvidenceSources {
     /// How often each branch's pull request is looked up, at most, except
     /// right after its agent stopped.
     pub forge_interval: Duration,
+    /// Where fix requests are delivered and confirmed (the default is the
+    /// real Claude Code).
+    pub fix: crate::actions::FixSources,
 }
 
 impl EvidenceSources {
@@ -97,6 +100,7 @@ impl Default for EvidenceSources {
             refresh_interval: Self::DEFAULT_REFRESH_INTERVAL,
             fetch_interval: Self::DEFAULT_FETCH_INTERVAL,
             forge_interval: Self::DEFAULT_FORGE_INTERVAL,
+            fix: crate::actions::FixSources::default(),
         }
     }
 }
@@ -104,6 +108,7 @@ impl Default for EvidenceSources {
 impl std::fmt::Debug for EvidenceSources {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EvidenceSources")
+            .field("fix", &self.fix)
             .field("git", &self.git.is_some())
             .field("forge", &self.forge.is_some())
             .field("repos", &self.settings.repos.len())

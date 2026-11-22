@@ -79,6 +79,8 @@ pub(crate) struct Shared {
     /// carried out once.
     pub(crate) concluding: std::sync::Mutex<std::collections::HashSet<volee_core::MissionId>>,
     pub(crate) settings: volee_config::Config,
+    /// Where fix requests are delivered and confirmed.
+    pub(crate) fix: crate::actions::FixSources,
     pub(crate) paths: Paths,
     /// The agents view, when configured and Claude Code is available.
     pub(crate) agents: Option<Arc<crate::agents_view::Agents>>,
@@ -172,6 +174,7 @@ impl Daemon {
             forge_client: config.evidence.forge.clone(),
             concluding: std::sync::Mutex::default(),
             settings: config.evidence.settings.clone(),
+            fix: config.evidence.fix.clone(),
             paths: config.paths,
             agents: agents.clone(),
             presence: crate::join::Presence::default(),
@@ -203,11 +206,13 @@ impl Daemon {
                     stop.clone(),
                 ))
             });
-        let hooks = start_hook_server(
+        let (hooks, merging) = start_hook_server(
             config.hook_server,
             shared.agents.clone(),
             reviews,
             Arc::clone(&rules),
+            &shared,
+            &stop,
         )
         .await?;
         // A mission the person approved while the daemon was stopping, or
@@ -234,6 +239,7 @@ impl Daemon {
             refresher,
             Some(files),
             hooks,
+            merging,
             polling,
             following,
             reviewing,
@@ -280,9 +286,17 @@ async fn start_hook_server(
     agents: Option<Arc<crate::agents_view::Agents>>,
     reviews: Option<Arc<crate::review::Reviews>>,
     rules: Arc<crate::rules::RulesService>,
-) -> Result<Option<tokio::task::JoinHandle<()>>, DaemonError> {
+    shared: &Arc<Shared>,
+    stop: &watch::Receiver<bool>,
+) -> Result<
+    (
+        Option<tokio::task::JoinHandle<()>>,
+        Option<tokio::task::JoinHandle<()>>,
+    ),
+    DaemonError,
+> {
     let Some(hook_config) = config else {
-        return Ok(None);
+        return Ok((None, None));
     };
     let listener = crate::hook_server::bind(&hook_config).await?;
     let store = volee_store::Store::open(&hook_config.database).map_err(|error| {
@@ -298,18 +312,71 @@ async fn start_hook_server(
             None
         }
     };
-    let web = agents.map(|agents| {
+    let mut web = agents.clone().map(|agents| {
         crate::web::Web::detect(agents, decisions)
             .with_reviews(reviews)
-            .with_assessments(assessments)
+            .with_assessments(assessments.clone())
     });
-    Ok(Some(tokio::spawn(async move {
-        if let Err(error) =
-            crate::hook_server::serve_with_web(listener, hook_config.token, store, web).await
-        {
-            tracing::error!(%error, "the hook server stopped");
+    // The actions on finished changes: merge, fix, comments, editors.
+    let mut merging = None;
+    if let (Some(web_ref), Some(assessments), Some(agents)) = (web.as_mut(), assessments, agents) {
+        let methods = shared
+            .settings
+            .repos
+            .values()
+            .filter_map(|repo| {
+                let method = match repo.merge? {
+                    volee_config::MergeMethod::Merge => volee_git::MergeMethod::Merge,
+                    volee_config::MergeMethod::Squash => volee_git::MergeMethod::Squash,
+                    volee_config::MergeMethod::Rebase => volee_git::MergeMethod::Rebase,
+                };
+                Some((repo.path.clone(), method))
+            })
+            .collect();
+        let parts = crate::actions::Parts {
+            git: shared.git.clone(),
+            forge: shared.forge_client.clone(),
+            methods,
+            resumer: Arc::new(crate::actions::fix::ClaudeCli {
+                program: shared.settings.review.command.clone(),
+            }),
+            timing: {
+                let mut timing = crate::actions::fix::Timing::default();
+                if let Some(dir) = &shared.fix.socket_dir {
+                    timing.socket_dir.clone_from(dir);
+                }
+                if let Some(within) = shared.fix.confirm_within {
+                    timing.confirm_within = within;
+                }
+                timing
+            },
+            assessments,
+            agents: Arc::clone(&agents),
+            projects: shared.fix.projects.clone().or_else(|| web_ref.projects()),
+        };
+        match crate::actions::Actions::open(parts, &hook_config.database) {
+            Ok(actions) => {
+                let actions = Arc::new(actions);
+                merging = Some(tokio::spawn(crate::actions::watch_auto_merge(
+                    Arc::clone(&actions),
+                    agents,
+                    stop.clone(),
+                )));
+                *web_ref = web_ref.clone().with_actions(Some(actions));
+            }
+            Err(error) => tracing::warn!(%error, "the actions on finished changes are unavailable"),
         }
-    })))
+    }
+    Ok((
+        Some(tokio::spawn(async move {
+            if let Err(error) =
+                crate::hook_server::serve_with_web(listener, hook_config.token, store, web).await
+            {
+                tracing::error!(%error, "the hook server stopped");
+            }
+        })),
+        merging,
+    ))
 }
 
 /// Replays hook events recorded while the daemon was down. Records that no

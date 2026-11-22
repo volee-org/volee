@@ -3,6 +3,7 @@
 
   import Card from "./Card.svelte";
   import DecisionCard from "./DecisionCard.svelte";
+  import Journal from "./Journal.svelte";
   import { workIdFromHash } from "./work";
   import WorkScreen from "./Work.svelte";
   import { decide, type DecisionBody, follow, openTerminal, readToken, type Status } from "./live";
@@ -162,6 +163,9 @@
       title={workCard ? title(workCard) : workId.slice(0, 8)}
       terminal={inbox.terminal}
       brief={workCard?.review ?? null}
+      stamp={workCard ? `${workCard.diff?.files}:${workCard.diff?.insertions}:${workCard.diff?.deletions}:${workCard.ahead}:${workCard.dirty}` : ""}
+      journal={inbox.journal}
+      {now}
       onback={leaveWork}
       onterminal={openById}
     />
@@ -225,6 +229,7 @@
         <p class="others">{inbox.others} other {inbox.others === 1 ? "agent" : "agents"} running, nothing to decide.</p>
       {/if}
     {/if}
+    <Journal entries={inbox.journal} {now} />
   {/if}
 </main>
 
