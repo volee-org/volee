@@ -192,8 +192,14 @@ Subagent and task events count as neither activity nor stop: on 2.1.330 the
 subagent that writes the suggested next prompt stops a few seconds after the
 turn's `Stop`, and counting it made a finished agent look busy.
 
-The base branch is the repository's default branch (`origin/HEAD`, else
-`main`, `master` or `develop`). A merge is recognized when the last tip the
+The base branch is the one the agent's branch was created from, when that
+can be known, taken from the first of these that names an existing branch: the
+branch it tracks (`branch.<name>.merge`), the branch its reflog says it was
+"Created from", the nearest local branch (fewest commits the branch has and
+the candidate lacks, then the reverse, the default branch winning a tie).
+Otherwise it is the repository's default branch (`origin/HEAD`, else `main`,
+`master` or `develop`). `volee agents` shows it as `from <base>`, with a `?`
+when it is only the nearest branch or the default one. A merge is recognized when the last tip the
 daemon saw with commits of its own is now part of the base: that memory lives
 in the daemon and starts over with it. A squash merge of several commits
 cannot be seen in the history. The rule is meant to be replaced by the Lua

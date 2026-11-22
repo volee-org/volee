@@ -120,7 +120,16 @@ fn place(card: &AgentCard) -> String {
     } else {
         ""
     };
-    format!("{} \u{203a} {branch}{tree}", text::one_line(&repo.name))
+    // Where the branch came from; a `?` when that is only a guess.
+    let base = match (repo.base.as_deref(), repo.base_source.as_deref()) {
+        (Some(base), Some("default" | "nearest")) => format!(" from {}?", text::one_line(base)),
+        (Some(base), _) => format!(" from {}", text::one_line(base)),
+        (None, _) => String::new(),
+    };
+    format!(
+        "{} \u{203a} {branch}{tree}{base}",
+        text::one_line(&repo.name)
+    )
 }
 
 /// `ahead`, `behind` and uncommitted changes against the base branch.
@@ -199,6 +208,7 @@ mod tests {
             worktree: Some(PathBuf::from("/work/alpha/.claude/worktrees/feat")),
             branch: Some("feat/invoices".into()),
             base: Some("main".into()),
+            base_source: Some("reflog".into()),
         });
         card.git = Some(GitFacts {
             ahead: 2,
@@ -227,7 +237,7 @@ mod tests {
         let table = render(&view);
         assert!(table.starts_with("NAME"), "{table}");
         assert!(
-            table.contains("alpha \u{203a} feat/invoices (worktree)"),
+            table.contains("alpha \u{203a} feat/invoices (worktree) from main"),
             "{table}"
         );
         assert!(table.contains("\u{2191}2 \u{2193}1"), "{table}");

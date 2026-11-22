@@ -19,7 +19,7 @@ use volee_core::finished::{Activity, BranchWork, HookKind, classify_hook, is_fin
 use volee_core::reconcile::ListedSession;
 use volee_core::state::{AgentState, InputRequest, StateCategory};
 use volee_core::time::Timestamp;
-use volee_git::{DeliveryQuery, Git};
+use volee_git::{BaseGuess, BaseSource, DeliveryQuery, Git};
 use volee_harness::Harness;
 use volee_proto::methods::{AgentCard, AgentsView, GitFacts, HookFacts, RepoFacts};
 use volee_store::{HookFilter, Store};
@@ -315,13 +315,26 @@ fn git_facts(
         Ok(None) => return Ok(None),
         Err(error) => return Err(error.to_string()),
     };
-    let base = git.default_branch(&info.main_checkout).ok().flatten();
+    // The base of the branch the agent is on, else the default branch.
+    let guess = match &info.branch {
+        Some(branch) => git.base_of(&info.main_checkout, branch).ok().flatten(),
+        None => git
+            .default_branch(&info.main_checkout)
+            .ok()
+            .flatten()
+            .map(|branch| BaseGuess {
+                branch,
+                source: BaseSource::Default,
+            }),
+    };
+    let base = guess.as_ref().map(|guess| guess.branch.clone());
     let repo = RepoFacts {
         name: info.name.clone(),
         root: info.main_checkout.clone(),
         worktree: info.is_linked_worktree.then(|| info.top_level.clone()),
         branch: info.branch.clone(),
         base: base.clone(),
+        base_source: guess.map(|guess| guess.source.label().to_owned()),
     };
     let (Some(branch), Some(base)) = (&info.branch, &base) else {
         return Ok(Some((repo, None)));

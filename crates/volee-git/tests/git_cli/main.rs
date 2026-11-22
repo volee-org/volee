@@ -6,6 +6,7 @@
 
 mod fixture;
 
+mod base;
 mod delivery;
 mod diff;
 mod errors;

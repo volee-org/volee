@@ -345,3 +345,56 @@ async fn a_subagent_that_stops_after_the_stop_does_not_undo_finished_work() {
     assert_eq!(card.hooks.last_event.as_deref(), Some("SubagentStop"));
     assert!(card.finished_work);
 }
+
+#[tokio::test]
+async fn the_base_is_the_branch_the_agents_branch_was_created_from_not_the_default() {
+    let daemon = start(true);
+    // `develop` is two commits ahead of main, and the agent's branch is made
+    // from it, then adds one commit of its own.
+    git(&daemon.repo, &["branch", "develop"]);
+    let develop = daemon.repo.parent().unwrap().join("alpha-develop");
+    git(
+        &daemon.repo,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            develop.to_str().unwrap(),
+            "develop",
+        ],
+    );
+    for file in ["one.rs", "two.rs"] {
+        std::fs::write(develop.join(file), "x\n").unwrap();
+        git(&develop, &["add", file]);
+        git(&develop, &["commit", "--quiet", "-m", file]);
+    }
+    let sub = daemon.repo.parent().unwrap().join("alpha-sub");
+    git(
+        &daemon.repo,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "feat/sub",
+            sub.to_str().unwrap(),
+            "develop",
+        ],
+    );
+    std::fs::write(sub.join("sub.rs"), "sub\n").unwrap();
+    git(&sub, &["add", "sub.rs"]);
+    git(&sub, &["commit", "--quiet", "-m", "Add sub"]);
+    daemon
+        .harness
+        .set(vec![session(ID, &sub, AgentState::Idle)]);
+    let card = only_card(&daemon).await;
+    let repo = card.repo.unwrap();
+    assert_eq!(repo.base.as_deref(), Some("develop"));
+    assert_eq!(repo.base_source.as_deref(), Some("reflog"));
+    let facts = card.git.unwrap();
+    assert_eq!(
+        facts.ahead, 1,
+        "one commit against develop, not three against main"
+    );
+    assert_eq!(facts.diff.files, 1);
+}

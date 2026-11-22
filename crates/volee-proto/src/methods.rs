@@ -746,8 +746,13 @@ pub struct RepoFacts {
     pub worktree: Option<std::path::PathBuf>,
     /// The checked-out branch; `None` when `HEAD` is detached.
     pub branch: Option<String>,
-    /// The branch the work goes into, as git resolved it.
+    /// The branch the work goes into: the one the agent's branch was
+    /// created from when that can be known, else the default branch.
     pub base: Option<String>,
+    /// How `base` is known: `upstream`, `reflog`, `nearest` or `default`
+    /// (a guess, the weakest).
+    #[serde(default)]
+    pub base_source: Option<String>,
 }
 
 /// What git says of an agent's branch against its base.

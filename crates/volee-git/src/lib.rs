@@ -275,6 +275,57 @@ pub trait Git: Send + Sync {
     /// when there is no `origin` remote or its URL names no `owner/name`,
     /// such as a path on this machine.
     fn origin(&self, repo: &Path) -> Result<Option<RepoSlug>, GitError>;
+
+    /// The branch `branch` was most likely created from, and how that is
+    /// known; the first of these that gives a branch that exists:
+    ///
+    /// 1. [`BaseSource::Upstream`]: the branch it tracks
+    ///    (`branch.<name>.merge`), when that is another branch.
+    /// 2. [`BaseSource::Reflog`]: the branch the reflog says it was "Created
+    ///    from".
+    /// 3. [`BaseSource::Nearest`]: the local branch the branch is closest to:
+    ///    the fewest commits that the branch has and the candidate lacks,
+    ///    then the fewest that the candidate has and the branch lacks, the
+    ///    default branch winning a tie.
+    /// 4. [`BaseSource::Default`]: the [default branch](Git::default_branch).
+    ///
+    /// `None` when nothing is known: no branch of that name and no default.
+    fn base_of(&self, repo: &Path, branch: &str) -> Result<Option<BaseGuess>, GitError>;
+}
+
+/// A guess at the branch another branch was created from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BaseGuess {
+    /// The base branch, without `refs/heads/` or `origin/`.
+    pub branch: String,
+    /// How it is known.
+    pub source: BaseSource,
+}
+
+/// How a [base branch](BaseGuess) is known, from the surest to the weakest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BaseSource {
+    /// The branch the base tracks.
+    Upstream,
+    /// The branch the reflog says it was created from.
+    Reflog,
+    /// The nearest local branch by commits.
+    Nearest,
+    /// The repository's default branch: nothing better is known.
+    Default,
+}
+
+impl BaseSource {
+    /// The name used in listings and JSON.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Upstream => "upstream",
+            Self::Reflog => "reflog",
+            Self::Nearest => "nearest",
+            Self::Default => "default",
+        }
+    }
 }
 
 /// Where a directory sits in a git repository: see [`Git::repo_info`].

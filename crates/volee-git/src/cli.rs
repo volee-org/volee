@@ -13,8 +13,8 @@ use volee_core::delivery::{Delivery, DiffStat, PushState};
 use crate::command::{Completed, Request, Runner};
 use crate::parse::{self, StatusSummary};
 use crate::{
-    DeliveryQuery, DeliveryReport, DiffFormat, DiffOutput, Git, GitError, Head, MergeRefusal,
-    NewWorktree, RemovalRefusal, RepoInfo, RepoSlug, WorktreeInfo,
+    BaseGuess, BaseSource, DeliveryQuery, DeliveryReport, DiffFormat, DiffOutput, Git, GitError,
+    Head, MergeRefusal, NewWorktree, RemovalRefusal, RepoInfo, RepoSlug, WorktreeInfo,
 };
 
 /// The most untracked files [`Git::diff`] lists or shows. The others are
@@ -170,6 +170,123 @@ impl GitCli {
             Some(1) => Ok(None),
             _ => Err(completed.failure()),
         }
+    }
+
+    /// Whether `name` is a branch of the repository: local, or on `origin`.
+    fn branch_exists(&self, dir: &Path, name: &str) -> Result<bool, GitError> {
+        if name.is_empty() {
+            return Ok(false);
+        }
+        Ok(self
+            .commit_of(dir, &format!("refs/heads/{name}"))?
+            .or(self.commit_of(dir, &format!("refs/remotes/origin/{name}"))?)
+            .is_some())
+    }
+
+    /// A git setting of `branch`, such as `merge`; `None` when unset.
+    fn branch_setting(
+        &self,
+        dir: &Path,
+        branch: &str,
+        key: &str,
+    ) -> Result<Option<String>, GitError> {
+        let completed = self
+            .git(dir)
+            .args(["config", "--get", &format!("branch.{branch}.{key}")])
+            .run()?;
+        match completed.code {
+            Some(0) => Ok(Some(completed.text()?.trim().to_owned()).filter(|v| !v.is_empty())),
+            Some(1) => Ok(None),
+            _ => Err(completed.failure()),
+        }
+    }
+
+    /// The branch `branch` tracks, when it is another branch of the
+    /// repository (a branch that tracks its own copy on the remote says
+    /// nothing about where it came from).
+    fn upstream_base(&self, dir: &Path, branch: &str) -> Result<Option<String>, GitError> {
+        let Some(merge) = self.branch_setting(dir, branch, "merge")? else {
+            return Ok(None);
+        };
+        let Some(name) = merge.strip_prefix("refs/heads/") else {
+            return Ok(None);
+        };
+        if name == branch || !self.branch_exists(dir, name)? {
+            return Ok(None);
+        }
+        Ok(Some(name.to_owned()))
+    }
+
+    /// The branch the reflog of `branch` says it was created from, when
+    /// that is a branch of the repository (not `HEAD`, not a commit).
+    fn reflog_base(&self, dir: &Path, branch: &str) -> Result<Option<String>, GitError> {
+        let completed = self
+            .git(dir)
+            .args([
+                "reflog",
+                "show",
+                "--format=%gs",
+                &format!("refs/heads/{branch}"),
+            ])
+            .run()?;
+        if completed.code != Some(0) {
+            return Ok(None);
+        }
+        let text = completed.text()?;
+        // Newest first: the creation is the last line.
+        let Some(from) = text
+            .lines()
+            .rev()
+            .find_map(|line| line.trim().strip_prefix("branch: Created from "))
+        else {
+            return Ok(None);
+        };
+        let name = from.trim().strip_prefix("origin/").unwrap_or(from.trim());
+        if name == branch || name == "HEAD" || !self.branch_exists(dir, name)? {
+            return Ok(None);
+        }
+        Ok(Some(name.to_owned()))
+    }
+
+    /// The local branch closest to `branch` (whose tip is `tip`), looking at
+    /// the first [`NEAREST_CANDIDATES`] branches.
+    fn nearest_branch(
+        &self,
+        dir: &Path,
+        branch: &str,
+        tip: &str,
+        default: Option<&str>,
+    ) -> Result<Option<String>, GitError> {
+        let names = self
+            .git(dir)
+            .args(["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+            .run()?
+            .success()?
+            .text()?;
+        let mut candidates: Vec<&str> = names
+            .lines()
+            .map(str::trim)
+            .filter(|n| !n.is_empty() && *n != branch)
+            .collect();
+        // The default branch is always looked at, however many there are.
+        candidates.sort_by_key(|name| (default != Some(*name), *name));
+        candidates.truncate(NEAREST_CANDIDATES);
+        let mut best: Option<((u32, u32, bool), String)> = None;
+        for name in candidates {
+            let Some(candidate) = self.commit_of(dir, &format!("refs/heads/{name}"))? else {
+                continue;
+            };
+            if self.merge_base(dir, &candidate, tip)?.is_none() {
+                continue;
+            }
+            let ahead = self.count_commits(dir, tip, Some(&candidate))?;
+            let behind = self.count_commits(dir, &candidate, Some(tip))?;
+            let key = (ahead, behind, default != Some(name));
+            if best.as_ref().is_none_or(|(known, _)| key < *known) {
+                best = Some((key, name.to_owned()));
+            }
+        }
+        Ok(best.map(|(_, name)| name))
     }
 
     /// The branch to compare with: `origin/<base>` when it exists, `<base>`
@@ -1012,6 +1129,25 @@ impl Git for GitCli {
         Ok(())
     }
 
+    fn base_of(&self, repo: &Path, branch: &str) -> Result<Option<BaseGuess>, GitError> {
+        let Some(tip) = self.commit_of(repo, &format!("refs/heads/{branch}"))? else {
+            return Ok(self
+                .default_branch(repo)?
+                .map(|branch| guess(branch, BaseSource::Default)));
+        };
+        if let Some(base) = self.upstream_base(repo, branch)? {
+            return Ok(Some(guess(base, BaseSource::Upstream)));
+        }
+        if let Some(base) = self.reflog_base(repo, branch)? {
+            return Ok(Some(guess(base, BaseSource::Reflog)));
+        }
+        let default = self.default_branch(repo)?;
+        if let Some(base) = self.nearest_branch(repo, branch, &tip, default.as_deref())? {
+            return Ok(Some(guess(base, BaseSource::Nearest)));
+        }
+        Ok(default.map(|branch| guess(branch, BaseSource::Default)))
+    }
+
     fn origin(&self, repo: &Path) -> Result<Option<RepoSlug>, GitError> {
         let completed = self.git(repo).args(["remote", "get-url", "origin"]).run()?;
         match completed.code {
@@ -1023,6 +1159,13 @@ impl Git for GitCli {
             _ => Err(completed.failure()),
         }
     }
+}
+
+/// How many local branches [`GitCli::base_of`] compares a branch with at most.
+const NEAREST_CANDIDATES: usize = 40;
+
+fn guess(branch: String, source: BaseSource) -> BaseGuess {
+    BaseGuess { branch, source }
 }
 
 /// A base branch, resolved to a commit.
