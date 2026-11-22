@@ -6,6 +6,7 @@
 //! | `GET /` and the bundle's files | no | the page (it reads the token from its address) |
 //! | `GET /api/inbox` | yes | the inbox, as JSON |
 //! | `GET /api/events` | yes | the inbox now, then again each time it changes |
+//! | `GET /api/agents/{id}/work` | yes | the layers of an agent's finished work |
 //! | `POST /api/agents/{id}/terminal` | yes | focuses the agent's terminal |
 //! | `POST /api/decisions/{id}` | yes | decides a held permission or question |
 //! | `GET /api/agents/{id}/review` | yes | the AI pre-review of the agent's branch tip (an opinion) |
@@ -46,6 +47,8 @@ pub(crate) struct Web {
     terminal: Option<Arc<dyn Terminal>>,
     decisions: Arc<Decisions>,
     reviews: Option<Arc<Reviews>>,
+    /// Claude Code's projects directory, where transcripts live.
+    projects: Option<std::path::PathBuf>,
 }
 
 impl Web {
@@ -60,11 +63,24 @@ impl Web {
                 std::env::var(name).ok()
             })
         });
+        let projects = std::env::var_os("CLAUDE_CONFIG_DIR")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|home| std::path::Path::new(&home).join(".claude"))
+            })
+            .map(|dir| dir.join("projects"));
         Self::new(
             agents,
             terminal.map(|rex| Arc::new(rex) as Arc<dyn Terminal>),
             decisions,
         )
+        .with_projects(projects)
+    }
+
+    /// Reads transcripts from `projects` (Claude Code's `projects` directory).
+    pub(crate) fn with_projects(mut self, projects: Option<std::path::PathBuf>) -> Self {
+        self.projects = projects;
+        self
     }
 
     pub(crate) fn new(
@@ -77,6 +93,7 @@ impl Web {
             terminal,
             decisions,
             reviews: None,
+            projects: None,
         }
     }
 
@@ -122,6 +139,7 @@ pub(crate) fn router(token: Arc<str>, web: Web) -> Router {
     Router::new()
         .route("/api/inbox", get(get_inbox))
         .route("/api/events", get(events))
+        .route("/api/agents/{id}/work", get(get_work))
         .route("/api/agents/{id}/terminal", post(open_terminal))
         .route("/api/decisions/{id}", post(decide))
         .route(
@@ -260,6 +278,36 @@ async fn decide(
         Err(DecideError::Invalid(message)) => (
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({ "ok": false, "message": message })),
+        )
+            .into_response(),
+    }
+}
+
+/// The layers of an agent's work: summary, plan, files, diagram, diff. Always
+/// answers when the agent exists; what could not be read is said inside.
+async fn get_work(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !allowed(&shared, &headers, None) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let view = shared.web.agents.latest().await;
+    let Some(agent) = view.agents.into_iter().find(|agent| agent.session_id == id) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "ok": false, "message": "this agent is gone" })),
+        )
+            .into_response();
+    };
+    let projects = shared.web.projects.clone();
+    match tokio::task::spawn_blocking(move || crate::work::build(&agent, projects.as_deref())).await
+    {
+        Ok(work) => Json(work).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "ok": false, "message": error.to_string() })),
         )
             .into_response(),
     }

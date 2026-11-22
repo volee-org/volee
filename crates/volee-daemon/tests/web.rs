@@ -255,3 +255,52 @@ async fn opening_a_terminal_of_an_unknown_agent_says_so() {
     assert_eq!(status, 404, "{body}");
     assert!(body.contains("\"ok\":false"), "{body}");
 }
+
+#[tokio::test]
+async fn the_work_of_an_agent_needs_the_token_and_an_agent() {
+    let daemon = start().await;
+    let host = daemon.addr.to_string();
+    let (status, ..) = get(daemon.addr, "GET", "/api/agents/s9/work", &host, None).await;
+    assert_eq!(status, 401);
+    let (status, _, body) = get(
+        daemon.addr,
+        "GET",
+        "/api/agents/ghost/work",
+        &host,
+        Some(TOKEN),
+    )
+    .await;
+    assert_eq!(status, 404, "{body}");
+    assert!(body.contains("\"ok\":false"), "{body}");
+}
+
+#[tokio::test]
+async fn the_work_of_an_agent_outside_a_repository_degrades_to_what_is_known() {
+    let daemon = start().await;
+    daemon.harness.set(vec![blocked("s7", &daemon.cwd)]);
+    let host = daemon.addr.to_string();
+    let mut found = None;
+    for _ in 0..50 {
+        let (status, _, body) = get(
+            daemon.addr,
+            "GET",
+            "/api/agents/s7/work",
+            &host,
+            Some(TOKEN),
+        )
+        .await;
+        if status == 200 {
+            found = Some(serde_json::from_str::<serde_json::Value>(&body).unwrap());
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let work = found.expect("the agent shows up");
+    assert_eq!(work["id"], "s7");
+    // Not a repository and no transcript: the screen says so, it does not fail.
+    assert_eq!(work["transcript"]["available"], false);
+    assert!(work["diff"]["error"].is_string(), "{work}");
+    assert_eq!(work["files"].as_array().unwrap().len(), 0);
+    assert!(work["diagram"].as_str().unwrap().starts_with("flowchart"));
+    assert_eq!(work["summary"]["source"], "git");
+}
