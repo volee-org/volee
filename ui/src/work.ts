@@ -93,6 +93,13 @@ export interface Work {
   agent?: { alive: boolean; pid: number | null; finished_work: boolean };
 }
 
+/** Whether two readings show the same change: the same diff, commits and comments. */
+export function sameChange(a: Work, b: Work): boolean {
+  const key = (work: Work) =>
+    JSON.stringify([work.files.map((file) => [file.path, file.patch]), work.commits, work.diff, work.comments ?? []]);
+  return key(a) === key(b);
+}
+
 /** The layers, in the order a reader opens them. */
 export const LAYERS = ["summary", "review", "plan", "points", "files", "diagram", "diff"] as const;
 export type LayerId = (typeof LAYERS)[number];

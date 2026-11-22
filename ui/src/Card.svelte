@@ -12,9 +12,13 @@
     onopen: (card: Card) => void;
     /** Opens the screen of a finished card; waiting cards have none. */
     onread?: (card: Card) => void;
+    /** Merges the work from the card: offered for a low risk change only, which a glance is enough for. */
+    onmerge?: (card: Card) => void;
     note?: string;
   }
-  let { card, now, terminal, onopen, onread, note = "" }: Props = $props();
+  let { card, now, terminal, onopen, onread, onmerge, note = "" }: Props = $props();
+
+  const mergeable = $derived(card.kind === "finished" && card.risk?.level === "low" && onmerge !== undefined);
 
   const reviewBadge = $derived(badge(card.review));
   const readable = $derived(card.kind === "finished" && onread !== undefined);
@@ -77,6 +81,11 @@
     <footer>
       {#if readable}
         <button type="button" class="read" onclick={() => onread?.(card)}>Read the work</button>
+      {/if}
+      {#if mergeable}
+        <button type="button" class="merge" data-testid="card-merge" title="Low risk: merge it now, the daemon checks the result" onclick={() => onmerge?.(card)}
+          >Merge into {card.base ?? "the base"}</button
+        >
       {/if}
       {#if terminal}
         <button type="button" onclick={() => onopen(card)}>Open terminal</button>
@@ -214,6 +223,15 @@
     border-radius: 7px;
     padding: 4px 12px;
     cursor: pointer;
+  }
+  button.merge {
+    border-color: var(--finished);
+    color: var(--finished);
+  }
+  button.merge:hover,
+  button.merge:focus-visible {
+    background: var(--finished);
+    color: var(--accent-text);
   }
   button:hover,
   button:focus-visible {

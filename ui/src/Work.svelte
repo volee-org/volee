@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
 
   import {
     addComment,
@@ -32,6 +32,7 @@
     moveLayer,
     nextClosed,
     planSourceText,
+    sameChange,
     stepMark,
     testsText,
     type Work,
@@ -118,6 +119,7 @@
   async function edit(editor: string, file: string, line: number) {
     const result = await openEditor(token, id, { editor, file, line });
     said = { ok: result.ok, text: result.message };
+    if (result.ok) watchSaves();
   }
 
   let review = $state<Review | null>(null);
@@ -190,10 +192,27 @@
   async function reload() {
     const result = await fetchWork(token, id);
     if (!result.work) return;
+    // Nothing moved: keep what is on screen (a comment being typed stays).
+    if (work && sameChange(work, result.work)) return;
     work = result.work;
     comments = result.work.comments ?? [];
     editors = result.work.editors ?? [];
   }
+
+  /** After "Open in <editor>": the saved file shows in the diff, whenever the person saves it. */
+  let watching: ReturnType<typeof setInterval> | undefined;
+  function watchSaves() {
+    clearInterval(watching);
+    const until = Date.now() + 10 * 60_000;
+    watching = setInterval(() => {
+      if (Date.now() > until) clearInterval(watching);
+      else void reload();
+    }, 3000);
+  }
+  onDestroy(() => {
+    clearInterval(watching);
+    clearTimeout(armTimer);
+  });
 
   onMount(async () => {
     const result = await fetchWork(token, id);

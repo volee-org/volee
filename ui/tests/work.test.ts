@@ -9,6 +9,7 @@ import {
   nextClosed,
   patchOf,
   planSourceText,
+  sameChange,
   stepMark,
   testsText,
   type Work,
@@ -165,5 +166,19 @@ describe("fetchWork", () => {
       throw new Error("offline");
     }) as unknown as typeof fetch;
     expect((await fetchWork("t", "x", broken)).message).toContain("offline");
+  });
+});
+
+describe("a change read again", () => {
+  it("is the same change until a patch, a commit or a comment differs", () => {
+    const a = work({ files: [file({ path: "a.rs", patch: "+one\n" })] });
+    expect(sameChange(a, work({ files: [file({ path: "a.rs", patch: "+one\n" })] }))).toBe(true);
+    expect(sameChange(a, work({ files: [file({ path: "a.rs", patch: "+one\n+two\n" })] }))).toBe(false);
+    expect(sameChange(a, work({ files: a.files, commits: [{ sha: "abc", subject: "x" }] }))).toBe(false);
+    const commented = work({
+      files: a.files,
+      comments: [{ id: 1, file: "a.rs", line: 1, text: "hm", created_at: 1 }],
+    });
+    expect(sameChange(a, commented)).toBe(false);
   });
 });

@@ -3,6 +3,7 @@
 
   import Card from "./Card.svelte";
   import DecisionCard from "./DecisionCard.svelte";
+  import { mergeWork } from "./actions";
   import Journal from "./Journal.svelte";
   import { workIdFromHash } from "./work";
   import WorkScreen from "./Work.svelte";
@@ -104,6 +105,15 @@
 
   function open(card: CardData) {
     return openById(card.id);
+  }
+
+  /** Merges a low risk change from its card: the daemon merges, the journal and the card say how it went. */
+  async function mergeCard(card: CardData) {
+    if (!token) return;
+    notes[card.id] = "merging…";
+    const result = await mergeWork(token, card.id);
+    notes[card.id] = result.message || (result.ok ? "merged" : "not merged");
+    setTimeout(() => delete notes[card.id], 12000);
   }
 
   onMount(() => {
@@ -221,7 +231,7 @@
         <section data-section="finished">
           <h2>Finished work <span class="count">{groups.finished.length}</span></h2>
           {#each groups.finished as card (card.id)}
-            <Card {card} {now} terminal={inbox.terminal} onopen={open} onread={readWork} note={notes[card.id] ?? ""} />
+            <Card {card} {now} terminal={inbox.terminal} onopen={open} onread={readWork} onmerge={mergeCard} note={notes[card.id] ?? ""} />
           {/each}
         </section>
       {/if}
