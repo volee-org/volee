@@ -160,6 +160,23 @@ coordinator that reaches the limit gets a refusal that tells it to ask you.
 Workers also stay in the repositories the mission names: volee compares their
 main checkouts, never their directory names.
 
+## `[review]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Whether the daemon reviews finished work at all. |
+| `auto` | `true` | `true`: a branch is reviewed as soon as its agent has finished work. `false`: only when asked (`POST /api/agents/{id}/review`). |
+| `timeout` | `300` | Seconds one reviewer may run before it is stopped. |
+| `concurrency` | `1` | Reviews running at once. |
+| `command` | `"claude"` | The Claude Code program to run. |
+
+The review is Claude Code's `/code-review`, run read-only in the agent's
+worktree. Its findings are an opinion on the card, never a gate. The model
+and the number of reviewers come from the rules (`review.model`,
+`review.reviewers` in `rules.lua`; more reviewers when the risk is high), not
+from this table. A branch tip is reviewed once; see
+[ADR 0039](../adr/0039-the-pre-review-is-claude-codes-code-review-and-an-opinion.md).
+
 ## `[git]`
 
 | Key | Default | Meaning |

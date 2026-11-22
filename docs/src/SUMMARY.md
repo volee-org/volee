@@ -66,6 +66,7 @@
   - [0036. The web interface](adr/0036-the-web-interface-is-a-svelte-app-the-daemon-embeds.md)
   - [0037. Lua config and rules](adr/0037-lua-config-and-rules.md)
   - [0038. Held permissions and questions](adr/0038-a-permission-or-a-question-is-held-until-the-person-decides.md)
+  - [0039. The pre-review is `/code-review`, an opinion](adr/0039-the-pre-review-is-claude-codes-code-review-and-an-opinion.md)
   - [Template](adr/template.md)
 
 # Project

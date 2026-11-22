@@ -276,6 +276,13 @@ interface only.
 | `GET /api/events` | yes | Server-sent events: the inbox at once, then again each time it changes (the token may be passed as `?token=`, since `EventSource` sets no header). |
 | `POST /api/agents/{id}/terminal` | yes | Focuses the agent's terminal through the terminal adapter. |
 | `POST /api/decisions/{id}` | yes | Decides a held permission or question (see below): `404` when it is gone, `422` when the decision does not fit the card. |
+| `GET /api/agents/{id}/review` | yes | The AI pre-review of the agent's branch tip: `status` (`none`, `pending`, `running`, `done`, `failed`, `disabled`) and the findings (file, line, severity, summary, failure scenario). An opinion, never a gate. |
+| `POST /api/agents/{id}/review` | yes | Asks for it now: `202` queued, `200` the tip has one already, `409` off or skipped by the rules. `?retry=1` redoes a failed one. |
+
+**The pre-review** (`review.rs`, [ADR 0039](../adr/0039-the-pre-review-is-claude-codes-code-review-and-an-opinion.md))
+runs Claude Code's `/code-review` in the agent's worktree when finished work
+appears: read-only, no hooks, a session named `volee-review-...` that the
+agents view ignores, results kept in SQLite per `(repo, branch, tip)`.
 
 A request whose `Host` is not a loopback name is refused, and the page is
 served with a Content-Security-Policy that allows only its own files.
