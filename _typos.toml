@@ -11,6 +11,7 @@ extend-exclude = [
     "ui/package-lock.json",
     "ui/node_modules/",
     "ui/dist/",
+    "crates/*/tests/fixtures/",
     "**/snapshots/*.snap",
 ]
 
@@ -18,3 +19,4 @@ extend-exclude = [
 # Project and ecosystem names that look like typos.
 ratatui = "ratatui"
 volee = "volee"
+reste = "reste"

@@ -424,21 +424,34 @@ fn open_points(
     points
 }
 
-/// Lines of a final message that admit something left undone or surprising.
+/// What a final message admits is left: the lines under a heading such as
+/// "Not done" when it has one, else the lines that carry a cue ("did not",
+/// "n'ai pas"...). A heuristic, labelled as the agent's own words.
 fn stated_points(text: &str) -> Vec<String> {
-    const CUES: [&str; 22] = [
+    const SECTIONS: [&str; 14] = [
         "not done",
+        "not implemented",
+        "left undone",
+        "left to do",
+        "remaining",
+        "open point",
+        "caveat",
+        "limitation",
+        "todo",
+        "non fait",
+        "pas fait",
+        "reste à",
+        "restant",
+        "à faire",
+    ];
+    const CUES: [&str; 14] = [
         "didn't",
         "did not",
         "couldn't",
         "could not",
         "unable to",
         "skipped",
-        "remaining",
-        "left to do",
-        "todo",
         "not implemented",
-        "caveat",
         "n'ai pas",
         "pas pu",
         "pas fait",
@@ -446,18 +459,46 @@ fn stated_points(text: &str) -> Vec<String> {
         "restent",
         "à noter",
         "pas demandé",
-        "n'était pas",
-        "n'a pas",
-        "limitation",
     ];
+    let clean = |line: &str| {
+        line.trim()
+            .trim_start_matches(['-', '*', ' '])
+            .replace("**", "")
+            .trim()
+            .to_owned()
+    };
+    // A heading is a markdown heading, a line that is only bold, or a line
+    // that ends with a colon.
+    let is_heading = |line: &str| {
+        let line = line.trim();
+        line.starts_with('#')
+            || (line.starts_with("**") && line.ends_with("**") && line.len() > 4)
+            || (line.ends_with(':') && !line.starts_with(['-', '*']))
+    };
+    let mut under: Vec<String> = Vec::new();
+    let mut inside = false;
+    for line in text.lines() {
+        if is_heading(line) {
+            let lower = clean(line.trim_start_matches('#')).to_lowercase();
+            inside = SECTIONS.iter().any(|section| lower.contains(section));
+        } else if inside {
+            let item = clean(line);
+            if !item.is_empty() {
+                under.push(clip(&item, 240));
+            }
+        }
+    }
+    if !under.is_empty() {
+        return under;
+    }
     text.lines()
-        .map(|line| line.trim().trim_start_matches(['-', '*', ' ']).trim())
-        .filter(|line| !line.is_empty())
+        .map(clean)
+        .filter(|line| !line.is_empty() && !is_heading(line))
         .filter(|line| {
             let lower = line.to_lowercase();
             CUES.iter().any(|cue| lower.contains(cue))
         })
-        .map(|line| clip(&line.replace("**", ""), 240))
+        .map(|line| clip(&line, 240))
         .collect()
 }
 
@@ -616,7 +657,11 @@ mod tests {
             serde_json::json!({"type":"assistant","timestamp":"2020-01-01T00:00:03Z","message":{"content":[
                 {"type":"text","text":"Done: mul works. I did not run the linter."}]}}),
         ];
-        let text = lines.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n");
+        let text = lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
         std::fs::write(project.join("sess-1.jsonl"), text).unwrap();
 
         let work = build(&card(dir.path(), "sess-1", true), Some(projects.path()));
@@ -661,6 +706,24 @@ mod tests {
         assert!(work.diff.error.as_deref().unwrap().contains("base"));
         assert!(work.files.is_empty());
         assert!(work.diagram.contains("no file changed"));
+    }
+
+    #[test]
+    fn stated_points_prefer_the_section_that_lists_what_was_not_done() {
+        let text = "Done.\n\n**Choices**\n- I did not add a guard.\n\n**Not done**\n- No push.\n- Lock file untouched.\n\n**Next**\n- Merge it.";
+        assert_eq!(stated_points(text), ["No push.", "Lock file untouched."]);
+        let french = "Fait.\n\n**Non faits**\n- Pas de push\n\n**Choix**\n- x";
+        assert_eq!(stated_points(french), ["Pas de push"]);
+    }
+
+    #[test]
+    fn stated_points_fall_back_to_cue_lines() {
+        let text = "All good.\nI did not run the linter.\nI skipped the docs.\nThe end.";
+        assert_eq!(
+            stated_points(text),
+            ["I did not run the linter.", "I skipped the docs."]
+        );
+        assert!(stated_points("Everything is done.").is_empty());
     }
 
     #[test]

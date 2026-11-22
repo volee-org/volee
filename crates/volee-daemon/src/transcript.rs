@@ -816,9 +816,14 @@ pub(crate) fn numbered_steps(text: &str) -> Option<Vec<String>> {
             .get(index + 1)
             .map_or(chars.len(), |(start, _, _)| *start);
         let raw: String = chars[*from..to].iter().collect();
-        // The last step ends at the first blank line or sentence break.
+        // The last step ends at the first line break or sentence break: what
+        // follows it is the rest of the prompt, not another step.
         let step = if index + 1 == marks.len() {
-            raw.split("\n\n").next().unwrap_or(&raw).to_owned()
+            let first = raw.split('\n').next().unwrap_or(&raw);
+            first
+                .split_once(". ")
+                .map_or(first, |(head, _)| head)
+                .to_owned()
         } else {
             raw
         };
@@ -1097,6 +1102,11 @@ mod tests {
             3
         );
         assert_eq!(numbered_steps("1. a\n2. b").unwrap(), ["a", "b"]);
+        // The last step stops where the rest of the prompt begins.
+        assert_eq!(
+            numbered_steps("1) one 2) two and more. Then run the tests.").unwrap(),
+            ["one", "two and more"]
+        );
         assert!(numbered_steps("version 2.0 is out, see 3) here").is_none());
         assert!(numbered_steps("1. alone").is_none());
     }
