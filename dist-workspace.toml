@@ -29,3 +29,6 @@ hosting = "github"
 checksum = "sha256"
 # Packages are not distributed unless they opt in with `dist = true`
 dist = false
+# Build the web interface before cargo builds the binary: the daemon embeds
+# ui/dist, and the release build refuses to go on without it.
+github-build-setup = "../build-setup.yml"

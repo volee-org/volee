@@ -1,0 +1,14 @@
+# Steps that dist inserts before it builds the binaries (see
+# dist-workspace.toml): build the web interface the daemon embeds.
+- name: Install Node
+  uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+  with:
+    node-version: "24"
+    cache: npm
+    cache-dependency-path: ui/package-lock.json
+- name: Build the web interface
+  run: cd ui && npm ci && npm run build
+  shell: bash
+- name: Require the web interface in the build
+  run: echo "VOLEE_REQUIRE_UI=1" >> "$GITHUB_ENV"
+  shell: bash

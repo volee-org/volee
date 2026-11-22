@@ -8,6 +8,9 @@ extend-exclude = [
     "docs/mermaid-init.js",
     "*.gif",
     "*.svg",
+    "ui/package-lock.json",
+    "ui/node_modules/",
+    "ui/dist/",
     "**/snapshots/*.snap",
 ]
 
