@@ -31,7 +31,9 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{Semaphore, watch};
 use volee_proto::methods::AgentCard;
-use volee_rules::{Change, FileChange, Rules};
+use volee_rules::{Change, FileChange};
+
+use crate::rules::RulesService;
 use volee_store::{NewFinding, NewReview, Store, StoredReview, review_status};
 
 use crate::agents_view::Agents;
@@ -405,15 +407,14 @@ pub(crate) fn change_of(target: &Target, tip: &str) -> Change {
     }
 }
 
-/// Asks the Lua rules how to review `change`: the model and the number of
-/// reviewers (more when the risk is high). Rules that fail give the safest
-/// plan, as `volee-rules` decides.
-pub(crate) fn plan_for(change: &Change, repo_root: &Path, config_dir: &Path) -> Plan {
-    let rules = Rules::load(Some(repo_root), Some(config_dir));
-    let evaluated = rules.evaluate(change);
+/// Asks the Lua rules (the daemon's loaded ones, the same as the card's) how
+/// to review `change`: the model and the number of reviewers (more when the
+/// risk is high). Rules that fail or answer late give the safest plan.
+pub(crate) fn plan_for(rules: &RulesService, change: &Change, repo_root: &Path, tip: &str) -> Plan {
+    let report = rules.evaluate(repo_root, tip, change);
     Plan {
-        model: evaluated.review.model,
-        reviewers: u32::from(evaluated.review.reviewers),
+        model: report.evaluation.review.model.clone(),
+        reviewers: u32::from(report.evaluation.review.reviewers),
     }
 }
 
@@ -478,7 +479,7 @@ impl Target {
         )
     }
 
-    fn repo_key(&self) -> String {
+    pub(crate) fn repo_key(&self) -> String {
         self.repo_root.to_string_lossy().into_owned()
     }
 }
@@ -501,7 +502,7 @@ pub(crate) enum Requested {
 /// The review service: queue, cache and runner.
 pub(crate) struct Reviews {
     settings: volee_config::Review,
-    config_dir: PathBuf,
+    rules: Arc<RulesService>,
     store: Arc<Mutex<Store>>,
     reviewer: Arc<dyn Reviewer>,
     slots: Arc<Semaphore>,
@@ -529,7 +530,7 @@ impl Reviews {
     /// left unfinished are failed: nothing is resumed.
     pub(crate) fn open(
         settings: volee_config::Review,
-        config_dir: PathBuf,
+        rules: Arc<RulesService>,
         database: &Path,
         reviewer: Arc<dyn Reviewer>,
     ) -> Result<Self, volee_store::StoreError> {
@@ -542,7 +543,7 @@ impl Reviews {
         Ok(Self {
             slots: Arc::new(Semaphore::new(settings.concurrency.max(1))),
             settings,
-            config_dir,
+            rules,
             store: Arc::new(Mutex::new(store)),
             reviewer,
             revision: watch::channel(0).0,
@@ -611,9 +612,10 @@ impl Reviews {
             return Requested::NoTip;
         };
         let plan = plan_for(
+            &self.rules,
             &change_of(target, &tip),
             &target.repo_root,
-            &self.config_dir,
+            &tip,
         );
         if plan.reviewers == 0 {
             return Requested::Skipped;
@@ -947,7 +949,7 @@ mod tests {
         };
         let reviews = Reviews::open(
             settings,
-            dir.path().join("config"),
+            RulesService::new(dir.path().join("config")),
             &dir.path().join("volee.db"),
             fake.clone(),
         )

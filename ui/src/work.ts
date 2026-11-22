@@ -1,6 +1,7 @@
 // The layers of a finished change (crates/volee-daemon/src/work/mod.rs).
 
 import type { Review } from "./review";
+import type { RiskView, RuleLayer } from "./risk";
 
 export type StepStatus = "pending" | "in-progress" | "done" | "unknown";
 export type PlanSource = "tasks" | "plan-mode" | "prompt";
@@ -81,14 +82,43 @@ export interface Work {
     deletions: number;
   };
   diagram: string;
+  /** The risk of the change and the layers the rules open; absent when the daemon has no rules. */
+  risk?: RiskView | null;
 }
 
 /** The layers, in the order a reader opens them. */
 export const LAYERS = ["summary", "review", "plan", "points", "files", "diagram", "diff"] as const;
 export type LayerId = (typeof LAYERS)[number];
 
-/** Which layers start open: the ones that answer "what happened" at a glance. */
+/**
+ * The screen's layers a rules file's layers open. The rules know five; the
+ * screen splits two of them: the plan comes with the open points, the diff
+ * with the list of files.
+ */
+export function layersOpenedBy(layers: RuleLayer[]): Record<LayerId, boolean> {
+  const has = (layer: RuleLayer) => layers.includes(layer);
+  return {
+    summary: has("summary"),
+    review: has("review"),
+    plan: has("plan"),
+    points: has("plan"),
+    files: has("diff"),
+    diagram: has("diagram"),
+    diff: has("diff"),
+  };
+}
+
+/**
+ * Which layers start open. With rules, the layers they name for the risk;
+ * without, the ones that answer "what happened" at a glance.
+ */
 export function initialOpen(work: Work, review: Review | null = null): Record<LayerId, boolean> {
+  if (work.risk) {
+    const opened = layersOpenedBy(work.risk.layers);
+    // A review that is running, failed or found things is worth seeing at once.
+    const reviewNews = review !== null && ["pending", "running", "failed", "done"].includes(review.status);
+    return { ...opened, review: opened.review || reviewNews };
+  }
   return {
     summary: true,
     // Open when the review has something to show: it is running, failed or found things.

@@ -36,15 +36,12 @@ use tokio::sync::{oneshot, watch};
 pub struct HoldSettings {
     /// A permission request: the hook's own timeout is the same value.
     pub permission_timeout: Duration,
-    /// A question, before the terminal asks it.
-    pub question_delay: Duration,
 }
 
 impl Default for HoldSettings {
     fn default() -> Self {
         Self {
             permission_timeout: Duration::from_secs(volee_config::DEFAULT_PERMISSION_TIMEOUT),
-            question_delay: volee_rules::Settings::default().held_question_timeout(),
         }
     }
 }
@@ -94,6 +91,9 @@ pub(crate) struct Held {
     pub(crate) tool_input: Value,
     /// The `permission_suggestions` of the request, verbatim.
     pub(crate) suggestions: Vec<Value>,
+    /// How long a question is held, from the rules of the agent's repository
+    /// (`held_question_timeout`); the rules' default when they cannot say.
+    pub(crate) delay: Option<Duration>,
 }
 
 /// What the person chose, as the interface posts it.
@@ -194,7 +194,9 @@ impl Decisions {
     pub(crate) async fn hold(self: &Arc<Self>, held: Held) -> Option<Value> {
         let limit = match held.kind {
             DecisionKind::Permission => self.settings.permission_timeout,
-            DecisionKind::Question => self.settings.question_delay,
+            DecisionKind::Question => held
+                .delay
+                .unwrap_or_else(|| volee_rules::Settings::default().held_question_timeout()),
         };
         let now = now_millis();
         let id = ulid::Ulid::generate().to_string();
@@ -517,6 +519,7 @@ mod tests {
 
     fn permission(session: &str, command: &str) -> Held {
         Held {
+            delay: None,
             kind: DecisionKind::Permission,
             session_id: session.to_owned(),
             tool_name: "Bash".to_owned(),
@@ -532,6 +535,7 @@ mod tests {
 
     fn question(session: &str) -> Held {
         Held {
+            delay: None,
             kind: DecisionKind::Question,
             session_id: session.to_owned(),
             tool_name: "AskUserQuestion".to_owned(),
@@ -542,10 +546,9 @@ mod tests {
         }
     }
 
-    fn settings(permission_ms: u64, question_ms: u64) -> HoldSettings {
+    fn settings(permission_ms: u64) -> HoldSettings {
         HoldSettings {
             permission_timeout: Duration::from_millis(permission_ms),
-            question_delay: Duration::from_millis(question_ms),
         }
     }
 
@@ -570,7 +573,7 @@ mod tests {
 
     #[tokio::test]
     async fn allow_answers_the_held_request_and_clears_the_card() {
-        let decisions = Decisions::new(settings(5_000, 5_000));
+        let decisions = Decisions::new(settings(5_000));
         let task = spawn_hold(&decisions, permission("s1", "npm test")).await;
         let card = decisions.cards().remove(0);
         assert_eq!(card.summary, "npm test");
@@ -597,7 +600,7 @@ mod tests {
 
     #[tokio::test]
     async fn allow_with_a_suggestion_echoes_that_suggestion() {
-        let decisions = Decisions::new(settings(5_000, 5_000));
+        let decisions = Decisions::new(settings(5_000));
         let task = spawn_hold(&decisions, permission("s1", "ls")).await;
         let id = decisions.cards()[0].id.clone();
         assert!(matches!(
@@ -629,7 +632,7 @@ mod tests {
 
     #[tokio::test]
     async fn deny_carries_the_message_the_model_sees() {
-        let decisions = Decisions::new(settings(5_000, 5_000));
+        let decisions = Decisions::new(settings(5_000));
         let task = spawn_hold(&decisions, permission("s1", "rm -rf x")).await;
         let id = decisions.cards()[0].id.clone();
         decisions
@@ -650,7 +653,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_decision_twice_or_after_the_hold_is_gone() {
-        let decisions = Decisions::new(settings(5_000, 5_000));
+        let decisions = Decisions::new(settings(5_000));
         let task = spawn_hold(&decisions, permission("s1", "ls")).await;
         let id = decisions.cards()[0].id.clone();
         decisions.decide(&id, Decision::Terminal).unwrap();
@@ -667,7 +670,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_hold_runs_out_and_the_card_goes() {
-        let decisions = Decisions::new(settings(60, 60));
+        let decisions = Decisions::new(settings(60));
         let task = spawn_hold(&decisions, permission("s1", "ls")).await;
         assert_eq!(task.await.unwrap(), None);
         assert_eq!(decisions.cards().len(), 0);
@@ -675,7 +678,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_dropped_handler_takes_its_card_with_it() {
-        let decisions = Decisions::new(settings(5_000, 5_000));
+        let decisions = Decisions::new(settings(5_000));
         let task = spawn_hold(&decisions, permission("s1", "ls")).await;
         task.abort();
         let _ = task.await;
@@ -684,7 +687,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_terminal_answering_first_clears_the_card_and_answers_nothing() {
-        let decisions = Decisions::new(settings(5_000, 5_000));
+        let decisions = Decisions::new(settings(5_000));
         let ran = json!({ "command": "ls" });
         for (event, tool, input, goes) in [
             ("PostToolUse", "Bash", Some(&ran), true),
@@ -733,7 +736,7 @@ mod tests {
 
     #[tokio::test]
     async fn another_session_is_left_alone() {
-        let decisions = Decisions::new(settings(5_000, 5_000));
+        let decisions = Decisions::new(settings(5_000));
         let task = spawn_hold(&decisions, permission("s1", "ls")).await;
         decisions.observe(&Observed {
             event: "Stop",
@@ -749,7 +752,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_question_is_answered_with_the_original_questions_echoed_back() {
-        let decisions = Decisions::new(settings(5_000, 5_000));
+        let decisions = Decisions::new(settings(5_000));
         let task = spawn_hold(&decisions, question("s1")).await;
         let id = decisions.cards()[0].id.clone();
         let answer = |text: &str| Decision::Answer {
@@ -791,7 +794,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_question_can_be_denied_with_a_reason_and_its_own_pre_tool_use_does_not_clear_it() {
-        let decisions = Decisions::new(settings(5_000, 5_000));
+        let decisions = Decisions::new(settings(5_000));
         let task = spawn_hold(&decisions, question("s1")).await;
         decisions.observe(&Observed {
             event: "PreToolUse",

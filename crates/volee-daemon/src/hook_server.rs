@@ -91,6 +91,27 @@ struct Shared {
     /// The held requests; without the web interface nobody could decide, so
     /// nothing is held.
     decisions: Option<Arc<crate::decisions::Decisions>>,
+    /// The rules, which say how long a question is held in each repository.
+    rules: Option<Arc<crate::rules::RulesService>>,
+}
+
+/// How long the rules of the repository of `session_id` hold a question,
+/// when they can say.
+async fn question_delay(shared: &Shared, session_id: &str) -> Option<std::time::Duration> {
+    let rules = shared.rules.clone()?;
+    let root = shared
+        .agents
+        .as_ref()
+        .and_then(|agents| agents.peek())
+        .and_then(|view| {
+            view.agents
+                .into_iter()
+                .find(|agent| agent.session_id == session_id)
+        })
+        .and_then(|agent| agent.repo.map(|repo| repo.root));
+    tokio::task::spawn_blocking(move || rules.info(root.as_deref()).held_question_timeout)
+        .await
+        .ok()
 }
 
 fn router(token: String, store: Store, web: Option<crate::web::Web>) -> Router {
@@ -100,6 +121,7 @@ fn router(token: String, store: Store, web: Option<crate::web::Web>) -> Router {
         store: Arc::new(Mutex::new(store)),
         agents: web.as_ref().map(crate::web::Web::agents),
         decisions: web.as_ref().map(crate::web::Web::decisions),
+        rules: web.as_ref().and_then(crate::web::Web::rules),
     };
     let hooks = Router::new()
         .route("/healthz", get(|| async { "ok" }))
@@ -174,6 +196,7 @@ async fn hook(
         return StatusCode::OK.into_response();
     }
     let held = Held {
+        delay: None,
         kind: DecisionKind::Permission,
         session_id: session_id.to_owned(),
         tool_name: tool_name.to_owned(),
@@ -216,9 +239,11 @@ async fn decide(
     ) else {
         return StatusCode::OK.into_response();
     };
+    let delay = question_delay(&shared, session_id).await;
     answer(
         decisions
             .hold(Held {
+                delay,
                 kind: DecisionKind::Question,
                 session_id: session_id.to_owned(),
                 tool_name: "AskUserQuestion".to_owned(),

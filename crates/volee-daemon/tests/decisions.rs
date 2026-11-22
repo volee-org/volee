@@ -35,6 +35,16 @@ async fn start(permission_ms: u64, question_ms: u64) -> Running {
     let paths = Paths::rooted(root.join("volee"));
     std::fs::create_dir_all(&paths.state_dir).unwrap();
     let database = paths.database();
+    // How long a question is held is a rule: the personal file says it.
+    std::fs::create_dir_all(&paths.config_dir).unwrap();
+    std::fs::write(
+        paths.config_dir.join("rules.lua"),
+        format!(
+            "return {{ held_question_timeout = {} }}",
+            Duration::from_millis(question_ms).as_secs_f64()
+        ),
+    )
+    .unwrap();
     let listener = UnixListener::bind(&paths.socket).unwrap();
     let addr = {
         let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -58,7 +68,6 @@ async fn start(permission_ms: u64, question_ms: u64) -> Running {
             database: database.clone(),
             hold: HoldSettings {
                 permission_timeout: Duration::from_millis(permission_ms),
-                question_delay: Duration::from_millis(question_ms),
             },
         }),
         agents_view: Some(AgentsViewConfig {

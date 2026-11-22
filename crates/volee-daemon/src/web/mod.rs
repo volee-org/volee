@@ -6,7 +6,8 @@
 //! | `GET /` and the bundle's files | no | the page (it reads the token from its address) |
 //! | `GET /api/inbox` | yes | the inbox, as JSON |
 //! | `GET /api/events` | yes | the inbox now, then again each time it changes |
-//! | `GET /api/agents/{id}/work` | yes | the layers of an agent's finished work |
+//! | `GET /api/agents/{id}/work` | yes | the layers of an agent's finished work, with its risk |
+//! | `POST /api/agents/{id}/risk` | yes | raises or lowers the risk of the branch tip by hand (`{"level": "low"}`, or `null` to take it back) |
 //! | `POST /api/agents/{id}/terminal` | yes | focuses the agent's terminal |
 //! | `POST /api/decisions/{id}` | yes | decides a held permission or question |
 //! | `GET /api/agents/{id}/review` | yes | the AI pre-review of the agent's branch tip (an opinion) |
@@ -36,6 +37,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::agents_view::Agents;
+use crate::assess::Assessments;
 use crate::decisions::{DecideError, Decision, Decisions};
 use crate::review::{Requested, Reviews, Target as ReviewTarget};
 use terminal::{Target, Terminal};
@@ -47,6 +49,8 @@ pub(crate) struct Web {
     terminal: Option<Arc<dyn Terminal>>,
     decisions: Arc<Decisions>,
     reviews: Option<Arc<Reviews>>,
+    /// The risk of changes, from the rules, with the person's overrides.
+    assessments: Option<Arc<Assessments>>,
     /// Claude Code's projects directory, where transcripts live.
     projects: Option<std::path::PathBuf>,
 }
@@ -93,8 +97,22 @@ impl Web {
             terminal,
             decisions,
             reviews: None,
+            assessments: None,
             projects: None,
         }
+    }
+
+    /// The same interface, showing the risk of finished changes.
+    pub(crate) fn with_assessments(mut self, assessments: Option<Arc<Assessments>>) -> Self {
+        self.assessments = assessments;
+        self
+    }
+
+    /// The rules the interface asks, when there are any.
+    pub(crate) fn rules(&self) -> Option<Arc<crate::rules::RulesService>> {
+        self.assessments
+            .as_ref()
+            .map(|assessments| Arc::clone(assessments.rules()))
     }
 
     /// The same interface, serving the AI pre-review too.
@@ -126,7 +144,79 @@ impl Web {
             .map(|terminal| terminal.name());
         let mut inbox = inbox::build_with(&view, name, &self.decisions.cards());
         self.add_reviews(&view, &mut inbox).await;
+        self.add_risks(&view, &mut inbox).await;
         inbox
+    }
+
+    /// Puts each finished card's risk on it, and the state of the rules
+    /// files for the banner.
+    async fn add_risks(&self, view: &volee_proto::methods::AgentsView, inbox: &mut inbox::Inbox) {
+        let Some(assessments) = self.assessments.clone() else {
+            return;
+        };
+        let targets: Vec<(String, ReviewTarget)> = inbox
+            .cards
+            .iter()
+            .filter(|card| card.kind == inbox::Kind::Finished)
+            .filter_map(|card| {
+                let agent = view
+                    .agents
+                    .iter()
+                    .find(|agent| agent.session_id == card.id)?;
+                Some((card.id.clone(), ReviewTarget::of(agent)?))
+            })
+            .collect();
+        // The repositories whose rules apply to what is shown, and the
+        // personal file alone.
+        let mut roots: Vec<Option<std::path::PathBuf>> = vec![None];
+        for agent in &view.agents {
+            let root = agent.repo.as_ref().map(|repo| repo.root.clone());
+            if root.is_some() && !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+        let read = Arc::clone(&assessments);
+        let (risks, status) = tokio::task::spawn_blocking(move || {
+            let risks = targets
+                .into_iter()
+                .filter_map(|(id, target)| Some((id, read.assess(&target)?)))
+                .collect::<Vec<_>>();
+            let mut status = inbox::RulesStatus::default();
+            for root in roots {
+                let info = read.rules().info(root.as_deref());
+                for error in &info.errors {
+                    let json = crate::assess::error_json(error);
+                    if !status.errors.contains(&json) {
+                        status.errors.push(json);
+                    }
+                }
+                if info.restricted
+                    && let Some(root) = &root
+                {
+                    let note = format!(
+                        "{}: the repository's rules file is not trusted, so it can raise a risk but never lower it (trusted_repos in your rules.lua)",
+                        root.display()
+                    );
+                    if !status.warnings.contains(&note) {
+                        status.warnings.push(note);
+                    }
+                }
+                for warning in info.warnings {
+                    if !status.warnings.contains(&warning) {
+                        status.warnings.push(warning);
+                    }
+                }
+            }
+            (risks, status)
+        })
+        .await
+        .unwrap_or_default();
+        for (id, risk) in risks {
+            if let Some(card) = inbox.cards.iter_mut().find(|card| card.id == id) {
+                card.risk = Some(risk);
+            }
+        }
+        inbox.rules = status;
     }
 
     /// Puts each finished card's review brief on it.
@@ -178,6 +268,7 @@ pub(crate) fn router(token: Arc<str>, web: Web) -> Router {
         .route("/api/events", get(events))
         .route("/api/agents/{id}/work", get(get_work))
         .route("/api/agents/{id}/terminal", post(open_terminal))
+        .route("/api/agents/{id}/risk", post(set_risk))
         .route("/api/decisions/{id}", post(decide))
         .route(
             "/api/agents/{id}/review",
@@ -275,9 +366,10 @@ fn inbox_stream(web: Web) -> impl Stream<Item = Result<Event, Infallible>> {
     let agents = web.agents.subscribe();
     let decisions = web.decisions.subscribe();
     let reviews = web.reviews.as_ref().map(|reviews| reviews.subscribe());
+    let rules = web.rules().map(|rules| rules.subscribe());
     futures_util::stream::unfold(
-        (web, agents, decisions, reviews, true),
-        |(web, mut agents, mut decisions, mut reviews, first)| async move {
+        (web, agents, decisions, reviews, rules, true),
+        |(web, mut agents, mut decisions, mut reviews, mut rules, first)| async move {
             if !first {
                 tokio::select! {
                     changed = agents.changed() => if changed.is_err() { return None; },
@@ -289,6 +381,13 @@ fn inbox_stream(web: Web) -> impl Stream<Item = Result<Event, Infallible>> {
                             None => std::future::pending().await,
                         }
                     } => if changed.is_err() { return None; },
+                    // The rules files changed, or a risk was set by hand.
+                    changed = async {
+                        match rules.as_mut() {
+                            Some(rules) => rules.changed().await,
+                            None => std::future::pending().await,
+                        }
+                    } => if changed.is_err() { return None; },
                 }
             }
             let inbox = web.inbox().await;
@@ -296,7 +395,7 @@ fn inbox_stream(web: Web) -> impl Stream<Item = Result<Event, Infallible>> {
                 .event("inbox")
                 .json_data(&inbox)
                 .unwrap_or_else(|_| Event::default().comment("the inbox could not be encoded"));
-            Some((Ok(event), (web, agents, decisions, reviews, false)))
+            Some((Ok(event), (web, agents, decisions, reviews, rules, false)))
         },
     )
 }
@@ -347,9 +446,75 @@ async fn get_work(
             .into_response();
     };
     let projects = shared.web.projects.clone();
-    match tokio::task::spawn_blocking(move || crate::work::build(&agent, projects.as_deref())).await
-    {
-        Ok(work) => Json(work).into_response(),
+    let assessments = shared.web.assessments.clone();
+    let built = tokio::task::spawn_blocking(move || {
+        let risk =
+            assessments.and_then(|assessments| assessments.assess(&ReviewTarget::of(&agent)?));
+        (crate::work::build(&agent, projects.as_deref()), risk)
+    })
+    .await;
+    match built {
+        Ok((work, risk)) => {
+            let mut body = serde_json::to_value(work).unwrap_or_default();
+            body["risk"] = serde_json::to_value(risk).unwrap_or_default();
+            Json(body).into_response()
+        }
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "ok": false, "message": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct RiskBody {
+    /// `low`, `medium`, `high`, or null to take the choice back.
+    level: Option<String>,
+}
+
+/// Raises or lowers the risk of the branch's current tip by hand. The choice
+/// is kept for this tip only. `422` for a word that is not a level.
+async fn set_risk(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<RiskBody>,
+) -> Response {
+    if !allowed(&shared, &headers, None) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(assessments) = shared.web.assessments.clone() else {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "ok": false, "message": "the risk of changes is unavailable" })),
+        )
+            .into_response();
+    };
+    let level = match body.level.as_deref() {
+        None => None,
+        Some("low") => Some(volee_rules::Risk::Low),
+        Some("medium") => Some(volee_rules::Risk::Medium),
+        Some("high") => Some(volee_rules::Risk::High),
+        Some(other) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "ok": false, "message": format!("{other:?} is not a risk level (low, medium, high)") })),
+            )
+                .into_response();
+        }
+    };
+    let target = match review_target(&shared, &id).await {
+        Ok(target) => target,
+        Err(response) => return *response,
+    };
+    match tokio::task::spawn_blocking(move || assessments.set_override(&target, level)).await {
+        Ok(Some(risk)) => Json(risk).into_response(),
+        Ok(None) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "ok": false, "message": "the branch has no tip" })),
+        )
+            .into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "ok": false, "message": error.to_string() })),

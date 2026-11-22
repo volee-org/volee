@@ -17,6 +17,7 @@ mod error;
 mod hooks;
 mod migrations;
 mod reviews;
+mod risk;
 mod seq;
 pub mod spool;
 mod store;

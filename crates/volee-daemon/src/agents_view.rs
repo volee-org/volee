@@ -17,6 +17,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Notify, watch};
 use volee_core::delivery::PrState;
 use volee_core::finished::{Activity, BranchWork, HookKind, classify_hook, is_finished_work};
+use volee_rules::FinishedFacts;
+
+use crate::rules::RulesService;
 use volee_core::reconcile::{ListedSession, Listing};
 use volee_core::state::{AgentState, InputRequest, StateCategory};
 use volee_core::time::Timestamp;
@@ -97,6 +100,9 @@ struct Sources {
     store: Option<Arc<Mutex<Store>>>,
     /// Whether the forge can be used, asked once: it may reach the network.
     forge_usable: OnceLock<bool>,
+    /// The rules, which decide what finished work is. `None`: the built-in
+    /// rule ([`is_finished_work`]).
+    rules: Option<Arc<RulesService>>,
 }
 
 /// The poller and its last reading.
@@ -140,6 +146,7 @@ impl Agents {
         git: Option<Arc<dyn Git>>,
         forge: Option<Arc<dyn Forge>>,
         database: &Path,
+        rules: Option<Arc<RulesService>>,
     ) -> Self {
         let store = match Store::open(database) {
             Ok(store) => Some(Arc::new(Mutex::new(store))),
@@ -155,6 +162,7 @@ impl Agents {
                 forge,
                 store,
                 forge_usable: OnceLock::new(),
+                rules,
             }),
             inner: tokio::sync::Mutex::default(),
             revision: watch::channel(0).0,
@@ -294,9 +302,16 @@ pub(crate) fn build(
     harness: Option<Arc<dyn Harness>>,
     git: Option<Arc<dyn Git>>,
     forge: Option<Arc<dyn Forge>>,
+    rules: Option<Arc<RulesService>>,
 ) -> Option<Arc<Agents>> {
     let (config, harness) = config.zip(harness)?;
-    Some(Arc::new(Agents::new(harness, git, forge, &config.database)))
+    Some(Arc::new(Agents::new(
+        harness,
+        git,
+        forge,
+        &config.database,
+        rules,
+    )))
 }
 
 /// Starts the poller of `agents`, when there is a view to poll.
@@ -413,7 +428,22 @@ fn card(session: &ListedSession, sources: &Sources, memory: &mut Memory) -> Agen
             unique_commits: facts.unique,
             merged: facts.merged,
         };
-        card.finished_work = is_finished_work(&card.hooks.activity, &card.state, &work);
+        card.finished_work = match (&sources.rules, &card.repo) {
+            (Some(rules), repo) => rules.finished(
+                repo.as_ref().map(|repo| repo.root.as_path()),
+                &FinishedFacts {
+                    stopped_last: card.hooks.activity.stopped_last(),
+                    busy: matches!(
+                        card.state,
+                        AgentState::Working | AgentState::NeedsInput { .. } | AgentState::Launching
+                    ),
+                    commits: work.commits,
+                    unique_commits: work.unique_commits,
+                    merged: work.merged,
+                },
+            ),
+            (None, _) => is_finished_work(&card.hooks.activity, &card.state, &work),
+        };
     }
     card
 }
@@ -878,6 +908,7 @@ mod tests {
             forge: None,
             store: None,
             forge_usable: OnceLock::new(),
+            rules: None,
         }
     }
 

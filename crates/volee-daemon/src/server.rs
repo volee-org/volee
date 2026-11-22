@@ -132,6 +132,7 @@ impl Daemon {
     }
 
     /// Serves an already bound listener. Used by [`Daemon::run`] and by tests.
+    #[allow(clippy::too_many_lines)]
     pub async fn serve(listener: UnixListener, config: Config) -> Result<(), DaemonError> {
         let mut state = State::load(config.log, config.clock)?;
         let caught_up = crate::missions::catch_up(&mut state).len();
@@ -153,11 +154,15 @@ impl Daemon {
         // Subscribed before anything can commit: no removal is missed.
         let removals = state.subscribe();
         let (shutdown, mut stop) = watch::channel(false);
+        // The one set of loaded rules: the finished-work rule, the card's
+        // risk, the review plan and the held question delay all ask it.
+        let rules = crate::rules::RulesService::new(config.paths.config_dir.clone());
         let agents = crate::agents_view::build(
             config.agents_view.as_ref(),
             config.harness.clone(),
             config.evidence.git.clone(),
             config.evidence.forge.clone(),
+            Some(Arc::clone(&rules)),
         );
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
@@ -186,7 +191,8 @@ impl Daemon {
             ))
         });
         let polling = crate::agents_view::spawn_poll(config.agents_view.as_ref(), agents, &stop);
-        let reviews = open_reviews(&shared, config.hook_server.as_ref());
+        let reviews = open_reviews(&shared, config.hook_server.as_ref(), &rules);
+        let watching_rules = tokio::spawn(Arc::clone(&rules).watch(stop.clone()));
         let reviewing = reviews
             .as_ref()
             .zip(shared.agents.clone())
@@ -197,7 +203,13 @@ impl Daemon {
                     stop.clone(),
                 ))
             });
-        let hooks = start_hook_server(config.hook_server, shared.agents.clone(), reviews).await?;
+        let hooks = start_hook_server(
+            config.hook_server,
+            shared.agents.clone(),
+            reviews,
+            Arc::clone(&rules),
+        )
+        .await?;
         // A mission the person approved while the daemon was stopping, or
         // whose merge it could not finish, is carried out now.
         crate::missions::resume_approved(&shared).await;
@@ -218,9 +230,17 @@ impl Daemon {
         }
         tracing::info!("volee daemon stopping");
         connections.abort_all();
-        for task in [refresher, Some(files), hooks, polling, following, reviewing]
-            .into_iter()
-            .flatten()
+        for task in [
+            refresher,
+            Some(files),
+            hooks,
+            polling,
+            following,
+            reviewing,
+            Some(watching_rules),
+        ]
+        .into_iter()
+        .flatten()
         {
             task.abort();
         }
@@ -233,6 +253,7 @@ impl Daemon {
 fn open_reviews(
     shared: &Shared,
     hook_server: Option<&crate::hook_server::HookServerConfig>,
+    rules: &Arc<crate::rules::RulesService>,
 ) -> Option<Arc<crate::review::Reviews>> {
     let settings = shared.settings.review.clone();
     if !settings.enabled {
@@ -243,12 +264,7 @@ fn open_reviews(
         settings.command.clone(),
         Duration::from_secs(settings.timeout),
     ));
-    match crate::review::Reviews::open(
-        settings,
-        shared.paths.config_dir.clone(),
-        database,
-        reviewer,
-    ) {
+    match crate::review::Reviews::open(settings, Arc::clone(rules), database, reviewer) {
         Ok(reviews) => Some(Arc::new(reviews)),
         Err(error) => {
             tracing::warn!(%error, "the AI pre-review is unavailable");
@@ -263,6 +279,7 @@ async fn start_hook_server(
     config: Option<crate::hook_server::HookServerConfig>,
     agents: Option<Arc<crate::agents_view::Agents>>,
     reviews: Option<Arc<crate::review::Reviews>>,
+    rules: Arc<crate::rules::RulesService>,
 ) -> Result<Option<tokio::task::JoinHandle<()>>, DaemonError> {
     let Some(hook_config) = config else {
         return Ok(None);
@@ -274,7 +291,18 @@ async fn start_hook_server(
     tracing::info!(addr = ?listener.local_addr().ok(), "hook server ready");
     // The web interface shares the listener, when there are agents to show.
     let decisions = crate::decisions::Decisions::new(hook_config.hold);
-    let web = agents.map(|agents| crate::web::Web::detect(agents, decisions).with_reviews(reviews));
+    let assessments = match crate::assess::Assessments::open(rules, &hook_config.database) {
+        Ok(assessments) => Some(Arc::new(assessments)),
+        Err(error) => {
+            tracing::warn!(%error, "the risk of changes is unavailable");
+            None
+        }
+    };
+    let web = agents.map(|agents| {
+        crate::web::Web::detect(agents, decisions)
+            .with_reviews(reviews)
+            .with_assessments(assessments)
+    });
     Ok(Some(tokio::spawn(async move {
         if let Err(error) =
             crate::hook_server::serve_with_web(listener, hook_config.token, store, web).await

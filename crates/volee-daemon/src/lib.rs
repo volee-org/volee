@@ -9,6 +9,7 @@
 //! Start it with [`Daemon::run`]; build its dependencies with [`Config`].
 
 mod agents_view;
+mod assess;
 mod clock;
 mod control;
 mod decisions;
@@ -21,6 +22,7 @@ mod join;
 mod log;
 mod missions;
 mod review;
+mod rules;
 mod server;
 mod sqlite;
 mod state;

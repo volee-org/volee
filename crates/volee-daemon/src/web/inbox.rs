@@ -56,6 +56,9 @@ pub(crate) struct InboxCard {
     /// Filled by the web layer, which knows the reviews; `None` when nobody
     /// asked for one or reviews are off.
     pub(crate) review: Option<ReviewBrief>,
+    /// How much care the rules say the change needs, and what the person
+    /// set by hand. Filled by the web layer; finished work only.
+    pub(crate) risk: Option<crate::assess::RiskView>,
 }
 
 /// The pre-review of a card in a few words: enough for a badge, and for the
@@ -84,6 +87,18 @@ pub(crate) struct Inbox {
     /// puts them at the top of "Waiting for you".
     pub(crate) decisions: Vec<DecisionView>,
     pub(crate) cards: Vec<InboxCard>,
+    /// What is wrong with the rules files, shown as a discreet banner.
+    pub(crate) rules: RulesStatus,
+}
+
+/// The state of the rules files, for the banner.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub(crate) struct RulesStatus {
+    /// Files that fail: each says file, line and message; while any does,
+    /// every answer is the safest one.
+    pub(crate) errors: Vec<serde_json::Value>,
+    /// Probable typos.
+    pub(crate) warnings: Vec<String>,
 }
 
 /// A held request with the agent it comes from.
@@ -150,6 +165,7 @@ pub(crate) fn build_with(
         others,
         decisions: held.iter().map(|card| decision_view(view, card)).collect(),
         cards: keyed.into_iter().map(|(_, card)| card).collect(),
+        rules: RulesStatus::default(),
     }
 }
 
@@ -210,6 +226,7 @@ fn card(agent: &AgentCard, kind: Kind) -> InboxCard {
         ahead: agent.git.as_ref().map_or(0, |git| git.ahead),
         dirty: agent.git.as_ref().is_some_and(|git| git.dirty),
         review: None,
+        risk: None,
     }
 }
 

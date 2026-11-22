@@ -3,6 +3,7 @@
   import Place from "./Place.svelte";
   import { type Card, title } from "./model";
   import { badge } from "./review";
+  import { riskText, riskTitle } from "./risk";
 
   interface Props {
     card: Card;
@@ -42,6 +43,14 @@
       Work is ready to read
       {#if card.diff}
         <span class="diff mono">{diffSummary(card.diff.files, card.diff.insertions, card.diff.deletions)}</span>
+      {/if}
+      {#if card.risk}
+        <span
+          class="badge risk {card.risk.level}"
+          class:overridden={card.risk.overridden}
+          data-testid="risk-badge"
+          title={riskTitle(card.risk)}>{riskText(card.risk)}</span
+        >
       {/if}
       {#if reviewBadge}
         <span class="badge {reviewBadge.tone}" data-testid="review-badge" title="The AI review's opinion, not a gate">
@@ -154,6 +163,21 @@
   .badge.clean {
     color: var(--finished);
     border-color: var(--finished);
+  }
+  .badge.risk.low {
+    color: var(--finished);
+    border-color: var(--finished);
+  }
+  .badge.risk.medium {
+    color: var(--waiting);
+    border-color: var(--waiting);
+  }
+  .badge.risk.high {
+    color: var(--danger);
+    border-color: var(--danger);
+  }
+  .badge.risk.overridden {
+    border-style: dashed;
   }
   .badge.failed {
     color: var(--danger);

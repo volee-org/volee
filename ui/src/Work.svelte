@@ -8,6 +8,7 @@
   import { inline, renderMarkdown } from "./markdown";
   import { briefKey, fetchReview, requestReview, type Review, type ReviewBrief, reviewHint } from "./review";
   import ReviewLayer from "./ReviewLayer.svelte";
+  import { LEVELS, type RiskLevel, riskText, setRisk } from "./risk";
   import {
     fetchWork,
     initialOpen,
@@ -78,6 +79,23 @@
     diff: false,
   });
   let focus = $state<LayerId | null>("summary");
+  let riskProblem = $state("");
+  let changingRisk = $state(false);
+
+  /** Raises or lowers the risk of this tip by hand (null: back to the rules); the layers follow. */
+  async function changeRisk(level: RiskLevel | null) {
+    if (!work) return;
+    changingRisk = true;
+    riskProblem = "";
+    const result = await setRisk(token, id, level);
+    changingRisk = false;
+    if (!result.risk) {
+      riskProblem = result.message;
+      return;
+    }
+    work = { ...work, risk: result.risk };
+    open = initialOpen(work, review);
+  }
 
   onMount(async () => {
     const result = await fetchWork(token, id);
@@ -181,6 +199,35 @@
       <span class="mono">{diffSummary(work.diff.files, work.diff.insertions, work.diff.deletions)}</span> ·
       {testsText(work.tests)}
     </p>
+    {#if work.risk}
+      <div class="risk {work.risk.level}" data-testid="risk" data-level={work.risk.level} data-overridden={work.risk.overridden}>
+        <span class="level">{riskText(work.risk)}</span>
+        <span class="why">{work.risk.reasons.join(" · ")}</span>
+        <span class="control" role="group" aria-label="Set the risk by hand">
+          {#each LEVELS as level (level)}
+            <button
+              type="button"
+              data-level={level}
+              class:current={work.risk.level === level}
+              disabled={changingRisk || work.risk.level === level}
+              onclick={() => changeRisk(level)}>{level}</button
+            >
+          {/each}
+          {#if work.risk.overridden}
+            <button type="button" data-testid="risk-reset" disabled={changingRisk} onclick={() => changeRisk(null)}
+              >Back to the rules ({work.risk.computed})</button
+            >
+          {/if}
+        </span>
+        {#each work.risk.notes as note (note)}
+          <p class="risknote">{note}</p>
+        {/each}
+        {#each work.risk.errors as error (error)}
+          <p class="risknote failed">{error}</p>
+        {/each}
+        {#if riskProblem}<p class="risknote failed" role="alert">{riskProblem}</p>{/if}
+      </div>
+    {/if}
     {#if !work.transcript.available}
       <p class="degraded" role="status" data-testid="degraded">
         Transcript unavailable ({work.transcript.reason}). Showing what git and the hooks know: no plan and no
@@ -394,6 +441,70 @@
   .layers {
     display: grid;
     gap: 10px;
+  }
+  .risk {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 12px;
+    border: 1px solid var(--border);
+    border-left-width: 4px;
+    border-radius: 8px;
+    padding: 8px 12px;
+    background: var(--surface);
+  }
+  .risk.low {
+    border-left-color: var(--finished);
+  }
+  .risk.medium {
+    border-left-color: var(--waiting);
+  }
+  .risk.high {
+    border-left-color: var(--danger);
+  }
+  .risk[data-overridden="true"] {
+    border-style: dashed;
+    border-left-style: solid;
+  }
+  .risk .level {
+    font-weight: 600;
+  }
+  .risk .why {
+    color: var(--muted);
+    flex: 1;
+    min-width: 12ch;
+    overflow-wrap: anywhere;
+  }
+  .risk .control {
+    display: inline-flex;
+    gap: 6px;
+  }
+  .risk .control button {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 1px 9px;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+  .risk .control button:hover:not(:disabled),
+  .risk .control button:focus-visible {
+    border-color: var(--accent);
+    outline: none;
+  }
+  .risk .control button:disabled {
+    cursor: default;
+    opacity: 0.55;
+  }
+  .risknote {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .risknote.failed {
+    color: var(--danger);
   }
   .line {
     margin: 0 0 8px;

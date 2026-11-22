@@ -7,6 +7,7 @@
   import WorkScreen from "./Work.svelte";
   import { decide, type DecisionBody, follow, openTerminal, readToken, type Status } from "./live";
   import { type Card as CardData, emptyInbox, type Inbox, split, title } from "./model";
+  import { rulesBannerText } from "./risk";
 
   type Theme = "auto" | "light" | "dark";
 
@@ -165,6 +166,14 @@
       onterminal={openById}
     />
   {:else}
+    {#if inbox.rules.errors.length > 0}
+      <p class="rules-banner" role="status" data-testid="rules-banner" title="Fix the file and save it: it is read again by itself.">
+        {rulesBannerText(inbox.rules)}
+      </p>
+    {:else if inbox.rules.warnings.length > 0}
+      <p class="rules-note" role="status" data-testid="rules-warnings">{inbox.rules.warnings.join(" · ")}</p>
+    {/if}
+
     {#if inbox.error}
       <p class="error" role="alert">Claude Code's sessions cannot be listed: {inbox.error}</p>
     {/if}
@@ -220,6 +229,22 @@
 </main>
 
 <style>
+  .rules-banner,
+  .rules-note {
+    margin: 0 0 12px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+  }
+  .rules-banner {
+    border: 1px solid var(--danger);
+    color: var(--danger);
+  }
+  .rules-note {
+    border: 1px dashed var(--border);
+    color: var(--muted);
+  }
   main {
     max-width: 720px;
     margin: 0 auto;

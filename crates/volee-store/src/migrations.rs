@@ -93,6 +93,17 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (review_id, position)
     );
     ",
+    // 5: the risk a person set by hand on a branch tip (v2, step 8). It is
+    // per tip: a new commit is judged by the rules again.
+    "
+    CREATE TABLE risk_overrides (
+        repo   TEXT    NOT NULL,
+        tip    TEXT    NOT NULL,
+        level  TEXT    NOT NULL,
+        set_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, tip)
+    );
+    ",
 ];
 
 /// The newest schema version this build understands.

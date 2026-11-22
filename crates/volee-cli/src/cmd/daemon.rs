@@ -71,9 +71,6 @@ fn hook_server(paths: &Paths) -> Result<volee_daemon::HookServerConfig> {
         database: paths.database(),
         hold: volee_daemon::HoldSettings {
             permission_timeout: std::time::Duration::from_secs(hooks.permission_timeout),
-            question_delay: volee_rules::Rules::load(None, Some(&paths.config_dir))
-                .settings()
-                .held_question_timeout(),
         },
     })
 }

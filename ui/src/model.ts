@@ -1,6 +1,7 @@
 // The shapes the daemon sends (crates/volee-daemon/src/web/inbox.rs).
 
 import type { ReviewBrief } from "./review";
+import { emptyRules, type RiskView, type RulesStatus } from "./risk";
 
 export type CardKind = "waiting" | "finished";
 
@@ -32,6 +33,8 @@ export interface Card {
   dirty: boolean;
   /** The AI pre-review of the branch's current tip, in short; absent when nobody asked. */
   review?: ReviewBrief | null;
+  /** How much care the rules say the change needs; finished work only. */
+  risk?: RiskView | null;
 }
 
 export interface Suggestion {
@@ -88,6 +91,8 @@ export interface Inbox {
   /** Held permission requests and questions, oldest first. */
   decisions: Decision[];
   cards: Card[];
+  /** What is wrong with the rules files; empty when they load. */
+  rules: RulesStatus;
 }
 
 export const emptyInbox: Inbox = {
@@ -97,6 +102,7 @@ export const emptyInbox: Inbox = {
   others: 0,
   decisions: [],
   cards: [],
+  rules: emptyRules,
 };
 
 /** What a title is made from. */
