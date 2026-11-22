@@ -62,6 +62,7 @@
   - [0033. A lead makes others work](adr/0033-a-lead-makes-others-work.md)
   - [0034. A session in its own terminal opens once it left it](adr/0034-a-session-in-its-own-terminal-opens-once-it-left-it.md)
   - [0035. The context comes from the status line](adr/0035-the-context-an-agent-uses-comes-from-its-status-line.md)
+  - [0036. The web interface](adr/0036-the-web-interface-is-a-svelte-app-the-daemon-embeds.md)
   - [Template](adr/template.md)
 
 # Project

@@ -8,7 +8,8 @@ stay in the list, marked as such.
 
 > [!NOTE]
 > v2 is under construction on the `v2` branch. This page covers what exists:
-> **stage 1, the hook server**, and **stage 2, agents and finished work**. Parts of the 0.x daemon (the registry, the
+> **stage 1, the hook server**, **stage 2, agents and finished work**, and
+> **stage 3, the web interface**. Parts of the 0.x daemon (the registry, the
 > messages, the missions, the merge flow) are still in the code and are
 > adapted in later stages; the pages of the user guide and the other
 > architecture pages still describe 0.x.
@@ -75,6 +76,8 @@ flowchart LR
 | `volee doctor` | `volee-cli` | Writes the hook settings that make Claude Code post to the daemon, and says whether the daemon answers. |
 | Agents view | `volee-daemon`, `agents_view.rs` | Polls `claude agents --json`, joins each session to its hook events and to what git says of its worktree, and decides which agents have finished work. Serves `agents.view`. |
 | `volee agents` | `volee-cli` | Shows the agents view: state, repository, branch, how far the branch is from its base, finished work with its diff summary. |
+| Web interface | `volee-daemon`, `web/` and `ui/` | The inbox in a browser tab: the bundle (embedded), a JSON API and a live event stream, on the hook server's port. See [the web interface](#the-web-interface). |
+| `volee ui` | `volee-cli` | Prints and opens the link to the interface, with its token. |
 | `volee events` | `volee-cli` | Lists the stored events, oldest first, optionally for one session. Reads the database directly, so it works with the daemon stopped. |
 
 ## The hook server
@@ -229,6 +232,56 @@ the card says `merge unknown` and the work stays finished: volee does not
 guess. The rule is meant to be replaced by the Lua
 rules of a later stage; it takes only facts, so nothing that gathers them
 changes.
+
+## The web interface
+
+`volee ui` opens `http://127.0.0.1:<port>/#token=...` in the browser: the
+inbox, a list of the agents that need a decision, live. The interface is a
+Svelte app in `ui/` (TypeScript, Vite, npm), built into a bundle that the
+daemon embeds at compile time; the reasons are in
+[ADR 0036](../adr/0036-the-web-interface-is-a-svelte-app-the-daemon-embeds.md).
+It is served by the hook server's listener, so it is on the loopback
+interface only.
+
+| Request | Token | Answer |
+| --- | --- | --- |
+| `GET /` and the bundle's files | no | The page. It reads the token from the link's fragment, keeps it for the tab and clears the address bar. |
+| `GET /api/inbox` | yes | The inbox as JSON, once. |
+| `GET /api/events` | yes | Server-sent events: the inbox at once, then again each time it changes (the token may be passed as `?token=`, since `EventSource` sets no header). |
+| `POST /api/agents/{id}/terminal` | yes | Focuses the agent's terminal through the terminal adapter. |
+
+A request whose `Host` is not a loopback name is refused, and the page is
+served with a Content-Security-Policy that allows only its own files.
+
+**The inbox** has two kinds of card, both built from the agents view by one
+pure function (`web/inbox.rs`): an agent **waiting** for a permission, an
+answer or a dialog (Claude Code reports it as needing input), and an agent
+with **finished work** (the rule above). Every other running agent is only
+counted. Cards are sorted by urgency: waiting before finished, a permission
+before a question, and within each the one that has waited longest first.
+Each card says the agent's name, its state, what it waits for, since when,
+the repository, the branch and its base, and for finished work the diff
+summary.
+
+**Live updates.** The agents view counts the readings that changed what a
+person sees, and each event stream wakes on that counter. A stored hook event
+asks the poller to read again after 300 ms, so a card appears within about a
+second of a `Stop` or a permission prompt, not at the next poll.
+
+**Open terminal.** The terminal adapter (`web/terminal.rs`) only locates and
+focuses. The Rex adapter lists Rex's sessions and terminal panes, asks each
+pane which programs run in it, picks the pane that holds the agent's process
+id (or, failing that, the only pane in the agent's directory), focuses it and
+asks a connected Rex app to show its session (Rex refuses unless Remote
+Control is on; the answer then tells the person which session to open). When
+Rex is not installed or its server is not running, the interface hides the
+button.
+
+**Builds without Node.** `crates/volee-daemon/build.rs` embeds `ui/dist` when
+it exists and a stub page otherwise, so `cargo build` and the Rust tests need
+no Node. A release build sets `VOLEE_REQUIRE_UI=1`, which makes a missing
+bundle a build error; the release workflow builds the interface first
+(`.github/build-setup.yml`, through `dist-workspace.toml`).
 
 ## What is still 0.x
 

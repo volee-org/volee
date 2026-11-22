@@ -42,6 +42,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0033](0033-a-lead-makes-others-work.md) | A lead is the agent you talk to, and it makes others work (amends 0007) | Accepted |
 | [0034](0034-a-session-in-its-own-terminal-opens-once-it-left-it.md) | A session in a terminal of its own opens once it left it, on the same row (amends 0027) | Superseded by v2 (was: Accepted) |
 | [0035](0035-the-context-an-agent-uses-comes-from-its-status-line.md) | The context an agent uses comes from its status line | Superseded by v2 (was: Accepted) |
+| [0036](0036-the-web-interface-is-a-svelte-app-the-daemon-embeds.md) | The web interface is a Svelte app the daemon embeds and feeds by server-sent events | Accepted |
 
 ## Not built yet
 
