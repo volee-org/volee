@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ago, diffSummary, shortPath } from "./format";
+  import { diffSummary, shortPath, sinceText, waitingText } from "./format";
   import { type Card, title } from "./model";
 
   interface Props {
@@ -16,14 +16,12 @@
   <header>
     <h3>{title(card)}</h3>
     <span class="since" title="Since when">
-      {card.kind === "waiting" ? "waiting" : "finished"}
-      {ago(card.since, now)}
-      {card.since === null ? "" : "ago"}
+      {sinceText(card.kind === "waiting" ? "waiting" : "finished", card.since, now)}
     </span>
   </header>
 
   {#if card.kind === "waiting"}
-    <p class="what">Waiting for <strong>{card.waiting_for ?? "you"}</strong></p>
+    <p class="what"><strong>{waitingText(card.waiting_for)}</strong></p>
   {:else}
     <p class="what">
       Work is ready to read

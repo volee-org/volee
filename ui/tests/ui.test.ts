@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ago, diffSummary, shortPath } from "../src/format";
+import { ago, diffSummary, shortPath, sinceText, waitingText } from "../src/format";
 import { follow, openTerminal, readToken, type TokenStorage } from "../src/live";
 import { type Card, split, title } from "../src/model";
 
@@ -40,6 +40,16 @@ describe("format", () => {
     expect(ago(now - 3 * 3_600_000, now)).toBe("3 h");
     expect(ago(now - 50 * 3_600_000, now)).toBe("2 d");
     expect(ago(now + 5_000, now)).toBe("just now");
+  });
+  it("words how long ago something happened", () => {
+    expect(sinceText("waiting", null, now)).toBe("waiting");
+    expect(sinceText("finished", now - 1000, now)).toBe("finished just now");
+    expect(sinceText("waiting", now - 4 * 60_000, now)).toBe("waiting 4 min ago");
+  });
+  it("words what a waiting agent waits for", () => {
+    expect(waitingText("permission for Bash")).toBe("Waiting for permission for Bash");
+    expect(waitingText("blocked")).toBe("Needs an answer from you");
+    expect(waitingText(null)).toBe("Needs an answer from you");
   });
   it("summarises a diff", () => {
     expect(diffSummary(1, 3, 0)).toBe("1 file, +3 −0");
