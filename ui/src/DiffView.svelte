@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import { inline } from "./markdown";
   import { CATEGORY_TEXT, initialOpenFiles, patchOf, type WorkFile } from "./work";
 
   interface Props {
@@ -71,7 +72,8 @@
         <span class="chip">{CATEGORY_TEXT[file.category]}</span>
       </button>
       {#if open[file.path]}
-        {#if file.why}<p class="why">{file.why}</p>{/if}
+        {#if file.why}<!-- eslint-disable-next-line svelte/no-at-html-tags -->
+          <p class="why">{@html inline(file.why)}</p>{/if}
         {#if file.binary}
           <p class="note">Binary file.</p>
         {:else if !file.patch}

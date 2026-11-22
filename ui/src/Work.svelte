@@ -5,6 +5,7 @@
   import DiffView from "./DiffView.svelte";
   import { diffSummary } from "./format";
   import Layer from "./Layer.svelte";
+  import { inline, renderMarkdown } from "./markdown";
   import {
     fetchWork,
     initialOpen,
@@ -155,7 +156,8 @@
       <Layer id="summary" title="Summary" hint={work.summary.line} open={open.summary} focused={focus === "summary"} ontoggle={() => toggle("summary")}>
         <p class="line">{work.summary.line}</p>
         {#if work.summary.text && work.summary.text !== work.summary.line}
-          <div class="said">{work.summary.text}</div>
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+          <div class="said md">{@html renderMarkdown(work.summary.text)}</div>
           <p class="source">The agent's own closing message.</p>
         {:else if work.summary.source === "git"}
           <p class="source">Taken from the commits: the agent left no closing message.</p>
@@ -196,7 +198,8 @@
             </ol>
           {/if}
           {#if work.plan.text}
-            <pre class="said mono">{work.plan.text}</pre>
+            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+            <div class="said md">{@html renderMarkdown(work.plan.text)}</div>
           {/if}
         {:else}
           <p class="note">
@@ -220,7 +223,10 @@
         {:else}
           <ul class="points">
             {#each work.open_points as point, i (i)}
-              <li><span class="chip {point.kind}">{point.kind === "stated" ? "said by the agent" : "noticed by volee"}</span> {point.text}</li>
+              <li><span class="chip {point.kind}">{point.kind === "stated" ? "said by the agent" : "noticed by volee"}</span>
+                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                <span>{@html inline(point.text)}</span>
+              </li>
             {/each}
           </ul>
         {/if}
@@ -255,7 +261,10 @@
                 <span class="mono path">{file.path}</span>
                 <span class="mono counts"><span class="add">+{file.insertions}</span> <span class="del">−{file.deletions}</span></span>
                 {#if file.touched_by.length > 0}<span class="chip">{file.touched_by.join(", ")}</span>{/if}
-                {#if file.why}<span class="reason">{file.why}</span>{/if}
+                {#if file.why}
+                  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                  <span class="reason">{@html inline(file.why)}</span>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -342,7 +351,6 @@
     font-size: 1.02rem;
   }
   .said {
-    white-space: pre-wrap;
     background: var(--bg);
     border-radius: 8px;
     padding: 10px 12px;
@@ -354,6 +362,28 @@
     margin: 6px 0 0;
     color: var(--muted);
     font-size: 0.88rem;
+  }
+  .md :global(p) {
+    margin: 0 0 8px;
+  }
+  .md :global(p:last-child) {
+    margin-bottom: 0;
+  }
+  .md :global(ul),
+  .md :global(ol) {
+    margin: 0 0 8px;
+  }
+  .md :global(pre) {
+    overflow-x: auto;
+    background: var(--surface);
+    padding: 8px 10px;
+    border-radius: 6px;
+  }
+  .md :global(code),
+  .points :global(code),
+  .reason :global(code) {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.9em;
   }
   ul,
   ol {
