@@ -8,23 +8,19 @@
 - [Getting started](guide/getting-started.md)
 - [Concepts](guide/concepts.md)
 - [The interface](guide/interface.md)
-- [Themes](guide/themes.md)
-- [Command line](guide/cli.md)
 - [Configuration](guide/configuration.md)
-- [Agents of other harnesses](guide/other-harnesses.md)
+- [Command line](guide/cli.md)
 
 # Reference
 
-- [Daemon protocol](reference/protocol.md)
-- [MCP tools for agents](reference/mcp.md)
 - [Rules files (Lua)](reference/rules.md)
+- [MCP tools for agents](reference/mcp.md)
 
 # Architecture
 
 - [Overview](architecture/overview.md)
-- [Domain model](architecture/domain.md)
-- [Hosts](architecture/hosts.md)
 - [Claude Code adapter](architecture/claude-code.md)
+- [Data and events](architecture/domain.md)
 - [Git](architecture/git.md)
 - [Decisions](adr/README.md)
   - [0000. Record architecture decisions](adr/0000-record-architecture-decisions.md)

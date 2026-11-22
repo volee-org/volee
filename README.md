@@ -7,7 +7,7 @@
   </picture>
 </h1>
 
-**See, launch and coordinate every coding agent on your machine, from your terminal.**
+**A control tower for your Claude Code agents: it tells you what needs a decision, and lets you decide with as little reading as the risk allows.**
 
 [![CI](https://github.com/volee-org/volee/actions/workflows/ci.yml/badge.svg)](https://github.com/volee-org/volee/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-volee--org.github.io-8839ef)](https://volee-org.github.io/volee/)
@@ -17,100 +17,78 @@
 </div>
 
 > [!NOTE]
-> volee is young and built in the open. Expect rough edges and tell us about
-> them; the [roadmap](https://volee-org.github.io/volee/project/roadmap.html)
-> says what comes next.
+> This is volee v2, a restart on the `v2` branch. It is not released yet: the
+> latest release (0.18) is a different tool, a terminal interface that owned
+> the agents' terminals. The [roadmap](https://volee-org.github.io/volee/project/roadmap.html)
+> says what remains before v2.0.0.
 
 ## Why
 
-You run five Claude Code sessions in five worktrees. One waits for a
-permission, one finished an hour ago, two are talking to each other through a
-coordinator, and you are not sure which branch was pushed. volee answers, in
-one screen:
+You run several Claude Code agents at once, across repositories. The scarce
+resource is no longer typing, it is attention: every agent produces work to
+read, questions to answer and permissions to grant, at moments you do not
+choose. The two ways to fail are rubber-stamping (approve everything) and
+overload (read everything).
 
-- **Who is running?** Every agent on the machine, with its state, repository,
-  branch and worktree, whether you started it or another agent did.
-- **Who needs me?** Permission prompts, questions and finished work, sorted by
-  urgency.
-- **What did they do?** Commits, diffs, push state, pull request and checks.
-- **Who talks to whom?** Messages between agents and with you, as threads and
-  as a live graph where each message travels along its edge.
+volee watches your agents and puts what needs you in one **decision inbox**, a
+page in your browser served by a small local daemon:
 
-It also runs **missions**: a goal across one or more repositories, split by a
-coordinator agent and delivered by worker agents, with delivery checked by
-code, not by trust.
+- **A permission** an agent asks for: allow once, allow with a rule Claude Code
+  suggested, or deny with a reason the model reads.
+- **A question** an agent asks: pick one of the proposed answers or write your
+  own, without going to the terminal.
+- **Finished work**: read it in layers (summary, plan, open points, AI review,
+  diagram, guided diff), only as deep as its risk asks, then merge, ask for a
+  fix, comment a line or open the file in your own editor.
+
+![A low risk change in the inbox](docs/src/images/rules-3-low-inbox.png)
 
 ## How it works
 
-- Each agent volee launches runs in a volee host, a small process that holds
-  its terminal and its exact screen, so it survives closed windows, the
-  interface and the daemon. Open one with `enter` or `volee attach`, come
-  back with `Ctrl+Space` then `q`.
-- A preview, a full-screen view and a wall of screens show every agent
-  that runs. An agent volee hosts shows live, exactly as its terminal
-  does, status line included, without being resized; any other shows as
-  its harness or its multiplexer replays it.
-- volee launches Claude Code and OpenCode agents. A session you started
-  yourself opens the same way, where it runs: `enter` or a double click
-  puts a terminal on it inside volee (`claude attach` on a background
-  session, the pane of a tuios session), with nothing stopped or restarted.
-- Any other program runs under volee from your terminal: `volee run --
-  codex` starts it in a volee host, with your terminal on it, and it is
-  listed, shown and opened like the others.
-- The list is what runs now, one row per session, as Claude Code's own
-  agents view lists them: a session that is gone leaves it.
-- After a reboot, the daemon resumes the agents the reboot interrupted, with
-  their conversation. `volee daemon install` starts it at login, if you want.
-- Sessions you started by hand in a tuios or tmux pane are found in that
-  pane: their preview is the pane's screen, `enter` opens a tuios pane
-  inside volee and brings a tmux pane forward.
-- Each new worktree can run your setup commands, such as `bun install`,
-  before its agent starts.
-- A small local daemon keeps the registry, the event log and the messages in
-  SQLite. The interface, the command line and the agents all talk to it.
-- Agents message each other through an MCP server, which any MCP-capable
-  harness can use.
-- No multiplexer, editor or git client is required: the ones you use (Neovim,
-  lazygit, VS Code...) open an agent's worktree with a key.
+volee **observes** Claude Code. It never starts an agent, holds a terminal or
+types into one.
+
+- Claude Code posts its **hooks** over `http` to the daemon on `127.0.0.1`.
+  A permission or a question is held until you decide in the browser, then
+  answered through the hook's response; if you answer in the terminal first,
+  the card goes away.
+- The daemon lists sessions with `claude agents --json`, reads git in each
+  session's directory and reads the transcript for the plan and the reasons.
+  Git is the truth, the transcript is commentary, and when a transcript cannot
+  be read the screen says so and shows what git and the hooks know.
+- Your **rules** are Lua: `config.lua` for the machine and `rules.lua` (one per
+  repository, one personal) for risk, the layers shown, the review plan and
+  automatic merge. A broken file falls back to the safest rule: full read, no
+  automatic merge.
+- The **AI review** is Claude Code's own `/code-review`, shown as an opinion on
+  the card, never as a gate.
+- Merging is done by the daemon with delivery evidence and a journal line;
+  automatic merge exists for low risk changes, in the repositories you list.
+- An optional adapter (Rex) focuses an agent's terminal from the page.
 
 Read the [architecture overview](https://volee-org.github.io/volee/architecture/overview.html)
 and the [design decisions](https://volee-org.github.io/volee/adr/README.html).
 
 ## Install
 
-The latest release is v0.18.0. Each [release](https://github.com/volee-org/volee/releases)
-has prebuilt binaries for macOS (Apple Silicon and Intel) and Linux (x86_64
-and ARM64), and an installer that checks the download and puts `volee` in
-`~/.local/bin`:
+v2 has no release yet. See the
+[installation guide](https://volee-org.github.io/volee/guide/installation.html)
+for what is available, or build it from source (Rust 1.90 or later, and
+Node 24 for the web interface):
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/volee-org/volee/releases/latest/download/volee-cli-installer.sh | sh
-```
-
-Or build it from source with Cargo (Rust 1.90 or later and Zig 0.15.2):
-
-```sh
-cargo install --locked --git https://github.com/volee-org/volee --tag v0.18.0 volee-cli
+git clone --branch v2 https://github.com/volee-org/volee
+cd volee
+(cd ui && npm ci && npm run build)   # the interface the binary embeds
+cargo build --release -p volee-cli   # target/release/volee
 ```
 
 volee supports macOS and Linux and needs [Claude Code](https://code.claude.com)
-2.1.319 or later for its agent features. The
-[installation guide](https://volee-org.github.io/volee/guide/installation.html)
-covers specific versions, manual downloads and uninstalling.
+2.1.330 (the version v2 was measured on; it needs hooks over `http` and
+`claude agents --json`).
 
-Open the interface on every agent of your machine, or try it on a simulated
-team of agents first, no setup needed:
-
-```sh
-volee        # the agents on this machine; starts the daemon when needed
-volee demo   # a simulated team
-```
-
-![volee demo](docs/src/images/demo.gif)
-
-Then launch your first agent with the
-[getting started guide](https://volee-org.github.io/volee/guide/getting-started.html):
-it takes about ten minutes.
+Then, in the [getting started guide](https://volee-org.github.io/volee/guide/getting-started.html):
+start the daemon, run `volee doctor` in a project, run `volee ui`.
 
 ## Contributing
 

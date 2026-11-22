@@ -1,163 +1,82 @@
 # MCP tools for agents
 
-Agents talk to volee, and to each other, through an
-[MCP](https://modelcontextprotocol.io) server that volee runs for each of them
-(ADR 0005). Agents launched by volee get it automatically. Any MCP-capable
-harness can use it too:
+volee runs an [MCP](https://modelcontextprotocol.io) server, over stdio, that a
+coding agent can use to ask you a question and to exchange messages
+([ADR 0005](../adr/0005-harness-neutral-agent-protocol.md)). It is **optional**:
+the inbox works from Claude Code's hooks alone and needs no MCP server.
+
+> [!NOTE]
+> The MCP server is carried over from 0.x. v2 does not launch agents, so no
+> agent gets the server by default, and the messaging tools belong to the 0.x
+> registry (see [Data and events](../architecture/domain.md#the-0x-registry)).
+> The tool that matters for v2 is `ask_human`. The others may be removed or
+> reworked before v2.0.0, and the tools that launched agents and missions
+> (`spawn_worker`, `spawn_agent`, `start_mission`) are already gone.
+
+## Using it
+
+An agent of any harness joins volee by starting the server with a name
+([ADR 0014](../adr/0014-agents-of-other-harnesses-join-through-mcp.md)):
 
 ```json
 {
   "mcpServers": {
-    "volee": { "type": "stdio", "command": "volee", "args": ["mcp", "--agent", "ag_01jc5…"] }
+    "volee": { "type": "stdio", "command": "volee", "args": ["mcp", "--join", "reviewer"] }
   }
 }
-```
-
-The server speaks for one agent, given by `--agent`. It starts the volee
-daemon if needed.
-
-An agent of another harness, which volee did not launch, joins instead
-([ADR 0014](../adr/0014-agents-of-other-harnesses-join-through-mcp.md)):
-
-```sh
-volee mcp --join <name> [--harness <kind>] [--mission <title, short id or id>]
 ```
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--join` | required | The agent's name. The same name, harness and directory find the same agent again on the next start. |
-| `--harness` | `other` | The harness it runs in, such as `codex` or `gemini-cli`: lowercase letters, digits, `.`, `_` and `-`. `claude-code` is refused: volee finds those sessions itself. |
-| `--mission` | none | An open mission to take part in, so that its members and this agent can write to each other. Without it, the agent writes to the person, and the person to it. |
+| `--harness` | `other` | The harness it runs in, such as `codex` or `gemini-cli`: lowercase letters, digits, `.`, `_` and `-`. `claude-code` is refused: Claude Code sessions are seen through hooks and `claude agents --json`. |
+| `--mission` | none | An open mission to take part in. Without it, the agent writes to you, and you to it. |
 
-The directory the server runs in is the agent's workspace. The agent is
-idle while the server runs and stopped once it exits; each tool call shows
-as its activity. No hooks hand it messages, so the server's instructions ask
-the model to call `read_messages` at the start of a task, after a question,
-and before it finishes. The [guide](../guide/other-harnesses.md) has
-configurations for Codex CLI and Gemini CLI.
-
-Agents volee launches may call every tool below without a permission
-prompt: their settings allow `mcp__volee`, so that a background agent never
-stalls on asking to send a message. Only a mission's coordinator may call
-`request_approval`. The tools that launched agents and missions
-(`spawn_worker`, `spawn_agent`, `start_mission`) left with the v2 restart.
-No tool merges or closes a mission: volee does both,
-once the human approved.
+The directory the server runs in is the agent's workspace. The server starts the
+daemon when it is not running. `volee mcp --agent <id>` is the form 0.x used for
+agents it launched.
 
 ## Tools
 
-### `whoami`
-
-The caller's identity: id, name, role, state, repository, branch, worktree,
-base branch, mission and parent. For a lead, also `repos`: the repositories
-of the person's configuration, which it can name when it launches.
-
-### `list_agents`
-
-Every agent volee knows, those that need attention first. Each entry has an
-id, a name, a role, a state, the repository and branch, the mission, the
-parent, the harness, and `can_message`: whether the caller may write to it.
-The caller's own entry is in the list too, with `you: true` in place of
-`can_message`: a lead that reads the list before it launches does not take
-itself for a duplicate.
-
-| Argument | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `include_finished` | boolean | `false` | Also list stopped, failed and lost agents. |
-
-### `send_message`
-
-| Argument | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `to` | list of strings | required | Agent ids (`ag_…`), agent names from `list_agents`, or `human`. |
-| `body` | string | required | Markdown. |
-| `kind` | `question`, `answer`, `contract`, `report`, `alert`, `note` | `note` | What the message is for. |
-| `in_reply_to` | string | none | The id of the answered message, which keeps the thread. |
-| `refs` | list | none | Each item sets one of `file` (with an optional `line`), `commit` or `url`. |
-
-Routing follows ADR 0006: inside a mission every member writes to every
-member; otherwise an agent writes to its parent, its children, its mission's
-coordinator, the agent that requested its mission, and the human. A refusal
-comes back as a tool error that explains why, so the model can correct
-itself.
-
-A message to an agent whose session ended resumes it, unless the human
-stopped that agent or its mission is over: then the message waits. When the
-human stops a worker of a running mission, volee tells the coordinator in the
-mission's thread, so that it plans without that worker.
-
-### `read_messages`
-
-Messages addressed to the caller, oldest first, with sender, kind, id and
-references. Returned messages are marked as read.
-
-| Argument | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `unread_only` | boolean | `true` | Only messages not read yet. |
-
-Messages also reach the agents volee launched without this tool: at the end
-of a turn through the `Stop` hook, or by waking an idle agent. An agent that
-joined with `--join` has no hooks: this tool is the only way its messages
-reach it.
+| Tool | Does |
+| --- | --- |
+| `whoami` | The caller's identity: id, name, role, state, repository, branch, worktree, mission, parent. |
+| `list_agents` | The agents of the registry, those that need attention first, with `can_message`. |
+| `send_message` | A message to agents or to `human`, with a kind (`question`, `answer`, `contract`, `report`, `alert`, `note`), a reply target and references. Routing follows [ADR 0006](../adr/0006-messaging.md). |
+| `read_messages` | Messages addressed to the caller, oldest first; they are marked read. An agent that joined with `--join` has no hooks: this tool is the only way its messages reach it. |
+| `ask_human` | Asks you a question, with answers to choose from. |
+| `report` | Tells the parent, the mission's coordinator and you that the task is done, blocked or failed. |
+| `request_approval` | For a mission's coordinator: presents its report and asks for your approval ([ADR 0032](../adr/0032-a-mission-is-merged-only-after-the-person-approved.md)). |
 
 ### `ask_human`
 
-Asks the human a question that only they can decide, with the answers they
-choose from. The question stays on top of the human's messages, in the
-interface and in `volee msg questions`, until they answer it.
-
 | Argument | Type | Meaning |
 | --- | --- | --- |
-| `question` | string | The question, short and complete: the human may read it hours later. |
+| `question` | string | The question, short and complete: you may read it hours later. |
 | `options` | list of strings | The answers to choose from: two to six, each a few words on one line (40 characters at most), all different. |
 
-The answer reaches the agent as an `answer` message in reply to the
-question, like any other message. Its text is one of the options, in the
-option's own spelling, when the human picked one; anything else is the
-human's own words and is never a yes. The tool returns at once: the agent
-ends its turn and volee wakes it with the answer.
+The tool returns at once; the agent is told to end its turn. The question stays
+unanswered until you answer it **from the command line**:
 
-`send_message` with the kind `question` still asks a question without
-options. Options on anything but a question to the human are refused
+```sh
+volee msg questions                  # the questions waiting for you, with their offered answers
+volee msg answer <question|agent> 2  # the number of an offered answer, its words, or your own words
+```
+
+The web inbox does not list these questions: it shows the questions Claude Code
+itself asks through `AskUserQuestion`, which is a different mechanism (a hook,
+see [the interface](../guide/interface.md#a-question)). Your answer reaches the
+agent as an `answer` message in reply to its question, which it reads with
+`read_messages`: one of the options, in its own spelling, when you picked one;
+anything else is your own words and is never a yes. Options on anything but a
+question to you are refused
 ([ADR 0031](../adr/0031-a-question-may-offer-its-answers.md)).
 
-### `report`
+### Routing and refusals
 
-Tells the agent's parent, its mission's coordinator and the human that the
-task is done, blocked or failed. A `done` report is a `report` message;
-`blocked` and `failed` are `alert` messages.
-
-| Argument | Type | Meaning |
-| --- | --- | --- |
-| `outcome` | `done`, `blocked`, `failed` | How the task ended. |
-| `summary` | string | What was done, what is left, what to check. |
-| `refs` | list | Commits, pull requests or files that prove the work. |
-
-### `request_approval`
-
-For a mission's coordinator, once volee told it that every worker delivered:
-presents its report to the human and asks for their approval
-([ADR 0032](../adr/0032-a-mission-is-merged-only-after-the-person-approved.md)).
-
-| Argument | Type | Meaning |
-| --- | --- | --- |
-| `done` | string | What is done, in one line. |
-| `proof` | string | The proof, in one line: pull requests, branches, test results. |
-| `left` | string, optional | What is left, in one line; "nothing" when left out. |
-
-volee posts the report as a question from the coordinator to the human, in
-the mission's thread, with the answers `ok merge` and `no` (`ok close` and
-`no` for an analysis mission); the lead that asked for the mission reads it
-too. The mission waits: nothing is merged or closed before the human
-answers. The tool returns at once, and the coordinator ends its turn. volee
-then tells it what the answer was. On the approving answer, volee merges
-each worker's work itself, closes the mission, tidies its workers and stops
-the coordinator, which has nothing more to do; if a merge does not go
-through, volee tells it why, and it presents its report again once what
-blocks is settled. On any other answer, nothing is merged and the mission
-stays open.
-
-Refused, with the reason, when the caller is not the coordinator, while a
-worker has not delivered (a report presented for approval says the work is
-ready), while the human has not answered the report already presented, and
-once they approved.
+Inside a mission every member writes to every member; otherwise an agent writes
+to its parent, its children, its mission's coordinator and you. A refusal comes
+back as a tool error that explains why, so the model can correct itself. Only a
+mission's coordinator may call `request_approval`, and it is refused while a
+worker has not delivered or while you have not answered the report already
+presented. No tool merges or closes a mission: volee merges, after your approval.

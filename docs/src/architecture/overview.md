@@ -1,19 +1,10 @@
 # Architecture overview
 
-This page describes volee v2 as it is built, stage by stage. The plan and the
-reasons for the restart are in `docs/v2/framing.md` in the repository; each
-significant choice has an architecture decision record (ADR) in
-[Decisions](../adr/README.md). Decisions of 0.x that the restart superseded
-stay in the list, marked as such.
-
-> [!NOTE]
-> v2 is under construction on the `v2` branch. This page covers what exists:
-> **stage 1, the hook server**, **stage 2, agents and finished work**, and
-> **stage 3, the web interface**, and **step 8, the Lua rules and
-> configuration**. Parts of the 0.x daemon (the registry, the messages, the
-> missions, the merge flow) are still in the code and are adapted in later
-> stages; the pages of the user guide and the other
-> architecture pages still describe 0.x.
+This page describes volee v2 as it is built. The reasons for the restart are in
+`docs/v2/framing.md` in the repository, with the trials that checked what
+Claude Code allows (`docs/v2/*.md`); each significant choice has an architecture
+decision record (ADR) in [Decisions](../adr/README.md). Decisions of 0.x that
+the restart superseded stay in the list, marked as such.
 
 ## What volee v2 is for
 
@@ -53,21 +44,32 @@ flowchart LR
     A1[session 1]
     A2[session 2]
   end
-  subgraph D[volee daemon]
-    H[hook server<br/>127.0.0.1]
-    DB[(SQLite<br/>hook_events)]
+  subgraph D[volee daemon, Rust, 127.0.0.1]
+    H[hook server<br/>http hooks, held decisions]
+    P[agents view<br/>claude agents --json]
+    T[transcript reader]
+    G[git and gh]
+    L[Lua rules<br/>mlua, sandboxed]
+    DB[(SQLite<br/>events, journal...)]
+    ACT[actions<br/>merge, fix, editor]
+    W[web API<br/>HTTP + SSE + embedded UI]
   end
-  CLI[volee events]
-  DOC[volee doctor]
+  UI[Web interface<br/>Svelte, in your browser]
+  AD[terminal adapter<br/>Rex, optional]
   A1 -- http hooks --> H
   A2 -- http hooks --> H
   H --> DB
-  P[claude agents --json] --> V[agents view]
-  DB --> V
-  G[git] --> V
-  V --> AG[volee agents]
-  CLI -- reads --> DB
-  DOC -. writes hook settings .-> CC
+  P --> A1
+  P --> W
+  T --> W
+  G --> W
+  L --> W
+  DB --> W
+  W <--> UI
+  UI --> ACT
+  ACT -- merge --> G
+  ACT -- fix request --> A1
+  W -. open this terminal .-> AD
 ```
 
 | Part | Where | Does |
@@ -79,6 +81,8 @@ flowchart LR
 | `volee agents` | `volee-cli` | Shows the agents view: state, repository, branch, how far the branch is from its base, finished work with its diff summary. |
 | Web interface | `volee-daemon`, `web/` and `ui/` | The inbox in a browser tab: the bundle (embedded), a JSON API and a live event stream, on the hook server's port. See [the web interface](#the-web-interface). |
 | `volee ui` | `volee-cli` | Prints and opens the link to the interface, with its token. |
+| Rules | `volee-rules`, `volee-daemon` `rules.rs` | Sandboxed Lua (`mlua`): risk, layers, review plan, automatic merge, finished work, how long a question is held. |
+| Actions | `volee-daemon`, `actions/` | Merge, fix request, line comments, editors, the journal. |
 | `volee events` | `volee-cli` | Lists the stored events, oldest first, optionally for one session. Reads the database directly, so it works with the daemon stopped. |
 
 ## The hook server
@@ -379,17 +383,32 @@ no Node. A release build sets `VOLEE_REQUIRE_UI=1`, which makes a missing
 bundle a build error; the release workflow builds the interface first
 (`.github/build-setup.yml`, through `dist-workspace.toml`).
 
-## What is still 0.x
+## What is carried over from 0.x
 
-The registry, event log (`events` table), messages, missions and merge flow of
-0.x still run in the daemon and are reached over its Unix socket. They are
-reworked in the following stages, as the inbox needs them; until then they are
-not part of what this page describes.
+The registry, event log (`events` table), messages and missions of 0.x still
+run in the daemon and are reached over its Unix socket by the CLI and the MCP
+server. They are not part of the inbox and are being reduced to what `ask_human`
+and `volee mcp --join` need; see the [roadmap](../project/roadmap.md). The
+socket protocol is an internal interface between the `volee` command and the
+daemon, and is not documented as a public API. The daemon no longer lists Claude
+Code a second time to turn every session into a registry agent: the agents view
+is the one reader of `claude agents --json`.
 
-Step 8 retired the 0.x **session discovery**: the daemon no longer lists
-Claude Code a second time to turn every session into an agent of its own. The
-agents view is the one reader of `claude agents --json`; the agents a mission
-knows (launched by it, or joined through MCP) follow the listing the view reads,
-and no session becomes an agent by being listed. Configuration is Lua only
-(`config.lua`, see [Configuration](../guide/configuration.md)): the TOML file
-and its parser are gone.
+Configuration is Lua only (`config.lua`, see
+[Configuration](../guide/configuration.md)): the 0.x TOML file and its parser
+are gone.
+
+## Where things are
+
+| Path | What lives there |
+| --- | --- |
+| `crates/volee-daemon` | The daemon: hook server, agents view, held decisions, rules host, review, actions, web API |
+| `crates/volee-rules` | The Lua engine and the typed `Change` and `FinishedFacts`; depends on no other volee crate |
+| `crates/volee-config` | `config.lua` |
+| `crates/volee-store` | SQLite: hook events, journal, comments, review results, risk overrides, caches |
+| `crates/volee-git` | git and the forge through your own `git` and `gh` |
+| `crates/volee-harness` | The Claude Code profile and the hook settings |
+| `crates/volee-core`, `volee-proto` | The 0.x domain model and the socket protocol |
+| `crates/volee-mcp` | The MCP server (`ask_human` and the 0.x messaging tools) |
+| `crates/volee-cli` | The `volee` command |
+| `ui/` | The Svelte app, embedded into the daemon at build time |

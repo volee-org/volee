@@ -1,61 +1,56 @@
-# volee
+# Introduction
 
-**See, launch and coordinate every coding agent on your machine, from your
-terminal.**
+volee is a **control tower for your Claude Code agents**. You run several
+agents at once, across repositories. The scarce resource is no longer typing,
+it is attention: every agent produces work to read, questions to answer and
+permissions to grant, at moments you do not choose. volee watches them, puts
+what needs a decision in one inbox in your browser, and lets you decide with as
+little reading as the risk allows.
 
-> **Early development.** volee is being built in the open. Pages marked
-> *planned* describe behavior that is designed (see the
-> [decisions](adr/README.md)) but not released yet.
+> [!NOTE]
+> This documentation describes volee v2, which is not released yet. The latest
+> release, 0.18, was a different tool (a terminal interface that launched agents
+> and owned their terminals). The [roadmap](project/roadmap.md) says what
+> remains before v2.0.0. The decisions of 0.x stay in the
+> [decision list](adr/README.md), marked as superseded where v2 replaced them.
 
-## The problem
+![A low risk change in the inbox](images/rules-3-low-inbox.png)
 
-Coding agents made parallel work cheap. Running five of them is easy;
-keeping track of them is not:
+## What you get
 
-- Which ones are still working, which one waits for a permission, which one
-  finished an hour ago?
-- Which worktree and branch does each one use, and was its work pushed?
-- When two agents coordinate through a third one, what did they agree on?
+- **One inbox with three kinds of card.** A **permission** (allow once, allow
+  with a rule Claude Code suggested, deny with a reason), a **question**
+  (proposed answers first, or your own words) and **finished work**.
+- **Finished work read in layers.** One line of summary, then the plan the
+  agent followed, its open points, an AI review, a diagram of the change and the
+  diff ordered for reading. Each layer opens only if the risk asks for it.
+- **Risk you can tune.** Rules in Lua, per repository and per person, decide the
+  risk of a change (sensitive paths, migrations, dependencies, size, untested
+  code) and with it the layers shown, the review plan and whether a merge may be
+  automatic.
+- **Actions.** Merge, ask the agent for a fix, comment a line (it becomes the fix
+  request), open the file in your own editor. Every action is written to a
+  journal.
+- **An opinion, never a gate.** The review is Claude Code's own `/code-review`.
 
-Terminal tabs and multiplexer panes show *where* agents run, not *what they
-do*. volee shows what they do.
+## What volee does not do
 
-## What volee gives you
-
-- **One screen for every agent** on the machine, grouped the way the work is
-  organized: a lead, its missions, their workers and subagents.
-- **Urgency first**: questions and permission prompts float to the top.
-- **Delivery at a glance**: commits since the agent started, pushed or not,
-  pull request, checks.
-- **Conversations you can follow**: typed, threaded messages between agents
-  and with you, and a live graph where each message travels along its edge.
-- **Missions**: give a goal across several repositories to a coordinator
-  agent; volee supervises its workers and checks that the work was delivered.
-- **Every screen, exactly**: each agent volee launches runs in a volee host
-  that holds its terminal, so its preview is its live screen, and a wall
-  shows the screens of every agent that runs, hosted by volee or not. The agent survives closed
-  windows, the interface and the daemon, and comes back after a reboot.
-- **Your terminal, your tools**: open an agent with a key, type into it
-  inside volee and come back with `Ctrl+Space` then `q`; open its worktree in your
-  editor, your diff viewer or your
-  git interface. None of them is required, and no multiplexer either; a
-  session you started in a tuios or tmux pane is shown and reached there.
-- **Claude Code and OpenCode**: volee launches agents of both, and shows
-  the ones started elsewhere. A Claude Code session you started yourself
-  opens where it runs, in the background or in a tuios pane, with nothing
-  stopped or restarted; the list is what runs now.
-- **Any other AI, from your terminal**: `volee run -- <command>` runs any
-  program under volee. Your terminal is on it at once, and it is listed,
-  shown and opened like the others
-  ([Agents of other harnesses](guide/other-harnesses.md)).
-- **Worktrees ready to work**: your setup commands, such as `bun install`,
-  run in each new worktree before its agent starts.
+volee **observes**. It does not launch agents, hold their terminals or type
+into them. Claude Code reports what happens through its own hooks, and a
+decision goes back through the hook's response. The only thing volee writes to
+a session is a fix request you ask for, through Claude Code's documented
+messaging socket or a background resume, never keys typed into a terminal.
 
 ## Where to go next
 
-- [Installation](guide/installation.md)
-- [Getting started](guide/getting-started.md): your first agent and your
-  first mission, in about ten minutes.
-- [Concepts](guide/concepts.md): agents, sessions, roles, missions, messages.
-- [Architecture overview](architecture/overview.md), for contributors and the
-  curious.
+- [Installation](guide/installation.md), then [Getting started](guide/getting-started.md):
+  start the daemon, hook it to Claude Code, open the inbox.
+- [Concepts](guide/concepts.md): the words used on the page.
+- [The interface](guide/interface.md): each card and screen.
+- [Configuration](guide/configuration.md) and [Rules files](reference/rules.md):
+  `config.lua` and `rules.lua`.
+- [Architecture overview](architecture/overview.md): how the parts fit, and why
+  the [decisions](adr/README.md) were taken.
+
+volee is open source, MIT OR Apache-2.0, built in the open at
+[github.com/volee-org/volee](https://github.com/volee-org/volee).

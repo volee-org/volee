@@ -1,6 +1,6 @@
 # 0025. Key sequences, a leader key and which-key popups; every key configurable
 
-- Status: Superseded by the v2 restart (`docs/v2/framing.md`, 2026-11-21), kept as history of 0.x. Status in 0.x: Proposed (amended on 2026-11-17 by [LazyVim's keys](#lazyvims-keys) and [the leader's panel](#the-leaders-panel))
+- Status: Superseded by the v2 restart (`docs/v2/framing.md`, 2026-11-21), kept as history of 0.x. Status in 0.x: Proposed (amended on 2026-11-17 by [LazyVim's keys](#lazyvims-keys) and [the leader's panel](#the-leaders-panel-and-the-modal-windows))
 - Date: 2026-11-09
 
 ## Context

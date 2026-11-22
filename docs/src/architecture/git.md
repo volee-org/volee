@@ -71,33 +71,22 @@ memory in its `delivery-updated` events. Some consequences are worth knowing:
 - A squash-merged branch is never in its base's history: its evidence is the
   merged pull request, which comes from the forge.
 
-## When the daemon checks
+## When the daemon reads git
 
-The daemon keeps the workspace and evidence of every agent up to date by
-itself, sessions volee did not launch included, so the interface and the
-mission supervisor never wait for git:
-
-- **Workspaces.** When an agent registers, or its working directory changes,
-  the daemon reads where the directory sits: the repository (named after its
-  `[repos.<name>]` entry in the configuration when one matches, otherwise
-  after its folder), the main checkout, the worktree when it is a linked one,
-  the branch, and the base branch (the one already known, else the configured
-  one, else the repository's default branch). The branch an agent was
-  launched on, or first seen on, stays its branch even when `HEAD` moves.
-- **Evidence.** It is read again the moment an agent finishes a turn, stops
-  or fails, when the supervisor judges it, and every minute for live agents.
-  The previous evidence's `unmerged_tip` is passed back, so merges are
-  proven. Before reading an agent's evidence, the daemon fetches its
-  repository, at most every five minutes and in batch mode, when the
-  [`[git] fetch`](../guide/configuration.md#git) setting allows it: by
-  default for agents volee launched, never for sessions it only discovered,
-  whose remotes belong to the person who started them. A `delivery-updated`
-  event is recorded only when the evidence changed, or when it is the first
-  check since the agent's state changed, which the supervisor waits for.
+- **The agents view** reads git for every session whose directory is in a
+  repository, with one cheap `git status` per reading and a full reading only
+  when something changed (see [the overview](overview.md#agents-and-finished-work)):
+  repository, worktree, branch, base, commits ahead and behind, uncommitted
+  changes, merged or not, diff summary.
+- **The work screen** reads the diff when you open it, and again after you opened
+  an editor.
+- **Merge and tidy** read the delivery evidence just before and just after they
+  act.
 - git and the forge never run under the daemon's state lock or on a request
-  path: they run on background threads, for four agents at a time and one
-  job per agent, and triggers that arrive meanwhile are merged into the next
-  job. A failure is logged and the next trigger tries again.
+  path that waits for them: they run on background threads, four at a time and
+  one job per agent. A failure is logged and the next trigger tries again.
+- Fetching is the `[git] fetch` setting, and does not apply to the sessions you
+  started ([Configuration](../guide/configuration.md#git)).
 
 ## Pull requests
 
@@ -127,25 +116,22 @@ The pull request records its head commit, and counts as delivery evidence
 only while the branch is still at that commit: commits made after it are not
 part of it, until the next look-up finds them in it.
 
-## Worktrees volee creates
+## Merging
 
-- The worktree is created detached at `origin/<base>`, as the last fetch left
-  it, and the branch is created inside it, with no upstream until the agent
-  pushes it. A failure therefore never leaves a stray branch; when the worktree
-  exists but a later step failed (a hook, a checkout stopped at its timeout),
-  volee says the worktree is there.
-- volee refuses to reuse an existing branch or directory, and checks both
-  before it touches the repository, with one exception
-  ([ADR 0016](../adr/0016-what-a-failed-launch-left-untouched.md)): what a
-  failed launch left untouched. When the agent of an earlier launch on the
-  same branch, in the same worktree and from the same base, failed before
-  any session started, git still registers that worktree for the branch, the
-  worktree has no change and no untracked file, and the branch has no commit
-  beyond its merge base with the base branch, the same launch run again
-  reuses the worktree and forgets the failed agent.
-- Removing a worktree is never forced. volee refuses to remove the main
-  checkout, a locked worktree, a worktree with uncommitted changes or
-  untracked files, and a detached `HEAD` that no branch, tag or
-  remote-tracking branch contains, since those commits would be lost with the
-  worktree. Ignored files, such as build outputs, are deleted with it. The
-  branch is always kept.
+A merge is the one place volee changes a repository
+([ADR 0041](../adr/0041-actions-on-a-finished-change-and-how-a-fix-reaches-the-agent.md)).
+A repository whose `origin` is on a forge gets its pull request merged through
+`gh` (a draft is marked ready; the method is the repository's `merge` setting,
+else the first one the forge allows). Any other repository gets a merge commit of
+the branch into its base in the main checkout, which must have the base checked
+out and be clean. Nothing is forced and no branch is deleted. A local merge is
+verified (the tip is part of the base), a forge merge is verified by asking the
+forge again, and a merge that cannot be shown is reported as failed.
+
+## Removing a worktree
+
+`volee tidy` never forces. It refuses to remove the main checkout, a locked
+worktree, a worktree with uncommitted changes or untracked files, and a detached
+`HEAD` that no branch, tag or remote-tracking branch contains, since those
+commits would be lost with the worktree. Ignored files, such as build outputs,
+are deleted with it. The branch is always kept.
