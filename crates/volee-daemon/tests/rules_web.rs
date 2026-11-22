@@ -357,7 +357,7 @@ async fn a_repository_cannot_lower_the_risk_or_turn_automatic_merging_on_unless_
     rewrite(
         &daemon.config_dir.join("rules.lua"),
         &format!(
-            "return {{ sensitive_paths = {{ 'src/auth/**' }}, trusted_repos = {{ '{}' }} }}",
+            "return {{ sensitive_paths = {{ 'src/auth/**' }}, trusted_repos = {{ '{0}' }}, auto_merge_repos = {{ '{0}' }} }}",
             daemon.repo.display()
         ),
     );

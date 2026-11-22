@@ -135,7 +135,17 @@ impl Loaded {
                 change,
                 reply,
             } => {
-                let evaluation = self.rules(Some(&root), stamp).evaluate(&change);
+                // Automatic merging is opt-in per repository, in the personal
+                // file only: a repository's own file cannot list itself.
+                let enabled = self.rules(None, stamp).settings().auto_merges(&root);
+                let mut evaluation = self.rules(Some(&root), stamp).evaluate(&change);
+                if !enabled {
+                    evaluation.merge = MergeDecision {
+                        allowed: false,
+                        reason: "auto merge not enabled for this repo (auto_merge_repos in your rules.lua)"
+                            .to_owned(),
+                    };
+                }
                 let _ = reply.send(Report { evaluation });
             }
             Job::Layers {

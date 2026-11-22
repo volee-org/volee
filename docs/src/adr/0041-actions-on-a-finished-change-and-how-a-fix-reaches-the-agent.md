@@ -38,9 +38,11 @@ by a worker of this project; step 9 repeats it on a real session (see
   repository's file can never turn it on), the daemon merges by itself once per
   branch tip, whatever came of it, and the journal says it was a rule and which
   reason the rule gave. A failing automatic merge is not retried in a loop.
-  There is no per-repository switch in the interface: `auto_merge` is set in
-  the rules (the personal file turns it off everywhere or per repository, by a
-  function that looks at `change.repo`).
+  **It is opt-in per repository**: volee sees every session of the machine, so
+  it only runs in the repositories listed in `auto_merge_repos` of the
+  personal file (default none, whatever `auto_merge` answers; a repository's
+  file cannot list itself) and the card says "auto merge not enabled for this
+  repo" otherwise. There is no switch in the interface.
 
 ### A fix request
 
@@ -59,7 +61,8 @@ nonce. The channel depends on the session:
    person, not reachable by others, or volee refuses to write to it.
 2. **A stopped session**: `claude --bg --resume <full session id> "<text>"`
    and **no other option** (any other option starts a copy of the session).
-   "Already running" is retried once after a second.
+   "Already running" is retried once after a second. The program is the
+   `claude.command` of `config.lua`, the same one the review runs.
 3. **Never** `claude --resume -p` on a session that is open (the two histories
    diverge silently), and never keys typed into a terminal. A live session
    whose socket is missing or unsafe is **not** resumed: the request is

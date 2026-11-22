@@ -61,6 +61,7 @@ return {
     { name = "code", kind = "external", cmd = "code -g {file}:{line}" },
   },
   trust_repo_rules = false,      -- personal file only: see "Trusting a repository's file"
+  auto_merge_repos = {},         -- personal file only: the repositories that may merge by themselves
   trusted_repos = {},            -- personal file only
 }
 ```
@@ -110,18 +111,19 @@ The **facts** of `finished`: `stopped_last`, `busy`, `commits`,
 `unique_commits`, `merged`. The default rule is: not busy, stopped after its
 last activity, not merged, and at least one unique commit.
 
-### Automatic merge, and turning it off for one repository
+### Automatic merge is opt-in, per repository
 
-When `auto_merge` allows a change (low risk, trust rules respected), the
-daemon merges it **by itself once the agent finished**, once per branch tip,
-and the journal on the inbox says it was a rule and gives the reason you
-returned. There is no switch in the interface: turn it off where you set it.
-A function can look at the repository:
+volee sees every Claude Code session of the machine, so a broad rule must not
+be able to merge work in a repository you never thought of. Automatic merging
+therefore runs **only in the repositories you list** in the **personal** file,
+by their main checkout. The default is none, whatever `auto_merge` answers;
+a repository's own file cannot list itself. For an unlisted repository the
+card says "auto merge not enabled for this repo".
 
 ```lua
 return {
+  auto_merge_repos = { "/Users/me/code/docs-site" },
   auto_merge = function(change, risk)
-    if change.repo == "billing" then return false, "billing is always read" end
     if risk == "low" and volee.touches(change, "docs/**") then
       return true, "docs only, low risk"
     end
@@ -129,6 +131,12 @@ return {
   end,
 }
 ```
+
+In a listed repository, when `auto_merge` allows a change (low risk, trust
+rules respected), the daemon merges it **by itself once the agent finished**,
+once per branch tip, and the journal on the inbox says it was a rule and gives
+the reason you returned. To turn it off for one repository, take it out of the
+list; there is no switch in the interface.
 
 The merge itself is the one-click merge of the work screen: a pull request
 through `gh` when the repository's `origin` is on GitHub (method from the

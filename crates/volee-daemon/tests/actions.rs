@@ -94,6 +94,7 @@ async fn start(options: Options<'_>) -> Running {
     std::fs::create_dir_all(projects.join("p")).unwrap();
     std::fs::write(projects.join("p").join(format!("{ID}.jsonl")), "").unwrap();
     if let Some(text) = options.personal_rules {
+        let text = text.replace("{REPO}", &repo.to_string_lossy());
         std::fs::write(paths.config_dir.join("rules.lua"), text).unwrap();
     }
     let database = paths.database();
@@ -141,7 +142,7 @@ async fn start(options: Options<'_>) -> Running {
     );
     let mut settings = volee_config::Config::default();
     settings.review.enabled = false;
-    settings.review.command = fake_claude.to_string_lossy().into_owned();
+    settings.claude.command = fake_claude.to_string_lossy().into_owned();
     let cli = GitCli::new()
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1");
@@ -340,7 +341,7 @@ async fn a_merge_that_fails_changes_nothing_and_the_journal_says_why() {
 async fn a_low_risk_change_merges_by_itself_when_the_rules_say_so_and_the_journal_says_which() {
     let daemon = start(Options {
         personal_rules: Some(
-            "return { auto_merge = function(change, risk) \
+            "return { auto_merge_repos = { '{REPO}' }, auto_merge = function(change, risk) \
              if risk == 'low' and volee.touches(change, 'docs/**') then \
                return true, 'docs only, low risk' end return false end }",
         ),
@@ -370,9 +371,43 @@ async fn a_low_risk_change_merges_by_itself_when_the_rules_say_so_and_the_journa
 }
 
 #[tokio::test]
+async fn a_repository_the_person_did_not_list_is_never_merged_by_itself_whatever_the_rules_say() {
+    // auto_merge = true, a low risk change, but `auto_merge_repos` is empty.
+    let daemon = start(Options {
+        personal_rules: Some("return { auto_merge = true }"),
+        alive: true,
+    })
+    .await;
+    let inbox = finished_card(&daemon).await;
+    let merge = &inbox["cards"][0]["risk"]["auto_merge"];
+    assert_eq!(merge["allowed"], false, "{merge}");
+    assert!(
+        merge["reason"]
+            .as_str()
+            .unwrap()
+            .contains("not enabled for this repo"),
+        "{merge}"
+    );
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(!daemon.repo.join("docs/guide.md").exists());
+    assert_eq!(journal(&daemon).await.len(), 0);
+    // A repository's own file cannot list itself.
+    std::fs::create_dir_all(daemon.repo.join(".volee")).unwrap();
+    let own = format!(
+        "return {{ auto_merge_repos = {{ '{}' }} }}",
+        daemon.repo.display()
+    );
+    std::fs::write(daemon.repo.join(".volee/rules.lua"), own).unwrap();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(!daemon.repo.join("docs/guide.md").exists());
+}
+
+#[tokio::test]
 async fn a_high_risk_change_is_never_merged_by_itself() {
     let daemon = start(Options {
-        personal_rules: Some("return { auto_merge = true, sensitive_paths = { 'docs/**' } }"),
+        personal_rules: Some(
+            "return { auto_merge_repos = { '{REPO}' }, auto_merge = true, sensitive_paths = { 'docs/**' } }",
+        ),
         alive: true,
     })
     .await;

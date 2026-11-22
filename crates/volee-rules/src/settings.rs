@@ -146,6 +146,10 @@ pub struct Settings {
     pub trust_repo_rules: bool,
     /// Repository roots whose rules file is trusted (see `trust_repo_rules`).
     pub trusted_repos: Vec<String>,
+    /// Repository roots where automatic merging may run at all. Only the
+    /// personal file counts. Empty by default: whatever `auto_merge` says, no
+    /// repository merges by itself until it is listed here.
+    pub auto_merge_repos: Vec<String>,
 }
 
 impl Default for Settings {
@@ -179,6 +183,7 @@ impl Default for Settings {
             editors: Vec::new(),
             trust_repo_rules: false,
             trusted_repos: Vec::new(),
+            auto_merge_repos: Vec::new(),
         }
     }
 }
@@ -195,18 +200,24 @@ impl Settings {
     /// Whether the rules file of the repository at `root` is trusted: the
     /// person said so for every repository or for this one.
     pub fn trusts(&self, root: &std::path::Path) -> bool {
-        if self.trust_repo_rules {
-            return true;
-        }
-        let same = |listed: &str| {
+        self.trust_repo_rules || Self::lists(&self.trusted_repos, root)
+    }
+
+    /// Whether automatic merging may run in the repository at `root`: the
+    /// person listed it in `auto_merge_repos`.
+    pub fn auto_merges(&self, root: &std::path::Path) -> bool {
+        Self::lists(&self.auto_merge_repos, root)
+    }
+
+    fn lists(listed: &[String], root: &std::path::Path) -> bool {
+        listed.iter().any(|listed| {
             let listed = std::path::Path::new(listed);
             listed == root
                 || matches!(
                     (listed.canonicalize(), root.canonicalize()),
                     (Ok(a), Ok(b)) if a == b
                 )
-        };
-        self.trusted_repos.iter().any(|listed| same(listed))
+        })
     }
 
     /// Checks what a type cannot: durations and editor commands.
@@ -222,7 +233,7 @@ impl Settings {
 }
 
 /// The top-level keys a rules file may hold.
-pub(crate) const SETTING_KEYS: [&str; 11] = [
+pub(crate) const SETTING_KEYS: [&str; 12] = [
     "sensitive_paths",
     "migration_paths",
     "dependency_paths",
@@ -234,6 +245,7 @@ pub(crate) const SETTING_KEYS: [&str; 11] = [
     "editors",
     "trust_repo_rules",
     "trusted_repos",
+    "auto_merge_repos",
 ];
 
 /// The rule functions a rules file may define.
