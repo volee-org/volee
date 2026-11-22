@@ -8,7 +8,7 @@ stay in the list, marked as such.
 
 > [!NOTE]
 > v2 is under construction on the `v2` branch. This page covers what exists:
-> **stage 1, the hook server**. Parts of the 0.x daemon (the registry, the
+> **stage 1, the hook server**, and **stage 2, agents and finished work**. Parts of the 0.x daemon (the registry, the
 > messages, the missions, the merge flow) are still in the code and are
 > adapted in later stages; the pages of the user guide and the other
 > architecture pages still describe 0.x.
@@ -60,6 +60,10 @@ flowchart LR
   A1 -- http hooks --> H
   A2 -- http hooks --> H
   H --> DB
+  P[claude agents --json] --> V[agents view]
+  DB --> V
+  G[git] --> V
+  V --> AG[volee agents]
   CLI -- reads --> DB
   DOC -. writes hook settings .-> CC
 ```
@@ -69,6 +73,8 @@ flowchart LR
 | Hook server | `volee-daemon`, `hook_server.rs` | Receives `POST /hooks/<event>`, checks the token, stores the event, answers with an empty `200`. Decides nothing. |
 | Store | `volee-store` | Keeps each hook event in the `hook_events` table: arrival time, event name, session id, working directory and the raw payload. Append-only. |
 | `volee doctor` | `volee-cli` | Writes the hook settings that make Claude Code post to the daemon, and says whether the daemon answers. |
+| Agents view | `volee-daemon`, `agents_view.rs` | Polls `claude agents --json`, joins each session to its hook events and to what git says of its worktree, and decides which agents have finished work. Serves `agents.view`. |
+| `volee agents` | `volee-cli` | Shows the agents view: state, repository, branch, how far the branch is from its base, finished work with its diff summary. |
 | `volee events` | `volee-cli` | Lists the stored events, oldest first, optionally for one session. Reads the database directly, so it works with the daemon stopped. |
 
 ## The hook server
@@ -141,6 +147,58 @@ the daemon stopped: the session ran its tool, answered and exited with status
 0 in about the same time as with the daemon up (8 s against 7 s), and `-p` mode printed one line for
 the `SessionEnd` hook (`connect ECONNREFUSED 127.0.0.1:<port>`). The events
 of that session are not recorded: nothing replays them later.
+
+## Agents and finished work
+
+The daemon lists Claude Code's sessions with `claude agents --json` every
+`[agents] poll_interval` seconds (5 by default) and keeps the last reading in
+memory; a request that finds it older than a second reads again first. For
+each session it builds a card from three sources:
+
+| Source | Gives | Joined by |
+| --- | --- | --- |
+| `claude agents --json` | Name, state (`busy`, `idle`, `blocked`...), what it waits for, process id, working directory | |
+| Hook events in SQLite | The newest event, when the agent last acted, when it last stopped | `session_id` |
+| git, on the session's directory | Repository, linked worktree, branch, base branch, commits ahead and behind, uncommitted changes, merged or not, diff summary (files, lines added and removed) | working directory |
+
+Hook payloads carry the session id but no process id, so the join is by
+session id alone.
+
+Every source can fail without harm. A listing that fails or changes shape
+keeps the previous cards and says why (`volee agents` prints a warning, the
+daemon logs it once); an element of the listing that cannot be read is
+skipped; a directory git cannot read gives a card without git facts; a
+database that cannot be opened gives empty hook facts.
+
+Which sessions Claude Code lists was measured on 2.1.330: interactive
+sessions (in a terminal) and background sessions appear; a `claude -p`
+session does not, even while it runs.
+
+### Finished work
+
+One function, `is_finished_work` in `volee-core`, takes the facts and answers.
+An agent has finished work when:
+
+1. its newest sign of life is a stop (`Stop`, or a `Notification` of type
+   `agent_completed` or `idle_prompt`) that came after its last activity
+   (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+   `PermissionRequest`, `PermissionDenied`);
+2. Claude Code does not report it as working, launching or waiting for input;
+3. its branch has commits the base branch does not have, whose change is not
+   already there as a patch (so a cherry-picked commit is not work to
+   review), and the branch is not merged.
+
+Subagent and task events count as neither activity nor stop: on 2.1.330 the
+subagent that writes the suggested next prompt stops a few seconds after the
+turn's `Stop`, and counting it made a finished agent look busy.
+
+The base branch is the repository's default branch (`origin/HEAD`, else
+`main`, `master` or `develop`). A merge is recognized when the last tip the
+daemon saw with commits of its own is now part of the base: that memory lives
+in the daemon and starts over with it. A squash merge of several commits
+cannot be seen in the history. The rule is meant to be replaced by the Lua
+rules of a later stage; it takes only facts, so nothing that gathers them
+changes.
 
 ## What is still 0.x
 

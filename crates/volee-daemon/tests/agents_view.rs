@@ -321,3 +321,27 @@ async fn a_view_that_is_not_configured_says_so() {
         other => panic!("expected a refusal, got {other:?}"),
     }
 }
+
+/// Measured on Claude Code 2.1.330: the subagent that writes the suggested
+/// next prompt stops a few seconds after the turn's `Stop`.
+#[tokio::test]
+async fn a_subagent_that_stops_after_the_stop_does_not_undo_finished_work() {
+    let daemon = start(true);
+    commit_in_worktree(&daemon);
+    hooks(
+        &daemon.store,
+        ID,
+        &[
+            ("UserPromptSubmit", 200),
+            ("PostToolUse", 300),
+            ("Stop", 400),
+            ("SubagentStop", 404),
+        ],
+    );
+    daemon
+        .harness
+        .set(vec![session(ID, &daemon.worktree, AgentState::Idle)]);
+    let card = only_card(&daemon).await;
+    assert_eq!(card.hooks.last_event.as_deref(), Some("SubagentStop"));
+    assert!(card.finished_work);
+}

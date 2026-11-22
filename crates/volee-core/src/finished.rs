@@ -30,14 +30,19 @@ pub enum HookKind {
 
 /// Reads a hook event as activity or completion.
 ///
+/// Subagent and task events are neither: Claude Code runs a subagent after a
+/// turn ends (measured on 2.1.330: a `SubagentStop` four seconds after the
+/// `Stop`, from the one that writes the suggested next prompt), and a
+/// background task can outlast the turn that started it. Counting them as
+/// activity would make a finished agent look busy.
+///
 /// `event` is the hook event name (`Stop`, `PreToolUse`...) and
 /// `notification_type` the payload's `notification_type` for a
 /// `Notification`, when it has one.
 pub fn classify_hook(event: &str, notification_type: Option<&str>) -> HookKind {
     match event {
         "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "PostToolUseFailure"
-        | "PermissionRequest" | "PermissionDenied" | "SubagentStart" | "SubagentStop"
-        | "TaskCreated" | "TaskCompleted" => HookKind::Activity,
+        | "PermissionRequest" | "PermissionDenied" => HookKind::Activity,
         "Stop" | "StopFailure" => HookKind::Completion,
         "Notification" => match notification_type {
             Some("agent_completed" | "idle_prompt") => HookKind::Completion,
@@ -127,6 +132,14 @@ mod tests {
             "PermissionRequest",
         ] {
             assert_eq!(classify_hook(event, None), HookKind::Activity, "{event}");
+        }
+        for event in [
+            "SubagentStart",
+            "SubagentStop",
+            "TaskCreated",
+            "TaskCompleted",
+        ] {
+            assert_eq!(classify_hook(event, None), HookKind::Other, "{event}");
         }
         assert_eq!(classify_hook("Stop", None), HookKind::Completion);
         assert_eq!(
