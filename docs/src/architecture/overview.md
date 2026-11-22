@@ -273,6 +273,19 @@ it cannot turn automatic merging on. The rules are then loaded twice, with the
 repository's file and without it (the *floor*), and the higher risk and the
 floor's merge decision stand. See [ADR 0037](../adr/0037-lua-config-and-rules.md).
 
+### The actions on a finished change
+
+`actions/` holds what the person does on a finished card
+([ADR 0041](../adr/0041-actions-on-a-finished-change-and-how-a-fix-reaches-the-agent.md)):
+`merge.rs` (the 0.x merge flow with delivery evidence), `fix.rs` (the only
+module that knows how a message reaches a Claude Code session: the session's
+socket, or a background resume, confirmed by the transcript), `editor.rs`
+(the rules' editors, run without a shell) and `mod.rs` (line comments per
+branch tip and the journal, both in SQLite, and the automatic merge watcher
+that follows the agents view and the rules). The web routes are listed in
+`web/mod.rs`; the interface shows the buttons, the fix box, the comments in the
+diff and the journal.
+
 ## Held decisions
 
 Two hook requests are not answered at once: a `PermissionRequest`
