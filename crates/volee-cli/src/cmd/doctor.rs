@@ -46,6 +46,29 @@ const EVENTS: &[&str] = &[
 /// The daemon answers at once; a hung one must not stall a session.
 const HOOK_TIMEOUT: u64 = 5;
 
+/// How long Claude Code waits for the daemon to decide a request it holds.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Holds {
+    /// A permission request, in seconds: the hook's timeout.
+    pub(crate) permission_timeout: u64,
+    /// A question, in seconds: the daemon hands it back to the terminal
+    /// after this; the hook's timeout adds a margin.
+    pub(crate) question_delay: u64,
+}
+
+impl Default for Holds {
+    fn default() -> Self {
+        Self {
+            permission_timeout: volee_config::DEFAULT_PERMISSION_TIMEOUT,
+            question_delay: volee_config::DEFAULT_QUESTION_DELAY,
+        }
+    }
+}
+
+/// Seconds added to a held question's delay in the hook's timeout, so that
+/// the daemon always hands the question back before Claude Code gives up.
+const QUESTION_MARGIN: u64 = 15;
+
 /// What `volee doctor` was asked.
 #[derive(Debug)]
 pub(crate) struct Options {
@@ -60,24 +83,40 @@ pub(crate) struct Options {
 
 pub(crate) fn run(options: &Options) -> Result<()> {
     let paths = paths()?;
-    let port = settings_port(&paths);
+    let (port, holds) = settings(&paths);
     let target = settings_file(options)?;
     if options.remove {
         return remove(&target);
     }
     let token = hook_token::read_or_create(&paths.hook_token_file())
         .with_context(|| format!("cannot create {}", paths.hook_token_file().display()))?;
-    write(&target, port, &token, options.user)?;
+    write(&target, port, holds, &token, options.user)?;
     report_daemon(port);
     Ok(())
 }
 
 pub(crate) fn settings_port(paths: &Paths) -> u16 {
+    settings(paths).0
+}
+
+/// The hook port and the holds, from the configuration (defaults when it
+/// cannot be read).
+fn settings(paths: &Paths) -> (u16, Holds) {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
-    volee_config::Config::load(&paths.config_file(), &home)
-        .map_or(volee_config::DEFAULT_HOOK_PORT, |config| config.hooks.port)
+    volee_config::Config::load(&paths.config_file(), &home).map_or(
+        (volee_config::DEFAULT_HOOK_PORT, Holds::default()),
+        |config| {
+            (
+                config.hooks.port,
+                Holds {
+                    permission_timeout: config.hooks.permission_timeout,
+                    question_delay: config.hooks.question_delay,
+                },
+            )
+        },
+    )
 }
 
 fn settings_file(options: &Options) -> Result<PathBuf> {
@@ -95,9 +134,9 @@ fn settings_file(options: &Options) -> Result<PathBuf> {
     Ok(project.join(".claude/settings.local.json"))
 }
 
-fn write(target: &Path, port: u16, token: &str, user: bool) -> Result<()> {
+fn write(target: &Path, port: u16, holds: Holds, token: &str, user: bool) -> Result<()> {
     let existing = read_settings(target)?;
-    let merged = with_hooks(existing, port, token)?;
+    let merged = with_hooks(existing, port, holds, token)?;
     save(target, &merged)?;
     println!("Wrote volee's hooks to {}", target.display());
     println!("  events   {}", EVENTS.join(", "));
@@ -105,6 +144,10 @@ fn write(target: &Path, port: u16, token: &str, user: bool) -> Result<()> {
     println!("  note     SessionStart takes no http hook: it runs a silent curl to the same url");
     println!("  auth     Authorization: Bearer <token> (written in that file in clear)");
     println!("  timeout  {HOOK_TIMEOUT} s; a daemon that is down never blocks a session");
+    println!(
+        "  held     PermissionRequest for up to {} s and AskUserQuestion for {} s, until you decide in the browser; then the terminal asks",
+        holds.permission_timeout, holds.question_delay
+    );
     if user {
         println!(
             "  scope    every Claude Code session of this user. `volee doctor --user --remove` \
@@ -203,16 +246,17 @@ fn is_volee_hook(hook: &Value) -> bool {
         Some("command") => hook.get("command"),
         _ => None,
     };
-    target
-        .and_then(Value::as_str)
-        .is_some_and(|text| text.contains("http://127.0.0.1:") && text.contains("/hooks/"))
+    target.and_then(Value::as_str).is_some_and(|text| {
+        text.contains("http://127.0.0.1:")
+            && (text.contains("/hooks/") || text.contains("/decide/"))
+    })
 }
 
 /// The hook for `event`. Claude Code accepts `http` hooks on every event but
 /// `SessionStart` (which takes `command` and `mcp_tool` only): there a `curl`
 /// command posts the same request. It exits 0 whatever happens and prints
 /// nothing, since a `SessionStart` hook's output goes to the model.
-fn hook_for(event: &str, port: u16, token: &str) -> Value {
+fn hook_for(event: &str, port: u16, holds: Holds, token: &str) -> Value {
     let url = format!("http://127.0.0.1:{port}/hooks/{event}");
     if event == "SessionStart" {
         return json!({
@@ -226,17 +270,39 @@ fn hook_for(event: &str, port: u16, token: &str) -> Value {
             "timeout": HOOK_TIMEOUT + 2,
         });
     }
+    // A permission request is held for the person: Claude Code waits that
+    // long, and the daemon holds for the same time.
+    let timeout = if event == "PermissionRequest" {
+        holds.permission_timeout
+    } else {
+        HOOK_TIMEOUT
+    };
     json!({
         "type": "http",
         "url": url,
         "headers": { "Authorization": format!("Bearer {token}") },
-        "timeout": HOOK_TIMEOUT,
+        "timeout": timeout,
+    })
+}
+
+/// The `PreToolUse` entry that holds `AskUserQuestion`, next to the plain
+/// one that stores every `PreToolUse`: the held request posts to `/decide/`,
+/// stores nothing, and answers after at most the configured delay.
+fn question_entry(port: u16, holds: Holds, token: &str) -> Value {
+    json!({
+        "matcher": "AskUserQuestion",
+        "hooks": [{
+            "type": "http",
+            "url": format!("http://127.0.0.1:{port}/decide/AskUserQuestion"),
+            "headers": { "Authorization": format!("Bearer {token}") },
+            "timeout": holds.question_delay + QUESTION_MARGIN,
+        }],
     })
 }
 
 /// `settings` with volee's hooks for `port` and `token`, replacing any
 /// earlier volee entries and keeping everything else.
-fn with_hooks(settings: Value, port: u16, token: &str) -> Result<Value> {
+fn with_hooks(settings: Value, port: u16, holds: Holds, token: &str) -> Result<Value> {
     let (mut settings, _) = without_hooks(settings)?;
     let root = settings
         .as_object_mut()
@@ -247,13 +313,16 @@ fn with_hooks(settings: Value, port: u16, token: &str) -> Result<Value> {
         .as_object_mut()
         .context("`hooks` in the settings must be an object")?;
     for event in EVENTS {
-        let entry = json!({ "hooks": [hook_for(event, port, token)] });
-        hooks
+        let entry = json!({ "hooks": [hook_for(event, port, holds, token)] });
+        let list = hooks
             .entry((*event).to_owned())
             .or_insert_with(|| Value::Array(Vec::new()))
             .as_array_mut()
-            .with_context(|| format!("`hooks.{event}` in the settings must be a list"))?
-            .push(entry);
+            .with_context(|| format!("`hooks.{event}` in the settings must be a list"))?;
+        list.push(entry);
+        if *event == "PreToolUse" {
+            list.push(question_entry(port, holds, token));
+        }
     }
     Ok(settings)
 }
@@ -338,17 +407,23 @@ mod tests {
 
     #[test]
     fn every_event_posts_to_its_own_path_with_the_token_and_a_short_timeout() {
-        let settings = with_hooks(json!({}), 4000, TOKEN).unwrap();
+        let settings = with_hooks(json!({}), 4000, Holds::default(), TOKEN).unwrap();
         for event in EVENTS.iter().filter(|event| **event != "SessionStart") {
-            assert_eq!(
-                urls(&settings, event),
-                [format!("http://127.0.0.1:4000/hooks/{event}")]
-            );
+            let mut expected = vec![format!("http://127.0.0.1:4000/hooks/{event}")];
+            if *event == "PreToolUse" {
+                expected.push("http://127.0.0.1:4000/decide/AskUserQuestion".to_owned());
+            }
+            assert_eq!(urls(&settings, event), expected);
         }
         let hook = &settings["hooks"]["PermissionRequest"][0]["hooks"][0];
         assert_eq!(hook["type"], "http");
         assert_eq!(hook["headers"]["Authorization"], "Bearer t0k3n");
-        assert_eq!(hook["timeout"], HOOK_TIMEOUT);
+        assert_eq!(
+            hook["timeout"], 3600,
+            "a permission request is held: a long, explicit timeout"
+        );
+        let plain = &settings["hooks"]["PostToolUse"][0]["hooks"][0];
+        assert_eq!(plain["timeout"], HOOK_TIMEOUT);
         assert!(
             hook.get("onFailure").is_none(),
             "never asks to block on failure"
@@ -357,7 +432,7 @@ mod tests {
 
     #[test]
     fn session_start_takes_no_http_hook_so_it_gets_a_silent_curl_that_never_fails() {
-        let settings = with_hooks(json!({}), 4000, TOKEN).unwrap();
+        let settings = with_hooks(json!({}), 4000, Holds::default(), TOKEN).unwrap();
         let hook = &settings["hooks"]["SessionStart"][0]["hooks"][0];
         assert_eq!(hook["type"], "command");
         let command = hook["command"].as_str().unwrap();
@@ -378,7 +453,7 @@ mod tests {
         let (without, removed) = without_hooks(settings).unwrap();
         assert_eq!(
             removed,
-            EVENTS.len(),
+            EVENTS.len() + 1,
             "the curl entry is recognized as volee's"
         );
         assert_eq!(without, json!({}));
@@ -417,7 +492,7 @@ mod tests {
                 "Elsewhere": [{ "hooks": [{ "type": "command", "command": "x" }] }]
             }
         });
-        let settings = with_hooks(existing, 4000, TOKEN).unwrap();
+        let settings = with_hooks(existing, 4000, Holds::default(), TOKEN).unwrap();
         assert_eq!(settings["model"], "haiku");
         assert_eq!(settings["permissions"]["allow"][0], "Bash(ls)");
         assert_eq!(
@@ -425,17 +500,17 @@ mod tests {
             "x"
         );
         let pre = settings["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(pre.len(), 3, "the two earlier hooks and volee's");
+        assert_eq!(pre.len(), 4, "the two earlier hooks and volee's two");
         assert_eq!(pre[0]["hooks"][0]["command"], "check.sh");
         assert_eq!(pre[1]["hooks"][0]["url"], "http://localhost:9000/other");
     }
 
     #[test]
     fn running_again_replaces_volees_entries_instead_of_adding_more() {
-        let once = with_hooks(json!({}), 4000, TOKEN).unwrap();
-        let twice = with_hooks(once.clone(), 4000, TOKEN).unwrap();
+        let once = with_hooks(json!({}), 4000, Holds::default(), TOKEN).unwrap();
+        let twice = with_hooks(once.clone(), 4000, Holds::default(), TOKEN).unwrap();
         assert_eq!(once, twice);
-        let moved = with_hooks(twice, 5000, "other").unwrap();
+        let moved = with_hooks(twice, 5000, Holds::default(), "other").unwrap();
         assert_eq!(
             urls(&moved, "Stop"),
             ["http://127.0.0.1:5000/hooks/Stop"],
@@ -455,13 +530,13 @@ mod tests {
                 { "hooks": [{ "type": "command", "command": "check.sh" }] }
             ] }
         });
-        let with = with_hooks(existing.clone(), 4000, TOKEN).unwrap();
+        let with = with_hooks(existing.clone(), 4000, Holds::default(), TOKEN).unwrap();
         let (without, removed) = without_hooks(with).unwrap();
-        assert_eq!(removed, EVENTS.len());
+        assert_eq!(removed, EVENTS.len() + 1);
         assert_eq!(without, existing);
         let (nothing, removed) =
-            without_hooks(with_hooks(json!({}), 4000, TOKEN).unwrap()).unwrap();
-        assert_eq!(removed, EVENTS.len());
+            without_hooks(with_hooks(json!({}), 4000, Holds::default(), TOKEN).unwrap()).unwrap();
+        assert_eq!(removed, EVENTS.len() + 1);
         assert_eq!(nothing, json!({}), "an empty hooks object is dropped too");
     }
 
@@ -471,18 +546,18 @@ mod tests {
         let file = dir.path().join(".claude/settings.local.json");
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(&file, "{ not json").unwrap();
-        let error = write(&file, 4000, TOKEN, false).unwrap_err();
+        let error = write(&file, 4000, Holds::default(), TOKEN, false).unwrap_err();
         assert!(error.to_string().contains("not valid JSON"), "{error:#}");
         assert_eq!(fs::read_to_string(&file).unwrap(), "{ not json");
         fs::write(&file, "[1]").unwrap();
-        assert!(write(&file, 4000, TOKEN, false).is_err());
+        assert!(write(&file, 4000, Holds::default(), TOKEN, false).is_err());
     }
 
     #[test]
     fn the_file_is_written_private_and_removing_restores_it() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join(".claude/settings.local.json");
-        write(&file, 4000, TOKEN, false).unwrap();
+        write(&file, 4000, Holds::default(), TOKEN, false).unwrap();
         assert_eq!(
             fs::metadata(&file).unwrap().permissions().mode() & 0o777,
             0o600
@@ -504,5 +579,31 @@ mod tests {
         let addr = free.local_addr().unwrap();
         drop(free);
         assert!(health(addr).is_err(), "nothing listens there");
+    }
+
+    #[test]
+    fn the_holds_come_from_the_configuration() {
+        let holds = Holds {
+            permission_timeout: 30,
+            question_delay: 9,
+        };
+        let settings = with_hooks(json!({}), 4000, holds, TOKEN).unwrap();
+        assert_eq!(
+            settings["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"],
+            30
+        );
+        let question = &settings["hooks"]["PreToolUse"][1];
+        assert_eq!(question["matcher"], "AskUserQuestion");
+        assert_eq!(
+            question["hooks"][0]["url"],
+            "http://127.0.0.1:4000/decide/AskUserQuestion"
+        );
+        assert_eq!(question["hooks"][0]["timeout"], 9 + QUESTION_MARGIN);
+        let plain = &settings["hooks"]["PreToolUse"][0];
+        assert!(
+            plain.get("matcher").is_none(),
+            "every PreToolUse is still stored"
+        );
+        assert_eq!(plain["hooks"][0]["timeout"], HOOK_TIMEOUT);
     }
 }
