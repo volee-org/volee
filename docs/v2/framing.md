@@ -228,9 +228,13 @@ interactive session.**
   as a hook error. `allow` without `updatedInput` fails ("Invalid tool
   parameters"), then the normal dialog shows.
 - The hook input includes `tool_use_id` (unlike `PermissionRequest`).
-- **Untested:** what the terminal shows while a blocking http hook waits for a
-  slow human (likely nothing, since `PreToolUse` runs before the dialog); the
-  timeout behaviour there; the multi-select answer format.
+- **Measured at step 5 (2026-11-22, Claude Code 2.1.330):** while a blocking
+  http hook holds the question, the terminal shows no dialog, only the spinner
+  line `running PreToolUse hooks... 1/2`; when the daemon answers nothing
+  (delay expired, or the person chose "Ask in terminal") the normal dialog
+  appears and works; a multi-select answered in the terminal is recorded as the
+  labels joined by `, ` (`"Red, Blue"`), and the same string sent through the
+  hook reaches the model unchanged. See ADR 0038.
 - Design consequences: question cards are answered from the inbox for any
   session. Open point: while volee holds the question, the person at the
   terminal sees nothing, so volee must warn them (decision 4) and have a

@@ -88,7 +88,7 @@ default) and refuses to bind any other interface.
 
 | Request | Answer |
 | --- | --- |
-| `POST /hooks/<event>` with the right token and a JSON object body | The event is stored; `200` with an empty body. Claude Code reads that as "no opinion" and goes on as if the hook did not exist. |
+| `POST /hooks/<event>` with the right token and a JSON object body | The event is stored; `200` with an empty body. Claude Code reads that as "no opinion" and goes on as if the hook did not exist (except for a `PermissionRequest`, which is held: see below). |
 | The same without the right token | `401`; nothing is stored. |
 | A body that is not a JSON object, or an event name that is not a plain word | `400`; nothing is stored. |
 | `GET /healthz` | `200 ok`, with no token: what `volee doctor` uses to check the daemon. |
@@ -233,6 +233,32 @@ guess. The rule is meant to be replaced by the Lua
 rules of a later stage; it takes only facts, so nothing that gathers them
 changes.
 
+## Held decisions
+
+Two hook requests are not answered at once: a `PermissionRequest`
+(`/hooks/PermissionRequest`) and the `PreToolUse` of `AskUserQuestion`
+(`/decide/AskUserQuestion`, a second `PreToolUse` entry with a matcher, which
+stores nothing). The daemon **holds** them (`decisions.rs`) until the person
+decides in the browser; the card shows the tool and its input (or the
+questions and their options), the agent, the repository and branch, and the
+time left. The reasons and the measurements are in
+[ADR 0038](../adr/0038-a-permission-or-a-question-is-held-until-the-person-decides.md).
+
+| What happens | Answer to Claude Code |
+| --- | --- |
+| Allow (optionally with one of Claude Code's suggested rules) | `decision.behavior: allow`, with `updatedPermissions` for a rule |
+| Deny, with a message | `decision.behavior: deny` and the message, which the model reads |
+| Answer a question | `permissionDecision: allow` and an `updatedInput` echoing `questions` with `answers` (a multi-select joins the labels with `, `) |
+| Deny a question | `permissionDecision: deny` and the reason |
+| The terminal answers first (`PostToolUse`... for the same tool and input, another `PreToolUse`, `Stop`...) | Nothing: an empty `200`, the card goes |
+| The hold runs out (`[hooks] permission_timeout`, `question_delay`) | Nothing: the terminal's own dialog stays or appears |
+| Claude Code closes the connection, or the daemon stops | The card goes; Claude Code asks in the terminal |
+
+`volee doctor` writes the long timeout of the `PermissionRequest` hook and the
+question entry from the same two settings, so run it again after changing
+them. While a question is held the terminal shows only a spinner; the person
+can hand either kind of card back at once with "Ask in terminal".
+
 ## The web interface
 
 `volee ui` opens `http://127.0.0.1:<port>/#token=...` in the browser: the
@@ -249,11 +275,12 @@ interface only.
 | `GET /api/inbox` | yes | The inbox as JSON, once. |
 | `GET /api/events` | yes | Server-sent events: the inbox at once, then again each time it changes (the token may be passed as `?token=`, since `EventSource` sets no header). |
 | `POST /api/agents/{id}/terminal` | yes | Focuses the agent's terminal through the terminal adapter. |
+| `POST /api/decisions/{id}` | yes | Decides a held permission or question (see below): `404` when it is gone, `422` when the decision does not fit the card. |
 
 A request whose `Host` is not a loopback name is refused, and the page is
 served with a Content-Security-Policy that allows only its own files.
 
-**The inbox** has two kinds of card, both built from the agents view by one
+**The inbox** has held decisions first (see above), then two kinds of card, both built from the agents view by one
 pure function (`web/inbox.rs`): an agent **waiting** for a permission, an
 answer or a dialog (Claude Code reports it as needing input), and an agent
 with **finished work** (the rule above). Every other running agent is only

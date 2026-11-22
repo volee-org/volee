@@ -43,6 +43,7 @@ never edited after it is accepted: a later ADR supersedes it.
 | [0034](0034-a-session-in-its-own-terminal-opens-once-it-left-it.md) | A session in a terminal of its own opens once it left it, on the same row (amends 0027) | Superseded by v2 (was: Accepted) |
 | [0035](0035-the-context-an-agent-uses-comes-from-its-status-line.md) | The context an agent uses comes from its status line | Superseded by v2 (was: Accepted) |
 | [0036](0036-the-web-interface-is-a-svelte-app-the-daemon-embeds.md) | The web interface is a Svelte app the daemon embeds and feeds by server-sent events | Accepted |
+| [0038](0038-a-permission-or-a-question-is-held-until-the-person-decides.md) | A permission or a question is held by its hook until the person decides | Accepted |
 
 ## Not built yet
 

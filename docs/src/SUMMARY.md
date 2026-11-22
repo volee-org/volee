@@ -65,6 +65,7 @@
   - [0035. The context comes from the status line](adr/0035-the-context-an-agent-uses-comes-from-its-status-line.md)
   - [0036. The web interface](adr/0036-the-web-interface-is-a-svelte-app-the-daemon-embeds.md)
   - [0037. Lua config and rules](adr/0037-lua-config-and-rules.md)
+  - [0038. Held permissions and questions](adr/0038-a-permission-or-a-question-is-held-until-the-person-decides.md)
   - [Template](adr/template.md)
 
 # Project
