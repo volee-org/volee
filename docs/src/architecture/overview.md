@@ -9,9 +9,10 @@ stay in the list, marked as such.
 > [!NOTE]
 > v2 is under construction on the `v2` branch. This page covers what exists:
 > **stage 1, the hook server**, **stage 2, agents and finished work**, and
-> **stage 3, the web interface**. Parts of the 0.x daemon (the registry, the
-> messages, the missions, the merge flow) are still in the code and are
-> adapted in later stages; the pages of the user guide and the other
+> **stage 3, the web interface**, and **step 8, the Lua rules and
+> configuration**. Parts of the 0.x daemon (the registry, the messages, the
+> missions, the merge flow) are still in the code and are adapted in later
+> stages; the pages of the user guide and the other
 > architecture pages still describe 0.x.
 
 ## What volee v2 is for
@@ -154,8 +155,8 @@ of that session are not recorded: nothing replays them later.
 ## Agents and finished work
 
 The daemon lists Claude Code's sessions with `claude agents --json` every
-`[agents] poll_interval` seconds (5 by default) and keeps the last reading in
-memory; a request that finds it older than a second reads again first. For
+`agents.poll_interval` seconds of `config.lua` (5 by default) and keeps the
+last reading in memory; a request that finds it older than a second reads again first. For
 each session it builds a card from three sources:
 
 | Source | Gives | Joined by |
@@ -191,8 +192,10 @@ session does not, even while it runs.
 
 ### Finished work
 
-One function, `is_finished_work` in `volee-core`, takes the facts and answers.
-An agent has finished work when:
+The Lua rules decide ([rules](../reference/rules.md), `finished(facts)`). When
+no file defines the function, the built-in rule answers, `is_finished_work` in
+`volee-core`, which takes the facts and answers. An agent has finished work
+when:
 
 1. its newest sign of life is a stop (`Stop`, or a `Notification` of type
    `agent_completed` or `idle_prompt`) that came after its last activity
@@ -229,9 +232,46 @@ when it is only the nearest branch or the default one. A merge is recognized in 
 
 When neither can tell (no GitHub remote, `gh` missing or signed out, an error)
 the card says `merge unknown` and the work stays finished: volee does not
-guess. The rule is meant to be replaced by the Lua
-rules of a later stage; it takes only facts, so nothing that gathers them
-changes.
+guess. The rule takes only facts (`FinishedFacts`), so nothing that gathers
+them changes: the daemon gives them to the rules, which run on a worker
+thread (see [The rules in the daemon](#the-rules-in-the-daemon)), and a rule
+that fails or answers late gives way to the built-in one.
+
+### The rules in the daemon
+
+One component, `rules.rs`, owns the Lua. Lua never runs on the async loop: a
+worker thread holds the loaded rules, one set per repository (its
+`.volee/rules.lua` and the personal `rules.lua`), and a caller waits for the
+answer for a limited time (5 s for an evaluation, 2 s for the finished rule).
+A late answer counts as the safest outcome (high risk, no automatic merge,
+every layer) and the worker that overran is replaced. The files are read again
+when they change: each request carries the modification time and size of both
+files, and a poller looks every two seconds while nobody asks and tells the
+interface. Evaluations are cached per repository and per branch tip, for as
+long as the files stay the same.
+
+What the rules feed:
+
+- **Finished work**: the `finished` rule (`agents_view.rs`).
+- **The card's risk**: the level, the reasons, the layers, whether it may
+  merge by itself (`assess.rs`). The person can raise or lower the level on
+  the card; the choice is kept per branch tip in SQLite (`risk_overrides`), is
+  shown as overridden, and goes away with the next commit. A lowered level
+  does not turn the merge on.
+- **The work screen**: it opens the layers `rules.layers` names for the risk in
+  force (the plan comes with the open points, the diff with its files).
+- **The review plan** (`review.rs`): the same loaded rules as the card.
+- **How long a question is held**: `held_question_timeout` of the repository's
+  rules. `volee doctor` writes it, plus a margin, as the hook's timeout.
+- **A broken file**: `rules.errors` of the inbox (file, line, message) shows a
+  banner in the interface, and `volee doctor` prints it. Every answer is the
+  safest one until the file is fixed.
+
+A repository's file is **not trusted** unless the personal file says so
+(`trust_repo_rules`, `trusted_repos`): it can raise a risk, never lower it, and
+it cannot turn automatic merging on. The rules are then loaded twice, with the
+repository's file and without it (the *floor*), and the higher risk and the
+floor's merge decision stand. See [ADR 0037](../adr/0037-lua-config-and-rules.md).
 
 ## Held decisions
 
@@ -275,6 +315,7 @@ interface only.
 | `GET /api/inbox` | yes | The inbox as JSON, once. |
 | `GET /api/events` | yes | Server-sent events: the inbox at once, then again each time it changes (the token may be passed as `?token=`, since `EventSource` sets no header). |
 | `GET /api/agents/{id}/work` | yes | The layers of an agent's finished work ([ADR 0040](../adr/0040-a-finished-change-is-read-in-layers.md)): summary, plan, open points, files with the reason, commands and tests, a Mermaid diagram, the diff per file. Always answers for a known agent; what could not be read is said inside. |
+| `POST /api/agents/{id}/risk` | yes | Raises or lowers the risk of the branch tip by hand: `{"level": "low" | "medium" | "high"}`, or `{"level": null}` to take the choice back. Answers the new risk; `422` for another word. The work screen and the finished cards carry the same `risk` object (`level`, `reasons`, `computed`, `overridden`, `layers`, `auto_merge`, `notes`, `errors`). |
 | `POST /api/agents/{id}/terminal` | yes | Focuses the agent's terminal through the terminal adapter. |
 | `POST /api/decisions/{id}` | yes | Decides a held permission or question (see below): `404` when it is gone, `422` when the decision does not fit the card. |
 | `GET /api/agents/{id}/review` | yes | The AI pre-review of the agent's branch tip: `status` (`none`, `pending`, `running`, `done`, `failed`, `disabled`) and the findings (file, line, severity, summary, failure scenario). An opinion, never a gate. |
@@ -331,3 +372,11 @@ The registry, event log (`events` table), messages, missions and merge flow of
 0.x still run in the daemon and are reached over its Unix socket. They are
 reworked in the following stages, as the inbox needs them; until then they are
 not part of what this page describes.
+
+Step 8 retired the 0.x **session discovery**: the daemon no longer lists
+Claude Code a second time to turn every session into an agent of its own. The
+agents view is the one reader of `claude agents --json`; the agents a mission
+knows (launched by it, or joined through MCP) follow the listing the view reads,
+and no session becomes an agent by being listed. Configuration is Lua only
+(`config.lua`, see [Configuration](../guide/configuration.md)): the TOML file
+and its parser are gone.
