@@ -78,7 +78,20 @@ pub struct Config {
 pub struct Hooks {
     /// The TCP port on 127.0.0.1.
     pub port: u16,
+    /// How long, in seconds, a permission request is held for the person to
+    /// decide in the browser. `volee doctor` writes it as the hook's timeout;
+    /// when it runs out, Claude Code asks in the terminal as usual.
+    pub permission_timeout: u64,
+    /// How long, in seconds, a question (`AskUserQuestion`) is held for the
+    /// person to answer in the browser before the terminal asks it.
+    pub question_delay: u64,
 }
+
+/// The default hold of a permission request, in seconds.
+pub const DEFAULT_PERMISSION_TIMEOUT: u64 = 3600;
+
+/// The default hold of a question, in seconds.
+pub const DEFAULT_QUESTION_DELAY: u64 = 120;
 
 /// The default hook port.
 pub const DEFAULT_HOOK_PORT: u16 = 47835;
@@ -87,6 +100,8 @@ impl Default for Hooks {
     fn default() -> Self {
         Self {
             port: DEFAULT_HOOK_PORT,
+            permission_timeout: DEFAULT_PERMISSION_TIMEOUT,
+            question_delay: DEFAULT_QUESTION_DELAY,
         }
     }
 }
@@ -399,6 +414,12 @@ impl Config {
                 "agents.poll_interval must be at least 1 second".to_owned(),
             ));
         }
+        if self.hooks.permission_timeout == 0 || self.hooks.question_delay == 0 {
+            return Err(invalid(
+                "hooks.permission_timeout and hooks.question_delay must be at least 1 second"
+                    .to_owned(),
+            ));
+        }
         if self.missions.max_workers == 0 {
             return Err(invalid(
                 "missions.max_workers must be at least 1".to_owned(),
@@ -487,6 +508,13 @@ port = 70000
             )
             .is_err()
         );
+        assert!(parse("[hooks]\nquestion_delay = 0\n").is_err());
+        assert!(parse("[hooks]\npermission_timeout = 0\n").is_err());
+        let held = parse("[hooks]\npermission_timeout = 30\nquestion_delay = 9\n").unwrap();
+        assert_eq!(held.hooks.permission_timeout, 30);
+        assert_eq!(held.hooks.question_delay, 9);
+        assert_eq!(Config::default().hooks.question_delay, 120);
+        assert_eq!(Config::default().hooks.permission_timeout, 3600);
         assert!(
             parse(
                 "[hooks]

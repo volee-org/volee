@@ -58,3 +58,12 @@ wake_timeout = 3600
 # The port on 127.0.0.1 where the daemon receives Claude Code's `http` hooks.
 # `volee doctor` writes it into the hook settings: run it again after a change.
 # port = 47835
+
+# How long, in seconds, a permission request waits for your decision in the
+# browser. Written as the hook's timeout by `volee doctor`; afterwards Claude
+# Code asks in the terminal as usual.
+# permission_timeout = 3600
+
+# How long, in seconds, a question from an agent (AskUserQuestion) waits for
+# your answer in the browser before the terminal asks it.
+# question_delay = 120
