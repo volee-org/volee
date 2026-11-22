@@ -1,0 +1,23 @@
+[package]
+name = "volee-rules"
+description = "The Lua rules of volee: risk, layers, review, automatic merge and finished work, decided by a sandboxed Lua file."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["config", "development-tools"]
+
+[dependencies]
+mlua.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -22,6 +22,7 @@ volee-git = { path = "crates/volee-git", version = "0.18.0" }
 volee-harness = { path = "crates/volee-harness", version = "0.18.0" }
 volee-mcp = { path = "crates/volee-mcp", version = "0.18.0" }
 volee-proto = { path = "crates/volee-proto", version = "0.18.0" }
+volee-rules = { path = "crates/volee-rules", version = "0.18.0" }
 volee-store = { path = "crates/volee-store", version = "0.18.0" }
 
 # External crates. Keep this list sorted.
@@ -31,6 +32,7 @@ clap = { version = "4.6.7", features = ["derive", "wrap_help"] }
 clap_complete = "4.6.11"
 futures-util = { version = "0.3.34", default-features = false }
 insta = { version = "1.49.0", features = ["json"] }
+mlua = { version = "0.12.2", default-features = false, features = ["lua54", "vendored", "serialize", "send"] }
 rmcp = { version = "3.9.0", default-features = false }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 rustix = { version = "1.1.6", features = ["process"] }
