@@ -63,6 +63,9 @@ async fn start(options: Options<'_>) -> Running {
     let root = dir.path().canonicalize().unwrap();
     let repo = root.join("alpha");
     repository(&repo);
+    // The merge commit needs an identity, and CI machines have none.
+    git(&repo, &["config", "user.name", "t"]);
+    git(&repo, &["config", "user.email", "t@t"]);
     let worktree = root.join("alpha-feat");
     git(
         &repo,
