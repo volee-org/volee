@@ -11,7 +11,11 @@ fill in a table of settings. Functions are there for the special cases. See
 | `<repo>/.volee/rules.lua` | Everyone who works on that repository. Committed. |
 | `<config dir>/rules.lua` | You, on every repository. Not committed. |
 
-Both are optional. The **merge order** is: built-in defaults, then the
+Both are optional, and neither is `config.lua`: the machine's settings
+(ports, repositories, the review command) live in
+[`config.lua`](../guide/configuration.md), which a repository can never
+supply. The rules files are reloaded live when they change. The **merge
+order** is: built-in defaults, then the
 repository file, then your personal file.
 
 - A scalar (`auto_merge = true`) or a function in a later file replaces the
@@ -56,6 +60,8 @@ return {
     { name = "nvim", kind = "terminal", cmd = "nvim +{line} {file}" },
     { name = "code", kind = "external", cmd = "code -g {file}:{line}" },
   },
+  trust_repo_rules = false,      -- personal file only: see "Trusting a repository's file"
+  trusted_repos = {},            -- personal file only
 }
 ```
 
@@ -119,6 +125,30 @@ last activity, not merged, and at least one unique commit.
 libraries are available. Nothing else is: no `io`, `require`, `load`,
 `debug`, `coroutine` or other `os` functions. A call that runs more than 10
 million instructions, 500 ms, or allocates more than 16 MiB is stopped.
+
+## Trusting a repository's file
+
+A repository's `.volee/rules.lua` is code from that repository. By default it
+is **not trusted**, and the rules are evaluated twice: with its file and
+without it (your own rules alone). Then:
+
+- the risk is the **higher** of the two answers: a repository can raise a risk,
+  never lower what your own rules say;
+- `auto_merge` is your own rules' answer: a repository can never turn
+  automatic merging on, whatever its file says (the card says so);
+- everything else it sets (layers, review, editors, the held question delay)
+  applies.
+
+You opt in from your own file, which a repository cannot write:
+
+```lua
+return {
+  trust_repo_rules = true,                    -- every repository
+  trusted_repos = { "/Users/me/code/shop" },  -- or only these roots
+}
+```
+
+A repository's file that tries to set either key is ignored.
 
 ## When something is wrong
 

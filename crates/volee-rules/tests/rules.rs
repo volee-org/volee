@@ -660,3 +660,180 @@ fn a_realistic_rules_file_decides_as_written() {
     );
     assert_eq!(r.editors().len(), 2);
 }
+
+// ---- trust in a repository's file -----------------------------------------
+
+fn untrusted(repo: &str, personal: Option<&str>) -> Rules {
+    Rules::from_sources_untrusted(
+        Some(Source::new("repo/.volee/rules.lua", repo)),
+        personal.map(|text| Source::new("config/rules.lua", text)),
+    )
+}
+
+#[test]
+fn an_untrusted_repository_cannot_turn_automatic_merging_on() {
+    let rules = untrusted("return { auto_merge = true }", None);
+    assert!(rules.is_restricted());
+    let e = rules.evaluate(&change(&[("README.md", 1, 0)]));
+    assert_eq!(e.risk.level, Risk::Low);
+    assert!(!e.merge.allowed, "{:?}", e.merge);
+    assert!(
+        e.notes.iter().any(|n| n.contains("automatic merge")),
+        "{:?}",
+        e.notes
+    );
+    // The same file, trusted, merges.
+    let trusted = rules_trusted("return { auto_merge = true }");
+    assert!(
+        trusted
+            .evaluate(&change(&[("README.md", 1, 0)]))
+            .merge
+            .allowed
+    );
+}
+
+fn rules_trusted(repo: &str) -> Rules {
+    rules(repo)
+}
+
+#[test]
+fn an_untrusted_repository_function_cannot_turn_automatic_merging_on() {
+    let rules = untrusted(
+        "return { auto_merge = function() return true, 'always' end }",
+        None,
+    );
+    assert!(
+        !rules
+            .evaluate(&change(&[("README.md", 1, 0)]))
+            .merge
+            .allowed
+    );
+}
+
+#[test]
+fn an_untrusted_repository_can_raise_a_risk_but_never_lower_it() {
+    // A function that says low for everything: a big change stays high.
+    let lowering = untrusted(
+        "return { risk = function() return 'low', { 'trust me' } end }",
+        None,
+    );
+    let big = change(&[("src/a.rs", 900, 0)]);
+    assert_eq!(lowering.evaluate(&big).risk.level, Risk::High);
+    assert!(
+        lowering
+            .evaluate(&big)
+            .notes
+            .iter()
+            .any(|n| n.contains("raised"))
+    );
+    // Settings that move the thresholds up lower nothing either.
+    let lax = untrusted(
+        "return { size = { medium_lines = 90000, high_lines = 95000 } }",
+        None,
+    );
+    assert_eq!(lax.evaluate(&big).risk.level, Risk::High);
+    // It can raise: a sensitive path of its own, or a function saying high.
+    let strict = untrusted("return { sensitive_paths = { 'src/**' } }", None);
+    assert_eq!(
+        strict.evaluate(&change(&[("src/a.rs", 1, 0)])).risk.level,
+        Risk::High
+    );
+    let raising = untrusted(
+        "return { risk = function() return 'high', { 'ours' } end }",
+        None,
+    );
+    let e = raising.evaluate(&change(&[("README.md", 1, 0)]));
+    assert_eq!(e.risk.level, Risk::High);
+    assert_eq!(e.risk.reasons, ["ours"]);
+}
+
+#[test]
+fn the_personal_file_may_lower_what_the_defaults_say_and_a_repository_cannot_undo_it() {
+    let personal = "return { size = { medium_lines = 5000, high_lines = 9000 } }";
+    let rules = untrusted(
+        "return { size = { medium_lines = 10, high_lines = 20 } }",
+        Some(personal),
+    );
+    // The repository asks for more care than the person's own file: it wins.
+    let e = rules.evaluate(&change(&[("src/a.rs", 100, 0)]));
+    assert_eq!(
+        e.risk.level,
+        Risk::Low,
+        "the personal file's thresholds are merged last"
+    );
+    // And a repository file that lowers below the person's own rules does not.
+    let lowering = untrusted(
+        "return { risk = function() return 'low' end }",
+        Some("return { sensitive_paths = { 'src/**' } }"),
+    );
+    assert_eq!(
+        lowering.evaluate(&change(&[("src/a.rs", 1, 0)])).risk.level,
+        Risk::High
+    );
+}
+
+#[test]
+fn trust_comes_from_the_personal_file_only() {
+    let repo = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join(".volee")).unwrap();
+    // The repository tries to trust itself.
+    std::fs::write(
+        repo.path().join(".volee/rules.lua"),
+        "return { trust_repo_rules = true, auto_merge = true }",
+    )
+    .unwrap();
+    let c = change(&[("README.md", 1, 0)]);
+    let rules = Rules::load(Some(repo.path()), Some(config.path()));
+    assert!(rules.is_restricted());
+    assert!(
+        !rules.evaluate(&c).merge.allowed,
+        "a repository cannot trust itself"
+    );
+
+    std::fs::write(
+        config.path().join("rules.lua"),
+        "return { trust_repo_rules = true }",
+    )
+    .unwrap();
+    let rules = Rules::load(Some(repo.path()), Some(config.path()));
+    assert!(!rules.is_restricted());
+    assert!(rules.evaluate(&c).merge.allowed);
+
+    let listed = format!(
+        "return {{ trusted_repos = {{ '{}' }} }}",
+        repo.path().display()
+    );
+    std::fs::write(config.path().join("rules.lua"), listed).unwrap();
+    let rules = Rules::load(Some(repo.path()), Some(config.path()));
+    assert!(!rules.is_restricted());
+    assert!(rules.evaluate(&c).merge.allowed);
+
+    // Trusting another repository trusts nothing here.
+    std::fs::write(
+        config.path().join("rules.lua"),
+        "return { trusted_repos = { '/somewhere/else' } }",
+    )
+    .unwrap();
+    let rules = Rules::load(Some(repo.path()), Some(config.path()));
+    assert!(rules.is_restricted());
+    assert!(!rules.evaluate(&c).merge.allowed);
+}
+
+#[test]
+fn a_personal_file_alone_is_never_restricted() {
+    let config = tempfile::tempdir().unwrap();
+    std::fs::write(
+        config.path().join("rules.lua"),
+        "return { auto_merge = true }",
+    )
+    .unwrap();
+    let rules = Rules::load(None, Some(config.path()));
+    assert!(!rules.is_restricted());
+    assert!(
+        rules
+            .evaluate(&change(&[("README.md", 1, 0)]))
+            .merge
+            .allowed
+    );
+}

@@ -140,6 +140,12 @@ pub struct Settings {
     pub held_question_timeout: DurationSetting,
     /// The person's editors.
     pub editors: Vec<Editor>,
+    /// Trust the rules file of every repository. Only the personal file can
+    /// say it: without it a repository's file can raise a risk but never
+    /// lower it, and never turn automatic merging on.
+    pub trust_repo_rules: bool,
+    /// Repository roots whose rules file is trusted (see `trust_repo_rules`).
+    pub trusted_repos: Vec<String>,
 }
 
 impl Default for Settings {
@@ -171,6 +177,8 @@ impl Default for Settings {
             auto_merge: false,
             held_question_timeout: DurationSetting::Seconds(600.0),
             editors: Vec::new(),
+            trust_repo_rules: false,
+            trusted_repos: Vec::new(),
         }
     }
 }
@@ -182,6 +190,23 @@ impl Settings {
         self.held_question_timeout
             .to_duration()
             .unwrap_or(Duration::from_secs(600))
+    }
+
+    /// Whether the rules file of the repository at `root` is trusted: the
+    /// person said so for every repository or for this one.
+    pub fn trusts(&self, root: &std::path::Path) -> bool {
+        if self.trust_repo_rules {
+            return true;
+        }
+        let same = |listed: &str| {
+            let listed = std::path::Path::new(listed);
+            listed == root
+                || matches!(
+                    (listed.canonicalize(), root.canonicalize()),
+                    (Ok(a), Ok(b)) if a == b
+                )
+        };
+        self.trusted_repos.iter().any(|listed| same(listed))
     }
 
     /// Checks what a type cannot: durations and editor commands.
@@ -197,7 +222,7 @@ impl Settings {
 }
 
 /// The top-level keys a rules file may hold.
-pub(crate) const SETTING_KEYS: [&str; 9] = [
+pub(crate) const SETTING_KEYS: [&str; 11] = [
     "sensitive_paths",
     "migration_paths",
     "dependency_paths",
@@ -207,6 +232,8 @@ pub(crate) const SETTING_KEYS: [&str; 9] = [
     "auto_merge",
     "held_question_timeout",
     "editors",
+    "trust_repo_rules",
+    "trusted_repos",
 ];
 
 /// The rule functions a rules file may define.

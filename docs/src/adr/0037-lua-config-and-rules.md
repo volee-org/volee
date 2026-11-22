@@ -64,7 +64,7 @@ replaced by the same mechanism.
   are filled after, so a path with spaces or shell characters is one argument
   and never interpreted.
 - The old TOML `volee-config` crate is untouched. Replacing it with this one
-  is a later step.
+  is a later step. *(Done in step 8, see the amendment below.)*
 
 ## Consequences
 
@@ -85,6 +85,58 @@ replaced by the same mechanism.
   in volee should know that; the personal file is the place to override it
   (`auto_merge = false`). A later option is to ignore the repo file's merge
   settings unless the personal file opts in.
+
+## Amendment, step 8 (2026-11-22): Lua is the only configuration
+
+- **The daemon's settings move to Lua too.** `config.lua` in the config
+  directory returns a table (`agents`, `repos`, `messages`, `missions`, `git`,
+  `review`, `hooks`) and runs in the same sandbox and with the same limits as
+  the rules (`volee_rules::load_data`). The TOML parser and the `toml`
+  dependency are gone, without a migration: volee is not in use. A leftover
+  `config.toml` is never read; the daemon, `volee config check` and
+  `volee doctor` print one line saying it is ignored. `volee-config` keeps the
+  typed settings (`Config`) and now reads them from Lua; it still rejects
+  unknown keys, and Lua errors carry file and line.
+- **Two files, not one.** `config.lua` is data read when the daemon starts and
+  applies to the machine; `rules.lua` (personal) and `<repo>/.volee/rules.lua`
+  are decisions about a change, reloaded live, and the repository file is
+  code from a repository. Keeping them apart means the one file a repository
+  may supply can only ever reach the rules, never the ports, the paths of
+  repositories or the review command. A function in `config.lua` is an error.
+- **The held question delay is a rule.** `hooks.question_delay` is removed;
+  `held_question_timeout` of the rules is the only setting, per project.
+  `volee doctor` evaluates the project's rules to write the hook's timeout.
+- **A repository file cannot weaken the person's defaults** (trust). The repo
+  file's `auto_merge` and its `risk` function can only make a change safer
+  unless the personal file opts in with `trust_repo_rules = true`, or lists
+  the repository in `trusted_repos`. See the section below.
+
+### Trust in a repository's rules file
+
+The consequence noted above ("a repository file can say `auto_merge = true`
+for a low risk change, or lower a risk") is closed in step 8. Without an
+opt-in, the rules are loaded twice, as the repository's file plus the
+personal file, and as the personal file alone (the **floor**), and:
+
+- the **risk** is the higher of the two answers: a repository can raise a
+  level (a sensitive path, a smaller size threshold, a `risk` function that
+  says `high`), never lower what the person's own rules and the built-in
+  defaults say;
+- **`auto_merge`** is the answer of the personal file alone, evaluated at the
+  final risk: a repository can never turn automatic merging on, and its
+  `auto_merge = true` is ignored (and reported on the card);
+- every other setting of the repository file (layers, review, editors, the
+  held question delay) applies as before.
+
+The opt-in lives only in the personal file, which a repository cannot write:
+`trust_repo_rules = true` trusts every repository, `trusted_repos = { "/path" }`
+trusts the listed repository roots. A repository file is also marked as
+trusted only for the repositories where it is read, so trusting one project
+never trusts another. The personal file itself is never restricted.
+
+Known limit: the repository file can still choose fewer layers or no review
+for a level; it cannot change the level or the merge. Closing that too is a
+later step if it proves to matter.
 
 ## Alternatives considered
 

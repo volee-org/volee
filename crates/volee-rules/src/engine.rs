@@ -65,6 +65,9 @@ pub struct Evaluation {
     pub merge: MergeDecision,
     /// Every failure met on the way (each answer it touched is the safest).
     pub errors: Vec<RuleError>,
+    /// What the repository's rules asked for and the person's own rules
+    /// refused (an untrusted repository file): shown, never silent.
+    pub notes: Vec<String>,
 }
 
 /// The loaded rules: a repository file and a personal file merged, in one
@@ -84,6 +87,10 @@ pub struct Rules {
     load_errors: Vec<RuleError>,
     warnings: Vec<String>,
     chunks: Vec<(String, String)>,
+    /// What the person's own rules alone say, when a repository file is
+    /// present and not trusted: the repository can raise a risk above it,
+    /// never go below, and never turn automatic merging on.
+    floor: Option<Box<Rules>>,
 }
 
 impl Rules {
@@ -106,11 +113,47 @@ impl Rules {
         };
         let repo = read(repo_root.map(|r| r.join(REPO_RULES_PATH)));
         let personal = read(config_dir.map(|d| d.join(PERSONAL_RULES_FILE)));
-        if errors.is_empty() {
+        if !errors.is_empty() {
+            return Self::degraded(None, errors);
+        }
+        // A repository file is code from a repository: it is trusted only
+        // when the personal file says so (`trust_repo_rules`, `trusted_repos`).
+        let trusted = match (&repo, repo_root) {
+            (None, _) | (_, None) => true,
+            (Some(_), Some(root)) => Self::from_sources_with(None, personal.clone(), limits)
+                .settings()
+                .trusts(root),
+        };
+        if trusted {
             Self::from_sources_with(repo, personal, limits)
         } else {
-            Self::degraded(None, errors)
+            Self::from_sources_untrusted_with(repo, personal, limits)
         }
+    }
+
+    /// Rules from texts in memory where the repository file is **not**
+    /// trusted: it can raise a risk, never lower it, and its `auto_merge`
+    /// is ignored. [`Rules::from_sources`] trusts both files.
+    pub fn from_sources_untrusted(repo: Option<Source>, personal: Option<Source>) -> Self {
+        Self::from_sources_untrusted_with(repo, personal, Limits::default())
+    }
+
+    fn from_sources_untrusted_with(
+        repo: Option<Source>,
+        personal: Option<Source>,
+        limits: Limits,
+    ) -> Self {
+        let restricted = repo.is_some();
+        let mut rules = Self::from_sources_with(repo, personal.clone(), limits);
+        if restricted {
+            rules.floor = Some(Box::new(Self::from_sources_with(None, personal, limits)));
+        }
+        rules
+    }
+
+    /// Whether a repository file is present but not trusted.
+    pub fn is_restricted(&self) -> bool {
+        self.floor.is_some()
     }
 
     /// Rules from texts already in memory.
@@ -152,6 +195,7 @@ impl Rules {
                     load_errors: Vec::new(),
                     warnings,
                     chunks,
+                    floor: None,
                 }
             }
             Err(error) => Self::degraded(Some(sandbox), vec![error]),
@@ -166,6 +210,7 @@ impl Rules {
             load_errors: errors,
             warnings: Vec::new(),
             chunks: Vec::new(),
+            floor: None,
         }
     }
 
@@ -198,13 +243,28 @@ impl Rules {
     /// The risk of a change. The `risk(change)` function when defined, else
     /// computed from the settings.
     pub fn risk(&self, change: &Change) -> Evaluated<RiskAssessment> {
-        self.run(
+        self.risk_with_floor(change).0
+    }
+
+    /// The risk, and whether the person's own rules raised it above what the
+    /// repository's rules said.
+    fn risk_with_floor(&self, change: &Change) -> (Evaluated<RiskAssessment>, bool) {
+        let mut out = self.run(
             "risk",
             |lua| Ok(vec![change_value(lua, change)?]),
             parse_risk,
             || defaults::risk(&self.settings, change),
             || safest::risk("the risk rule failed"),
-        )
+        );
+        let mut raised = false;
+        if let Some(floor) = &self.floor {
+            let own = floor.risk(change).value;
+            if own.level > out.value.level {
+                out.value = own;
+                raised = true;
+            }
+        }
+        (out, raised)
     }
 
     /// The card layers for a change at a risk level.
@@ -233,6 +293,36 @@ impl Rules {
     /// Whether the change may merge without asking. A high risk change is
     /// never merged automatically, whatever a function says.
     pub fn auto_merge(&self, change: &Change, risk: &RiskAssessment) -> Evaluated<MergeDecision> {
+        self.auto_merge_noted(change, risk).0
+    }
+
+    /// The merge decision and, for an untrusted repository file, whether it
+    /// asked for a merge the person's own rules refused.
+    fn auto_merge_noted(
+        &self,
+        change: &Change,
+        risk: &RiskAssessment,
+    ) -> (Evaluated<MergeDecision>, bool) {
+        let asked = self.auto_merge_of_these_files(change, risk);
+        let Some(floor) = &self.floor else {
+            return (asked, false);
+        };
+        let own = floor.auto_merge_of_these_files(change, risk);
+        let ignored = asked.value.allowed && !own.value.allowed;
+        (
+            Evaluated {
+                value: own.value,
+                error: asked.error,
+            },
+            ignored,
+        )
+    }
+
+    fn auto_merge_of_these_files(
+        &self,
+        change: &Change,
+        risk: &RiskAssessment,
+    ) -> Evaluated<MergeDecision> {
         let mut out = self.run(
             "auto_merge",
             |lua| risk_args(lua, change, risk),
@@ -274,10 +364,23 @@ impl Rules {
 
     /// Risk, layers, review and merge for one change.
     pub fn evaluate(&self, change: &Change) -> Evaluation {
-        let risk = self.risk(change);
+        let (risk, raised) = self.risk_with_floor(change);
         let layers = self.layers(change, &risk.value);
         let review = self.review(change, &risk.value);
-        let merge = self.auto_merge(change, &risk.value);
+        let (merge, ignored) = self.auto_merge_noted(change, &risk.value);
+        let mut notes = Vec::new();
+        if raised {
+            notes.push(
+                "the risk was raised by your own rules: a repository's rules cannot lower it"
+                    .to_owned(),
+            );
+        }
+        if ignored {
+            notes.push(
+                "the repository's rules asked for an automatic merge: ignored, the repository is not trusted"
+                    .to_owned(),
+            );
+        }
         let errors = if self.is_degraded() {
             self.load_errors.clone()
         } else {
@@ -292,6 +395,7 @@ impl Rules {
             review: review.value,
             merge: merge.value,
             errors,
+            notes,
         }
     }
 
