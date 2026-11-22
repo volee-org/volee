@@ -38,6 +38,19 @@ and alpha is back on `main` at `93795ee`.
 | ![](screenshots/actions-5-refresh-before.png) ![](screenshots/actions-5-refresh-after.png) | After "Open in", a line is appended to the file from outside (what saving in the editor does): `+6` becomes `+7` and the new line appears in the diff, about 3 seconds later. |
 | nvim through Rex | A real agent ran in a Rex window; `nvim` was opened on its file in a floating pane of that window: `rex block call ... process` showed `nvim` with the worktree as its working directory, the pane showed `docs/rex.md` at 1:1 on branch `trial/rex`. |
 
+## The resume path, run for real (follow-up)
+
+A real `claude --bg --model haiku --name trial-bg` session in a throwaway
+worktree of alpha committed a file, then `claude stop` stopped it (a stopped
+background session is no longer listed by `claude agents --json`, yet the work
+screen and the fix request answer by its session id). `POST /api/agents/<id>/fix`
+answered "Fix request delivered (resume). The stopped session was resumed in the
+background with your message." The same session id
+(`bd219540-288e-4657-a1fc-01cfb1ea7b57`) came back with a new pid, and the agent
+committed the requested change (`docs: bg second line`). No copy was started:
+`claude agents --json --all` listed that id once. Cleanup: `claude stop`,
+`claude rm`, worktree and branch removed.
+
 ## Things seen on the way
 
 - The daemon's refresh of an agent's git state takes up to ~20 seconds after a
