@@ -90,6 +90,7 @@ pub(crate) fn run(options: &Options) -> Result<()> {
     if options.remove {
         return remove(&target);
     }
+    report_environment(&paths);
     // How long a question is held is a rule (`held_question_timeout`): the
     // project's own, then the personal one. A user-wide file has no project.
     let project = if options.user {
@@ -108,6 +109,86 @@ pub(crate) fn run(options: &Options) -> Result<()> {
     write(&target, port, holds, &token, options.user)?;
     report_daemon(port);
     Ok(())
+}
+
+/// The oldest Claude Code volee v2 was measured with: hooks, `claude agents
+/// --json` and the held decisions behave as documented from there.
+const MIN_CLAUDE: (u64, u64, u64) = (2, 1, 330);
+
+/// Says what a first run needs and what is missing, one line each: `ok`,
+/// `MISSING` (volee cannot work without it) or `optional`. Nothing is
+/// changed here; every line that is not `ok` says what to do.
+fn report_environment(paths: &Paths) {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let claude = volee_config::Config::load(&paths.config_file(), &home)
+        .map_or_else(|_| "claude".to_owned(), |config| config.claude.command);
+    println!("Checks");
+    match tool_version(&claude) {
+        None => println!(
+            "  MISSING  {claude}: not found. Install Claude Code (https://code.claude.com); \
+             volee only observes it."
+        ),
+        Some(text) => match parse_version(&text) {
+            Some(version) if version < MIN_CLAUDE => println!(
+                "  MISSING  {claude} {text}: too old, {}.{}.{} or later is needed (`claude update`)",
+                MIN_CLAUDE.0, MIN_CLAUDE.1, MIN_CLAUDE.2
+            ),
+            _ => println!("  ok       {claude} {text}"),
+        },
+    }
+    match tool_version("git") {
+        Some(text) => println!("  ok       git {text}"),
+        None => println!("  MISSING  git: not found. volee reads diffs and merges with it."),
+    }
+    match tool_version("gh") {
+        Some(text) => println!("  ok       gh {text}"),
+        None => println!(
+            "  optional gh: not found. Without it volee does not show pull requests and checks."
+        ),
+    }
+    if paths.config_file().is_file() {
+        println!("  ok       configuration {}", paths.config_file().display());
+    } else {
+        println!(
+            "  optional no configuration file, defaults are used. `volee config init` writes a \
+             commented example at {}",
+            paths.config_file().display()
+        );
+    }
+}
+
+/// The first line of `<program> --version` with the program's own name
+/// removed, or `None` when the program cannot be run.
+fn tool_version(program: &str) -> Option<String> {
+    let output = std::process::Command::new(program)
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let line = text.lines().next()?.trim();
+    // "2.1.330 (Claude Code)", "git version 2.50.1", "gh version 2.80.0 (...)".
+    let line = line.rsplit("version ").next().unwrap_or(line);
+    Some(line.to_owned())
+}
+
+/// `(major, minor, patch)` from the first dotted number in `text`.
+fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
+    let word = text
+        .split_whitespace()
+        .find(|word| word.starts_with(|c: char| c.is_ascii_digit()))?;
+    let mut parts = word.split('.').map(|part| {
+        part.chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse::<u64>()
+            .ok()
+    });
+    Some((parts.next()??, parts.next()??, parts.next()??))
 }
 
 /// Says what is wrong with the rules files, one line each, with file and
@@ -425,6 +506,15 @@ mod tests {
     use super::*;
 
     const TOKEN: &str = "t0k3n";
+
+    #[test]
+    fn versions_are_read_from_the_first_dotted_number() {
+        assert_eq!(parse_version("2.1.330 (Claude Code)"), Some((2, 1, 330)));
+        assert_eq!(parse_version("2.50.1"), Some((2, 50, 1)));
+        assert_eq!(parse_version("2.51.0-rc1"), Some((2, 51, 0)));
+        assert_eq!(parse_version("no number"), None);
+        assert!((2, 1, 329) < MIN_CLAUDE && (2, 1, 330) >= MIN_CLAUDE);
+    }
 
     fn urls(settings: &Value, event: &str) -> Vec<String> {
         settings["hooks"][event]
