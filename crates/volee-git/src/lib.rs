@@ -366,6 +366,17 @@ pub struct DeliveryReport {
     /// The remote-tracking branch the push state compares with, such as
     /// `origin/feat`; `None` when there is none.
     pub upstream: Option<String>,
+    /// Commits of the base branch that the branch does not have: how far it
+    /// is behind. 0 when no comparison was needed.
+    #[serde(default)]
+    pub behind: u32,
+    /// Of the commits the branch has and the base branch does not
+    /// (`delivery.commits`), those whose change is not already in the base
+    /// branch as a patch (`git cherry`): a commit cherry-picked, or merged
+    /// as itself by a rebase, is not counted. A squash of several commits is
+    /// not recognized this way: its evidence is the merged pull request.
+    #[serde(default)]
+    pub unique_commits: u32,
 }
 
 /// What a worktree has checked out.
@@ -438,6 +449,8 @@ mod tests {
             on_branch: false,
             base: Some("origin/main".into()),
             upstream: None,
+            behind: 2,
+            unique_commits: 1,
         };
         let json = serde_json::to_string(&report).unwrap();
         assert_eq!(

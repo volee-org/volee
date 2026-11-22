@@ -109,6 +109,8 @@ fn a_fresh_branch_has_delivered_nothing() {
             on_branch: true,
             base: Some("origin/main".into()),
             upstream: None,
+            behind: 0,
+            unique_commits: 0,
         }
     );
 }
@@ -548,4 +550,42 @@ fn delivery_works_from_a_subdirectory() {
     let report = agent.report_from(&agent.worktree.join("src"), "feat", None);
     assert_eq!(report.delivery.commits, 1);
     assert_eq!(report.delivery.diff.files, 1);
+}
+
+#[test]
+fn a_branch_says_how_far_it_is_behind_its_base() {
+    let agent = Agent::new();
+    agent.commit("src/lib.rs", "one\n");
+    assert_eq!(agent.report(None).behind, 0);
+    agent.teammate_pushes(3);
+    let report = agent.report(None);
+    assert_eq!(report.behind, 3, "the base moved on by three commits");
+    assert_eq!(report.delivery.commits, 1);
+}
+
+#[test]
+fn a_commit_cherry_picked_into_the_base_is_not_unique_any_more() {
+    let agent = Agent::new();
+    let first = agent.commit("one.rs", "one\n");
+    agent.commit("two.rs", "two\n");
+    let report = agent.report(None);
+    assert_eq!(
+        (report.delivery.commits, report.unique_commits),
+        (2, 2),
+        "nothing of the branch is in the base yet"
+    );
+    // The first commit lands in the base as a copy of itself, on top of
+    // another commit (on the same parent it would be the same commit).
+    agent
+        .sandbox
+        .commit(&agent.clone, "other.rs", "other\n", "Add other.rs");
+    let in_clone = |args: &[&str]| agent.sandbox.git(&agent.clone, args);
+    in_clone(&["cherry-pick", "--quiet", &first]);
+    in_clone(&["push", "--quiet", "origin", "main"]);
+    let report = agent.report(None);
+    assert_eq!(report.delivery.commits, 2, "the history still differs");
+    assert_eq!(
+        report.unique_commits, 1,
+        "but one change is already in main"
+    );
 }

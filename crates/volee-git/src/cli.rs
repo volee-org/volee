@@ -220,6 +220,19 @@ impl GitCli {
     }
 
     /// Commits reachable from `tip` and not from `exclude`.
+    /// Commits of `tip` that `base` does not have, left out when `base`
+    /// already has the same change as a patch (`git cherry`).
+    fn unique_commits(&self, dir: &Path, base: &str, tip: &str) -> Result<u32, GitError> {
+        let output = self
+            .git(dir)
+            .args(["cherry", base, tip])
+            .run()?
+            .success()?
+            .text()?;
+        let unique = output.lines().filter(|line| line.starts_with('+')).count();
+        Ok(u32::try_from(unique).unwrap_or(u32::MAX))
+    }
+
     fn count_commits(&self, dir: &Path, tip: &str, exclude: Option<&str>) -> Result<u32, GitError> {
         let mut request = self.git(dir).args(["rev-list", "--count", tip]);
         if let Some(exclude) = exclude {
@@ -494,6 +507,13 @@ impl GitCli {
         } else {
             None
         };
+        let (behind, unique_commits) = match (&tip, &base) {
+            (Some(tip), Some(base)) => (
+                self.count_commits(worktree, &base.commit, Some(tip))?,
+                self.unique_commits(worktree, &base.commit, tip)?,
+            ),
+            _ => (0, 0),
+        };
         let (commits, merge_base) = match (&tip, &base) {
             (Some(tip), Some(base)) => (
                 self.count_commits(worktree, tip, Some(&base.commit))?,
@@ -546,6 +566,8 @@ impl GitCli {
             on_branch,
             base: base.map(|base| base.name),
             upstream,
+            behind,
+            unique_commits,
         })
     }
 
