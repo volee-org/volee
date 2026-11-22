@@ -2,6 +2,7 @@
   import { diffSummary, sinceText, waitingText } from "./format";
   import Place from "./Place.svelte";
   import { type Card, title } from "./model";
+  import { badge } from "./review";
 
   interface Props {
     card: Card;
@@ -14,6 +15,7 @@
   }
   let { card, now, terminal, onopen, onread, note = "" }: Props = $props();
 
+  const reviewBadge = $derived(badge(card.review));
   const readable = $derived(card.kind === "finished" && onread !== undefined);
 
   /** A click anywhere on a finished card reads it, except on its own buttons. */
@@ -40,6 +42,11 @@
       Work is ready to read
       {#if card.diff}
         <span class="diff mono">{diffSummary(card.diff.files, card.diff.insertions, card.diff.deletions)}</span>
+      {/if}
+      {#if reviewBadge}
+        <span class="badge {reviewBadge.tone}" data-testid="review-badge" title="The AI review's opinion, not a gate">
+          {#if reviewBadge.tone === "running"}<span class="dot" aria-hidden="true"></span>{/if}{reviewBadge.text}
+        </span>
       {/if}
     </p>
   {/if}
@@ -130,6 +137,41 @@
     padding: 0 9px;
     font-size: 0.82rem;
     color: var(--text);
+  }
+  .badge {
+    margin-left: 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0 9px;
+    font-size: 0.8rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .badge.findings {
+    color: var(--waiting);
+    border-color: var(--waiting);
+  }
+  .badge.clean {
+    color: var(--finished);
+    border-color: var(--finished);
+  }
+  .badge.failed {
+    color: var(--danger);
+    border-color: var(--danger);
+  }
+  .badge .dot {
+    display: inline-block;
+    width: 0.55em;
+    height: 0.55em;
+    margin-right: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.25;
+    }
   }
   .chip.warn {
     color: var(--waiting);

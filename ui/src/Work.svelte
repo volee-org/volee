@@ -6,6 +6,8 @@
   import { diffSummary } from "./format";
   import Layer from "./Layer.svelte";
   import { inline, renderMarkdown } from "./markdown";
+  import { briefKey, fetchReview, requestReview, type Review, type ReviewBrief, reviewHint } from "./review";
+  import ReviewLayer from "./ReviewLayer.svelte";
   import {
     fetchWork,
     initialOpen,
@@ -24,15 +26,51 @@
     id: string;
     title: string;
     terminal: string | null;
+    /** The card's review brief, pushed with the inbox: it changing is the cue to read the review again. */
+    brief?: ReviewBrief | null;
     onback: () => void;
     onterminal: (id: string) => void;
   }
-  let { token, id, title, terminal, onback, onterminal }: Props = $props();
+  let { token, id, title, terminal, brief = null, onback, onterminal }: Props = $props();
+
+  let review = $state<Review | null>(null);
+  let reviewProblem = $state("");
+  let asking = $state(false);
+  let reviewOpened = false;
+
+  /** Reads the review again; the layer opens once, the first time there is something to show. */
+  async function readReview() {
+    const result = await fetchReview(token, id);
+    review = result.review;
+    if (!result.review) reviewProblem = result.message;
+    if (result.review && !reviewOpened && ["pending", "running", "failed", "done"].includes(result.review.status)) {
+      reviewOpened = true;
+      open.review = true;
+    }
+  }
+
+  // The daemon pushes the card's brief over the events stream each time the
+  // review moves (queued, running, done, failed): read the whole review then.
+  // No polling.
+  $effect(() => {
+    void briefKey(brief);
+    void readReview();
+  });
+
+  async function runReview(retry: boolean) {
+    asking = true;
+    reviewProblem = "";
+    const result = await requestReview(token, id, retry);
+    asking = false;
+    if (!result.ok && result.message) reviewProblem = result.message;
+    await readReview();
+  }
 
   let work = $state<Work | null>(null);
   let problem = $state("");
   let open = $state<Record<LayerId, boolean>>({
     summary: true,
+    review: false,
     plan: false,
     points: false,
     files: false,
@@ -48,7 +86,8 @@
       return;
     }
     work = result.work;
-    open = initialOpen(result.work);
+    const initial = initialOpen(result.work, review);
+    open = { ...initial, review: initial.review || open.review };
   });
 
   async function reveal(layer: LayerId) {
@@ -181,6 +220,17 @@
       </Layer>
 
       <Layer
+        id="review"
+        title="AI review (an opinion)"
+        hint={reviewHint(review)}
+        open={open.review}
+        focused={focus === "review"}
+        ontoggle={() => toggle("review")}
+      >
+        <ReviewLayer {review} problem={reviewProblem} {asking} onrun={runReview} />
+      </Layer>
+
+      <Layer
         id="plan"
         title="Plan followed"
         hint={work.plan ? `${work.plan.steps.length} steps` : "none recorded"}
@@ -285,7 +335,7 @@
         {#if work.files.length === 0}
           <p class="note">No diff to show.</p>
         {:else}
-          <DiffView files={work.files} truncated={work.diff.truncated} />
+          <DiffView files={work.files} truncated={work.diff.truncated} findings={review?.findings ?? []} />
         {/if}
       </Layer>
     </div>

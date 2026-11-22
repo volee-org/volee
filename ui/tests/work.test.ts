@@ -52,7 +52,7 @@ const work = (over: Partial<Work> = {}): Work => ({
 describe("layers", () => {
   it("opens the summary first, and the plan and open points only when they exist", () => {
     const bare = initialOpen(work());
-    expect(bare).toEqual({ summary: true, plan: false, points: false, files: false, diagram: false, diff: false });
+    expect(bare).toEqual({ summary: true, review: false, plan: false, points: false, files: false, diagram: false, diff: false });
     const full = initialOpen(
       work({
         plan: { source: "tasks", steps: [], text: null },
@@ -69,6 +69,7 @@ describe("layers", () => {
   it("finds the next closed layer, after the focused one, wrapping around", () => {
     const open: Record<LayerId, boolean> = {
       summary: true,
+      review: true,
       plan: true,
       points: false,
       files: true,
@@ -84,8 +85,10 @@ describe("layers", () => {
 
   it("moves between layers and stops at the ends", () => {
     expect(moveLayer(null, 1)).toBe("summary");
+    expect(moveLayer("summary", 1)).toBe("review");
     expect(moveLayer(null, -1)).toBe("diff");
     expect(moveLayer("summary", -1)).toBe("summary");
+    expect(moveLayer("review", 1)).toBe("plan");
     expect(moveLayer("plan", 1)).toBe("points");
     expect(moveLayer("diff", 1)).toBe("diff");
   });

@@ -1,5 +1,7 @@
 // The shapes the daemon sends (crates/volee-daemon/src/web/inbox.rs).
 
+import type { ReviewBrief } from "./review";
+
 export type CardKind = "waiting" | "finished";
 
 export interface DiffStat {
@@ -28,6 +30,8 @@ export interface Card {
   diff: DiffStat | null;
   ahead: number;
   dirty: boolean;
+  /** The AI pre-review of the branch's current tip, in short; absent when nobody asked. */
+  review?: ReviewBrief | null;
 }
 
 export interface Suggestion {

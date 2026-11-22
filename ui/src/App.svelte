@@ -160,6 +160,7 @@
       id={workId}
       title={workCard ? title(workCard) : workId.slice(0, 8)}
       terminal={inbox.terminal}
+      brief={workCard?.review ?? null}
       onback={leaveWork}
       onterminal={openById}
     />

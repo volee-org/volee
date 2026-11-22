@@ -1,5 +1,7 @@
 // The layers of a finished change (crates/volee-daemon/src/work/mod.rs).
 
+import type { Review } from "./review";
+
 export type StepStatus = "pending" | "in-progress" | "done" | "unknown";
 export type PlanSource = "tasks" | "plan-mode" | "prompt";
 export type FileStatus = "added" | "modified" | "deleted" | "renamed";
@@ -82,13 +84,15 @@ export interface Work {
 }
 
 /** The layers, in the order a reader opens them. */
-export const LAYERS = ["summary", "plan", "points", "files", "diagram", "diff"] as const;
+export const LAYERS = ["summary", "review", "plan", "points", "files", "diagram", "diff"] as const;
 export type LayerId = (typeof LAYERS)[number];
 
 /** Which layers start open: the ones that answer "what happened" at a glance. */
-export function initialOpen(work: Work): Record<LayerId, boolean> {
+export function initialOpen(work: Work, review: Review | null = null): Record<LayerId, boolean> {
   return {
     summary: true,
+    // Open when the review has something to show: it is running, failed or found things.
+    review: review !== null && ["pending", "running", "failed", "done"].includes(review.status),
     plan: work.plan !== null,
     points: work.open_points.length > 0,
     files: false,
