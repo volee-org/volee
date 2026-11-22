@@ -108,6 +108,10 @@ pub(crate) struct Agents {
     revision: watch::Sender<u64>,
     /// Asks the poller to read now, because a hook event just arrived.
     nudge: Notify,
+    /// The last reading, readable at any time: a reading can take seconds
+    /// (the listing and git), and whoever only wants the last one must not
+    /// wait for it.
+    published: Mutex<Option<AgentsView>>,
 }
 
 impl std::fmt::Debug for Agents {
@@ -152,6 +156,7 @@ impl Agents {
             inner: tokio::sync::Mutex::default(),
             revision: watch::channel(0).0,
             nudge: Notify::new(),
+            published: Mutex::new(None),
         }
     }
 
@@ -165,6 +170,22 @@ impl Agents {
     /// mean that a session just changed state).
     pub(crate) fn nudge(&self) {
         self.nudge.notify_one();
+    }
+
+    /// The last reading, if there is one, without waiting for a reading in
+    /// progress.
+    pub(crate) fn peek(&self) -> Option<AgentsView> {
+        self.published
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn publish(&self, view: &AgentsView) {
+        *self
+            .published
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(view.clone());
     }
 
     /// The last reading, without reading again unless there is none yet.
@@ -227,6 +248,7 @@ impl Agents {
                     agents: cards,
                 };
                 inner.read_at = Some(Instant::now());
+                self.publish(&inner.view);
                 if changed || inner.read_count == 0 {
                     self.revision.send_modify(|revision| *revision += 1);
                 }
@@ -248,6 +270,7 @@ impl Agents {
             self.revision.send_modify(|revision| *revision += 1);
         }
         inner.view.error = Some(why);
+        self.publish(&inner.view);
         // Try again at the next request or tick, not at every request.
         inner.read_at = Some(Instant::now());
     }

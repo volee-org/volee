@@ -265,7 +265,8 @@ async fn start_hook_server(
     })?;
     tracing::info!(addr = ?listener.local_addr().ok(), "hook server ready");
     // The web interface shares the listener, when there are agents to show.
-    let web = agents.map(crate::web::Web::detect);
+    let decisions = crate::decisions::Decisions::new(hook_config.hold);
+    let web = agents.map(|agents| crate::web::Web::detect(agents, decisions));
     Ok(Some(tokio::spawn(async move {
         if let Err(error) =
             crate::hook_server::serve_with_web(listener, hook_config.token, store, web).await

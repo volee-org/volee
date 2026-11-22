@@ -1,10 +1,13 @@
 //! The hook server (v2, step 1): receives the events Claude Code posts through
 //! `http` hooks and stores them.
 //!
-//! It never decides anything. Every authenticated request whose body is a JSON
-//! object is stored as received and answered with an empty `200`, which Claude
-//! Code reads as "no opinion": the session goes on as if the hook did not
-//! exist. A request without the token is refused with `401`, a body that is
+//! It decides nothing by itself. Every authenticated request whose body is a
+//! JSON object is stored as received and answered with an empty `200`, which
+//! Claude Code reads as "no opinion": the session goes on as if the hook did
+//! not exist. Two requests are the exception when the web interface is
+//! served: a `PermissionRequest` (`/hooks/PermissionRequest`) and the
+//! `PreToolUse` of `AskUserQuestion` (`/decide/AskUserQuestion`) are held
+//! until the person decides in the browser (see [`crate::decisions`]). A request without the token is refused with `401`, a body that is
 //! not a JSON object with `400`. Claude Code treats any non-2xx answer, a
 //! refused connection and a timeout alike as a non-blocking error for these
 //! hooks, so a failure here never stops a session.
@@ -21,10 +24,12 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use tokio::net::TcpListener;
 use volee_store::{NewHookEvent, Store};
 
+use crate::decisions::{DecisionKind, Held, HoldSettings, Observed};
 use crate::error::DaemonError;
 
 /// The biggest request body the server reads: a transcript excerpt or a long
@@ -40,6 +45,8 @@ pub struct HookServerConfig {
     pub token: String,
     /// The SQLite database the events go to.
     pub database: PathBuf,
+    /// How long permission requests and questions are held.
+    pub hold: HoldSettings,
 }
 
 /// Binds the listener of `config`, refusing an address that is not loopback.
@@ -80,6 +87,9 @@ struct Shared {
     store: Arc<Mutex<Store>>,
     /// Told when an event is stored, so that the agents are read again now.
     agents: Option<Arc<crate::agents_view::Agents>>,
+    /// The held requests; without the web interface nobody could decide, so
+    /// nothing is held.
+    decisions: Option<Arc<crate::decisions::Decisions>>,
 }
 
 fn router(token: String, store: Store, web: Option<crate::web::Web>) -> Router {
@@ -88,10 +98,12 @@ fn router(token: String, store: Store, web: Option<crate::web::Web>) -> Router {
         token: Arc::clone(&token),
         store: Arc::new(Mutex::new(store)),
         agents: web.as_ref().map(crate::web::Web::agents),
+        decisions: web.as_ref().map(crate::web::Web::decisions),
     };
     let hooks = Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/hooks/{event}", post(hook))
+        .route("/decide/{tool}", post(decide))
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .with_state(shared);
     match web {
@@ -105,37 +117,122 @@ async fn hook(
     Path(path_event): Path<String>,
     headers: HeaderMap,
     body: Bytes,
-) -> StatusCode {
+) -> Response {
     if !authorized(&headers, &shared.token) {
-        return StatusCode::UNAUTHORIZED;
+        return StatusCode::UNAUTHORIZED.into_response();
     }
     let Ok(payload) = std::str::from_utf8(&body) else {
-        return StatusCode::BAD_REQUEST;
+        return StatusCode::BAD_REQUEST.into_response();
     };
     let Some(event) = describe(&path_event, payload) else {
-        return StatusCode::BAD_REQUEST;
+        return StatusCode::BAD_REQUEST.into_response();
     };
     let store = Arc::clone(&shared.store);
+    let name = event.event.clone();
     let stored = tokio::task::spawn_blocking(move || {
         let store = store.lock().unwrap_or_else(PoisonError::into_inner);
         store.append_hook_event(&event)
     })
     .await;
     match stored {
-        Ok(Ok(_)) => {
-            if let Some(agents) = &shared.agents {
-                agents.nudge();
-            }
-            StatusCode::OK
-        }
+        Ok(Ok(_)) => {}
         Ok(Err(error)) => {
             tracing::error!(%error, "cannot store a hook event");
-            StatusCode::INTERNAL_SERVER_ERROR
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
         Err(error) => {
             tracing::error!(%error, "the hook storing task failed");
-            StatusCode::INTERNAL_SERVER_ERROR
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
+    }
+    if let Some(agents) = &shared.agents {
+        agents.nudge();
+    }
+    let Some(decisions) = &shared.decisions else {
+        return StatusCode::OK.into_response();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+        return StatusCode::OK.into_response();
+    };
+    let text = |key: &str| value.get(key).and_then(serde_json::Value::as_str);
+    decisions.observe(&Observed {
+        event: &name,
+        session_id: text("session_id"),
+        tool_name: text("tool_name"),
+        tool_input: value.get("tool_input"),
+    });
+    if name != "PermissionRequest" {
+        return StatusCode::OK.into_response();
+    }
+    let (Some(session_id), Some(tool_name)) = (text("session_id"), text("tool_name")) else {
+        return StatusCode::OK.into_response();
+    };
+    // These two need an `updatedInput` the card cannot build: the terminal
+    // keeps them.
+    if matches!(tool_name, "AskUserQuestion" | "ExitPlanMode") {
+        return StatusCode::OK.into_response();
+    }
+    let held = Held {
+        kind: DecisionKind::Permission,
+        session_id: session_id.to_owned(),
+        tool_name: tool_name.to_owned(),
+        tool_input: value.get("tool_input").cloned().unwrap_or_default(),
+        suggestions: value
+            .get("permission_suggestions")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+    };
+    answer(decisions.hold(held).await)
+}
+
+/// The `PreToolUse` of `AskUserQuestion`, held for an answer. It is not
+/// stored: the generic `PreToolUse` hook of the same call is.
+async fn decide(
+    State(shared): State<Shared>,
+    Path(tool): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if !authorized(&headers, &shared.token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let (Some(decisions), "AskUserQuestion") = (&shared.decisions, tool.as_str()) else {
+        return StatusCode::OK.into_response();
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let text = |key: &str| value.get(key).and_then(serde_json::Value::as_str);
+    let input = value.get("tool_input").cloned().unwrap_or_default();
+    let (Some(session_id), true, true) = (
+        text("session_id"),
+        text("tool_name") == Some("AskUserQuestion"),
+        input
+            .get("questions")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|questions| !questions.is_empty()),
+    ) else {
+        return StatusCode::OK.into_response();
+    };
+    answer(
+        decisions
+            .hold(Held {
+                kind: DecisionKind::Question,
+                session_id: session_id.to_owned(),
+                tool_name: "AskUserQuestion".to_owned(),
+                tool_input: input,
+                suggestions: Vec::new(),
+            })
+            .await,
+    )
+}
+
+/// A held request's answer: the body, or an empty `200` for "no opinion".
+fn answer(body: Option<serde_json::Value>) -> Response {
+    match body {
+        Some(body) => Json(body).into_response(),
+        None => StatusCode::OK.into_response(),
     }
 }
 

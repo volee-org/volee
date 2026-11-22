@@ -71,13 +71,15 @@ pub(crate) async fn run() -> Result<()> {
 fn hook_server(paths: &Paths) -> Result<volee_daemon::HookServerConfig> {
     let token = crate::hook_token::read_or_create(&paths.hook_token_file())
         .with_context(|| format!("cannot read {}", paths.hook_token_file().display()))?;
+    let hooks = settings(paths).hooks;
     Ok(volee_daemon::HookServerConfig {
-        addr: std::net::SocketAddr::from((
-            std::net::Ipv4Addr::LOCALHOST,
-            settings(paths).hooks.port,
-        )),
+        addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, hooks.port)),
         token,
         database: paths.database(),
+        hold: volee_daemon::HoldSettings {
+            permission_timeout: std::time::Duration::from_secs(hooks.permission_timeout),
+            question_delay: std::time::Duration::from_secs(hooks.question_delay),
+        },
     })
 }
 

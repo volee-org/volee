@@ -7,6 +7,7 @@
 //! | `GET /api/inbox` | yes | the inbox, as JSON |
 //! | `GET /api/events` | yes | the inbox now, then again each time it changes |
 //! | `POST /api/agents/{id}/terminal` | yes | focuses the agent's terminal |
+//! | `POST /api/decisions/{id}` | yes | decides a held permission or question |
 //!
 //! The token is the hook token. A browser's `EventSource` cannot set a
 //! header, so the events stream also takes it as `?token=`. Requests whose
@@ -32,6 +33,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::agents_view::Agents;
+use crate::decisions::{DecideError, Decision, Decisions};
 use terminal::{Target, Terminal};
 
 /// What the web routes need besides the token.
@@ -39,12 +41,13 @@ use terminal::{Target, Terminal};
 pub(crate) struct Web {
     agents: Arc<Agents>,
     terminal: Option<Arc<dyn Terminal>>,
+    decisions: Arc<Decisions>,
 }
 
 impl Web {
     /// The web interface over `agents`, with the terminal adapter found on
     /// this machine (Rex), if any.
-    pub(crate) fn detect(agents: Arc<Agents>) -> Self {
+    pub(crate) fn detect(agents: Arc<Agents>, decisions: Arc<Decisions>) -> Self {
         if !assets::is_bundled() {
             tracing::warn!("this volee was built without the web interface (see ui/)");
         }
@@ -56,11 +59,25 @@ impl Web {
         Self::new(
             agents,
             terminal.map(|rex| Arc::new(rex) as Arc<dyn Terminal>),
+            decisions,
         )
     }
 
-    pub(crate) fn new(agents: Arc<Agents>, terminal: Option<Arc<dyn Terminal>>) -> Self {
-        Self { agents, terminal }
+    pub(crate) fn new(
+        agents: Arc<Agents>,
+        terminal: Option<Arc<dyn Terminal>>,
+        decisions: Arc<Decisions>,
+    ) -> Self {
+        Self {
+            agents,
+            terminal,
+            decisions,
+        }
+    }
+
+    /// The held permission requests and questions.
+    pub(crate) fn decisions(&self) -> Arc<Decisions> {
+        Arc::clone(&self.decisions)
     }
 
     /// The agents the web interface shows, which hook events nudge.
@@ -70,13 +87,16 @@ impl Web {
 
     /// The inbox now.
     async fn inbox(&self) -> inbox::Inbox {
-        let view = self.agents.latest().await;
+        let view = match self.agents.peek() {
+            Some(view) => view,
+            None => self.agents.latest().await,
+        };
         let name = self
             .terminal
             .as_ref()
             .filter(|terminal| terminal.available())
             .map(|terminal| terminal.name());
-        inbox::build(&view, name)
+        inbox::build_with(&view, name, &self.decisions.cards())
     }
 }
 
@@ -92,6 +112,7 @@ pub(crate) fn router(token: Arc<str>, web: Web) -> Router {
         .route("/api/inbox", get(get_inbox))
         .route("/api/events", get(events))
         .route("/api/agents/{id}/terminal", post(open_terminal))
+        .route("/api/decisions/{id}", post(decide))
         .fallback(get(assets::serve))
         .layer(middleware::from_fn(guard))
         .with_state(Shared { token, web })
@@ -177,24 +198,56 @@ async fn events(
     sse.into_response()
 }
 
-/// The inbox, once at once, then each time the agents change. A client that
-/// connects late gets the whole current inbox first, so nothing is replayed.
+/// The inbox, once at once, then each time the agents or the held requests
+/// change. A client that connects late gets the whole current inbox first,
+/// so nothing is replayed.
 fn inbox_stream(web: Web) -> impl Stream<Item = Result<Event, Infallible>> {
-    let changes = web.agents.subscribe();
+    let agents = web.agents.subscribe();
+    let decisions = web.decisions.subscribe();
     futures_util::stream::unfold(
-        (web, changes, true),
-        |(web, mut changes, first)| async move {
-            if !first && changes.changed().await.is_err() {
-                return None;
+        (web, agents, decisions, true),
+        |(web, mut agents, mut decisions, first)| async move {
+            if !first {
+                tokio::select! {
+                    changed = agents.changed() => if changed.is_err() { return None; },
+                    changed = decisions.changed() => if changed.is_err() { return None; },
+                }
             }
             let inbox = web.inbox().await;
             let event = Event::default()
                 .event("inbox")
                 .json_data(&inbox)
                 .unwrap_or_else(|_| Event::default().comment("the inbox could not be encoded"));
-            Some((Ok(event), (web, changes, false)))
+            Some((Ok(event), (web, agents, decisions, false)))
         },
     )
+}
+
+/// Applies what the person chose on a held card. `404` when the card is gone
+/// (decided elsewhere, expired, or the terminal answered first), `422` when
+/// the decision does not fit the card.
+async fn decide(
+    State(shared): State<Shared>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(decision): Json<Decision>,
+) -> Response {
+    if !allowed(&shared, &headers, None) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match shared.web.decisions.decide(&id, decision) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(DecideError::Gone) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "ok": false, "message": "this request is gone: it was answered in the terminal or it expired" })),
+        )
+            .into_response(),
+        Err(DecideError::Invalid(message)) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "ok": false, "message": message })),
+        )
+            .into_response(),
+    }
 }
 
 async fn open_terminal(

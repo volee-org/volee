@@ -19,7 +19,8 @@ use volee_core::harness::SessionKey;
 use volee_core::reconcile::ListedSession;
 use volee_core::state::{AgentState, InputRequest};
 use volee_daemon::{
-    AgentsViewConfig, Config, Daemon, EvidenceSources, HookServerConfig, ManualClock, MemoryLog,
+    AgentsViewConfig, Config, Daemon, EvidenceSources, HoldSettings, HookServerConfig, ManualClock,
+    MemoryLog,
 };
 use volee_harness::Harness;
 use volee_proto::paths::Paths;
@@ -64,6 +65,7 @@ async fn start() -> Running {
         },
         processes: None,
         hook_server: Some(HookServerConfig {
+            hold: HoldSettings::default(),
             addr,
             token: TOKEN.into(),
             database: database.clone(),

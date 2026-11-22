@@ -6,6 +6,7 @@
 //! cards come sorted by urgency, so the interface does not decide anything.
 //! Every other agent is only counted.
 
+use crate::decisions::DecisionCard;
 use serde::Serialize;
 use volee_core::state::{AgentState, InputRequest, StateCategory};
 use volee_proto::methods::{AgentCard, AgentsView};
@@ -44,6 +45,9 @@ pub(crate) struct InboxCard {
     pub(crate) repo: Option<String>,
     pub(crate) branch: Option<String>,
     pub(crate) base: Option<String>,
+    /// How `base` is known: `upstream`, `reflog`, `nearest` or `default` (a
+    /// guess, the weakest).
+    pub(crate) base_source: Option<String>,
     pub(crate) cwd: String,
     pub(crate) diff: Option<Diff>,
     pub(crate) ahead: u32,
@@ -51,7 +55,7 @@ pub(crate) struct InboxCard {
 }
 
 /// The inbox as the interface receives it.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub(crate) struct Inbox {
     pub(crate) updated_at: Option<i64>,
     pub(crate) error: Option<String>,
@@ -60,7 +64,24 @@ pub(crate) struct Inbox {
     pub(crate) terminal: Option<&'static str>,
     /// Running agents that need no decision now.
     pub(crate) others: usize,
+    /// Held permission requests and questions, oldest first: the interface
+    /// puts them at the top of "Waiting for you".
+    pub(crate) decisions: Vec<DecisionView>,
     pub(crate) cards: Vec<InboxCard>,
+}
+
+/// A held request with the agent it comes from.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub(crate) struct DecisionView {
+    #[serde(flatten)]
+    pub(crate) card: DecisionCard,
+    pub(crate) name: Option<String>,
+    pub(crate) repo: Option<String>,
+    pub(crate) branch: Option<String>,
+    pub(crate) base: Option<String>,
+    /// How the base is known (`upstream`, `reflog`, `nearest`, `default`).
+    pub(crate) base_source: Option<String>,
+    pub(crate) cwd: Option<String>,
 }
 
 /// How much a waiting card is worth acting on first: a permission blocks a
@@ -76,11 +97,23 @@ fn urgency(request: &InputRequest) -> u8 {
 
 /// Builds the inbox from the agents view. `terminal` names the adapter that
 /// can open a terminal, if any.
+#[cfg(test)]
 pub(crate) fn build(view: &AgentsView, terminal: Option<&'static str>) -> Inbox {
+    build_with(view, terminal, &[])
+}
+
+/// Builds the inbox with the held requests. An agent that has one is not
+/// listed again as a plain waiting card: the held request says more.
+pub(crate) fn build_with(
+    view: &AgentsView,
+    terminal: Option<&'static str>,
+    held: &[DecisionCard],
+) -> Inbox {
     let mut keyed: Vec<((u8, i64), InboxCard)> = Vec::new();
     let mut others = 0;
     for agent in &view.agents {
-        match classify(agent) {
+        let has_held = held.iter().any(|card| card.session_id == agent.session_id);
+        match classify(agent).filter(|(kind, _)| !(has_held && *kind == Kind::Waiting)) {
             Some((kind, rank)) => {
                 let card = card(agent, kind);
                 // The agent that waited longest comes first; an unknown time
@@ -88,6 +121,7 @@ pub(crate) fn build(view: &AgentsView, terminal: Option<&'static str>) -> Inbox 
                 let since = card.since.unwrap_or(i64::MAX);
                 keyed.push(((rank, since), card));
             }
+            None if has_held => {}
             None if agent.alive && agent.state.category() != StateCategory::Stopped => others += 1,
             None => {}
         }
@@ -98,7 +132,25 @@ pub(crate) fn build(view: &AgentsView, terminal: Option<&'static str>) -> Inbox 
         error: view.error.clone(),
         terminal,
         others,
+        decisions: held.iter().map(|card| decision_view(view, card)).collect(),
         cards: keyed.into_iter().map(|(_, card)| card).collect(),
+    }
+}
+
+fn decision_view(view: &AgentsView, card: &DecisionCard) -> DecisionView {
+    let agent = view
+        .agents
+        .iter()
+        .find(|agent| agent.session_id == card.session_id);
+    let repo = agent.and_then(|agent| agent.repo.as_ref());
+    DecisionView {
+        card: card.clone(),
+        name: agent.and_then(|agent| agent.name.clone()),
+        repo: repo.map(|repo| repo.name.clone()),
+        branch: repo.and_then(|repo| repo.branch.clone()),
+        base: repo.and_then(|repo| repo.base.clone()),
+        base_source: repo.and_then(|repo| repo.base_source.clone()),
+        cwd: agent.map(|agent| agent.cwd.display().to_string()),
     }
 }
 
@@ -129,6 +181,10 @@ fn card(agent: &AgentCard, kind: Kind) -> InboxCard {
         repo: agent.repo.as_ref().map(|repo| repo.name.clone()),
         branch: agent.repo.as_ref().and_then(|repo| repo.branch.clone()),
         base: agent.repo.as_ref().and_then(|repo| repo.base.clone()),
+        base_source: agent
+            .repo
+            .as_ref()
+            .and_then(|repo| repo.base_source.clone()),
         cwd: agent.cwd.display().to_string(),
         diff: agent.git.as_ref().map(|git| Diff {
             files: git.diff.files,

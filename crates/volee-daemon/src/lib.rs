@@ -11,6 +11,7 @@
 mod agents_view;
 mod clock;
 mod control;
+mod decisions;
 mod discovery;
 mod error;
 mod evidence;
@@ -30,6 +31,7 @@ mod web;
 
 pub use agents_view::AgentsViewConfig;
 pub use clock::{Clock, ManualClock, SystemClock};
+pub use decisions::HoldSettings;
 pub use discovery::DEFAULT_IDLE_INTERVAL as DEFAULT_IDLE_DISCOVERY_INTERVAL;
 pub use discovery::DEFAULT_INTERVAL as DEFAULT_DISCOVERY_INTERVAL;
 pub use discovery::DEFAULT_MAX_INTERVAL as DEFAULT_MAX_DISCOVERY_INTERVAL;

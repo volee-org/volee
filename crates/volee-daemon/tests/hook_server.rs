@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use volee_daemon::HookServerConfig;
 use volee_daemon::hook_server;
+use volee_daemon::{HoldSettings, HookServerConfig};
 use volee_store::{HookFilter, Store};
 
 const TOKEN: &str = "0123456789abcdef";
@@ -26,6 +26,7 @@ async fn start() -> Server {
     let dir = tempfile::tempdir().unwrap();
     let database = dir.path().join("volee.db");
     let config = HookServerConfig {
+        hold: HoldSettings::default(),
         addr: "127.0.0.1:0".parse().unwrap(),
         token: TOKEN.into(),
         database: database.clone(),
@@ -159,6 +160,7 @@ async fn the_hook_server_never_listens_beyond_the_loopback_interface() {
     let dir = tempfile::tempdir().unwrap();
     for addr in ["0.0.0.0:0", "192.168.1.10:0", "[::]:0"] {
         let config = HookServerConfig {
+            hold: HoldSettings::default(),
             addr: addr.parse().unwrap(),
             token: TOKEN.into(),
             database: dir.path().join("volee.db"),
@@ -173,6 +175,7 @@ async fn a_port_already_in_use_is_reported_with_the_setting_to_change() {
     let taken = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let dir = tempfile::tempdir().unwrap();
     let config = HookServerConfig {
+        hold: HoldSettings::default(),
         addr: taken.local_addr().unwrap(),
         token: TOKEN.into(),
         database: dir.path().join("volee.db"),
