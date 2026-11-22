@@ -184,6 +184,7 @@ fn start_with(events: Vec<Event>, harness: Option<Arc<dyn Harness>>) -> Running 
         evidence: EvidenceSources::default(),
         processes: None,
         hook_server: None,
+        agents_view: None,
     };
     let task = tokio::spawn(Daemon::serve(listener, config));
     Running {

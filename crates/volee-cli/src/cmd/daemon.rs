@@ -41,6 +41,8 @@ pub(crate) async fn run() -> Result<()> {
         ..EvidenceSources::default()
     };
     let hook_server = hook_server(&paths)?;
+    let poll_interval = std::time::Duration::from_secs(settings(&paths).agents.poll_interval);
+    let database = paths.database();
     let config = Config {
         spool: Some(paths.spool_dir()),
         paths,
@@ -54,6 +56,10 @@ pub(crate) async fn run() -> Result<()> {
         evidence,
         processes: Some(Arc::new(volee_harness::SystemRunner)),
         hook_server: Some(hook_server),
+        agents_view: Some(volee_daemon::AgentsViewConfig {
+            poll_interval,
+            database,
+        }),
     };
     Daemon::run(config)
         .await

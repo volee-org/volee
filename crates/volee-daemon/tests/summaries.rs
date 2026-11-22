@@ -84,6 +84,7 @@ fn start(summaries: bool) -> Running {
         },
         processes: None,
         hook_server: None,
+        agents_view: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

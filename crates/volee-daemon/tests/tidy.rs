@@ -103,6 +103,7 @@ fn start_with(worker: bool) -> Running {
         },
         processes: None,
         hook_server: None,
+        agents_view: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running {

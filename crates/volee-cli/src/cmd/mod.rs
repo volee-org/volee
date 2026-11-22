@@ -1,6 +1,7 @@
 //! One module per subcommand.
 
 pub(crate) mod agent;
+pub(crate) mod agents;
 pub(crate) mod config;
 pub(crate) mod daemon;
 pub(crate) mod doctor;

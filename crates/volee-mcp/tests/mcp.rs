@@ -91,6 +91,7 @@ fn start_with(events: Vec<Event>) -> Fixture {
             evidence: EvidenceSources::default(),
             processes: None,
             hook_server: None,
+            agents_view: None,
         },
     ));
     Fixture { socket, _dir: dir }

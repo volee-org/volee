@@ -17,11 +17,11 @@ use volee_core::{Agent, AgentId, Event, EventKind, Registry};
 use volee_harness::hooks::{HookPayload, HookSignal, SessionSource, interpret, stop_block_output};
 use volee_proto::PROTOCOL_VERSION;
 use volee_proto::methods::{
-    AbortMission, AgentParams, CloseMission, ContextParams, CreateMission, Diff, Empty, EventBatch,
-    EventsSince, Forget, HookIngest, HookParams, HookReply, HookWait, MarkRead, MarkReadParams,
-    Method, RecordActivity, RefreshDiscovery, ReportContext, RequestApproval, SendMessage,
-    SendParams, Sent, Shutdown, SinceParams, Status, StatusInfo, StatusParams, Summarize, Tidy,
-    WaitParams, WaitReply,
+    AbortMission, AgentParams, AgentsView, CloseMission, ContextParams, CreateMission, Diff, Empty,
+    EventBatch, EventsSince, Forget, HookIngest, HookParams, HookReply, HookWait, MarkRead,
+    MarkReadParams, Method, RecordActivity, RefreshDiscovery, ReportContext, RequestApproval,
+    SendMessage, SendParams, Sent, Shutdown, SinceParams, Status, StatusInfo, StatusParams,
+    Summarize, Tidy, ViewAgents, ViewParams, WaitParams, WaitReply,
 };
 use volee_proto::rpc::{self, RpcError};
 
@@ -61,6 +61,7 @@ pub(crate) async fn dispatch(
             respond(report_context(shared, parse::<ReportContext>(params)?).await)
         }
         Diff::NAME => respond(control::diff(shared, parse::<Diff>(params)?).await),
+        ViewAgents::NAME => respond(view_agents(shared, parse::<ViewAgents>(params)?).await),
         Tidy::NAME => respond(crate::tidy::tidy(shared, parse::<Tidy>(params)?).await),
         RecordActivity::NAME => {
             respond(crate::join::activity(shared, parse::<RecordActivity>(params)?).await)
@@ -129,6 +130,20 @@ async fn status(shared: &Arc<Shared>, params: StatusParams) -> Result<StatusInfo
         forge: shared.forge_status(),
         repos: shared.settings.repos.keys().cloned().collect(),
     })
+}
+
+/// `agents.view`: the agents, read again when the last reading is older than
+/// the caller allows.
+async fn view_agents(shared: &Arc<Shared>, params: ViewParams) -> Result<AgentsView, DaemonError> {
+    let Some(agents) = &shared.agents else {
+        return Err(DaemonError::Unavailable(
+            "the agents view is not running: this daemon found no Claude Code to list, see \
+             `volee daemon status`"
+                .into(),
+        ));
+    };
+    let max_age = Duration::from_millis(params.max_age_ms.unwrap_or(2_000));
+    Ok(agents.get(max_age).await)
 }
 
 async fn events_since(

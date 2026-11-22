@@ -327,6 +327,7 @@ fn start(events: Vec<Event>, clock: Arc<ManualClock>, evidence: EvidenceSources)
         evidence,
         processes: None,
         hook_server: None,
+        agents_view: None,
     };
     Running {
         socket,

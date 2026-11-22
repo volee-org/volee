@@ -385,6 +385,7 @@ fn serve(running: &mut Running, name: &str, events: Vec<Event>, merge: Option<&s
         },
         processes: None,
         hook_server: None,
+        agents_view: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
 }

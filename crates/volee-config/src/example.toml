@@ -15,6 +15,10 @@
 # an hour anyway; volee then resumes them when a message arrives).
 wake_timeout = 3600
 
+# How often the daemon lists Claude Code's sessions (`claude agents --json`)
+# for `volee agents`, in seconds.
+# poll_interval = 5
+
 # Agents run in volee hosts. When the machine restarts, the daemon resumes the
 # agents it interrupted in new hosts, with their conversation, the first time
 # it starts (`volee daemon install` starts it at login). false: they are

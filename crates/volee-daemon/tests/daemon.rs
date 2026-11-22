@@ -85,6 +85,7 @@ fn start() -> Running {
         evidence: EvidenceSources::default(),
         processes: None,
         hook_server: None,
+        agents_view: None,
     };
     let task = tokio::spawn(Daemon::serve(listener, config));
     Running {
@@ -113,6 +114,7 @@ fn empty(paths: Paths) -> Config {
         evidence: EvidenceSources::default(),
         processes: None,
         hook_server: None,
+        agents_view: None,
     }
 }
 

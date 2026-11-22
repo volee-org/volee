@@ -41,6 +41,17 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// List the Claude Code sessions the daemon sees: state, repository,
+    /// branch, how far the branch is from its base, and finished work with
+    /// its diff summary.
+    Agents {
+        /// Print JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+        /// Include sessions whose process ended.
+        #[arg(long)]
+        all: bool,
+    },
     /// Show an agent's changes against the branch it started from.
     Diff {
         /// The agent: its name, short id or id.
@@ -350,6 +361,7 @@ fn async_main(command: Command) -> ExitCode {
             Command::Daemon(DaemonCommand::Install { print }) => cmd::login::install(print),
             Command::Daemon(DaemonCommand::Uninstall) => cmd::login::uninstall(),
             Command::Ls { json } => cmd::ls::run(json).await,
+            Command::Agents { json, all } => cmd::agents::run(json, all).await,
             Command::Diff { agent, full } => cmd::agent::diff(&agent, full).await,
             Command::Forget { agent } => cmd::agent::forget(&agent).await,
             Command::Tidy {

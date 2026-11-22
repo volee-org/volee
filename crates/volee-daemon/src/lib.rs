@@ -8,6 +8,7 @@
 //!
 //! Start it with [`Daemon::run`]; build its dependencies with [`Config`].
 
+mod agents_view;
 mod clock;
 mod control;
 mod discovery;
@@ -26,6 +27,7 @@ mod support;
 mod tidy;
 mod watchers;
 
+pub use agents_view::AgentsViewConfig;
 pub use clock::{Clock, ManualClock, SystemClock};
 pub use discovery::DEFAULT_IDLE_INTERVAL as DEFAULT_IDLE_DISCOVERY_INTERVAL;
 pub use discovery::DEFAULT_INTERVAL as DEFAULT_DISCOVERY_INTERVAL;

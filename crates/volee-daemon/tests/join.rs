@@ -120,6 +120,7 @@ fn start(log: Vec<Event>) -> Running {
         evidence: EvidenceSources::default(),
         processes: None,
         hook_server: None,
+        agents_view: None,
     };
     tokio::spawn(Daemon::serve(listener, config));
     Running { socket, _dir: dir }

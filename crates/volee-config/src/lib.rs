@@ -185,6 +185,9 @@ pub struct AgentDefaults {
     /// volee hosts when the daemon starts (ADR 0024); on unless set to
     /// `false`.
     pub resume_after_reboot: bool,
+    /// How often the daemon lists Claude Code's sessions for `volee agents`,
+    /// in seconds (at least 1).
+    pub poll_interval: u64,
 }
 
 impl Default for AgentDefaults {
@@ -194,6 +197,7 @@ impl Default for AgentDefaults {
             permission_mode: None,
             wake_timeout: 3_600,
             resume_after_reboot: true,
+            poll_interval: 5,
         }
     }
 }
@@ -390,6 +394,11 @@ impl Config {
                 "agents.wake_timeout must be at least 1 second".to_owned(),
             ));
         }
+        if self.agents.poll_interval == 0 {
+            return Err(invalid(
+                "agents.poll_interval must be at least 1 second".to_owned(),
+            ));
+        }
         if self.missions.max_workers == 0 {
             return Err(invalid(
                 "missions.max_workers must be at least 1".to_owned(),
@@ -441,6 +450,19 @@ mod tests {
     fn the_example_parses_to_the_defaults() {
         let config = parse(EXAMPLE).unwrap();
         assert_eq!(config, Config::default());
+    }
+
+    #[test]
+    fn the_agents_poll_interval_has_a_default_and_a_floor() {
+        assert_eq!(Config::default().agents.poll_interval, 5);
+        assert_eq!(
+            parse("[agents]\npoll_interval = 2\n")
+                .unwrap()
+                .agents
+                .poll_interval,
+            2
+        );
+        assert!(parse("[agents]\npoll_interval = 0\n").is_err());
     }
 
     #[test]

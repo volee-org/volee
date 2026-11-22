@@ -69,6 +69,9 @@ pub struct Config {
     /// The hook server that receives Claude Code's `http` hooks; `None`
     /// starts none.
     pub hook_server: Option<crate::hook_server::HookServerConfig>,
+    /// The agents view: `claude agents --json` joined to hooks and git, read
+    /// every `poll_interval`; `None` starts none.
+    pub agents_view: Option<crate::agents_view::AgentsViewConfig>,
 }
 
 impl std::fmt::Debug for Config {
@@ -97,6 +100,8 @@ pub(crate) struct Shared {
     /// What reads the process table, when it is read.
     pub(crate) processes: Option<Arc<dyn volee_harness::CommandRunner>>,
     pub(crate) paths: Paths,
+    /// The agents view, when configured and Claude Code is available.
+    pub(crate) agents: Option<Arc<crate::agents_view::Agents>>,
     /// The interactive subscriptions open now, which set discovery's pace.
     pub(crate) watchers: Watchers,
     /// Requests for a listing now, and how listings progress.
@@ -172,6 +177,11 @@ impl Daemon {
         // Subscribed before anything can commit: no removal is missed.
         let removals = state.subscribe();
         let (shutdown, mut stop) = watch::channel(false);
+        let agents = crate::agents_view::build(
+            config.agents_view.as_ref(),
+            config.harness.clone(),
+            config.evidence.git.clone(),
+        );
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
             harnesses: config.harnesses,
@@ -182,6 +192,7 @@ impl Daemon {
             settings: config.evidence.settings.clone(),
             processes: config.processes,
             paths: config.paths,
+            agents: agents.clone(),
             watchers: Watchers::new(),
             refreshes: Refreshes::new(),
             presence: crate::join::Presence::default(),
@@ -206,23 +217,8 @@ impl Daemon {
             ));
         }
         let refresher = crate::evidence::spawn(&shared, config.evidence);
-        let hooks = match config.hook_server {
-            Some(hook_config) => {
-                let listener = crate::hook_server::bind(&hook_config).await?;
-                let store = volee_store::Store::open(&hook_config.database).map_err(|error| {
-                    DaemonError::Unavailable(format!("cannot open the hook database: {error}"))
-                })?;
-                tracing::info!(addr = ?listener.local_addr().ok(), "hook server ready");
-                Some(tokio::spawn(async move {
-                    if let Err(error) =
-                        crate::hook_server::serve(listener, hook_config.token, store).await
-                    {
-                        tracing::error!(%error, "the hook server stopped");
-                    }
-                }))
-            }
-            None => None,
-        };
+        let polling = crate::agents_view::spawn_poll(config.agents_view.as_ref(), agents, &stop);
+        let hooks = start_hook_server(config.hook_server).await?;
         // A mission the person approved while the daemon was stopping, or
         // whose merge it could not finish, is carried out now.
         crate::missions::resume_approved(&shared).await;
@@ -243,11 +239,34 @@ impl Daemon {
         }
         tracing::info!("volee daemon stopping");
         connections.abort_all();
-        for task in [refresher, Some(files), hooks].into_iter().flatten() {
+        for task in [refresher, Some(files), hooks, polling]
+            .into_iter()
+            .flatten()
+        {
             task.abort();
         }
         Ok(())
     }
+}
+
+/// Starts the hook server when one is configured: binds first, so that a port
+/// already in use stops the daemon with a message instead of failing later.
+async fn start_hook_server(
+    config: Option<crate::hook_server::HookServerConfig>,
+) -> Result<Option<tokio::task::JoinHandle<()>>, DaemonError> {
+    let Some(hook_config) = config else {
+        return Ok(None);
+    };
+    let listener = crate::hook_server::bind(&hook_config).await?;
+    let store = volee_store::Store::open(&hook_config.database).map_err(|error| {
+        DaemonError::Unavailable(format!("cannot open the hook database: {error}"))
+    })?;
+    tracing::info!(addr = ?listener.local_addr().ok(), "hook server ready");
+    Ok(Some(tokio::spawn(async move {
+        if let Err(error) = crate::hook_server::serve(listener, hook_config.token, store).await {
+            tracing::error!(%error, "the hook server stopped");
+        }
+    })))
 }
 
 /// Replays hook events recorded while the daemon was down. Records that no

@@ -675,6 +675,122 @@ method!(
     WaitReply
 );
 
+// ---- agents view ----------------------------------------------------------
+
+/// Parameters of [`ViewAgents`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewParams {
+    /// How old the daemon's last reading may be, in milliseconds, before it
+    /// reads again; 2 seconds when absent, 0 to always read again.
+    #[serde(default)]
+    pub max_age_ms: Option<u64>,
+}
+
+/// What the daemon knows of Claude Code's sessions now.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentsView {
+    /// When the sessions were last listed successfully; `None` when never.
+    pub updated_at: Option<Timestamp>,
+    /// Why the last listing failed, when it did: `agents` is then the one
+    /// before, possibly stale.
+    #[serde(default)]
+    pub error: Option<String>,
+    /// The sessions, the ones that need a person first.
+    pub agents: Vec<AgentCard>,
+}
+
+/// One Claude Code session, with what hooks and git say about it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentCard {
+    /// The Claude Code session id: what hook events are joined on.
+    pub session_id: String,
+    /// The session's name, when it has one.
+    pub name: Option<String>,
+    /// Whether it runs in Claude Code's background supervisor rather than a
+    /// terminal.
+    pub background: bool,
+    /// Whether its process is alive.
+    pub alive: bool,
+    /// Its process id, when the listing gives one.
+    pub pid: Option<u32>,
+    /// Its working directory.
+    pub cwd: std::path::PathBuf,
+    /// When it started, when known.
+    pub started_at: Option<Timestamp>,
+    /// What it does now, as Claude Code reports it.
+    pub state: volee_core::state::AgentState,
+    /// What it waits for, in Claude Code's words, when it waits.
+    pub waiting_for: Option<String>,
+    /// The repository it works in, when its directory is in one.
+    pub repo: Option<RepoFacts>,
+    /// What git says of its branch, when it has one.
+    pub git: Option<GitFacts>,
+    /// Why git could not be read, when it could not.
+    #[serde(default)]
+    pub git_error: Option<String>,
+    /// What its hook events say.
+    pub hooks: HookFacts,
+    /// Whether it stopped and left commits its base branch does not have
+    /// (`volee_core::finished::is_finished_work`).
+    pub finished_work: bool,
+}
+
+/// Where an agent works.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoFacts {
+    /// The repository's display name.
+    pub name: String,
+    /// Its main checkout.
+    pub root: std::path::PathBuf,
+    /// The linked worktree the agent works in; `None` in the main checkout.
+    pub worktree: Option<std::path::PathBuf>,
+    /// The checked-out branch; `None` when `HEAD` is detached.
+    pub branch: Option<String>,
+    /// The branch the work goes into, as git resolved it.
+    pub base: Option<String>,
+}
+
+/// What git says of an agent's branch against its base.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitFacts {
+    /// Commits the branch has and its base does not.
+    pub ahead: u32,
+    /// Of those, the ones whose change is not already in the base as a patch.
+    pub unique: u32,
+    /// Commits the base has and the branch does not.
+    pub behind: u32,
+    /// Uncommitted changes in the worktree.
+    pub dirty: bool,
+    /// The branch is merged into its base, as far as git can tell.
+    pub merged: bool,
+    /// Files and lines changed against the merge base.
+    pub diff: volee_core::delivery::DiffStat,
+    /// Whether the branch reached its remote.
+    pub push: volee_core::delivery::PushState,
+}
+
+/// What an agent's hook events say.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookFacts {
+    /// How many events the daemon stored for the session.
+    pub events: u64,
+    /// The newest event's name.
+    pub last_event: Option<String>,
+    /// When it arrived, in milliseconds since the Unix epoch.
+    pub last_event_at: Option<i64>,
+    /// When the agent last did something and when it last stopped.
+    pub activity: volee_core::finished::Activity,
+}
+
+method!(
+    /// The agents the daemon sees (`claude agents --json`), joined to their
+    /// hook events and to git.
+    ViewAgents,
+    "agents.view",
+    ViewParams,
+    AgentsView
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,6 +817,7 @@ mod tests {
             CreateMission::NAME,
             AbortMission::NAME,
             CloseMission::NAME,
+            ViewAgents::NAME,
         ];
         let mut sorted = names.to_vec();
         sorted.sort_unstable();

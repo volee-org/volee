@@ -16,6 +16,7 @@
 pub mod agent;
 pub mod delivery;
 pub mod event;
+pub mod finished;
 pub mod harness;
 pub mod ids;
 pub mod message;
