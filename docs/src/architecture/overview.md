@@ -199,10 +199,22 @@ branch it tracks (`branch.<name>.merge`), the branch its reflog says it was
 the candidate lacks, then the reverse, the default branch winning a tie).
 Otherwise it is the repository's default branch (`origin/HEAD`, else `main`,
 `master` or `develop`). `volee agents` shows it as `from <base>`, with a `?`
-when it is only the nearest branch or the default one. A merge is recognized when the last tip the
-daemon saw with commits of its own is now part of the base: that memory lives
-in the daemon and starts over with it. A squash merge of several commits
-cannot be seen in the history. The rule is meant to be replaced by the Lua
+when it is only the nearest branch or the default one. A merge is recognized in two ways:
+
+- **History.** The last tip the daemon saw with commits of its own is now part
+  of the base. That tip is written in SQLite (`branch_memory`) each time it
+  changes, so a restart of the daemon does not forget it. A branch merged
+  while the daemon never saw it with commits cannot be proven this way.
+- **Pull request.** A squash leaves nothing in the history. When the branch
+  still has commits the base lacks and the repository has a GitHub `origin`,
+  the daemon asks the forge (`gh pr list --head <branch> --state all`, read
+  only) whether the branch's pull request at that tip was merged. The answer
+  is cached in SQLite (`pull_request_cache`): a merged one for good, any other
+  for five minutes, a failure for one.
+
+When neither can tell (no GitHub remote, `gh` missing or signed out, an error)
+the card says `merge unknown` and the work stays finished: volee does not
+guess. The rule is meant to be replaced by the Lua
 rules of a later stage; it takes only facts, so nothing that gathers them
 changes.
 

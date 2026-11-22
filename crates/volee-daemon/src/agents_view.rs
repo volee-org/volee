@@ -11,18 +11,21 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::watch;
+use volee_core::delivery::PrState;
 use volee_core::finished::{Activity, BranchWork, HookKind, classify_hook, is_finished_work};
 use volee_core::reconcile::ListedSession;
 use volee_core::state::{AgentState, InputRequest, StateCategory};
 use volee_core::time::Timestamp;
-use volee_git::{BaseGuess, BaseSource, DeliveryQuery, Git};
+use volee_git::{BaseGuess, BaseSource, BranchHead, DeliveryQuery, Forge, Git};
 use volee_harness::Harness;
-use volee_proto::methods::{AgentCard, AgentsView, GitFacts, HookFacts, RepoFacts};
-use volee_store::{HookFilter, Store};
+use volee_proto::methods::{
+    AgentCard, AgentsView, GitFacts, HookFacts, PullRequestFacts, RepoFacts,
+};
+use volee_store::{CachedPullRequest, HookFilter, Store};
 
 /// How many of a session's newest hook events are read to find its last
 /// activity and its last stop.
@@ -37,11 +40,28 @@ pub struct AgentsViewConfig {
     pub database: PathBuf,
 }
 
+/// How long the forge's answer that a branch has no merged pull request is
+/// kept: a pull request can be opened and merged at any time. A merged one is
+/// kept for good, and an error for [`ERROR_TTL`].
+const PULL_REQUEST_TTL_MS: i64 = 5 * 60 * 1_000;
+
+/// How long a failed question to the forge is not asked again.
+const ERROR_TTL_MS: i64 = 60 * 1_000;
+
+/// Where the readings of a card come from.
+struct Sources {
+    git: Option<Arc<dyn Git>>,
+    /// The forge, for squash merges, which git cannot see.
+    forge: Option<Arc<dyn Forge>>,
+    store: Option<Arc<Mutex<Store>>>,
+    /// Whether the forge can be used, asked once: it may reach the network.
+    forge_usable: OnceLock<bool>,
+}
+
 /// The poller and its last reading.
 pub(crate) struct Agents {
     harness: Arc<dyn Harness>,
-    git: Option<Arc<dyn Git>>,
-    store: Option<Arc<Mutex<Store>>>,
+    sources: Arc<Sources>,
     inner: tokio::sync::Mutex<Inner>,
 }
 
@@ -66,6 +86,7 @@ impl Agents {
     pub(crate) fn new(
         harness: Arc<dyn Harness>,
         git: Option<Arc<dyn Git>>,
+        forge: Option<Arc<dyn Forge>>,
         database: &Path,
     ) -> Self {
         let store = match Store::open(database) {
@@ -77,8 +98,12 @@ impl Agents {
         };
         Self {
             harness,
-            git,
-            store,
+            sources: Arc::new(Sources {
+                git,
+                forge,
+                store,
+                forge_usable: OnceLock::new(),
+            }),
             inner: tokio::sync::Mutex::default(),
         }
     }
@@ -111,15 +136,14 @@ impl Agents {
             tracing::info!("listing Claude Code's sessions works again");
         }
         inner.failing = false;
-        let git = self.git.clone();
-        let store = self.store.clone();
+        let sources = Arc::clone(&self.sources);
         let memory = std::mem::take(&mut inner.unmerged);
         let built = tokio::task::spawn_blocking(move || {
             let mut memory = memory;
             let cards: Vec<AgentCard> = listing
                 .sessions
                 .iter()
-                .map(|session| card(session, git.as_deref(), store.as_deref(), &mut memory))
+                .map(|session| card(session, &sources, &mut memory))
                 .collect();
             (cards, memory)
         })
@@ -158,9 +182,10 @@ pub(crate) fn build(
     config: Option<&AgentsViewConfig>,
     harness: Option<Arc<dyn Harness>>,
     git: Option<Arc<dyn Git>>,
+    forge: Option<Arc<dyn Forge>>,
 ) -> Option<Arc<Agents>> {
     let (config, harness) = config.zip(harness)?;
-    Some(Arc::new(Agents::new(harness, git, &config.database)))
+    Some(Arc::new(Agents::new(harness, git, forge, &config.database)))
 }
 
 /// Starts the poller of `agents`, when there is a view to poll.
@@ -200,12 +225,14 @@ fn now() -> Timestamp {
 /// The card of one session.
 fn card(
     session: &ListedSession,
-    git: Option<&dyn Git>,
-    store: Option<&Mutex<Store>>,
+    sources: &Sources,
     memory: &mut HashMap<(PathBuf, String), String>,
 ) -> AgentCard {
     let session_id = session.key.id.clone();
-    let hooks = store.map_or_else(HookFacts::default, |store| hook_facts(store, &session_id));
+    let hooks = sources
+        .store
+        .as_deref()
+        .map_or_else(HookFacts::default, |store| hook_facts(store, &session_id));
     let mut card = AgentCard {
         waiting_for: waiting_for(&session.state),
         session_id,
@@ -222,10 +249,10 @@ fn card(
         hooks,
         finished_work: false,
     };
-    if let Some(git) = git
+    if let Some(git) = sources.git.as_deref()
         && session.cwd.is_dir()
     {
-        match git_facts(git, &session.cwd, memory) {
+        match git_facts(sources, git, &session.cwd, memory) {
             Ok(Some((repo, facts))) => {
                 card.repo = Some(repo);
                 card.git = facts;
@@ -306,6 +333,7 @@ fn notification_type(payload: &str) -> Option<String> {
 /// Where `cwd` sits and what git says of its branch. `Ok(None)` outside a
 /// repository; the error is already a sentence.
 fn git_facts(
+    sources: &Sources,
     git: &dyn Git,
     cwd: &Path,
     memory: &mut HashMap<(PathBuf, String), String>,
@@ -340,31 +368,226 @@ fn git_facts(
         return Ok(Some((repo, None)));
     };
     let key = (info.main_checkout.clone(), branch.clone());
+    let remembered = remembered_tip(sources, memory, &key);
     let query = DeliveryQuery {
         branch,
         base,
-        unmerged_tip: memory.get(&key).map(String::as_str),
+        unmerged_tip: remembered.as_deref(),
     };
     let report = git
         .delivery(&info.top_level, &query)
         .map_err(|error| error.to_string())?;
     let delivery = &report.delivery;
-    match &delivery.unmerged_tip {
-        Some(tip) => memory.insert(key, tip.clone()),
-        None => memory.remove(&key),
+    remember_tip(
+        sources,
+        memory,
+        &key,
+        remembered.as_deref(),
+        delivery.unmerged_tip.as_deref(),
+    );
+    let mut facts = GitFacts {
+        ahead: delivery.commits,
+        unique: report.unique_commits,
+        behind: report.behind,
+        dirty: delivery.dirty,
+        merged: delivery.merged_into_base,
+        diff: delivery.diff,
+        push: delivery.push,
+        merge_source: delivery.merged_into_base.then(|| "history".to_owned()),
+        merge_unknown: None,
+        pull_request: None,
     };
-    Ok(Some((
+    // A squash leaves nothing in the history: ask the forge, when there is
+    // work whose merge is in doubt.
+    if !facts.merged
+        && facts.ahead > 0
+        && facts.unique > 0
+        && let Some(tip) = &delivery.tip
+    {
+        match pull_request_state(sources, git, &info.main_checkout, branch, tip) {
+            PrAnswer::Merged(pull_request) => {
+                facts.merged = true;
+                facts.merge_source = Some("pull-request".to_owned());
+                facts.pull_request = Some(pull_request);
+            }
+            PrAnswer::NotMerged(pull_request) => facts.pull_request = pull_request,
+            PrAnswer::Unknown(why) => facts.merge_unknown = Some(why),
+        }
+    }
+    Ok(Some((repo, Some(facts))))
+}
+
+/// The tip remembered for a branch: from this run's memory, else from the
+/// database, where a previous run left it.
+fn remembered_tip(
+    sources: &Sources,
+    memory: &HashMap<(PathBuf, String), String>,
+    key: &(PathBuf, String),
+) -> Option<String> {
+    if let Some(tip) = memory.get(key) {
+        return Some(tip.clone());
+    }
+    let store = sources.store.as_deref()?;
+    let store = store.lock().unwrap_or_else(PoisonError::into_inner);
+    store
+        .unmerged_tip(&key.0.to_string_lossy(), &key.1)
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "cannot read what was remembered of a branch");
+            None
+        })
+}
+
+/// Keeps the new tip in memory and, when it changed, in the database.
+fn remember_tip(
+    sources: &Sources,
+    memory: &mut HashMap<(PathBuf, String), String>,
+    key: &(PathBuf, String),
+    before: Option<&str>,
+    after: Option<&str>,
+) {
+    match after {
+        Some(tip) => memory.insert(key.clone(), tip.to_owned()),
+        None => memory.remove(key),
+    };
+    if before == after {
+        return;
+    }
+    let Some(store) = sources.store.as_deref() else {
+        return;
+    };
+    let store = store.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Err(error) =
+        store.set_unmerged_tip(&key.0.to_string_lossy(), &key.1, after, now().as_millis())
+    {
+        tracing::warn!(%error, "cannot remember the tip of a branch");
+    }
+}
+
+/// What the forge says of a branch's pull request.
+enum PrAnswer {
+    /// Merged: the branch's work is in its base, as a squash or any merge.
+    Merged(PullRequestFacts),
+    /// Not merged: open, closed, or none was found.
+    NotMerged(Option<PullRequestFacts>),
+    /// It could not be asked, and why.
+    Unknown(String),
+}
+
+/// Asks the forge about the pull request of `branch` at `tip`, through the
+/// database's cache: a merged answer for good, others for a few minutes.
+fn pull_request_state(
+    sources: &Sources,
+    git: &dyn Git,
+    repo: &Path,
+    branch: &str,
+    tip: &str,
+) -> PrAnswer {
+    let Some(forge) = sources.forge.as_deref() else {
+        return PrAnswer::Unknown("no forge client (gh) is configured".to_owned());
+    };
+    if !*sources
+        .forge_usable
+        .get_or_init(|| forge.status().available)
+    {
+        return PrAnswer::Unknown("gh is missing or not signed in".to_owned());
+    }
+    let slug = match git.origin(repo) {
+        Ok(Some(slug)) => slug,
+        Ok(None) => return PrAnswer::Unknown("the repository has no GitHub remote".to_owned()),
+        Err(error) => return PrAnswer::Unknown(error.to_string()),
+    };
+    let key = repo.to_string_lossy();
+    let at = now().as_millis();
+    let cached = sources.store.as_deref().and_then(|store| {
+        let store = store.lock().unwrap_or_else(PoisonError::into_inner);
+        store.cached_pull_request(&key, branch, tip).ok().flatten()
+    });
+    if let Some(cached) = cached.filter(|cached| fresh(cached, at)) {
+        return answer_of(&cached);
+    }
+    let asked = forge.pull_request(
         repo,
-        Some(GitFacts {
-            ahead: delivery.commits,
-            unique: report.unique_commits,
-            behind: report.behind,
-            dirty: delivery.dirty,
-            merged: delivery.merged_into_base,
-            diff: delivery.diff,
-            push: delivery.push,
-        }),
-    )))
+        &BranchHead {
+            branch,
+            origin: Some(&slug),
+            tip,
+        },
+    );
+    let cached = match asked {
+        Ok(Some(pull_request)) => CachedPullRequest {
+            state: pr_state_name(pull_request.state).to_owned(),
+            number: i64::try_from(pull_request.number).ok(),
+            url: Some(pull_request.url),
+            checked_at: at,
+        },
+        Ok(None) => CachedPullRequest {
+            state: "none".to_owned(),
+            number: None,
+            url: None,
+            checked_at: at,
+        },
+        Err(error) => {
+            tracing::debug!(%error, branch, "cannot ask the forge about a pull request");
+            CachedPullRequest {
+                state: "error".to_owned(),
+                number: None,
+                url: Some(error.to_string()),
+                checked_at: at,
+            }
+        }
+    };
+    if let Some(store) = sources.store.as_deref() {
+        let store = store.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Err(error) = store.cache_pull_request(&key, branch, tip, &cached) {
+            tracing::warn!(%error, "cannot cache the forge's answer");
+        }
+    }
+    answer_of(&cached)
+}
+
+/// Whether a cached answer can still be used at `at`.
+fn fresh(cached: &CachedPullRequest, at: i64) -> bool {
+    let ttl = match cached.state.as_str() {
+        "merged" => return true,
+        "error" => ERROR_TTL_MS,
+        _ => PULL_REQUEST_TTL_MS,
+    };
+    at.saturating_sub(cached.checked_at) < ttl
+}
+
+fn answer_of(cached: &CachedPullRequest) -> PrAnswer {
+    let facts = |state| {
+        Some(PullRequestFacts {
+            number: cached
+                .number
+                .and_then(|n| u64::try_from(n).ok())
+                .unwrap_or(0),
+            url: cached.url.clone().unwrap_or_default(),
+            state,
+        })
+    };
+    match cached.state.as_str() {
+        "merged" => {
+            facts(PrState::Merged).map_or_else(|| PrAnswer::NotMerged(None), PrAnswer::Merged)
+        }
+        "open" => PrAnswer::NotMerged(facts(PrState::Open)),
+        "draft" => PrAnswer::NotMerged(facts(PrState::Draft)),
+        "closed" => PrAnswer::NotMerged(facts(PrState::Closed)),
+        "error" => PrAnswer::Unknown(format!(
+            "the forge could not be asked: {}",
+            cached.url.as_deref().unwrap_or("unknown error")
+        )),
+        _ => PrAnswer::NotMerged(None),
+    }
+}
+
+fn pr_state_name(state: PrState) -> &'static str {
+    match state {
+        PrState::Draft => "draft",
+        PrState::Open => "open",
+        PrState::Merged => "merged",
+        PrState::Closed => "closed",
+    }
 }
 
 /// The ones that need a person first: waiting, then finished work, then
@@ -400,6 +623,45 @@ mod tests {
     use super::*;
     use volee_core::harness::SessionKey;
 
+    fn no_sources(git: Option<Arc<dyn Git>>) -> Sources {
+        Sources {
+            git,
+            forge: None,
+            store: None,
+            forge_usable: OnceLock::new(),
+        }
+    }
+
+    #[test]
+    fn a_cached_pull_request_answer_lives_as_long_as_its_kind_allows() {
+        let answer = |state: &str, checked_at| CachedPullRequest {
+            state: state.to_owned(),
+            number: Some(7),
+            url: Some("https://example.com/pull/7".into()),
+            checked_at,
+        };
+        let now = 10_000_000;
+        assert!(fresh(&answer("merged", 0), now), "a merged one is for good");
+        assert!(fresh(&answer("open", now - 1_000), now));
+        assert!(!fresh(&answer("open", now - PULL_REQUEST_TTL_MS - 1), now));
+        assert!(fresh(&answer("error", now - 1_000), now));
+        assert!(!fresh(&answer("error", now - ERROR_TTL_MS - 1), now));
+        match answer_of(&answer("merged", 0)) {
+            PrAnswer::Merged(facts) => {
+                assert_eq!((facts.number, facts.state), (7, PrState::Merged));
+            }
+            _ => panic!("merged"),
+        }
+        assert!(matches!(
+            answer_of(&answer("none", 0)),
+            PrAnswer::NotMerged(None)
+        ));
+        assert!(matches!(
+            answer_of(&answer("error", 0)),
+            PrAnswer::Unknown(_)
+        ));
+    }
+
     fn session(id: &str, state: AgentState, alive: bool) -> ListedSession {
         ListedSession {
             alive,
@@ -431,11 +693,10 @@ mod tests {
     #[test]
     fn a_session_whose_directory_is_gone_still_gets_a_card_without_git_facts() {
         let mut memory = HashMap::new();
-        let git = volee_git::GitCli::new();
+        let sources = no_sources(Some(Arc::new(volee_git::GitCli::new())));
         let card = card(
             &session("s1", AgentState::Idle, true),
-            Some(&git),
-            None,
+            &sources,
             &mut memory,
         );
         assert_eq!(card.session_id, "s1");
@@ -460,7 +721,11 @@ mod tests {
         ]
         .into_iter()
         .map(|(id, state, alive)| {
-            let mut card = card(&session(id, state, alive), None, None, &mut HashMap::new());
+            let mut card = card(
+                &session(id, state, alive),
+                &no_sources(None),
+                &mut HashMap::new(),
+            );
             card.name = Some(id.to_owned());
             card
         })

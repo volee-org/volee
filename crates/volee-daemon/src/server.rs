@@ -181,6 +181,7 @@ impl Daemon {
             config.agents_view.as_ref(),
             config.harness.clone(),
             config.evidence.git.clone(),
+            config.evidence.forge.clone(),
         );
         let shared = Arc::new(Shared {
             state: Mutex::new(state),

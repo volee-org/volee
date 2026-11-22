@@ -4,6 +4,7 @@
 use std::fmt::Write as _;
 
 use anyhow::Result;
+use volee_core::delivery::PrState;
 use volee_core::state::AgentState;
 use volee_proto::methods::{AgentCard, AgentsView, ViewAgents, ViewParams};
 
@@ -139,7 +140,23 @@ fn git(card: &AgentCard) -> String {
     };
     let mut parts = vec![format!("\u{2191}{} \u{2193}{}", facts.ahead, facts.behind)];
     if facts.merged {
-        parts.push("merged".to_owned());
+        parts.push(match (&facts.merge_source, &facts.pull_request) {
+            (Some(source), Some(pull_request)) if source == "pull-request" => {
+                format!("merged (PR #{})", pull_request.number)
+            }
+            _ => "merged".to_owned(),
+        });
+    } else if let Some(pull_request) = &facts.pull_request {
+        let state = match pull_request.state {
+            PrState::Draft => "draft",
+            PrState::Open => "open",
+            PrState::Merged => "merged",
+            PrState::Closed => "closed",
+        };
+        parts.push(format!("PR #{} {state}", pull_request.number));
+    } else if facts.merge_unknown.is_some() {
+        // Commits the base lacks, and no way to tell a squash from here.
+        parts.push("merge unknown".to_owned());
     }
     if facts.dirty {
         parts.push("dirty".to_owned());
@@ -172,10 +189,10 @@ fn finished(card: &AgentCard) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use volee_core::delivery::{DiffStat, PushState};
+    use volee_core::delivery::{DiffStat, PrState, PushState};
     use volee_core::finished::Activity;
     use volee_core::state::InputRequest;
-    use volee_proto::methods::{GitFacts, HookFacts, RepoFacts};
+    use volee_proto::methods::{GitFacts, HookFacts, PullRequestFacts, RepoFacts};
 
     use super::*;
 
@@ -222,6 +239,9 @@ mod tests {
                 deletions: 2,
             },
             push: PushState::default(),
+            merge_source: None,
+            merge_unknown: None,
+            pull_request: None,
         });
         card.finished_work = true;
         card
@@ -244,6 +264,47 @@ mod tests {
         assert!(
             table.contains("yes: 2 commits, 3 files +10 \u{2212}2"),
             "{table}"
+        );
+    }
+
+    #[test]
+    fn the_merge_column_says_how_the_merge_is_known_or_that_it_is_not() {
+        let line = |change: &dyn Fn(&mut GitFacts)| {
+            let mut card = with_work(card("a", AgentState::Idle));
+            change(card.git.as_mut().unwrap());
+            git(&card)
+        };
+        assert_eq!(line(&|_| {}), "\u{2191}2 \u{2193}1");
+        assert_eq!(
+            line(&|facts| facts.merge_unknown = Some("no GitHub remote".into())),
+            "\u{2191}2 \u{2193}1 merge unknown"
+        );
+        assert_eq!(
+            line(&|facts| facts.pull_request = Some(PullRequestFacts {
+                number: 7,
+                url: String::new(),
+                state: PrState::Open
+            })),
+            "\u{2191}2 \u{2193}1 PR #7 open"
+        );
+        assert_eq!(
+            line(&|facts| {
+                facts.merged = true;
+                facts.merge_source = Some("pull-request".into());
+                facts.pull_request = Some(PullRequestFacts {
+                    number: 7,
+                    url: String::new(),
+                    state: PrState::Merged,
+                });
+            }),
+            "\u{2191}2 \u{2193}1 merged (PR #7)"
+        );
+        assert_eq!(
+            line(&|facts| {
+                facts.merged = true;
+                facts.merge_source = Some("history".into());
+            }),
+            "\u{2191}2 \u{2193}1 merged"
         );
     }
 

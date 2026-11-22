@@ -43,6 +43,26 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX hook_events_session ON hook_events (session_id, seq)
         WHERE session_id IS NOT NULL;
     ",
+    // 3: what the agents view remembers about branches.
+    "
+    CREATE TABLE branch_memory (
+        repo         TEXT    NOT NULL,
+        branch       TEXT    NOT NULL,
+        unmerged_tip TEXT    NOT NULL,
+        updated_at   INTEGER NOT NULL,
+        PRIMARY KEY (repo, branch)
+    );
+    CREATE TABLE pull_request_cache (
+        repo       TEXT    NOT NULL,
+        branch     TEXT    NOT NULL,
+        tip        TEXT    NOT NULL,
+        state      TEXT    NOT NULL,
+        number     INTEGER,
+        url        TEXT,
+        checked_at INTEGER NOT NULL,
+        PRIMARY KEY (repo, branch, tip)
+    );
+    ",
 ];
 
 /// The newest schema version this build understands.

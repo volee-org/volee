@@ -7,21 +7,102 @@
 mod common;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::{FakeHarness, git, repository};
 use tokio::net::UnixListener;
+use volee_core::delivery::{ChecksState, PrState, PullRequest};
 use volee_core::harness::SessionKey;
 use volee_core::reconcile::ListedSession;
 use volee_core::state::{AgentState, InputRequest};
 use volee_daemon::{AgentsViewConfig, Config, Daemon, EvidenceSources, ManualClock, MemoryLog};
-use volee_git::GitCli;
+use volee_git::{BranchHead, Forge, ForgeStatus, GitCli, GitError, MergeMethod};
 use volee_harness::Harness;
 use volee_proto::client::{Client, ClientError};
 use volee_proto::methods::{AgentCard, AgentsView, ViewAgents, ViewParams};
 use volee_proto::paths::Paths;
 use volee_store::{NewHookEvent, Store};
+
+/// A forge that answers what the test says and counts the questions.
+struct FakeForge {
+    usable: bool,
+    answer: Mutex<Answer>,
+    /// The repository directory of each question.
+    calls: Mutex<Vec<PathBuf>>,
+}
+
+#[derive(Clone, Copy)]
+enum Answer {
+    NoPullRequest,
+    Pull(PrState),
+    Fails,
+}
+
+impl FakeForge {
+    fn new(usable: bool, answer: Answer) -> Arc<Self> {
+        Arc::new(Self {
+            usable,
+            answer: Mutex::new(answer),
+            calls: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// How many times the agents view asked about `repo`, the repository's
+    /// main checkout. (The 0.x delivery evidence asks too, from the
+    /// worktree's directory: it is not counted.)
+    fn calls_in(&self, repo: &Path) -> usize {
+        self.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|dir| dir.as_path() == repo)
+            .count()
+    }
+}
+
+impl Forge for FakeForge {
+    fn status(&self) -> ForgeStatus {
+        ForgeStatus {
+            program: "fake-gh".into(),
+            available: self.usable,
+            version: Some("1.0.0".into()),
+            detail: None,
+        }
+    }
+
+    fn pull_request(
+        &self,
+        repo: &Path,
+        head: &BranchHead<'_>,
+    ) -> Result<Option<PullRequest>, GitError> {
+        self.calls.lock().unwrap().push(repo.to_path_buf());
+        match *self.answer.lock().unwrap() {
+            Answer::NoPullRequest => Ok(None),
+            Answer::Pull(state) => Ok(Some(PullRequest {
+                number: 7,
+                url: "https://github.com/acme/alpha/pull/7".into(),
+                state,
+                checks: ChecksState::Passing,
+                head: Some(head.tip.to_owned()),
+            })),
+            Answer::Fails => Err(GitError::Failed {
+                command: "gh pr list".into(),
+                code: Some(1),
+                stderr: "boom".into(),
+            }),
+        }
+    }
+
+    fn merge(
+        &self,
+        _repo: &Path,
+        _pull_request: &PullRequest,
+        _method: Option<MergeMethod>,
+    ) -> Result<MergeMethod, GitError> {
+        unreachable!("the agents view never merges")
+    }
+}
 
 struct Running {
     socket: PathBuf,
@@ -35,6 +116,11 @@ struct Running {
 /// A daemon with the agents view on, a repository `alpha` with a worktree on
 /// `feat/invoices`, and a fake listing the test sets.
 fn start(view: bool) -> Running {
+    start_with(view, None, false)
+}
+
+/// The same, with a forge client and, when `remote`, an `origin` on GitHub.
+fn start_with(view: bool, forge: Option<Arc<FakeForge>>, remote: bool) -> Running {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
     let repo = root.join("alpha");
@@ -52,6 +138,17 @@ fn start(view: bool) -> Running {
             "main",
         ],
     );
+    if remote {
+        git(
+            &repo,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/acme/alpha.git",
+            ],
+        );
+    }
     let paths = Paths::rooted(root.join("volee"));
     std::fs::create_dir_all(&paths.state_dir).unwrap();
     let database = paths.database();
@@ -74,6 +171,7 @@ fn start(view: bool) -> Running {
         idle_discovery_interval: Duration::from_secs(3_600),
         evidence: EvidenceSources {
             git: Some(Arc::new(git_cli)),
+            forge: forge.map(|forge| forge as Arc<dyn Forge>),
             refresh_interval: Duration::from_secs(3_600),
             ..EvidenceSources::default()
         },
@@ -397,4 +495,213 @@ async fn the_base_is_the_branch_the_agents_branch_was_created_from_not_the_defau
         "one commit against develop, not three against main"
     );
     assert_eq!(facts.diff.files, 1);
+}
+
+/// The tip of `feat/invoices`, which the agents view remembers.
+fn branch_tip(daemon: &Running) -> String {
+    git(&daemon.repo, &["rev-parse", "feat/invoices"])
+}
+
+fn merge_into_main(daemon: &Running) {
+    git(
+        &daemon.repo,
+        &[
+            "merge",
+            "--quiet",
+            "--no-ff",
+            "-m",
+            "Merge",
+            "feat/invoices",
+        ],
+    );
+}
+
+#[tokio::test]
+async fn what_the_view_saw_of_a_branch_survives_a_restart_and_proves_a_later_merge() {
+    // A previous run saw the branch with its commit, and wrote it down.
+    let daemon = start(true);
+    commit_in_worktree(&daemon);
+    let tip = branch_tip(&daemon);
+    daemon
+        .store
+        .set_unmerged_tip(
+            &daemon.repo.to_string_lossy(),
+            "feat/invoices",
+            Some(&tip),
+            1,
+        )
+        .unwrap();
+    // The daemon was down while the work landed.
+    merge_into_main(&daemon);
+    daemon
+        .harness
+        .set(vec![session(ID, &daemon.worktree, AgentState::Idle)]);
+    let facts = only_card(&daemon).await.git.unwrap();
+    assert!(facts.merged, "{facts:?}");
+    assert_eq!(facts.merge_source.as_deref(), Some("history"));
+}
+
+#[tokio::test]
+async fn without_that_memory_a_merge_made_in_the_dark_is_not_recognized() {
+    let daemon = start(true);
+    commit_in_worktree(&daemon);
+    merge_into_main(&daemon);
+    daemon
+        .harness
+        .set(vec![session(ID, &daemon.worktree, AgentState::Idle)]);
+    let facts = only_card(&daemon).await.git.unwrap();
+    assert!(!facts.merged, "nothing was ever seen of that branch");
+    assert_eq!(facts.ahead, 0);
+}
+
+#[tokio::test]
+async fn each_reading_writes_down_the_tip_it_saw() {
+    let daemon = start(true);
+    commit_in_worktree(&daemon);
+    daemon
+        .harness
+        .set(vec![session(ID, &daemon.worktree, AgentState::Idle)]);
+    only_card(&daemon).await;
+    let repo = daemon.repo.to_string_lossy().into_owned();
+    assert_eq!(
+        daemon.store.unmerged_tip(&repo, "feat/invoices").unwrap(),
+        Some(branch_tip(&daemon))
+    );
+}
+
+fn forge_ready(answer: Answer) -> (Running, Arc<FakeForge>) {
+    let forge = FakeForge::new(true, answer);
+    let daemon = start_with(true, Some(Arc::clone(&forge)), true);
+    commit_in_worktree(&daemon);
+    daemon
+        .harness
+        .set(vec![session(ID, &daemon.worktree, AgentState::Idle)]);
+    hooks(
+        &daemon.store,
+        ID,
+        &[("UserPromptSubmit", 200), ("Stop", 300)],
+    );
+    (daemon, forge)
+}
+
+#[tokio::test]
+async fn a_squash_merge_is_seen_through_the_pull_request_and_the_answer_is_cached() {
+    let (daemon, forge) = forge_ready(Answer::Pull(PrState::Merged));
+    // The work landed on main as a different commit: a squash.
+    std::fs::write(daemon.repo.join("squashed.rs"), "squashed\n").unwrap();
+    git(&daemon.repo, &["add", "squashed.rs"]);
+    git(
+        &daemon.repo,
+        &["commit", "--quiet", "-m", "Squash of feat/invoices (#7)"],
+    );
+    let card = only_card(&daemon).await;
+    let facts = card.git.unwrap();
+    assert!(facts.merged, "{facts:?}");
+    assert_eq!(facts.merge_source.as_deref(), Some("pull-request"));
+    assert_eq!(facts.pull_request.unwrap().number, 7);
+    assert!(!card.finished_work, "the work is in main");
+    assert_eq!(forge.calls_in(&daemon.repo), 1);
+    // Merged for good: asked once, never again.
+    only_card(&daemon).await;
+    only_card(&daemon).await;
+    assert_eq!(forge.calls_in(&daemon.repo), 1, "a merged answer is cached");
+}
+
+#[tokio::test]
+async fn an_open_pull_request_is_shown_and_does_not_make_the_work_merged() {
+    let (daemon, forge) = forge_ready(Answer::Pull(PrState::Open));
+    let card = only_card(&daemon).await;
+    let facts = card.git.unwrap();
+    assert!(!facts.merged);
+    assert_eq!(facts.pull_request.unwrap().state, PrState::Open);
+    assert_eq!(facts.merge_unknown, None);
+    assert!(card.finished_work);
+    only_card(&daemon).await;
+    assert_eq!(forge.calls_in(&daemon.repo), 1, "cached for a few minutes");
+}
+
+#[tokio::test]
+async fn a_branch_without_pull_request_is_not_merged_and_not_unknown() {
+    let (daemon, _forge) = forge_ready(Answer::NoPullRequest);
+    let facts = only_card(&daemon).await.git.unwrap();
+    assert!(!facts.merged && facts.pull_request.is_none());
+    assert_eq!(
+        facts.merge_unknown, None,
+        "the forge was asked and said none"
+    );
+}
+
+#[tokio::test]
+async fn when_the_forge_cannot_be_asked_the_merge_is_unknown_never_guessed() {
+    // No forge client at all.
+    let daemon = start_with(true, None, true);
+    commit_in_worktree(&daemon);
+    daemon
+        .harness
+        .set(vec![session(ID, &daemon.worktree, AgentState::Idle)]);
+    let facts = only_card(&daemon).await.git.unwrap();
+    assert!(!facts.merged);
+    assert!(
+        facts
+            .merge_unknown
+            .as_deref()
+            .unwrap()
+            .contains("no forge client"),
+        "{facts:?}"
+    );
+
+    // gh missing or signed out.
+    let forge = FakeForge::new(false, Answer::NoPullRequest);
+    let daemon = start_with(true, Some(Arc::clone(&forge)), true);
+    commit_in_worktree(&daemon);
+    daemon
+        .harness
+        .set(vec![session(ID, &daemon.worktree, AgentState::Idle)]);
+    let facts = only_card(&daemon).await.git.unwrap();
+    assert!(
+        facts
+            .merge_unknown
+            .as_deref()
+            .unwrap()
+            .contains("gh is missing")
+    );
+    assert_eq!(forge.calls_in(&daemon.repo), 0);
+
+    // No GitHub remote.
+    let forge = FakeForge::new(true, Answer::NoPullRequest);
+    let daemon = start_with(true, Some(Arc::clone(&forge)), false);
+    commit_in_worktree(&daemon);
+    daemon
+        .harness
+        .set(vec![session(ID, &daemon.worktree, AgentState::Idle)]);
+    let facts = only_card(&daemon).await.git.unwrap();
+    assert!(
+        facts
+            .merge_unknown
+            .as_deref()
+            .unwrap()
+            .contains("no GitHub remote")
+    );
+    assert_eq!(forge.calls_in(&daemon.repo), 0);
+}
+
+#[tokio::test]
+async fn a_forge_that_fails_is_unknown_and_is_not_asked_again_at_once() {
+    let (daemon, forge) = forge_ready(Answer::Fails);
+    let facts = only_card(&daemon).await.git.unwrap();
+    assert!(!facts.merged);
+    assert!(
+        facts
+            .merge_unknown
+            .as_deref()
+            .unwrap()
+            .contains("could not be asked"),
+        "{facts:?}"
+    );
+    only_card(&daemon).await;
+    assert_eq!(
+        forge.calls_in(&daemon.repo),
+        1,
+        "a failure is cached for a minute"
+    );
 }

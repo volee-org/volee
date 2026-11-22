@@ -209,7 +209,7 @@ fn reopening_keeps_data_and_does_not_remigrate() {
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
 }
 
 #[test]

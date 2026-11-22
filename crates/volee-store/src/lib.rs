@@ -12,6 +12,7 @@
 //! This crate performs no network IO and knows nothing about harnesses: the
 //! meaning of an event stays in `volee-core`.
 
+mod branches;
 mod error;
 mod hooks;
 mod migrations;
@@ -19,6 +20,7 @@ mod seq;
 pub mod spool;
 mod store;
 
+pub use branches::CachedPullRequest;
 pub use error::StoreError;
 pub use hooks::{HookEvent, HookFilter, NewHookEvent};
 pub use seq::Seq;

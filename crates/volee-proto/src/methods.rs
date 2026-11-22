@@ -756,7 +756,7 @@ pub struct RepoFacts {
 }
 
 /// What git says of an agent's branch against its base.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitFacts {
     /// Commits the branch has and its base does not.
     pub ahead: u32,
@@ -772,6 +772,31 @@ pub struct GitFacts {
     pub diff: volee_core::delivery::DiffStat,
     /// Whether the branch reached its remote.
     pub push: volee_core::delivery::PushState,
+    /// How the merge is known when `merged`: `history` (the branch's last
+    /// tip is part of the base) or `pull-request` (the forge says its pull
+    /// request was merged, which is the only way to see a squash).
+    #[serde(default)]
+    pub merge_source: Option<String>,
+    /// Why a squash merge cannot be told from here, when the branch has
+    /// commits the base lacks and the forge could not be asked: no GitHub
+    /// remote, `gh` missing or signed out, or an error. `None` when it was
+    /// told, or there is nothing to tell.
+    #[serde(default)]
+    pub merge_unknown: Option<String>,
+    /// The branch's pull request, when the forge was asked and found one.
+    #[serde(default)]
+    pub pull_request: Option<PullRequestFacts>,
+}
+
+/// A pull request, as the forge says.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PullRequestFacts {
+    /// Its number.
+    pub number: u64,
+    /// Its web address.
+    pub url: String,
+    /// Its state.
+    pub state: volee_core::delivery::PrState,
 }
 
 /// What an agent's hook events say.
