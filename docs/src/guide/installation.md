@@ -138,6 +138,16 @@ Where volee keeps its files (each directory has an override):
 The overrides let a second copy of volee run beside the first, with its own
 `hooks.port` in `config.lua`.
 
+## Next to volee 0.x
+
+volee 0.x and v2 keep their files in the same default directories
+(`~/.local/state/volee`: database, lock, socket), and they must not share them: v2
+would talk to a running 0.x daemon, even stop it. v2 refuses to open a 0.x database
+(`volee doctor` says so), and `scripts/install-local.sh` also installs `volee2`, the
+same program with directories of its own (`~/.local/volee-v2/home`, or
+`$VOLEE_V2_HOME`). Where a 0.x install exists, run v2 as `volee2`. The day-of-use
+guide (`docs/v2/day-of-use.md`) has the commands.
+
 ## Shell completions
 
 `volee completions <shell>` prints a completion script for bash, elvish, fish,

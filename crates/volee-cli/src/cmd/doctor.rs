@@ -148,6 +148,15 @@ fn report_environment(paths: &Paths) {
             "  optional gh: not found. Without it volee does not show pull requests and checks."
         ),
     }
+    if let Some(path) = legacy_database(&paths.database()) {
+        println!(
+            "  MISSING  {} is the database of volee 0.x: v2 refuses to open it, so that 0.x keeps \
+             working on it. Give v2 its own directories (VOLEE_STATE_DIR, VOLEE_CONFIG_DIR, \
+             VOLEE_DATA_DIR: the `volee2` command from scripts/install-local.sh does it) or move \
+             the file away.",
+            path.display()
+        );
+    }
     if paths.config_file().is_file() {
         println!("  ok       configuration {}", paths.config_file().display());
     } else {
@@ -157,6 +166,19 @@ fn report_environment(paths: &Paths) {
             paths.config_file().display()
         );
     }
+}
+
+/// The database at `path` when it is one of volee 0.x: a SQLite file whose
+/// header says schema version 1 (v2 applies all its migrations when it first
+/// opens one, so it never leaves a database there). Only the 100-byte header
+/// is read, so that nothing is opened, locked or created. A write-ahead log
+/// not yet folded in can make this miss a database; the daemon's own check
+/// does not.
+fn legacy_database(path: &Path) -> Option<PathBuf> {
+    let mut header = [0_u8; 100];
+    fs::File::open(path).ok()?.read_exact(&mut header).ok()?;
+    let version = u32::from_be_bytes(header[60..64].try_into().ok()?);
+    (header.starts_with(b"SQLite format 3\0") && version == 1).then(|| path.to_path_buf())
 }
 
 /// The first line of `<program> --version` with the program's own name
@@ -506,6 +528,27 @@ mod tests {
     use super::*;
 
     const TOKEN: &str = "t0k3n";
+
+    #[test]
+    fn a_database_at_schema_version_one_is_taken_for_a_0x_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let header = |version: u32| {
+            let mut bytes = vec![0_u8; 4096];
+            bytes[..16].copy_from_slice(b"SQLite format 3\0");
+            bytes[60..64].copy_from_slice(&version.to_be_bytes());
+            bytes
+        };
+        let old = dir.path().join("old.db");
+        fs::write(&old, header(1)).unwrap();
+        assert_eq!(legacy_database(&old), Some(old));
+        let current = dir.path().join("current.db");
+        fs::write(&current, header(6)).unwrap();
+        assert_eq!(legacy_database(&current), None);
+        let other = dir.path().join("other");
+        fs::write(&other, vec![1_u8; 4096]).unwrap();
+        assert_eq!(legacy_database(&other), None);
+        assert_eq!(legacy_database(&dir.path().join("missing.db")), None);
+    }
 
     #[test]
     fn versions_are_read_from_the_first_dotted_number() {

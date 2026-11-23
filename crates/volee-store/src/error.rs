@@ -41,6 +41,17 @@ pub enum StoreError {
         /// The newest version this build understands.
         supported: u32,
     },
+    /// The database is one of volee 0.x (schema version 1): v2 never
+    /// migrates it, because 0.x refuses a database that a newer volee changed.
+    #[error(
+        "this database belongs to volee 0.x ({events} events) and v2 does not migrate it: doing so \
+         would stop 0.x from opening it. Give v2 its own directories (VOLEE_STATE_DIR, \
+         VOLEE_CONFIG_DIR and VOLEE_DATA_DIR, see the day-of-use guide) or move this file away"
+    )]
+    LegacyDatabase {
+        /// How many events the 0.x log holds.
+        events: i64,
+    },
     /// A stored payload does not deserialize, typically because a newer volee
     /// wrote an event this one does not know.
     #[error("event {seq} cannot be read (written by a newer volee?): {source}")]

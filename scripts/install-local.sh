@@ -55,3 +55,21 @@ VOLEE_CLI_DOWNLOAD_URL="http://127.0.0.1:$port" \
     sh "$work/volee-cli-installer.sh"
 
 "$prefix/volee" --version
+
+# `volee2`: the same binary with directories of its own. By default volee v2 and
+# volee 0.x share ~/.local/state/volee (database, lock, socket), which makes v2 talk
+# to a running 0.x daemon, even stop it. This wrapper keeps them apart.
+cat >"$prefix/volee2" <<'WRAPPER'
+#!/bin/sh
+# volee v2, kept apart from volee 0.x: its own configuration, state and data.
+# VOLEE_V2_HOME moves all three (default ~/.local/volee-v2/home).
+home="${VOLEE_V2_HOME:-$HOME/.local/volee-v2/home}"
+VOLEE_CONFIG_DIR="${VOLEE_CONFIG_DIR:-$home/config}"
+VOLEE_STATE_DIR="${VOLEE_STATE_DIR:-$home/state}"
+VOLEE_DATA_DIR="${VOLEE_DATA_DIR:-$home/data}"
+VOLEE_SOCKET="${VOLEE_SOCKET:-$VOLEE_STATE_DIR/volee.sock}"
+export VOLEE_CONFIG_DIR VOLEE_STATE_DIR VOLEE_DATA_DIR VOLEE_SOCKET
+exec "$(dirname "$0")/volee" "$@"
+WRAPPER
+chmod +x "$prefix/volee2"
+echo "installed $prefix/volee2 (volee v2 with its own directories)"

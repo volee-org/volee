@@ -146,6 +146,15 @@ pub(crate) fn run(connection: &mut Connection) -> Result<(), StoreError> {
             supported: latest(),
         });
     }
+    // A database at version 1 is the event log of volee 0.x (v2 applies all its
+    // scripts in one open, so it never leaves one there). 0.x refuses a
+    // database that a newer volee changed, so v2 does not touch it.
+    if current == 1 {
+        let events = connection
+            .query_row("SELECT count(*) FROM events", [], |row| row.get(0))
+            .unwrap_or(0);
+        return Err(StoreError::LegacyDatabase { events });
+    }
     for (index, script) in MIGRATIONS.iter().enumerate().skip(current as usize) {
         let version = u32::try_from(index + 1).unwrap_or(u32::MAX);
         let transaction = connection.transaction()?;
@@ -195,6 +204,35 @@ mod tests {
         connection.pragma_update(None, "user_version", 999).unwrap();
         let error = run(&mut connection).unwrap_err();
         assert!(matches!(error, StoreError::SchemaTooNew { found: 999, .. }));
+    }
+
+    #[test]
+    fn a_0x_database_is_refused_and_left_exactly_as_it_was() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        // What volee 0.x leaves: its event log at schema version 1.
+        connection.execute_batch(MIGRATIONS[0]).unwrap();
+        connection.pragma_update(None, "user_version", 1).unwrap();
+        connection
+            .execute(
+                "INSERT INTO events (at, kind, agent, payload) VALUES (1, 'x', NULL, '{}')",
+                [],
+            )
+            .unwrap();
+        let error = run(&mut connection).unwrap_err();
+        assert!(
+            matches!(error, StoreError::LegacyDatabase { events: 1 }),
+            "{error:?}"
+        );
+        assert!(error.to_string().contains("volee 0.x"));
+        assert_eq!(version(&connection), 1, "the version is untouched");
+        let tables: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'hook_events'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 0, "no v2 table was added");
     }
 
     #[test]
