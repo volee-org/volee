@@ -58,15 +58,6 @@ pub(crate) fn check() -> Result<()> {
             file.display()
         );
     }
-    if let Some(model) = config.model_for(None) {
-        println!("  default model     {model}");
-    }
-    match config.agents.permission_mode {
-        Some(mode) => println!("  permission mode   {mode}"),
-        None => println!("  permission mode   manual (the default)"),
-    }
-    println!("  wake timeout      {} s", config.agents.wake_timeout);
-    println!("  worktrees         inside each repository, in .claude/worktrees");
     println!("  background fetch  {}", config.git.fetch);
     if config.repos.is_empty() {
         println!("  repositories      none (add entries to `repos`)");
@@ -77,8 +68,7 @@ pub(crate) fn check() -> Result<()> {
     Ok(())
 }
 
-/// One line per repository, its path aligned after the longest name, then
-/// one line per setup command each new worktree runs (ADR 0017). `exists`
+/// One line per repository, its path aligned after the longest name. `exists`
 /// tells whether a path is a folder on this machine.
 fn repository_lines(config: &Config, exists: impl Fn(&std::path::Path) -> bool) -> Vec<String> {
     let width = config
@@ -99,13 +89,6 @@ fn repository_lines(config: &Config, exists: impl Fn(&std::path::Path) -> bool) 
             "  repo {name:<width$} {}{missing}",
             repo.path.display()
         ));
-        for command in &repo.setup {
-            lines.push(format!(
-                "       {:<width$} setup: {}",
-                "",
-                crate::text::one_line(command)
-            ));
-        }
     }
     lines
 }
@@ -120,7 +103,7 @@ mod tests {
     fn repositories_align_on_the_longest_name() {
         let config = Config::parse(
             "return { repos = {\
-             shop = { path = '/srv/shop', setup = { 'bun install' } },\
+             shop = { path = '/srv/shop' },\
              ['simulateur-freelance'] = { path = '/srv/sim' } } }",
             Path::new("config.lua"),
             Path::new("/home/ada"),
@@ -131,7 +114,6 @@ mod tests {
             lines,
             [
                 "  repo shop                 /srv/shop",
-                "                            setup: bun install",
                 "  repo simulateur-freelance /srv/sim  (missing)",
             ]
         );

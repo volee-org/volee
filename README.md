@@ -71,10 +71,8 @@ and the [design decisions](https://volee-org.github.io/volee/adr/README.html).
 
 ## Install
 
-v2 has no release yet. See the
-[installation guide](https://volee-org.github.io/volee/guide/installation.html)
-for what is available, or build it from source (Rust 1.90 or later, and
-Node 24 for the web interface):
+v2 is not released yet, so there is no public install line to copy. Build it
+from source (Rust 1.90 or later, and Node 24 for the web interface):
 
 ```sh
 git clone --branch v2 https://github.com/volee-org/volee
@@ -82,6 +80,11 @@ cd volee
 (cd ui && npm ci && npm run build)   # the interface the binary embeds
 cargo build --release -p volee-cli   # target/release/volee
 ```
+
+Or test the installer from a local build, without a release and without
+downloading anything: `scripts/install-local.sh [PREFIX]` (needs dist, Rust and
+Node). The [installation guide](https://volee-org.github.io/volee/guide/installation.html)
+covers both.
 
 volee supports macOS and Linux and needs [Claude Code](https://code.claude.com)
 2.1.330 (the version v2 was measured on; it needs hooks over `http` and

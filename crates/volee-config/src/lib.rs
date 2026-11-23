@@ -72,8 +72,6 @@ pub struct Config {
     pub repos: BTreeMap<String, Repo>,
     /// Messaging settings.
     pub messages: Messages,
-    /// Mission settings.
-    pub missions: Missions,
     /// What the daemon does with git in the background.
     pub git: GitSettings,
     /// Where the daemon receives Claude Code's hooks.
@@ -206,21 +204,6 @@ impl fmt::Display for Fetch {
     }
 }
 
-/// Mission settings.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Missions {
-    /// The most agents one mission may launch besides its coordinator, so
-    /// that a coordinator gone wrong cannot start sessions without end.
-    pub max_workers: usize,
-}
-
-impl Default for Missions {
-    fn default() -> Self {
-        Self { max_workers: 8 }
-    }
-}
-
 /// Messaging settings.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -243,16 +226,6 @@ impl Messages {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AgentDefaults {
-    /// The model, unless a repository sets one.
-    pub model: Option<String>,
-    /// The permission mode passed to the harness; `manual` when unset.
-    pub permission_mode: Option<PermissionMode>,
-    /// How long an idle agent's hook waits for messages, in seconds.
-    pub wake_timeout: u64,
-    /// Whether agents a reboot interrupted come back on their own in new
-    /// volee hosts when the daemon starts (ADR 0024); on unless set to
-    /// `false`.
-    pub resume_after_reboot: bool,
     /// How often the daemon lists Claude Code's sessions for `volee agents`,
     /// in seconds (at least 1).
     pub poll_interval: u64,
@@ -260,48 +233,7 @@ pub struct AgentDefaults {
 
 impl Default for AgentDefaults {
     fn default() -> Self {
-        Self {
-            model: None,
-            permission_mode: None,
-            wake_timeout: 3_600,
-            resume_after_reboot: true,
-            poll_interval: 5,
-        }
-    }
-}
-
-/// Claude Code permission modes volee may pass on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PermissionMode {
-    /// Edits are accepted, commands still ask.
-    AcceptEdits,
-    /// A classifier decides.
-    Auto,
-    /// Every action asks.
-    Manual,
-    /// Actions that would ask are refused.
-    DontAsk,
-    /// The agent plans without acting.
-    Plan,
-}
-
-impl PermissionMode {
-    /// The value the harness expects on its command line.
-    pub const fn as_flag(self) -> &'static str {
-        match self {
-            Self::AcceptEdits => "acceptEdits",
-            Self::Auto => "auto",
-            Self::Manual => "manual",
-            Self::DontAsk => "dontAsk",
-            Self::Plan => "plan",
-        }
-    }
-}
-
-impl fmt::Display for PermissionMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_flag())
+        Self { poll_interval: 5 }
     }
 }
 
@@ -314,13 +246,6 @@ pub struct Repo {
     /// The branch work starts from; the repository's default when unset.
     #[serde(default)]
     pub base: Option<String>,
-    /// The model for this repository's agents.
-    #[serde(default)]
-    pub model: Option<String>,
-    /// Commands that prepare a new worktree before its agent starts, run in
-    /// order with `sh -c` in the worktree (ADR 0017), such as `bun install`.
-    #[serde(default)]
-    pub setup: Vec<String>,
     /// How volee merges this repository's pull requests once you approved a
     /// mission (ADR 0032); the first method the repository allows when
     /// unset.
@@ -453,16 +378,6 @@ impl Config {
                     repo.path.display()
                 )));
             }
-            if repo.setup.iter().any(|command| command.trim().is_empty()) {
-                return Err(invalid(format!(
-                    "repos.{name}.setup holds an empty command"
-                )));
-            }
-        }
-        if self.agents.wake_timeout == 0 {
-            return Err(invalid(
-                "agents.wake_timeout must be at least 1 second".to_owned(),
-            ));
         }
         if self.agents.poll_interval == 0 {
             return Err(invalid(
@@ -479,19 +394,7 @@ impl Config {
                 "review.timeout and review.concurrency must be at least 1".to_owned(),
             ));
         }
-        if self.missions.max_workers == 0 {
-            return Err(invalid(
-                "missions.max_workers must be at least 1".to_owned(),
-            ));
-        }
         Ok(())
-    }
-
-    /// The model for an agent in `repo`: the repository's, else the default.
-    pub fn model_for(&self, repo: Option<&str>) -> Option<&str> {
-        repo.and_then(|name| self.repos.get(name))
-            .and_then(|repo| repo.model.as_deref())
-            .or(self.agents.model.as_deref())
     }
 
     /// The repository whose main checkout is `path`, if one is configured.
@@ -588,8 +491,6 @@ mod tests {
     #[test]
     fn an_empty_file_is_the_defaults() {
         assert_eq!(parse("return {}").unwrap(), Config::default());
-        assert_eq!(Config::default().agents.wake_timeout, 3_600);
-        assert_eq!(Config::default().missions.max_workers, 8);
         assert_eq!(Config::default().git.fetch, Fetch::Launched);
     }
 
@@ -633,14 +534,13 @@ mod tests {
     fn repositories_expand_the_home_directory() {
         let config = parse(
             r#"return { repos = { billing = {
-                path = "~/code/billing", base = "develop", model = "sonnet",
+                path = "~/code/billing", base = "develop",
             } } }"#,
         )
         .unwrap();
         let repo = &config.repos["billing"];
         assert_eq!(repo.path, PathBuf::from("/home/ada/code/billing"));
         assert_eq!(repo.base.as_deref(), Some("develop"));
-        assert_eq!(config.model_for(Some("billing")), Some("sonnet"));
         assert_eq!(
             config
                 .repo_at(Path::new("/home/ada/code/billing"))
@@ -648,19 +548,6 @@ mod tests {
                 .0,
             "billing"
         );
-    }
-
-    #[test]
-    fn repository_models_override_the_default() {
-        let config = parse(
-            r#"return {
-                agents = { model = "opus" },
-                repos = { docs = { path = "/srv/docs" } },
-            }"#,
-        )
-        .unwrap();
-        assert_eq!(config.model_for(Some("docs")), Some("opus"));
-        assert_eq!(config.model_for(None), Some("opus"));
     }
 
     #[test]
@@ -693,41 +580,21 @@ mod tests {
     }
 
     #[test]
-    fn permission_modes_use_the_harness_spelling() {
-        let config = parse("return { agents = { permission_mode = 'acceptEdits' } }").unwrap();
-        assert_eq!(
-            config.agents.permission_mode,
-            Some(PermissionMode::AcceptEdits)
-        );
-        assert_eq!(PermissionMode::DontAsk.as_flag(), "dontAsk");
-        assert!(parse("return { agents = { permission_mode = 'bypassPermissions' } }").is_err());
-    }
-
-    #[test]
-    fn setup_commands_keep_their_order_and_none_may_be_empty() {
-        let config = parse(
-            r#"return { repos = { shop = {
-                path = "/srv/shop",
-                setup = { "cp \"$VOLEE_REPO_ROOT/.env.local\" .", "bun install" },
-            } } }"#,
-        )
-        .unwrap();
-        assert_eq!(
-            config.repos["shop"].setup,
-            ["cp \"$VOLEE_REPO_ROOT/.env.local\" .", "bun install"]
-        );
-        let docs = parse("return { repos = { docs = { path = '/srv/docs' } } }").unwrap();
-        assert_eq!(docs.repos["docs"].setup, Vec::<String>::new());
-        let error = parse(
-            "return { repos = { shop = { path = '/srv/shop', setup = { 'bun install', ' ' } } } }",
-        )
-        .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("repos.shop.setup holds an empty command"),
-            "{error}"
-        );
+    fn keys_of_volee_0_x_that_nothing_reads_are_unknown_keys() {
+        for old in [
+            "agents = { model = 'opus' }",
+            "agents = { permission_mode = 'auto' }",
+            "agents = { wake_timeout = 60 }",
+            "agents = { resume_after_reboot = false }",
+            "missions = { max_workers = 4 }",
+            "repos = { a = { path = '/srv/a', model = 'opus' } }",
+            "repos = { a = { path = '/srv/a', setup = { 'bun install' } } }",
+        ] {
+            let error = parse(&format!("return {{ {old} }}"))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("unknown field"), "{old}: {error}");
+        }
     }
 
     #[test]

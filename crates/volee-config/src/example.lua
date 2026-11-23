@@ -6,21 +6,9 @@
 
 return {
   agents = {
-    -- Model for the agents volee launches, unless a repository sets one.
-    -- model = "opus",
-
-    -- Permission mode passed to Claude Code: "acceptEdits", "auto", "manual",
-    -- "dontAsk" or "plan". Unset: "manual".
-    -- permission_mode = "auto",
-
-    -- Seconds an idle agent stays reachable by messages.
-    wake_timeout = 3600,
-
     -- How often the daemon lists Claude Code's sessions
     -- (`claude agents --json`), in seconds.
     -- poll_interval = 5,
-
-    -- resume_after_reboot = true,
   },
 
   -- One entry per repository. The key is the name used on the command line.
@@ -28,8 +16,6 @@ return {
   --   billing = {
   --     path = "~/code/billing",
   --     base = "develop",      -- the repository's default branch when unset
-  --     model = "sonnet",
-  --     setup = { "bun install" },
   --     merge = "squash",      -- "merge", "squash" or "rebase"
   --   },
   -- },
@@ -37,10 +23,6 @@ return {
   messages = {
     -- summaries = true,
     -- summary_model = "haiku",
-  },
-
-  missions = {
-    -- max_workers = 8,
   },
 
   git = {

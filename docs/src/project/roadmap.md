@@ -42,10 +42,11 @@ Step 10, the release, is under way:
 
 Cleanup that goes with it:
 
-- Remove what the inbox does not use of the 0.x registry: missions, the
-  messaging tools beyond `ask_human`, the `volee ls`, `msg`, `mission`, `summary`
-  and `hook` commands, and the `config.lua` keys that nothing reads
-  ([Configuration](../guide/configuration.md#carried-over-from-0x)).
+- The `config.lua` keys of 0.x that nothing read are removed
+  ([Configuration](../guide/configuration.md#keys-of-0x-that-are-gone)). The 0.x
+  registry, the MCP server (`ask_human`) and the `msg`, `mission`, `summary`,
+  `ls` and `hook` commands stay as they are, documented as carried over; what
+  the inbox does not use of them may go later.
 - Show the `ask_human` questions in the web inbox, next to the questions Claude
   Code asks through its hooks.
 

@@ -137,9 +137,13 @@ remote-tracking branches change.
 | `summaries` | `false` | Lets `volee summary` summarize a thread with a model. Each summary runs Claude Code with your account. |
 | `summary_model` | `haiku` | The model summaries use. |
 
-## Carried over from 0.x
+## Keys of 0.x that are gone
 
-The following keys are still accepted, so that a file written for the old tool
-loads, but nothing in v2 reads them: `agents.model`, `agents.permission_mode`,
+volee 0.x had keys that v2 never reads: `agents.model`, `agents.permission_mode`,
 `agents.wake_timeout`, `agents.resume_after_reboot`, `repos.<name>.model`,
-`repos.<name>.setup` and `missions`. They will be removed.
+`repos.<name>.setup` and `missions`. They were launch settings, and v2 does not
+launch agents. They are no longer accepted: like any unknown key, one of them
+makes `config.lua` fail to load with a message that names it (`unknown field
+`wake_timeout``, with the file), so delete it from an old file. `volee config` reports
+the error; the daemon logs a warning and runs with the defaults until the file
+is fixed.
