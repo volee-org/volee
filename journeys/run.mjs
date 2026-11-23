@@ -54,8 +54,23 @@ try {
     results.push(await journey.finish());
   }
 } finally {
-  await session?.instance.close();
-  L.restoreSandbox();
+  // Always, on success or failure: browser closed, sessions stopped and removed, worktrees and journey
+  // branches deleted, the repository back on main.
+  try {
+    await session?.instance.close();
+  } catch {}
+  let left = [];
+  try {
+    left = L.sweepSessions();
+  } catch (error) {
+    console.log(`cleanup problem (sessions): ${error.message}`);
+  }
+  try {
+    L.restoreSandbox();
+  } catch (error) {
+    console.log(`cleanup problem (repository): ${error.message}`);
+  }
+  for (const agent of left) console.log(`left behind, remove by hand: claude rm ${agent.id}  (${agent.name}, ${agent.state})`);
 }
 
 const passed = results.reduce((sum, r) => sum + r.passed, 0);

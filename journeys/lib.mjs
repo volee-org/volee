@@ -273,6 +273,28 @@ export function claudeRm(short) {
   return run("claude", ["rm", short], { timeout: 30_000 });
 }
 
+/** The sessions a run left: named journey-* and started inside the journeys' repository. Pure. */
+export function leftoverSessions(agents, sandbox = SANDBOX) {
+  const roots = [sandbox];
+  try {
+    roots.push(fs.realpathSync(sandbox));
+  } catch {}
+  return agents.filter(
+    (agent) =>
+      String(agent.name ?? "").startsWith("journey-") &&
+      roots.some((root) => agent.cwd === root || String(agent.cwd ?? "").startsWith(`${root}/`)),
+  );
+}
+/** Stops and removes every leftover session, whatever happened. Returns the ones that could not be removed. */
+export function sweepSessions() {
+  for (const agent of leftoverSessions(claudeAgents())) {
+    const short = agent.id ?? String(agent.sessionId).slice(0, 8);
+    claudeStop(short);
+    claudeRm(short);
+  }
+  return leftoverSessions(claudeAgents());
+}
+
 /** The session's transcript, found by its full id (never by what the agent said). */
 export function transcriptOf(dir, sessionId) {
   const encoded = fs.realpathSync(dir).replace(/[/.]/g, "-");

@@ -39,6 +39,11 @@ a small model, and Chrome.
   `journey/base` that is checked out there (a local merge needs its base checked
   out). Each journey removes what it made, and the runner puts the repository
   back on `main` at the end.
+- **They clean up after themselves, also on failure.** At the end `run.mjs`
+  closes the browser, stops and removes (`claude stop`, `claude rm`) every
+  session named `journey-*` started in the journeys repository, deletes the
+  throwaway worktrees and `journey/*` branches and puts the repository back on
+  `main`. A session that cannot be removed is listed with the command to run.
 - **Workspace trust, once.** Claude Code asks whether it may trust a directory
   the first time it runs there. `run.mjs` reads `~/.claude.json` (never writes
   it) and, when the repository is not trusted yet, stops with exit code 2 and

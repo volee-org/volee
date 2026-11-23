@@ -41,6 +41,18 @@ test("refuses to reset a directory it does not own", () => {
   assert.ok(fs.existsSync(path.join(dir, "precious.txt")));
 });
 
+test("leftover sessions are the journey-* ones started in the journeys repository", async () => {
+  const { leftoverSessions } = await import("./lib.mjs");
+  const box = "/nonexistent/volee-journeys";
+  const agents = [
+    { id: "a", name: "journey-j05", cwd: `${box}/.claude/worktrees/j05` },
+    { id: "b", name: "journey-j05", cwd: "/Users/someone/other" },
+    { id: "c", name: "my session", cwd: box },
+    { id: "d", name: "journey-x", cwd: `${box}-other` },
+  ];
+  assert.deepEqual(leftoverSessions(agents, box).map((a) => a.id), ["a"]);
+});
+
 test("resets an empty existing directory", () => {
   const dir = tmp();
   resetSandbox(dir);
