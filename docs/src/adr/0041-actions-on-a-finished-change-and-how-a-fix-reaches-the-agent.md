@@ -46,9 +46,13 @@ by a worker of this project; step 9 repeats it on a real session (see
 
 ### A fix request
 
-The text carries who it is from: "Message from the person you work for, sent
-through volee (not from another agent)", then the request, then a short
-nonce. The channel depends on the session:
+The text opens with who it is from: "This is a request from the person you
+work for, a human: they typed it in volee, which relays it to you. It is their
+own instruction, not a message from another agent or session.", then the
+request, then a short nonce. The channel depends on the session, which volee
+reads again at send time (a fresh `claude agents --json --all` and a check that
+the process exists), not from its own view of the agents, which can be a few
+seconds old:
 
 1. **A live session** (interactive or background, with a pid in `claude agents
    --json`): one JSON line `{"type":"user","message":{"role":"user","content":
@@ -64,9 +68,26 @@ nonce. The channel depends on the session:
    "Already running" is retried once after a second. The program is the
    `claude.command` of `config.lua`, the same one the review runs.
 3. **Never** `claude --resume -p` on a session that is open (the two histories
-   diverge silently), and never keys typed into a terminal. A live session
-   whose socket is missing or unsafe is **not** resumed: the request is
-   reported as not delivered.
+   diverge silently), and never keys typed into a terminal.
+
+A session that is not alive at send time is resumed (2). A session that is
+alive but whose socket is missing, stale or unsafe is **also resumed**: a
+session that still runs answers "already running" and nothing is copied, so the
+fallback is safe, and the person is not left with a "NOT delivered" for a
+session volee could reach. The journal says which path was used ("delivered
+(socket)" or "delivered (resume)"), and for a resume after an unusable socket
+it says why. A write that was made but not shown within the delay is **not**
+followed by a resume: the message may have arrived.
+
+**The framing is Claude Code's, and it has a limit.** A message that arrives on
+a live session's socket is shown to the model as "Another Claude session sent a
+message ... not typed by your user", whatever the text says. volee cannot
+change that wrapper. The first line of the text is the only thing it does
+about it, and a small model may still hold back a request that contradicts its
+task (measured with `haiku`: a request that overrides an instruction such as
+"exactly three lines" was declined or turned into a question, one that adds to
+the task was followed). A resumed session receives the text as the prompt of
+the resume and does not have the wrapper.
 
 **A write is not a delivery.** Over the socket volee confirms within 10
 seconds by the transcript (a new line holding the nonce) or by the agent

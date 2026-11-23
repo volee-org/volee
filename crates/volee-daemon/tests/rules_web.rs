@@ -240,6 +240,52 @@ async fn a_sensitive_change_is_high_risk_with_every_layer_and_low_risk_once_the_
     assert_eq!(inbox["cards"][0]["risk"]["layers"], json!(["summary"]));
 }
 
+/// Reads an events stream until `needle` shows in what it sent, or 15 s pass.
+async fn stream_shows(stream: &mut TcpStream, seen: &mut String, needle: &str) -> bool {
+    let end = tokio::time::Instant::now() + Duration::from_secs(15);
+    let mut chunk = vec![0_u8; 16384];
+    loop {
+        if seen.contains(needle) {
+            return true;
+        }
+        let left = end.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(left, stream.read(&mut chunk)).await {
+            Ok(Ok(count)) if count > 0 => seen.push_str(&String::from_utf8_lossy(&chunk[..count])),
+            _ => return false,
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_open_events_stream_pushes_the_new_risk_when_the_rules_change_and_says_the_agent_finished()
+ {
+    let daemon = start(Some("return { sensitive_paths = { 'src/auth/**' } }"), None).await;
+    let mut stream = TcpStream::connect(daemon.addr).await.unwrap();
+    let message = format!(
+        "GET /api/events?token={TOKEN} HTTP/1.1\r\nHost: {}\r\nAccept: text/event-stream\r\n\r\n",
+        daemon.addr
+    );
+    stream.write_all(message.as_bytes()).await.unwrap();
+    let mut seen = String::new();
+    // The open work screen reads its card from this stream: kind and risk.
+    assert!(
+        stream_shows(&mut stream, &mut seen, "\"level\":\"high\"").await,
+        "the first inbox event carries the risk: {seen}"
+    );
+    assert!(seen.contains("\"kind\":\"finished\""), "{seen}");
+
+    // The rules change while the stream is open: no request, the stream tells.
+    seen.clear();
+    rewrite(
+        &daemon.repo.join(".volee/rules.lua"),
+        "return { sensitive_paths = { 'src/billing/**' } }",
+    );
+    assert!(
+        stream_shows(&mut stream, &mut seen, "\"level\":\"low\"").await,
+        "the stream never pushed the new risk: {seen}"
+    );
+}
+
 #[tokio::test]
 async fn the_person_can_raise_or_lower_the_risk_of_a_tip_and_a_new_commit_is_judged_again() {
     let daemon = start(None, None).await;

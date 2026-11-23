@@ -5,7 +5,7 @@
   import DecisionCard from "./DecisionCard.svelte";
   import { mergeWork } from "./actions";
   import Journal from "./Journal.svelte";
-  import { workIdFromHash } from "./work";
+  import { cardStamp, workIdFromHash } from "./work";
   import WorkScreen from "./Work.svelte";
   import { decide, type DecisionBody, follow, openTerminal, readToken, type Status } from "./live";
   import { type Card as CardData, emptyInbox, type Inbox, split, title } from "./model";
@@ -173,7 +173,7 @@
       title={workCard ? title(workCard) : workId.slice(0, 8)}
       terminal={inbox.terminal}
       brief={workCard?.review ?? null}
-      stamp={workCard ? `${workCard.diff?.files}:${workCard.diff?.insertions}:${workCard.diff?.deletions}:${workCard.ahead}:${workCard.dirty}` : ""}
+      stamp={cardStamp(workCard)}
       journal={inbox.journal}
       {now}
       onback={leaveWork}

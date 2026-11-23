@@ -74,9 +74,12 @@ rules. Findings are stored per `(repo, branch, tip)`. See
 
 ## A fix request
 
-For a live session (a process id in the listing) one JSON line is written to its
+volee reads whether the session is alive again when the request is sent (a
+fresh `claude agents --json --all` and a check that the process exists). For a
+live session (a process id in the listing) one JSON line is written to its
 Unix socket `/tmp/cc-socks/<pid>.sock`; the socket must be owned by you and not
-reachable by others, or volee refuses. For a stopped session it runs
+reachable by others, or volee does not write to it and resumes the session
+instead (a session that still runs answers "already running"). For a stopped session it runs
 `claude --bg --resume <session id> "<text>"` and no other option, since any
 other option starts a copy. It never runs `claude --resume -p` on a session that
 is open. A write is not a delivery: volee confirms by the transcript or by the

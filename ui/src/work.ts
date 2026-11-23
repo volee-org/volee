@@ -1,6 +1,7 @@
 // The layers of a finished change (crates/volee-daemon/src/work/mod.rs).
 
 import type { EditorOption, LineComment } from "./actions";
+import type { Card } from "./model";
 import type { Review } from "./review";
 import type { RiskView, RuleLayer } from "./risk";
 
@@ -93,11 +94,44 @@ export interface Work {
   agent?: { alive: boolean; pid: number | null; finished_work: boolean };
 }
 
-/** Whether two readings show the same change: the same diff, commits and comments. */
+/**
+ * Whether two readings show the same change: the same diff, commits and
+ * comments, and the same risk and agent state, which the rules and the agent
+ * change without touching the diff.
+ */
 export function sameChange(a: Work, b: Work): boolean {
   const key = (work: Work) =>
-    JSON.stringify([work.files.map((file) => [file.path, file.patch]), work.commits, work.diff, work.comments ?? []]);
+    JSON.stringify([
+      work.files.map((file) => [file.path, file.patch]),
+      work.commits,
+      work.diff,
+      work.comments ?? [],
+      work.risk ? [work.risk.level, work.risk.computed, work.risk.overridden, work.risk.layers, work.risk.reasons] : null,
+      work.agent ? [work.agent.alive, work.agent.finished_work] : null,
+    ]);
   return key(a) === key(b);
+}
+
+/**
+ * What on the inbox card of an open work screen tells it to read the work
+ * again. The inbox is pushed over the events stream each time the agents, the
+ * rules or a risk change, so this needs no polling: the diff moved (a commit,
+ * a saved file), the agent stopped or started working (its `finished_work`,
+ * hence the Merge button), or the rules gave the change another risk.
+ */
+export function cardStamp(card: Card | null | undefined): string {
+  if (!card) return "";
+  const risk = card.risk;
+  return [
+    card.diff?.files,
+    card.diff?.insertions,
+    card.diff?.deletions,
+    card.ahead,
+    card.dirty,
+    card.kind,
+    card.state,
+    risk ? `${risk.level}/${risk.computed}/${risk.overridden}/${risk.tip}` : "",
+  ].join(":");
 }
 
 /** The layers, in the order a reader opens them. */

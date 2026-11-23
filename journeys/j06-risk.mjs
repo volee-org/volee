@@ -26,10 +26,8 @@ export default async function risk(journey, ctx) {
   L.setPersonalRules(LOW);
   const workLevel = async () => (await L.api("GET", `/api/agents/${encodeURIComponent(agent.card.id)}/work`)).json?.risk?.level;
   journey.check("editing rules.lua makes the daemon answer low for the same change, without restarting anything", await L.until(async () => (await workLevel()) === "low", 30, 1000));
-  // The open screen reads the work again when it is opened or reloaded.
-  await page.reload();
-  await page.waitForSelector('[data-testid="actions"]', { timeout: 30000 });
-  journey.check("the screen shows low risk", await L.until(async () => (await level()) === "low", 15, 500));
+  // The open screen follows by itself: the inbox stream pushes the new risk, no reload.
+  journey.check("the open work screen shows low risk by itself, without a reload", await L.until(async () => (await level()) === "low", 20, 500));
   journey.check("low risk opens the summary only, as the rules' layers say", (await layerOpen(page, "summary")) === "true" && (await layerOpen(page, "files")) !== "true");
   await L.shot(journey, page, '[data-testid="risk"]', "risk-low-after-edit");
 

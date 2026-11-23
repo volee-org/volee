@@ -33,7 +33,12 @@ use volee_store::{NewHookEvent, Store};
 
 const TOKEN: &str = "actions-test-token";
 const ID: &str = "11111111-2222-4333-8444-555555555555";
-const PID: u32 = 4242;
+/// The fake session's process id: this very process, so that the daemon's
+/// check that the process exists (it re-reads liveness when it sends a fix
+/// request) finds it.
+fn pid() -> u32 {
+    std::process::id()
+}
 
 struct Options<'a> {
     personal_rules: Option<&'a str>,
@@ -118,16 +123,24 @@ async fn start(options: Options<'_>) -> Running {
     let harness = Arc::new(FakeHarness::default());
     harness.set(vec![ListedSession {
         alive: options.alive,
-        pid: options.alive.then_some(PID),
+        pid: options.alive.then(pid),
         name: Some("billing".into()),
         ..ListedSession::new(SessionKey::claude(ID), &worktree, AgentState::Done)
     }]);
-    // A fake `claude`: records its arguments.
+    // A fake `claude`: answers `agents --json --all` with the session (with
+    // its process only when it is alive), and records the arguments of any
+    // other call.
     let fake_claude = root.join("fake-claude.sh");
+    let listing = if options.alive {
+        format!(r#"[{{"sessionId":"{ID}","pid":{}}}]"#, pid())
+    } else {
+        format!(r#"[{{"sessionId":"{ID}"}}]"#)
+    };
     script(
         &fake_claude,
         &format!(
-            "for a in \"$@\"; do printf '%s\\n' \"$a\" >> '{}'; done",
+            "if [ \"$1\" = agents ]; then printf '%s' '{listing}'; exit 0; fi\n\
+             for a in \"$@\"; do printf '%s\\n' \"$a\" >> '{}'; done",
             root.join("claude-args.log").display()
         ),
     );
@@ -421,7 +434,7 @@ async fn a_high_risk_change_is_never_merged_by_itself() {
 /// A fake session: listens on `<pid>.sock`, and when it gets a line, records
 /// it in the transcript (when `acknowledge`), like Claude Code does.
 fn fake_session(daemon: &Running, acknowledge: bool) -> Arc<std::sync::Mutex<Vec<String>>> {
-    let path = daemon.sockets.join(format!("{PID}.sock"));
+    let path = daemon.sockets.join(format!("{}.sock", pid()));
     let listener = StdUnixListener::bind(&path).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
     let lines = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -470,8 +483,14 @@ async fn a_fix_request_reaches_a_live_session_by_its_socket_and_is_confirmed_by_
     assert_eq!(value["type"], "user");
     let content = value["message"]["content"].as_str().unwrap();
     assert!(content.contains("Rename `guide` to `manual`."));
-    assert!(content.contains("from the person"), "{content}");
-    assert!(content.contains("through volee"), "{content}");
+    assert!(
+        content.starts_with("This is a request from the person you work for"),
+        "{content}"
+    );
+    assert!(
+        content.contains("volee, which relays it to you"),
+        "{content}"
+    );
     let entries = journal(&daemon).await;
     assert_eq!(entries[0]["kind"], "fix");
     assert_eq!(entries[0]["ok"], true);
@@ -540,7 +559,10 @@ async fn a_stopped_session_is_resumed_in_the_background_with_nothing_but_the_tex
     assert_eq!(args[0], "--bg");
     assert_eq!(args[1], "--resume");
     assert_eq!(args[2], ID);
-    assert!(args[3].starts_with("Message from the person"), "{args:?}");
+    assert!(
+        args[3].starts_with("This is a request from the person you work for"),
+        "{args:?}"
+    );
     assert!(log.contains("Add a title."));
     let entries = journal(&daemon).await;
     assert!(entries[0]["message"].as_str().unwrap().contains("resume"));

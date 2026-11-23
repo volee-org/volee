@@ -111,10 +111,14 @@ unavailable" and shows what git and the hooks know.
   switch on the page, on purpose.
 - **Ask for a fix.** The box is prefilled from the selected review findings (the
   important ones start selected) and your line comments, and you edit it
-  freely. `Ctrl+Enter` sends it. The agent reads it as "a message from the
-  person you work for, sent through volee". For a live session it is written to
-  the session's messaging socket; for a stopped one the session is resumed in
-  the background with the message. The page says "delivered" only when the
+  freely. `Ctrl+Enter` sends it. The first line tells the agent it is a request
+  from you, typed in volee and relayed by it. volee checks again, when you send,
+  whether the session is alive: a live one gets the message on its messaging
+  socket; a stopped one, or one whose socket cannot be used, is resumed in the
+  background with the message, and the journal says which way it went. Claude
+  Code itself shows a live session the message as sent by "another Claude
+  session", which volee cannot change: a model may hesitate over a request that
+  contradicts its task. The page says "delivered" only when the
   transcript shows it, or "NOT delivered" and offers the text with a Copy
   button. See [ADR 0041](../adr/0041-actions-on-a-finished-change-and-how-a-fix-reaches-the-agent.md).
 - **Comment a line.** Click a line number of the new side of the diff. A comment

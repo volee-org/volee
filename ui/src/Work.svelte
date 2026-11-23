@@ -194,7 +194,10 @@
     if (!result.work) return;
     // Nothing moved: keep what is on screen (a comment being typed stays).
     if (work && sameChange(work, result.work)) return;
+    // The rules gave the change another risk: the layers it opens follow.
+    const riskMoved = work?.risk && result.work.risk && work.risk.level !== result.work.risk.level;
     work = result.work;
+    if (riskMoved) open = initialOpen(result.work, review);
     comments = result.work.comments ?? [];
     editors = result.work.editors ?? [];
   }

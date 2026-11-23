@@ -85,22 +85,16 @@ export default async function actions(journey, ctx) {
   journey.check("proof in git: the agent made a second commit", committed, `commits: ${agent.commits()}`);
   const notes = L.git(agent.dir, "show", "HEAD:docs/notes.md").split("\n");
   journey.check("proof in git: docs/notes.md now ends with the fourth line", notes.length === 4 && notes[3] === "four", notes.join("|"));
-  journey.check("proof in the hook events: the message reached the agent as a prompt, signed by volee", L.events().some((l) => /UserPromptSubmit/.test(l) && /Message from the person/.test(l) && l.includes(agent.sessionId.slice(0, 8))));
+  journey.check("proof in the hook events: the message reached the agent as a prompt, relayed by volee", L.events().some((l) => /UserPromptSubmit/.test(l) && /request from the person you work for/.test(l) && l.includes(agent.sessionId.slice(0, 8))));
 
   // --- merge in one click (the change is low risk) ---
   const tip = L.git(agent.dir, "rev-parse", "HEAD");
-  await page.reload();
-  await page.waitForSelector('[data-testid="actions"]', { timeout: 30000 });
   const merge = page.locator('[data-testid="merge"]');
-  // The work screen reads the agent's state when it opens: after a fix, a reload shows it finished.
+  // No reload: the open work screen follows the agent through the inbox stream.
   const enabled = await L.until(async () => {
     await L.allowStray("j07");
-    if (!(await merge.count()) || (await merge.isDisabled())) {
-      await page.reload();
-      await page.waitForSelector('[data-testid="actions"]', { timeout: 30000 }).catch(() => {});
-    }
     return (await merge.count()) && !(await merge.isDisabled());
-  }, 150, 4000);
+  }, 150, 2000);
   journey.check("the merge button is enabled once the agent has finished", !!enabled);
   journey.check("the merge button names the base", /Merge into journey\/base/.test(await merge.innerText()));
   await merge.click({ timeout: 10000 });

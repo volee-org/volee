@@ -94,6 +94,58 @@ pub(crate) trait Resumer: Send + Sync {
     /// Resumes `session` in the background with `text`. The error carries
     /// what the program said.
     fn resume(&self, session: &str, text: &str) -> Result<(), String>;
+
+    /// Whether the session is alive, and its process id, read again now:
+    /// the daemon's own view of the agents can be a few seconds old, and a
+    /// session stopped since then must be resumed, not written to. The
+    /// default trusts `subject`.
+    fn liveness(&self, subject: &Subject) -> (bool, Option<u32>) {
+        (subject.alive, subject.pid)
+    }
+}
+
+/// Whether a process with this id exists.
+fn process_exists(pid: u32) -> bool {
+    Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "pid="])
+        .output()
+        .is_ok_and(|output| {
+            output.status.success() && !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+        })
+}
+
+/// What `claude agents --json --all` says about a session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Listed {
+    /// The output could not be read.
+    Unreadable,
+    /// It does not list the session.
+    Missing,
+    /// It lists the session, with or without a process.
+    Session(Option<u32>),
+}
+
+fn listed(listing: &str, session: &str) -> Listed {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(listing) else {
+        return Listed::Unreadable;
+    };
+    let Some(agents) = value
+        .as_array()
+        .or_else(|| value.get("agents").and_then(serde_json::Value::as_array))
+    else {
+        return Listed::Unreadable;
+    };
+    agents
+        .iter()
+        .find(|entry| entry.get("sessionId").and_then(serde_json::Value::as_str) == Some(session))
+        .map_or(Listed::Missing, |entry| {
+            Listed::Session(
+                entry
+                    .get("pid")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|pid| u32::try_from(pid).ok()),
+            )
+        })
 }
 
 /// The real program.
@@ -120,6 +172,31 @@ impl Resumer for ClaudeCli {
         .trim()
         .to_owned())
     }
+
+    fn liveness(&self, subject: &Subject) -> (bool, Option<u32>) {
+        let listing = Command::new(&self.program)
+            .args(["agents", "--json", "--all"])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).into_owned());
+        let pid = match listing
+            .as_deref()
+            .map(|text| listed(text, &subject.session_id))
+        {
+            // The listing is the authority: no entry, or an entry without a
+            // process, is a session that is not running.
+            Some(Listed::Session(pid)) => pid,
+            Some(Listed::Missing) => None,
+            // Claude Code did not answer, or not in a way that can be read:
+            // what the daemon knew, checked against the process table.
+            Some(Listed::Unreadable) | None => subject.pid.filter(|_| subject.alive),
+        };
+        match pid {
+            Some(pid) if process_exists(pid) => (true, Some(pid)),
+            _ => (false, None),
+        }
+    }
 }
 
 /// How a delivery behaves; tests shorten the waits.
@@ -142,10 +219,15 @@ impl Default for Timing {
     }
 }
 
-/// The text the agent receives: it says who it is from.
+/// The text the agent receives. Its first line says it is the person's own
+/// request, typed by them in volee and relayed by it: on a live session
+/// Claude Code wraps whatever arrives on the socket as "Another Claude
+/// session sent a message ... not typed by your user", and volee cannot change
+/// that framing (ADR 0041). A model may still hold back a request that
+/// contradicts its task; this line is all volee can do about it.
 pub(crate) fn message_text(request: &str, nonce: &str) -> String {
     format!(
-        "Message from the person you work for, sent through volee (not from another agent):\n\n{}\n\n(volee message {nonce})",
+        "This is a request from the person you work for, a human: they typed it in volee, which relays it to you. It is their own instruction, not a message from another agent or session.\n\n{}\n\n(volee message {nonce})",
         request.trim()
     )
 }
@@ -190,6 +272,14 @@ fn socket_of(dir: &Path, pid: u32) -> Result<PathBuf, String> {
 /// Delivers `request` to the session. Blocking. `confirmed` says whether the
 /// agent took the message (it reads the transcript and the agent's state);
 /// it is asked until `timing.confirm_within` passes.
+///
+/// Whether the session is alive is read again here (`Resumer::liveness`). A
+/// live session is written to on its socket; when it is not alive, or its
+/// socket cannot be used (missing, stale, not private), the session is
+/// resumed in the background instead. That is safe for a session that
+/// still runs: Claude Code answers "already running" and nothing is copied.
+/// A write that was made but not shown within the delay is *not* followed by
+/// a resume: the message may have arrived.
 pub(crate) fn deliver(
     subject: &Subject,
     request: &str,
@@ -199,61 +289,73 @@ pub(crate) fn deliver(
     confirmed: &mut dyn FnMut() -> bool,
 ) -> Outcome {
     let text = message_text(request, nonce);
-    if subject.alive {
-        let Some(pid) = subject.pid else {
-            return Outcome::NotDelivered(
-                "the session is alive but Claude Code lists no process id for it".to_owned(),
-            );
-        };
-        return by_socket(pid, &text, timing, confirmed);
+    let (alive, pid) = resumer.liveness(subject);
+    let mut because = None;
+    if alive {
+        match pid {
+            Some(pid) => match by_socket(pid, &text, timing, confirmed) {
+                Ok(outcome) => return outcome,
+                Err(why) => because = Some(why),
+            },
+            None => {
+                because = Some("Claude Code lists no process id for the session".to_owned());
+            }
+        }
     }
-    by_resume(&subject.session_id, &text, timing, resumer)
+    by_resume(
+        &subject.session_id,
+        &text,
+        timing,
+        resumer,
+        because.as_deref(),
+    )
 }
 
+/// `Err` when the socket cannot be used at all: the caller resumes instead.
 fn by_socket(
     pid: u32,
     text: &str,
     timing: &Timing,
     confirmed: &mut dyn FnMut() -> bool,
-) -> Outcome {
-    let path = match socket_of(&timing.socket_dir, pid) {
-        Ok(path) => path,
-        Err(why) => return Outcome::NotDelivered(why),
-    };
-    let mut stream = match UnixStream::connect(&path) {
-        Ok(stream) => stream,
-        Err(error) => {
-            return Outcome::NotDelivered(format!("cannot reach the session's socket: {error}"));
-        }
-    };
+) -> Result<Outcome, String> {
+    let path = socket_of(&timing.socket_dir, pid)?;
+    let mut stream = UnixStream::connect(&path)
+        .map_err(|error| format!("cannot reach the session's socket: {error}"))?;
     if let Err(error) = stream
         .write_all(socket_line(text).as_bytes())
         .and_then(|()| stream.flush())
     {
-        return Outcome::NotDelivered(format!("cannot write to the session's socket: {error}"));
+        return Err(format!("cannot write to the session's socket: {error}"));
     }
     let start = Instant::now();
     loop {
         if confirmed() {
-            return Outcome::Delivered(
+            return Ok(Outcome::Delivered(
                 Via::Socket,
                 format!(
                     "The agent took the message ({}s).",
                     start.elapsed().as_secs()
                 ),
-            );
+            ));
         }
         if start.elapsed() >= timing.confirm_within {
-            return Outcome::NotDelivered(format!(
+            return Ok(Outcome::NotDelivered(format!(
                 "written to the session's socket, but the agent did not show it within {}s",
                 timing.confirm_within.as_secs()
-            ));
+            )));
         }
         std::thread::sleep(timing.poll);
     }
 }
 
-fn by_resume(session: &str, text: &str, timing: &Timing, resumer: &dyn Resumer) -> Outcome {
+/// `because` is why a session that looked alive is resumed all the same.
+fn by_resume(
+    session: &str,
+    text: &str,
+    timing: &Timing,
+    resumer: &dyn Resumer,
+    because: Option<&str>,
+) -> Outcome {
     let mut attempt = resumer.resume(session, text);
     if let Err(said) = &attempt
         && said.to_lowercase().contains("already running")
@@ -264,9 +366,19 @@ fn by_resume(session: &str, text: &str, timing: &Timing, resumer: &dyn Resumer) 
     match attempt {
         Ok(()) => Outcome::Delivered(
             Via::Resume,
-            "The stopped session was resumed in the background with your message.".to_owned(),
+            because.map_or_else(
+                || "The session was not running: it was resumed in the background with your message.".to_owned(),
+                |why| {
+                    format!(
+                        "The session's socket could not be used ({why}), so it was resumed in the background with your message."
+                    )
+                },
+            ),
         ),
-        Err(said) => Outcome::NotDelivered(format!("`claude --bg --resume` failed: {said}")),
+        Err(said) => Outcome::NotDelivered(because.map_or_else(
+            || format!("`claude --bg --resume` failed: {said}"),
+            |why| format!("{why}; resuming the session instead failed too: {said}"),
+        )),
     }
 }
 
@@ -341,8 +453,15 @@ mod tests {
     #[test]
     fn the_message_says_it_comes_from_the_person_through_volee() {
         let text = message_text("  rename x  ", "ab12");
-        assert!(text.contains("from the person"));
-        assert!(text.contains("through volee"));
+        let first = text.lines().next().unwrap();
+        assert!(
+            first.starts_with("This is a request from the person you work for, a human"),
+            "{first}"
+        );
+        assert!(
+            first.contains("relays it to you")
+                && first.contains("not a message from another agent")
+        );
         assert!(text.contains("rename x"));
         assert!(text.ends_with("(volee message ab12)"));
     }
@@ -403,25 +522,42 @@ mod tests {
         );
     }
 
+    fn one_resume() -> Script {
+        Script {
+            answers: Mutex::new(vec![Ok(())]),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+
     #[test]
-    fn a_live_session_without_a_usable_socket_is_never_resumed() {
+    fn a_live_session_without_a_usable_socket_is_resumed_and_says_why() {
         let dir = tempfile::tempdir().unwrap();
         let subject = Subject {
             session_id: "s".into(),
             pid: Some(1),
             alive: true,
         };
+        let resumer = one_resume();
         let outcome = deliver(
             &subject,
             "x",
             "n",
             &quick(dir.path()),
-            &NoResume,
+            &resumer,
             &mut || true,
         );
-        assert!(!outcome.delivered());
-        assert!(outcome.message().contains("no socket"));
-        // A socket others can reach is refused too.
+        assert!(
+            matches!(outcome, Outcome::Delivered(Via::Resume, _)),
+            "{outcome:?}"
+        );
+        assert!(
+            outcome.message().contains("no socket"),
+            "{}",
+            outcome.message()
+        );
+        assert_eq!(resumer.calls.lock().unwrap().len(), 1);
+
+        // A socket others can reach is refused too, and the session resumed.
         let _lines = listen(dir.path(), 2);
         std::fs::set_permissions(
             dir.path().join("2.sock"),
@@ -432,14 +568,126 @@ mod tests {
             pid: Some(2),
             ..subject
         };
-        let outcome = deliver(&loose, "x", "n", &quick(dir.path()), &NoResume, &mut || {
-            true
-        });
+        let resumer = one_resume();
+        let outcome = deliver(&loose, "x", "n", &quick(dir.path()), &resumer, &mut || true);
         assert!(
             outcome.message().contains("reached by others"),
             "{}",
             outcome.message()
         );
+        assert!(outcome.delivered());
+    }
+
+    #[test]
+    fn a_resume_that_fails_after_an_unusable_socket_says_both() {
+        let dir = tempfile::tempdir().unwrap();
+        let subject = Subject {
+            session_id: "s".into(),
+            pid: Some(1),
+            alive: true,
+        };
+        let resumer = Script {
+            answers: Mutex::new(vec![Err("no such session".into())]),
+            calls: Mutex::new(Vec::new()),
+        };
+        let outcome = deliver(
+            &subject,
+            "x",
+            "n",
+            &quick(dir.path()),
+            &resumer,
+            &mut || true,
+        );
+        assert!(!outcome.delivered());
+        assert!(
+            outcome.message().contains("no socket"),
+            "{}",
+            outcome.message()
+        );
+        assert!(outcome.message().contains("no such session"));
+    }
+
+    /// A resumer whose fresh reading says the session is gone, whatever the
+    /// daemon's own (stale) view was.
+    struct Stopped(Script);
+    impl Resumer for Stopped {
+        fn resume(&self, session: &str, text: &str) -> Result<(), String> {
+            self.0.resume(session, text)
+        }
+        fn liveness(&self, _: &Subject) -> (bool, Option<u32>) {
+            (false, None)
+        }
+    }
+
+    #[test]
+    fn liveness_is_read_again_at_send_time_so_a_session_stopped_a_moment_ago_is_resumed() {
+        let dir = tempfile::tempdir().unwrap();
+        // Its old socket is still there and would accept the write.
+        let lines = listen(dir.path(), 4300);
+        let subject = Subject {
+            session_id: "s".into(),
+            pid: Some(4300),
+            alive: true, // the daemon's cached view
+        };
+        let resumer = Stopped(one_resume());
+        let outcome = deliver(
+            &subject,
+            "fix",
+            "n",
+            &quick(dir.path()),
+            &resumer,
+            &mut || true,
+        );
+        assert!(
+            matches!(outcome, Outcome::Delivered(Via::Resume, _)),
+            "{outcome:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(
+            lines.lock().unwrap().is_empty(),
+            "nothing was written to the stale socket"
+        );
+        assert_eq!(resumer.0.calls.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_write_the_agent_never_shows_is_still_not_followed_by_a_resume() {
+        let dir = tempfile::tempdir().unwrap();
+        let _lines = listen(dir.path(), 4301);
+        let subject = Subject {
+            session_id: "s".into(),
+            pid: Some(4301),
+            alive: true,
+        };
+        // NoResume panics if a resume is attempted.
+        let outcome = deliver(
+            &subject,
+            "x",
+            "n",
+            &quick(dir.path()),
+            &NoResume,
+            &mut || false,
+        );
+        assert!(!outcome.delivered());
+    }
+
+    #[test]
+    fn the_listing_gives_the_pid_of_a_session_or_says_it_is_missing_or_unreadable() {
+        let listing = r#"[{"sessionId":"a","pid":42},{"sessionId":"b"}]"#;
+        assert_eq!(listed(listing, "a"), Listed::Session(Some(42)));
+        assert_eq!(listed(listing, "b"), Listed::Session(None));
+        assert_eq!(listed(listing, "c"), Listed::Missing);
+        assert_eq!(
+            listed(r#"{"agents":[{"sessionId":"a","pid":7}]}"#, "a"),
+            Listed::Session(Some(7))
+        );
+        assert_eq!(listed("not json", "a"), Listed::Unreadable);
+    }
+
+    #[test]
+    fn a_process_that_exists_is_told_from_one_that_does_not() {
+        assert!(process_exists(std::process::id()));
+        assert!(!process_exists(u32::MAX - 1));
     }
 
     #[test]

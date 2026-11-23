@@ -17,9 +17,7 @@ export default async function resume(journey, ctx) {
   const stopped = await L.until(() => !L.claudeAgents().some((a) => a.sessionId === agent.sessionId && a.pid === before.pid), 30, 1000);
   journey.check("`claude stop` stopped it: its process is gone", stopped);
 
-  // volee learns it at its next look at `claude agents`: asked sooner, it would still take the session for a live one.
-  const knows = await L.until(async () => (await L.api("GET", `/api/agents/${encodeURIComponent(agent.card.id)}/work`)).json?.agent?.alive === false, 90, 2000);
-  journey.check("the daemon knows the session is no longer alive", knows);
+  // Asked at once, before the daemon has looked at `claude agents` again: it re-reads liveness when it sends.
 
   // A stopped session is no longer an inbox card, but its work is still there to read by its id.
   await page.evaluate((id) => {
