@@ -13,6 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { DEFAULT_SANDBOX, resetSandbox, isTrusted, untrustedMessage } from "./sandbox.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO = path.resolve(here, "..");
@@ -23,7 +24,8 @@ export const SHOTS = path.join(REPO, "docs/v2/screenshots");
 export const PREFIX = process.env.VOLEE_JOURNEY_HOME ?? path.join(os.homedir(), ".local/volee-v2");
 export const BIN = path.join(PREFIX, "bin/volee");
 export const PORT = Number(process.env.VOLEE_JOURNEY_PORT ?? 47911);
-export const SANDBOX = process.env.VOLEE_JOURNEY_SANDBOX ?? path.join(os.homedir(), "Developer/Labs/cockpit-sandbox/alpha");
+// The repository the journeys own (sandbox.mjs): never alpha, beta or gamma, which other tools use.
+export const SANDBOX = process.env.VOLEE_JOURNEY_SANDBOX ?? DEFAULT_SANDBOX;
 export const MODEL = process.env.VOLEE_JOURNEY_MODEL ?? "haiku";
 export const BASE = "journey/base";
 
@@ -199,6 +201,10 @@ export function clearPersonalRules() {
 export function sandboxReady() {
   return fs.existsSync(path.join(SANDBOX, ".git"));
 }
+/** Creates the journeys' repository, or puts it back to its seed commit. */
+export const resetOwnSandbox = () => resetSandbox(SANDBOX);
+export const sandboxTrusted = () => isTrusted(SANDBOX);
+export const sandboxUntrustedMessage = () => untrustedMessage(SANDBOX);
 
 /** A throwaway base branch checked out in the sandbox: a local merge needs the base checked out and clean. */
 export function prepareBase() {

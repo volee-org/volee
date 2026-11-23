@@ -29,12 +29,21 @@ a small model, and Chrome.
   install) are never touched. Neither are `~/.claude.json` and
   `~/.claude/settings.json`: hooks go into each throwaway worktree's own
   `.claude/settings.local.json`, by `volee doctor --project`.
-- **Throwaway work only.** Agents run in worktrees of a sandbox repository
-  (default `~/Developer/Labs/cockpit-sandbox/alpha`, which Claude Code already
-  trusts) on branches named `journey/*`, off a base branch `journey/base` that
-  is checked out in the sandbox (a local merge needs its base checked out).
-  Each journey removes what it made, and the runner puts the sandbox back on
-  `main` at the end.
+- **Throwaway work only, in a repository of their own.** The journeys create
+  and own `~/Developer/Labs/cockpit-sandbox/volee-journeys` (a fresh `git init`
+  with a seed commit on `main`, marked by a `.volee-journeys` file). `run.mjs`
+  creates it when missing and resets it to the seed commit at the start of every
+  run (it refuses to reset a directory without the marker). `alpha`, `beta` and
+  `gamma` are never touched: other tools use them. Agents run in worktrees of
+  that repository on branches named `journey/*`, off a base branch
+  `journey/base` that is checked out there (a local merge needs its base checked
+  out). Each journey removes what it made, and the runner puts the repository
+  back on `main` at the end.
+- **Workspace trust, once.** Claude Code asks whether it may trust a directory
+  the first time it runs there. `run.mjs` reads `~/.claude.json` (never writes
+  it) and, when the repository is not trusted yet, stops with exit code 2 and
+  says so: run `claude` once in that directory, accept, quit, run again. No
+  Claude session is started before that.
 - **Element-only screenshots** go to `docs/v2/screenshots/journey-<name>-<n>-<what>.png`:
   each one is one element of the page, so no other agent of the machine shows.
   The daemon sees every Claude Code session of the machine; the journeys only
@@ -52,10 +61,14 @@ node journeys/run.mjs --skip-install j05 j07   # only those
 ```
 
 Needs Node, Chrome, dist (`brew install cargo-dist`), Rust, `claude` signed in,
-and the sandbox repository. Playwright comes from `ui/node_modules` (`npm ci` in
+and the one-time trust of the journeys repository. Playwright comes from `ui/node_modules` (`npm ci` in
 `ui/`); no browser is downloaded. The exit code is 0 only if every check passed.
 Variables: `VOLEE_JOURNEY_HOME` (the prefix), `VOLEE_JOURNEY_PORT`,
-`VOLEE_JOURNEY_SANDBOX`, `VOLEE_JOURNEY_MODEL`.
+`VOLEE_JOURNEY_SANDBOX` (the journeys repository: a path that does not exist
+yet, or one created by a previous run), `VOLEE_JOURNEY_MODEL`.
+
+The setup and reset logic has its own checks, which need neither Claude nor
+volee: `node --test journeys/sandbox.test.mjs`.
 
 | Journey | What a person does | Proof |
 | --- | --- | --- |

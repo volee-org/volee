@@ -104,8 +104,9 @@ The commands below release `0.2.0`: replace it with your version.
 ### 0. Run the journeys (the gate before a tag)
 
 A release ships only what a person can do with it. From the release commit,
-on a machine with a signed-in Claude Code, Chrome and the sandbox repository
-(see [journeys/README.md](journeys/README.md)):
+on a machine with a signed-in Claude Code, Chrome and the journeys' own repository
+(`~/Developer/Labs/cockpit-sandbox/volee-journeys`, created by the run; Claude
+Code must trust it once, the run says how; see [journeys/README.md](journeys/README.md)):
 
 ```sh
 node journeys/run.mjs

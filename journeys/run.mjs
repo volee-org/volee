@@ -21,8 +21,16 @@ const files = fs
   .sort()
   .filter((file) => wanted.length === 0 || wanted.some((prefix) => file.startsWith(prefix)));
 
-if (!L.sandboxReady()) {
-  console.log(`sandbox ${L.SANDBOX} is not a git repository`);
+// The journeys own their repository: created when missing, reset to its seed commit at the start.
+try {
+  L.resetOwnSandbox();
+} catch (error) {
+  console.log(error.message);
+  process.exit(2);
+}
+// Claude Code asks about workspace trust once per directory. Never edit ~/.claude.json: ask the person.
+if (!L.sandboxTrusted()) {
+  console.log(L.sandboxUntrustedMessage());
   process.exit(2);
 }
 
