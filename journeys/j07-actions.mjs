@@ -43,15 +43,21 @@ export default async function actions(journey, ctx) {
   // --- comment a line ---
   await header.locator("button.head").click().catch(() => {});
   if ((await header.getAttribute("data-open")) !== "true") await header.locator("button.head").click();
-  const lineCell = header.locator('tr:has(.line-num2:text-is("3")) td.d2h-code-linenumber').first();
-  await lineCell.waitFor({ timeout: 20000 });
-  await lineCell.click();
-  const box = page.locator('textarea[aria-label="Comment on line 3"]');
-  await box.waitFor({ timeout: 10000 });
-  await box.fill("journey-comment: add a fourth line after this one");
-  await L.shot(journey, page, 'article.file[data-path="docs/notes.md"]', "comment-form");
-  await page.locator(".vc-save").click();
-  journey.check("the comment shows under its line", await L.until(async () => (await page.locator(".vc-text").count()) === 1, 10, 300));
+  // After an editor was opened the screen reads the work again every few seconds and may redraw
+  // the diff under the form: the person simply tries again.
+  let shown = false;
+  for (let attempt = 1; attempt <= 3 && !shown; attempt += 1) {
+    const lineCell = header.locator('tr:has(.line-num2:text-is("3")) td.d2h-code-linenumber').first();
+    await lineCell.waitFor({ timeout: 20000 });
+    await lineCell.click();
+    const box = page.locator('textarea[aria-label="Comment on line 3"]');
+    await box.waitFor({ timeout: 10000 });
+    await box.fill("journey-comment: add a fourth line after this one");
+    if (attempt === 1) await L.shot(journey, page, 'article.file[data-path="docs/notes.md"]', "comment-form");
+    await page.locator(".vc-save").click({ timeout: 5000 }).catch(() => {});
+    shown = await L.until(async () => (await page.locator(".vc-text").count()) === 1, 6, 300);
+  }
+  journey.check("the comment shows under its line", shown);
   const saved = (await L.api("GET", `/api/agents/${encodeURIComponent(agent.card.id)}/comments`)).json;
   journey.check("the daemon stored it for this branch tip, line 3 of docs/notes.md", JSON.stringify(saved).includes("docs/notes.md") && JSON.stringify(saved).includes("journey-comment"), JSON.stringify(saved)?.slice(0, 160));
 
@@ -68,7 +74,10 @@ export default async function actions(journey, ctx) {
   const said = await result.innerText();
   journey.check("volee says the fix request was delivered over the live socket", /delivered/i.test(said) && /socket/i.test(said), said);
   await L.shot(journey, page, '[data-testid="actions"]', "fix-delivered");
-  const committed = await L.until(() => agent.commits() === 2, 120, 2000);
+  const committed = await L.until(async () => {
+    await L.allowStray("j07");
+    return agent.commits() === 2;
+  }, 150, 2000);
   if (!committed) {
     console.log("  debug", JSON.stringify(L.agentById(agent.short)), JSON.stringify((await L.inbox()).decisions.map((d) => [d.kind, d.branch, d.summary])));
     console.log(L.events().slice(-8).join("\n"));
@@ -85,6 +94,7 @@ export default async function actions(journey, ctx) {
   const merge = page.locator('[data-testid="merge"]');
   // The work screen reads the agent's state when it opens: after a fix, a reload shows it finished.
   const enabled = await L.until(async () => {
+    await L.allowStray("j07");
     if (!(await merge.count()) || (await merge.isDisabled())) {
       await page.reload();
       await page.waitForSelector('[data-testid="actions"]', { timeout: 30000 }).catch(() => {});

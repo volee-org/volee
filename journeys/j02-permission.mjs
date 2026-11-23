@@ -23,9 +23,13 @@ export default async function permission(journey, ctx) {
   journey.check("the card disappears after Allow", await L.until(async () => !(await L.inbox()).decisions.some((d) => d.id === decision.id), 20));
   const done = await L.until(() => L.fileExists(L.path.join(allowed.dir, "docs/allowed.txt")), 60);
   journey.check("proof on disk: the file did not exist before and exists after Allow", !before && done);
-  const wrote = L.toolUses(allowed.transcript(), "Write");
-  const result = L.toolResults(allowed.transcript()).find((block) => block.tool_use_id === wrote[0]?.id);
-  journey.check("proof in the transcript: the Write ran and its result is not an error", wrote.length === 1 && result && !result.is_error);
+  // The transcript is written a moment after the file: wait for the tool result.
+  const ran = await L.until(() => {
+    const wrote = L.toolUses(allowed.transcript(), "Write");
+    const result = L.toolResults(allowed.transcript()).find((block) => block.tool_use_id === wrote[0]?.id);
+    return wrote.length === 1 && result ? { wrote, result } : false;
+  }, 30, 1000);
+  journey.check("proof in the transcript: the Write ran and its result is not an error", !!ran && !ran.result.is_error);
   journey.check("the hook events show PermissionRequest for this session", L.events().some((line) => /PermissionRequest/.test(line) && line.includes(allowed.sessionId.slice(0, 8))));
 
   // --- denied from the browser, with a reason ---

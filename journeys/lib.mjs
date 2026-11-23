@@ -128,6 +128,15 @@ export function ensureConfig() {
   fs.mkdirSync(configDir(), { recursive: true });
   const file = path.join(configDir(), "config.lua");
   if (!fs.existsSync(file)) volee(["config", "init"]);
+  else if (volee(["config", "check"]).code !== 0) {
+    // A file written by an older build can name keys this build no longer reads: start from the
+    // example of the installed binary. The prefix is the journeys' own.
+    const fresh = fs.mkdtempSync(path.join(PREFIX, "fresh-"));
+    volee(["config", "init"], { env: { ...voleeEnv(), VOLEE_CONFIG_DIR: fresh } });
+    fs.copyFileSync(path.join(fresh, "config.lua"), file);
+    fs.rmSync(fresh, { recursive: true, force: true });
+    console.log("  note  the config.lua left by an older build was rejected by this one: replaced by the new example");
+  }
   let text = fs.readFileSync(file, "utf8");
   if (!new RegExp(`^\\s*port = ${PORT},`, "m").test(text)) {
     text = text.replace(/^(\s*)-- port = \d+,/m, `$1port = ${PORT},`).replace(/^(\s*)port = \d+,/m, `$1port = ${PORT},`);
@@ -136,7 +145,7 @@ export function ensureConfig() {
 }
 
 export function daemonUp() {
-  return volee(["daemon", "status"]).code === 0;
+  return /\(pid \d+\)/.test(volee(["daemon", "status"]).out);
 }
 export function startDaemon() {
   ensureConfig();
@@ -311,6 +320,16 @@ export async function shot(journey, page, selector, label) {
   journey.shots += 1;
   fs.mkdirSync(SHOTS, { recursive: true });
   const file = path.join(SHOTS, `journey-${journey.name}-${journey.shots}-${label}.png`);
+  // The screenshots are published: the home directory never shows, only `~`.
+  await page.evaluate((home) => {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.nodeValue.includes(home)) node.nodeValue = node.nodeValue.split(home).join("~");
+    }
+    for (const input of document.querySelectorAll("input, textarea")) {
+      if (input.value.includes(home)) input.value = input.value.split(home).join("~");
+    }
+  }, fs.realpathSync(os.homedir()));
   await page.locator(selector).first().screenshot({ path: file });
   console.log(`  shot  ${path.relative(REPO, file)}`);
   return file;
@@ -340,7 +359,16 @@ export const decisionOf = (name, seconds = 90) =>
 /** The finished-work card of the agent on `journey/<name>`, once it exists. */
 export const cardOf = (name, seconds = 150) =>
   until(async () => (await inbox()).cards.find((card) => card.kind === "finished" && card.branch === `journey/${name}`), seconds);
-export const sessionIdOf = (short) => agentById(short)?.sessionId ?? null;
+/** A small model sometimes checks its work with a command nobody allowed: the person allows it. Returns how many. */
+export async function allowStray(name) {
+  const stray = (await inbox()).decisions.filter((decision) => decision.kind === "permission" && decision.branch === `journey/${name}`);
+  for (const decision of stray) {
+    await api("POST", `/api/decisions/${encodeURIComponent(decision.id)}`, { action: "allow" });
+    console.log(`  note  allowed a stray permission of the agent: ${decision.tool_name} ${String(decision.summary).slice(0, 60)}`);
+  }
+  return stray.length;
+}
+export const sessionIdOf =(short) => agentById(short)?.sessionId ?? null;
 export const journal = async () => (await api("GET", "/api/journal")).json ?? [];
 
 /** Whether the `cwd` of the agent shows a card of the branch in `page`. */
