@@ -101,18 +101,30 @@ The commands below release `0.2.0`: replace it with your version.
 > **v0.1.0**, the first release, needs no version change: the workspace is
 > already at `0.1.0`. Skip `cargo set-version` in step 2.
 
-### 0. Run the journeys, and test the installer
+### 0. Run the journeys (the gate before a tag)
 
-A release ships only what a person can do with it. The 0.x journeys drove the
-TUI through tuios and were removed with the v2 restart
-([docs/v2/framing.md](docs/v2/framing.md)); the browser journeys that replace
-them come with the stages of the v2 plan ([journeys/README.md](journeys/README.md)).
+A release ships only what a person can do with it. From the release commit,
+on a machine with a signed-in Claude Code, Chrome and the sandbox repository
+(see [journeys/README.md](journeys/README.md)):
 
-Then test the installer from a local artifact, never from a published release
-(see [Test the installer locally](#test-the-installer-locally)), and follow the
-first-run commands of the [installation guide](docs/src/guide/installation.md)
-in a sandbox repository with a real Claude Code session: the inbox must show
-its card. `v2.0.0` is tagged only after Jeff's explicit go.
+```sh
+node journeys/run.mjs
+```
+
+It installs volee from a local artifact (see
+[Test the installer locally](#test-the-installer-locally)), then drives the
+installed binary and the real web interface with real `haiku` sessions: install
+and `volee doctor`, a card, permissions allowed and denied, questions answered
+and left to time out, finished work read in layers with the pre-review, risk
+from `rules.lua`, a fix asked (live agent and stopped session), a comment, a
+merge by one click, an automatic merge, an editor, and `volee doctor --remove`.
+**Every check must pass** (`N/N checks`, exit code 0). Delivery is proved by
+git, transcripts and stored hook events, never by words in an agent's answer; a
+failure caused by the model is rerun, one caused by volee is fixed first. Never
+run it against `~/.local/bin` or an existing daemon: it uses its own prefix,
+port and directories. The journeys never run in CI.
+
+`v2.0.0` is tagged only after Jeff's explicit go.
 
 ### 1. Choose the version
 
