@@ -35,6 +35,10 @@ export default async function install(journey, ctx) {
   journey.check("PermissionRequest and PreToolUse hooks are there", !!settings.hooks?.PermissionRequest && !!settings.hooks?.PreToolUse);
   journey.check("the daemon is not running yet, doctor said so", /not answering/.test(doctor.out) || L.daemonUp());
 
+  // A daemon keeps running the build that started it (the installation guide says to restart it after an
+  // update): a daemon left by an earlier run would hide the build just installed.
+  L.stopDaemon();
+  await L.until(() => !L.daemonUp(), 15, 500);
   L.startDaemon();
   journey.check("`volee daemon start` starts the daemon", await L.until(() => L.daemonUp(), 20, 500));
   journey.check("the hook server answers on the isolated port", (await fetch(`http://127.0.0.1:${L.PORT}/healthz`).then((r) => r.text()).catch(() => "")) === "ok");
